@@ -7,6 +7,7 @@ import { getRequestContext, tryGetRequestContext } from '../server/request-conte
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { extractEntities, type ExtractedEntity, projectEntities } from '../services/entities.js';
+import { iterateEntityMatches } from '../services/entity-relevance.js';
 import { DomainError } from '../services/errors.js';
 import { RANK_WINDOW_CEILING, type SearchVerdict } from '../services/hybrid-search.js';
 import {
@@ -1404,15 +1405,16 @@ async function handleContext(
     // response, matching `memory.search`'s `viaEntity` observability.
     const byId = new Map<string, { memory: Memory; via: 'entity' | 'ranked' }>();
     if (deps.repos) {
-      for (const e of extractEntities('', focusText)) {
-        if (byId.size >= RELEVANCE_LIMIT) break;
-        const rows = deps.repos.entities.findMemoriesByEntity({
-          scope,
-          kind: e.kind,
-          value: e.value,
-          limit: RELEVANCE_LIMIT,
-        });
-        for (const r of rows) {
+      // No `types`/`status` passed: this channel's own behavior is every
+      // type, non-archived — the same defaults `findMemoriesByEntity` always
+      // had. Only `recallHints` narrows those (proactive-recall D4/D4b).
+      for (const { memories } of iterateEntityMatches(deps.repos, {
+        scope,
+        seedText: focusText,
+        limit: RELEVANCE_LIMIT,
+        shouldContinue: () => byId.size < RELEVANCE_LIMIT,
+      })) {
+        for (const r of memories) {
           if (byId.size >= RELEVANCE_LIMIT) break;
           if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'entity' });
         }

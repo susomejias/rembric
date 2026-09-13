@@ -3,8 +3,10 @@ import { ulid } from 'ulid';
 import type { TransactionRunner } from '../db/client.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSession, NewAgentSession } from '../db/schema/agent-sessions.js';
+import type { MemoryType } from '../db/schema/memory.js';
 
-import { extractEntities } from './entities.js';
+import type { ExtractedEntity } from './entities.js';
+import { iterateEntityMatches } from './entity-relevance.js';
 import { DomainError } from './errors.js';
 import { projectScope, type Scope } from './scope.js';
 import { evaluateSessionNudge, NOTICE_MAX_BYTES, type SessionNudgeRow } from './session-nudge.js';
@@ -17,6 +19,26 @@ import { hasAnyHeading, mergeSummarySections } from './summary-sections.js';
 
 const SESSION_PURGE_GRACE_MS = 3_600_000;
 const SESSION_PURGE_REASONING = 'operator purge of empty sessions';
+
+/** proactive-recall D4: reference memories are factual, not actionable as a hint. */
+const RECALL_MEMORY_TYPES: readonly MemoryType[] = ['project', 'feedback', 'procedural'];
+
+/**
+ * proactive-recall D5: bounds the lookup work behind the 3-line cap. Without
+ * this, a prompt naming many indexed identifiers that all resolve to
+ * ineligible memories would perform one indexed lookup per entity — up to
+ * `extractEntities`'s own 250-entity ceiling — while the line cap never
+ * engages because no line is ever produced.
+ */
+const RECALL_ENTITY_PROBE_MAX = 20;
+
+/** proactive-recall D3: bounds `AgentSessionsService`'s recall-dedupe map, LRU-evicted. */
+const RECALL_DEDUPE_SESSIONS_MAX = 500;
+
+/** Keyed on `(kind, value)`, not the bare value — the same literal under a different kind is a separate first appearance. */
+function recallDedupeKey(entity: ExtractedEntity): string {
+  return `${entity.kind}:${entity.value}`;
+}
 
 /**
  * A minimum interval, not a schedule: condition (2) of the gate means
@@ -427,7 +449,9 @@ export class AgentSessionsService {
       lastActivityAt: ts,
       ...precedenceSet(existing, input, ts),
     };
-    return { row: this.updateActiveOrThrow(sessionId, set), applied: true };
+    const row = this.updateActiveOrThrow(sessionId, set);
+    this.releaseRecallDedupe(sessionId);
+    return { row, applied: true };
   }
 
   /**
@@ -631,6 +655,7 @@ export class AgentSessionsService {
     if (!updated) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
+    this.releaseRecallDedupe(sessionId);
     return updated;
   }
 
@@ -765,62 +790,43 @@ export class AgentSessionsService {
    * is process-and-discard — never written to any table, index, or log at
    * info level.
    *
-   * Per-session dedupe: each entity is surfaced at most once per session.
-   * State is transient (in-memory) — a server restart clears it.
+   * Per-session dedupe: each `(kind, value)` entity is surfaced at most once
+   * per session (design.md D3 — the same value under a different kind is a
+   * separate first appearance). State is transient (in-memory), bounded to
+   * `RECALL_DEDUPE_SESSIONS_MAX` sessions with LRU eviction, and released by
+   * `end`/`softDelete`.
    */
   recallHints(sessionId: string, prompt: string): { lines: string[] } {
     // Slice BEFORE any regex runs — bounds ReDoS exposure.
     const snippet = prompt.slice(0, 500);
     if (snippet.length === 0) return { lines: [] };
 
-    const entities = extractEntities('', snippet);
-    if (entities.length === 0) return { lines: [] };
-
     const session = this.getById(sessionId);
     if (!session) return { lines: [] };
     if (!session.projectId) return { lines: [] };
 
-    // Transient per-session dedupe: keyed by sessionId, lives only in memory.
-    const dedupeKey = `recall:${sessionId}`;
-    let existing = this._dedupeState.get(dedupeKey);
-    if (!existing) {
-      existing = new Set();
-      this._dedupeState.set(dedupeKey, existing);
-    }
-
+    const existing = this.touchRecallDedupe(sessionId);
     const seenInThisTurn = new Set<string>();
     const lines: string[] = [];
 
-    for (const e of entities) {
-      if (lines.length >= 3) break;
-      // Skip entities already recalled in this session.
-      if (existing.has(e.value)) continue;
-      // Skip entities we've already seen in this turn (first appearance only).
-      if (seenInThisTurn.has(e.value)) continue;
-      seenInThisTurn.add(e.value);
-
-      // Entity lookup is project-scoped.
-      const matched = this.repos.entities.findMemoriesByEntity({
-        scope: projectScope(session.projectId),
-        kind: e.kind,
-        value: e.value,
-        limit: 2,
-      });
-
-      // Filter to active-learning types only.
-      const filtered = matched.filter(
-        (m) => m.type === 'project' || m.type === 'feedback' || m.type === 'procedural',
-      );
-      if (filtered.length === 0) continue;
-
-      // Mark this entity as recalled.
-      existing.add(e.value);
-      // Build the line: "Entity value: title1, title2".
-      const titles = filtered
-        .slice(0, 2)
-        .map((m) => m.title)
-        .join(', ');
-      lines.push(`${e.value}: ${titles}`);
+    for (const { entity, memories } of iterateEntityMatches(this.repos, {
+      scope: projectScope(session.projectId),
+      seedText: snippet,
+      limit: 2,
+      types: RECALL_MEMORY_TYPES,
+      status: 'active',
+      probeMax: RECALL_ENTITY_PROBE_MAX,
+      shouldContinue: () => lines.length < 3,
+      skip: (e) => {
+        const key = recallDedupeKey(e);
+        return existing.has(key) || seenInThisTurn.has(key);
+      },
+    })) {
+      seenInThisTurn.add(recallDedupeKey(entity));
+      if (memories.length === 0) continue;
+      existing.add(recallDedupeKey(entity));
+      const titles = memories.map((m) => m.title).join(', ');
+      lines.push(`${entity.value}: ${titles}`);
     }
 
     while (lines.length > 0 && Buffer.byteLength(lines.join('\n'), 'utf8') > NOTICE_MAX_BYTES) {
@@ -830,8 +836,33 @@ export class AgentSessionsService {
     return { lines };
   }
 
-  /** Transient dedupe state: sessionId → Set of entity values already recalled. */
-  private _dedupeState = new Map<string, Set<string>>();
+  /**
+   * Read (or create) a session's dedupe set and mark it most-recently-used,
+   * evicting the least-recently-used session beyond the bound.
+   */
+  private touchRecallDedupe(sessionId: string): Set<string> {
+    const existing = this._recallDedupeState.get(sessionId);
+    if (existing) {
+      this._recallDedupeState.delete(sessionId);
+      this._recallDedupeState.set(sessionId, existing);
+      return existing;
+    }
+    const created = new Set<string>();
+    this._recallDedupeState.set(sessionId, created);
+    if (this._recallDedupeState.size > RECALL_DEDUPE_SESSIONS_MAX) {
+      const oldest = this._recallDedupeState.keys().next().value;
+      if (oldest !== undefined) this._recallDedupeState.delete(oldest);
+    }
+    return created;
+  }
+
+  /** Releases a session's recall-dedupe state; called on `end` and `softDelete`. */
+  private releaseRecallDedupe(sessionId: string): void {
+    this._recallDedupeState.delete(sessionId);
+  }
+
+  /** Transient dedupe state: sessionId → Set of `(kind, value)` keys already recalled. */
+  private _recallDedupeState = new Map<string, Set<string>>();
 
   memoryCount(sessionId: string): number {
     return this.repos.agentSessions.memoryCount(sessionId);

@@ -129,6 +129,13 @@ export class EntitiesRepository {
     value: string;
     status?: MemoryStatus;
     type?: MemoryType;
+    /**
+     * Admitted type SET, applied with `inArray` ahead of `limit` — unlike
+     * `type` above, which narrows to one. A caller that needs the filter to
+     * bound which rows `limit` counts (rather than post-filtering an
+     * already-bounded page) MUST pass this, not filter the returned array.
+     */
+    types?: readonly MemoryType[];
     tag?: string;
     topicKey?: string;
     limit: number;
@@ -139,6 +146,7 @@ export class EntitiesRepository {
       opts.status ? eq(memory.status, opts.status) : sql`${memory.status} != 'archived'`,
     );
     if (opts.type) conditions.push(eq(memory.type, opts.type));
+    if (opts.types) conditions.push(inArray(memory.type, [...opts.types]));
     if (opts.tag) {
       conditions.push(
         sql`EXISTS (SELECT 1 FROM json_each(${memory.tags}) je WHERE je.value = ${opts.tag})`,

@@ -153,6 +153,41 @@ describe('EntitiesRepository', () => {
       ]);
     });
 
+    it('types filters the predicate ahead of limit, so an eligible row behind newer ineligible ones still surfaces', () => {
+      insertMemory('older-project', { type: 'project', createdAt: new Date(1000) });
+      insertMemory('newer-ref-1', { type: 'reference', createdAt: new Date(2000) });
+      insertMemory('newer-ref-2', { type: 'reference', createdAt: new Date(3000) });
+      for (const id of ['older-project', 'newer-ref-1', 'newer-ref-2']) {
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'config/deploy.yaml' }], new Date());
+      }
+      const found = repo.findMemoriesByEntity({
+        scope: projectScope('p0'),
+        value: 'config/deploy.yaml',
+        types: ['project', 'feedback', 'procedural'],
+        limit: 2,
+      });
+      expect(found.map((m) => m.id)).toEqual(['older-project']);
+    });
+
+    it('a superseded row is excluded by status: active even when it is the newer row', () => {
+      insertMemory('old-take', {
+        type: 'project',
+        status: 'superseded',
+        createdAt: new Date(1000),
+      });
+      insertMemory('new-take', { type: 'project', status: 'active', createdAt: new Date(2000) });
+      for (const id of ['old-take', 'new-take']) {
+        repo.linkMemory(id, 'p0', [{ kind: 'path', value: 'config/deploy.yaml' }], new Date());
+      }
+      const found = repo.findMemoriesByEntity({
+        scope: projectScope('p0'),
+        value: 'config/deploy.yaml',
+        status: 'active',
+        limit: 2,
+      });
+      expect(found.map((m) => m.id)).toEqual(['new-take']);
+    });
+
     it('returns only the read scope, with no argument that widens it', () => {
       t.handle.db
         .insert(projects)

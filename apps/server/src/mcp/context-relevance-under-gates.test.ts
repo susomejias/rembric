@@ -78,10 +78,11 @@ const saveFillers = (n: number) => {
 };
 
 /** Rows the entity pre-pass can reach by `path`, and that no focus text matches. */
-const saveLinked = (n: number, path: string) => {
+const saveLinked = (n: number, path: string, type: 'project' | 'reference' = 'project') => {
+  const rows = [];
   for (let i = 0; i < n; i++) {
     const row = memory.save(
-      { type: 'project', title: `Linked ${i}`, content: 'billing invoice reconciliation notes' },
+      { type, title: `Linked ${i}`, content: 'billing invoice reconciliation notes' },
       defaultScope,
     );
     repos.entities.linkMemory(
@@ -90,7 +91,9 @@ const saveLinked = (n: number, path: string) => {
       [{ kind: 'path', value: path }],
       new Date(),
     );
+    rows.push(row);
   }
+  return rows;
 };
 
 beforeEach(() => {
@@ -193,6 +196,20 @@ describe('memory.context relevance channel under the shipped gates', () => {
     );
     expect(body.relevantMemories).toHaveLength(RELEVANCE_LIMIT);
     expect(body.relevantMemories.every((r) => r.via === 'entity')).toBe(true);
+    expect(body.rankedPass).toBeUndefined();
+  });
+
+  it('keeps reference memories from the entity path when a ranked fallback is unavailable', async () => {
+    const path = 'apps/server/src/db/entity-reference.ts';
+    const references = saveLinked(RELEVANCE_LIMIT, path, 'reference');
+
+    const body = payload(await runWithContext(ctx(), () => handlers.context({ focus: path })));
+
+    expect(body.relevantMemories).toHaveLength(RELEVANCE_LIMIT);
+    expect(body.relevantMemories.every((r) => r.via === 'entity')).toBe(true);
+    expect(body.relevantMemories.map((r) => r.id).sort()).toEqual(
+      references.map((reference) => reference.id).sort(),
+    );
     expect(body.rankedPass).toBeUndefined();
   });
 
