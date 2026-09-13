@@ -37,15 +37,44 @@ describe('MCP initialize instructions', () => {
     }
   });
 
-  it('mentions memory.save, memory.search, memory.session_summary in both variants', () => {
-    const variants = [
+  it('independently teaches the SAVE component in both variants', () => {
+    for (const text of [
       buildInstructions({ requestedSlug: null }),
       buildInstructions({ requestedSlug: 'rembric' }),
-    ];
-    for (const text of variants) {
-      expect(text).toContain('memory.save');
+    ]) {
+      expect(text).toContain(
+        'SAVE: fix/decision/discovery/config/pattern/preference → memory.save',
+      );
+    }
+  });
+
+  it('independently teaches the RECALL component in both variants', () => {
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      expect(text).toContain('RECALL:');
+      expect(text).toContain('memory.context');
       expect(text).toContain('memory.search');
+    }
+  });
+
+  it('independently teaches the SUMMARIZE component in both variants', () => {
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      expect(text).toContain('SUMMARIZE:');
       expect(text).toContain('memory.session_summary');
+    }
+  });
+
+  it('requires a known sessionId to be passed and never invented in both variants', () => {
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      expect(text).toContain('Know your sessionId? Pass it; never guess.');
     }
   });
 
