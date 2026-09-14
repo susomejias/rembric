@@ -74,6 +74,7 @@ For a temporary rollback after a broken release, see the [emergency plugin rollb
 - **Four slash commands** — `/context`, `/recall`, `/remember`, `/summary` — the same markdown the other clients ship, not a per-client copy; the packaged copies carry the underscored tool names.
 - **Per-turn nudges**, byte-identical to every other Rembric client apart from those tool names: a first-prompt context reminder, a recall reminder when your prompt looks like one, a session-opening line on a new session, and the session-summary reminder the server composes from the session's own state and hands back at the end of each turn.
 - **Session capture** — the session is registered on your first prompt, the transcript is flushed after each turn, and a final summary is written when the session ends.
+- **Identity declaration** — on your first prompt the extension also pins the MCP transport to its own session row by exact id (`memory.session_resume` over MCP, once the row exists), so the model's writes — and a defensive `memory_session_start` — resolve to your session by pin instead of by lookup. It retries once the row exists, re-declares if the transport re-initialises, and stays silent if it cannot.
 - **`<private>` redaction** — anything between `<private>` and `</private>` is replaced with `[REDACTED]` before a transcript leaves your machine. An unclosed `<private>` redacts to the end of the text.
 
 ## Tool output
@@ -116,7 +117,7 @@ Closing the replaced session is what keeps memories attributed. Faced with two `
 
 A `reload` is the same session continuing, and a session that has ended never goes back to `active`. Ending there would cost the attribution of every later save in that Pi process, which is also why an unrecognised reason leaves the row open: not ending is recoverable, ending wrongly is not.
 
-One consequence worth knowing: **resuming a session that already ended does not re-attach it.** Its row is terminal, so new memories are not attributed to it automatically — ask the agent to pass that session's id explicitly when saving. Late summary and title writes still land, and the row reads `ended` in `…/dashboard/sessions`, so the situation is visible rather than silent.
+One consequence worth knowing: **resuming a session that already ended re-attaches it.** On the first prompt of the reopened process the extension re-registers the id and POSTs `/api/<slug>/sessions/<id>/resume`, which returns the row to `'active'` and pins the transport to it — so later saves attribute again with no explicit `sessionId`.
 
 An exit that runs no shutdown handler leaves the row `active`; the server retires it as `abandoned` on its own later.
 
