@@ -4,6 +4,26 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.31.0](https://github.com/susomejias/rembric/compare/plugin-v0.30.0...plugin-v0.31.0) (2026-09-14)
+
+
+### Features
+
+* **pi:** declare the session identity on the MCP transport ([e456b67](https://github.com/susomejias/rembric/commit/e456b67195d87a4db5d029a655857b6321cc6a2c)), closes [#377](https://github.com/susomejias/rembric/issues/377)
+* **recall:** surface prior learnings at turn start ([9b3b6c3](https://github.com/susomejias/rembric/commit/9b3b6c30343576857fbb0709dada83c8a684d56f))
+
+
+### Bug Fixes
+
+* **plugin:** pin the hints hook to the published 200 ms budget ([1dcd607](https://github.com/susomejias/rembric/commit/1dcd6077a836e56269191a02a6cc49d8acfee13c))
+* **recall:** move the entity query to its own hook; restore the published trigger wording ([7da3010](https://github.com/susomejias/rembric/commit/7da3010fbc68c8d62ad6cf39aec74b834a6a8c4e))
+
+
+### Documentation
+
+* **hermes-plugin:** align the system-prompt block with the recall wording ([06651b3](https://github.com/susomejias/rembric/commit/06651b35e8c9ac40a654f731d001eeeb8b02e32d))
+* **pi:** document the identity declaration and correct the resume note ([4d6d86e](https://github.com/susomejias/rembric/commit/4d6d86e994d6d55eaf3ee91cf46067e4b7499520)), closes [#377](https://github.com/susomejias/rembric/issues/377)
+
 ## [0.30.0](https://github.com/susomejias/rembric/compare/plugin-v0.29.2...plugin-v0.30.0) (2026-08-17)
 
 
