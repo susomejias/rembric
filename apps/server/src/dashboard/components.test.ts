@@ -490,17 +490,19 @@ describe('renderSidebar', () => {
   it('shows the pending-judgments badge when counter > 0', () => {
     const out = renderSidebar({
       active: 'home',
-      counters: { pendingJudgments: 3 },
+      counters: { pendingJudgments: { total: 3, byProject: [] } },
       collapsed: false,
       csrf,
     });
-    expect(out.__html).toContain('<span class="badge">3</span>');
+    expect(out.__html).toContain(
+      '<span class="badge" title="3 pending judgment candidates across all projects — resolve with memory.judge">3</span>',
+    );
   });
 
   it('omits the badge when counter is 0', () => {
     const out = renderSidebar({
       active: 'home',
-      counters: { pendingJudgments: 0 },
+      counters: { pendingJudgments: { total: 0, byProject: [] } },
       collapsed: false,
       csrf,
     });
@@ -510,23 +512,62 @@ describe('renderSidebar', () => {
   it('shows the needs-review badge on the MEMORIES entry when counter > 0', () => {
     const out = renderSidebar({
       active: 'home',
-      counters: { needsReview: 5 },
+      counters: { needsReview: { total: 5, byProject: [] } },
       collapsed: false,
       csrf,
     });
-    expect(out.__html).toMatch(/href="\/dashboard\/memories"[\s\S]*?<span class="badge">5<\/span>/);
+    expect(out.__html).toContain('href="/dashboard/memories"');
+    expect(out.__html).toContain(
+      '<span class="badge" title="5 active memories past their review TTL across all projects — re-affirm with memory.confirm">5</span>',
+    );
   });
 
   it('omits the needs-review badge when counter is 0 or absent', () => {
     const zero = renderSidebar({
       active: 'home',
-      counters: { needsReview: 0 },
+      counters: { needsReview: { total: 0, byProject: [] } },
       collapsed: false,
       csrf,
     });
     expect(zero.__html).not.toContain('class="badge"');
     const absent = renderSidebar({ active: 'home', counters: {}, collapsed: false, csrf });
     expect(absent.__html).not.toContain('class="badge"');
+  });
+
+  it('badges carry a native title tooltip with the per-project breakdown', () => {
+    const out = renderSidebar({
+      active: 'home',
+      counters: {
+        pendingJudgments: {
+          total: 7,
+          byProject: [
+            { label: 'experimenter', count: 5 },
+            { label: 'rembric', count: 2 },
+            { label: 'global', count: 0 },
+          ],
+        },
+      },
+      collapsed: false,
+      csrf,
+    });
+    expect(out.__html).toContain(
+      'title="7 pending judgment candidates across all projects — resolve with memory.judge\nexperimenter: 5\nrembric: 2\nglobal: 0"',
+    );
+  });
+
+  it('badge tooltips use the singular form for a count of 1 and omit the breakdown when empty', () => {
+    const out = renderSidebar({
+      active: 'home',
+      counters: {
+        needsReview: { total: 1, byProject: [{ label: 'rembric', count: 1 }] },
+        pendingJudgments: { total: 0, byProject: [] },
+      },
+      collapsed: false,
+      csrf,
+    });
+    expect(out.__html).toContain(
+      'title="1 active memory past their review TTL across all projects — re-affirm with memory.confirm\nrembric: 1"',
+    );
   });
 
   it('applies .is-collapsed and EXPAND label when collapsed', () => {

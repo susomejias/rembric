@@ -4,7 +4,9 @@ import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRepositories } from '../db/repositories/index.js';
+import { memoryRelations } from '../db/schema/memory-relations.js';
 import { memory, type NewMemory } from '../db/schema/memory.js';
+import { computeBadgeCounters } from '../server/dashboard-router.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
@@ -62,6 +64,10 @@ describe('memories dashboard TOTAL meta', () => {
     app = new Hono();
     app.use('*', (c: Context, next: Next) => {
       c.set('session' as never, session as never);
+      // Same request-wide badges the dashboard router's auth middleware computes.
+      if (c.req.method === 'GET') {
+        c.set('badgeCounters' as never, computeBadgeCounters(repos) as never);
+      }
       return next();
     });
     app.route('/', createMemoriesRouter({ repos, memory: memorySvc, sessions }));
@@ -75,11 +81,29 @@ describe('memories dashboard TOTAL meta', () => {
     expect(html).toContain(`<b>SHOWING</b> ${PAGE_SIZE} ROWS`);
   });
 
+  it('the JUDGMENTS sidebar badge ALSO renders on memories pages (request-wide badges)', async () => {
+    t.handle.db
+      .insert(memoryRelations)
+      .values({
+        id: 'RG',
+        judgmentId: 'JG',
+        sourceId: 'G0',
+        targetId: 'G1',
+        status: 'pending',
+        createdAt: new Date(1_000),
+      })
+      .run();
+    const html = await (await app.request('/')).text();
+    expect(html).toContain(
+      '<span class="badge" title="1 pending judgment candidate across all projects — resolve with memory.judge\nproject-zero: 1">1</span>',
+    );
+  });
+
   it('the MEMORIES sidebar entry carries a needs-review badge reflecting the seeded rows', async () => {
     // Every seeded row is ancient, typed 'project', never confirmed → all need review.
     const html = await (await app.request('/')).text();
-    expect(html).toMatch(
-      new RegExp(`href="/dashboard/memories"[\\s\\S]*?<span class="badge">${SEEDED}</span>`),
+    expect(html).toContain(
+      `<span class="badge" title="${SEEDED} active memories past their review TTL across all projects — re-affirm with memory.confirm\nproject-zero: ${SEEDED}">${SEEDED}</span>`,
     );
   });
 

@@ -60,9 +60,12 @@ const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
   (e): e is [MemoryType, number] => typeof e[1] === 'number',
 );
 
-/** All-scope needs-review count for the sidebar's MEMORIES badge. */
-function needsReviewBadgeCount(repos: Repositories): number {
-  return repos.memory.adminCountNeedsReview({ nowMs: Date.now(), ttlByType: TTL_BY_TYPE });
+function tryParseUrl(s: string): URL | undefined {
+  try {
+    return new URL(s);
+  } catch {
+    return undefined;
+  }
 }
 
 export function createMemoriesRouter(deps: MemoriesDeps): Hono {
@@ -72,7 +75,10 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const url = new URL(c.req.url);
+    // Hono's c.req.url is always a well-formed absolute URL; the about:blank
+    // fallback keeps the parser total (empty searchParams → filter defaults).
+    const url = tryParseUrl(c.req.url) ?? tryParseUrl('about:blank');
+    if (!url) return c.text('invalid request url', 400);
     const statusFilter = url.searchParams.get('status') ?? 'active';
     const typeFilter = url.searchParams.get('type') ?? '';
     const reviewFilter = url.searchParams.get('review') ?? '';
@@ -308,7 +314,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       renderPage(c, deps.sessions, body, {
         title: 'Memories',
         activeNav: 'memories',
-        counters: { needsReview: needsReviewBadgeCount(deps.repos) },
       }),
     );
   });
@@ -324,7 +329,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
         renderPage(c, deps.sessions, html`<p class="flash error">Memory not found.</p>`, {
           title: 'Memory',
           activeNav: 'memories',
-          counters: { needsReview: needsReviewBadgeCount(deps.repos) },
         }),
         404,
       );
@@ -563,7 +567,6 @@ export function createMemoriesRouter(deps: MemoriesDeps): Hono {
       renderPage(c, deps.sessions, body, {
         title: `Memory ${shortId(row.id)}`,
         activeNav: 'memories',
-        counters: { needsReview: needsReviewBadgeCount(deps.repos) },
       }),
     );
   });

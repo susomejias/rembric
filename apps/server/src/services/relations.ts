@@ -501,19 +501,6 @@ export class RelationsService {
     return this.repos.relations.countPendingInScope({ projectId: scope.projectId });
   }
 
-  /** Count rows by status. Used by `memory.stats` and the dashboard. */
-  countByStatus(): Record<'pending' | 'judged' | 'orphaned', number> {
-    const out: Record<'pending' | 'judged' | 'orphaned', number> = {
-      pending: 0,
-      judged: 0,
-      orphaned: 0,
-    };
-    for (const r of this.repos.relations.countRowsByStatus()) {
-      out[r.status] = Number(r.count);
-    }
-    return out;
-  }
-
   /** @internal — exposed for cross-scope invariant tests. */
   private assertSameScope(sourceId: string, targetId: string): void {
     const a = this.repos.memory.findScopeTupleById(sourceId);

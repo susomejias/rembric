@@ -14,7 +14,7 @@ import { getCookie } from 'hono/cookie';
 
 import type { SessionsService } from '../services/sessions.js';
 
-import { renderSidebar, type NavKey } from './components.js';
+import { renderSidebar, type BadgeCounters, type NavKey } from './components.js';
 import { csrfInput } from './csrf.js';
 import { raw, shell, type SafeHtml } from './templates.js';
 import type { ResolvedSession } from './types.js';
@@ -26,8 +26,19 @@ export interface PageOpts {
   title: string;
   activeNav: NavKey;
   view?: string;
-  counters?: { pendingJudgments?: number; needsReview?: number };
+  /** Override for the request-wide badge counters (see `badgeCountersFrom`). */
+  badges?: BadgeCounters;
   flash?: { kind: 'error' | 'success'; text: string };
+}
+
+/**
+ * Sidebar badge counters for the current request, computed once by the
+ * dashboard router's auth middleware (`computeBadgeCounters`) and stashed in
+ * context. Every page sees the same badges; a handler may still override via
+ * `PageOpts.badges`.
+ */
+export function badgeCountersFrom(c: Context): BadgeCounters {
+  return (c.get('badgeCounters' as never) as BadgeCounters | undefined) ?? {};
 }
 
 export function renderPage(
@@ -49,7 +60,7 @@ export function renderPage(
   );
   const sidebar = renderSidebar({
     active: opts.activeNav,
-    counters: opts.counters ?? {},
+    counters: opts.badges ?? badgeCountersFrom(c),
     collapsed,
     csrf,
     update: badge,
@@ -61,7 +72,6 @@ export function renderPage(
     sidebar,
     collapsed,
     flash: opts.flash,
-    counters: opts.counters,
     updateBadge: badge,
     updateModal: modal,
   });

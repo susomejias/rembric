@@ -436,7 +436,7 @@ export async function bootstrap(
       prompts: promptsSvc,
       memory: memorySvc,
       relations: relationsSvc,
-      getStats: () => collectStats(repos, agentSessionsSvc, relationsSvc),
+      getStats: () => collectStats(repos, agentSessionsSvc),
       dataDir: config.dataDir,
       updates,
       selfUpdate,
@@ -590,14 +590,9 @@ export function buildDoctorReportFactory(deps: {
   };
 }
 
-function collectStats(
-  repos: Repositories,
-  agentSessionsSvc: AgentSessionsService,
-  relationsSvc: RelationsService,
-): DashboardStats {
+function collectStats(repos: Repositories, agentSessionsSvc: AgentSessionsService): DashboardStats {
   const consolidationRow = repos.consolidation.adminLatestRun();
   const sessionsByStatus = agentSessionsSvc.adminCountByStatus();
-  const relationsByStatus = relationsSvc.countByStatus();
   const memoriesByStatus = repos.memory.countRowsByStatus();
 
   return {
@@ -607,6 +602,5 @@ function collectStats(
     projects: repos.projects.count(),
     lastConsolidationAt: consolidationRow?.startedAt ?? null,
     activeSessions: sessionsByStatus.active,
-    pendingJudgments: relationsByStatus.pending,
   };
 }

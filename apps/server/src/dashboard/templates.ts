@@ -390,7 +390,6 @@ export interface ShellOptions {
   view?: string;
   collapsed?: boolean;
   flash?: { kind: 'error' | 'success'; text: string };
-  counters?: { pendingJudgments?: number; needsReview?: number };
   /** Pre-rendered sidebar (with CSRF). When omitted, the shell renders
    *  without a sidebar — used for the login page. */
   sidebar?: SafeHtml;

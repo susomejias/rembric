@@ -140,6 +140,15 @@ describe('admin list-page count methods', () => {
     expect(repos.memory.adminCountNeedsReview({ nowMs: FUTURE_MS, ttlByType: [] })).toBe(0);
   });
 
+  it('memory.adminCountNeedsReviewByProject groups aged active rows per project (control: ungrouped sibling)', () => {
+    const grouped = repos.memory.adminCountNeedsReviewByProject({ nowMs: FUTURE_MS, ttlByType });
+    // Same population as the ungrouped sibling above: 12 ancient p0 rows + 1 p1.
+    const total = grouped.reduce((acc, r) => acc + r.count, 0);
+    expect(total).toBe(13);
+    expect(grouped).toContainEqual({ projectId: 'p0', count: 12 });
+    expect(grouped).toContainEqual({ projectId: 'p1', count: 1 });
+  });
+
   it('agentSessions.adminCount counts visible and deleted rows', () => {
     expect(repos.agentSessions.adminCount({ deleted: false })).toBe(12);
     expect(repos.agentSessions.adminCount({ deleted: true })).toBe(2);
@@ -149,6 +158,58 @@ describe('admin list-page count methods', () => {
     expect(repos.relations.adminCountWithFilters({ status: 'pending' })).toBe(12);
     expect(repos.relations.adminCountWithFilters({ kind: 'pending' })).toBe(12);
     expect(repos.relations.adminCountWithFilters({ status: 'judged' })).toBe(0);
+  });
+
+  it('relations.adminPendingAdjudicableByProject counts only pending pairs with both endpoints active, grouped per project', () => {
+    // Control: the 12 seeded pending rows join two ARCHIVED endpoints →
+    // adjudicably zero, even though adminCountWithFilters sees 12.
+    expect(repos.relations.adminCountWithFilters({ status: 'pending' })).toBe(12);
+    expect(repos.relations.adminPendingAdjudicableByProject()).toEqual([]);
+
+    t.handle.db
+      .insert(memory)
+      .values([
+        mem({ id: 'GA', content: 'adjudicable source' }),
+        mem({ id: 'GB', content: 'adjudicable target' }),
+        mem({ id: 'GSRC', content: 'global pending source', scope: 'global', projectId: null }),
+        mem({ id: 'GTGT', content: 'global pending target', scope: 'global', projectId: null }),
+        mem({ id: 'DEAD', content: 'superseded endpoint', status: 'superseded' }),
+      ])
+      .run();
+    t.handle.db
+      .insert(memoryRelations)
+      .values([
+        {
+          id: 'PA',
+          judgmentId: 'JA',
+          sourceId: 'GA',
+          targetId: 'GB',
+          status: 'pending' as const,
+          createdAt: new Date(1_000),
+        },
+        {
+          id: 'PG',
+          judgmentId: 'JG',
+          sourceId: 'GSRC',
+          targetId: 'GTGT',
+          status: 'pending' as const,
+          createdAt: new Date(1_000),
+        },
+        {
+          id: 'PD',
+          judgmentId: 'JD',
+          sourceId: 'DEAD',
+          targetId: 'GB',
+          status: 'pending' as const,
+          createdAt: new Date(1_000),
+        },
+      ])
+      .run();
+
+    const grouped = repos.relations.adminPendingAdjudicableByProject();
+    expect(grouped).toContainEqual({ projectId: 'p0', count: 1 });
+    expect(grouped).toContainEqual({ projectId: null, count: 1 });
+    expect(grouped.reduce((acc, r) => acc + r.count, 0)).toBe(2);
   });
 
   it('consolidation.adminCountRuns counts every run', () => {

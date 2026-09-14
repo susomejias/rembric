@@ -23,6 +23,8 @@ import {
   tblEmpty,
   truncate,
   viewHead,
+  type BadgeBreakdown,
+  type BadgeCounters,
 } from '../dashboard/components.js';
 import { createConsolidationRouter, scopeLabel } from '../dashboard/consolidation.js';
 import { csrfInput, readFormAndVerifyCsrf } from '../dashboard/csrf.js';
@@ -31,6 +33,7 @@ import { createJudgmentsRouter } from '../dashboard/judgments.js';
 import { createMaintenanceRouter } from '../dashboard/maintenance.js';
 import { createMemoriesRouter } from '../dashboard/memories.js';
 import { createOAuthConsentRouter } from '../dashboard/oauth-consent.js';
+import { badgeCountersFrom } from '../dashboard/page-shell.js';
 import { createProjectsRouter } from '../dashboard/projects.js';
 import { createPromptsRouter } from '../dashboard/prompts.js';
 import { createSessionsRouter } from '../dashboard/sessions.js';
@@ -58,6 +61,7 @@ import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { PromptsService } from '../services/prompts.js';
 import type { RelationsService } from '../services/relations.js';
+import { reviewTtlEntries } from '../services/review.js';
 import type { SelfUpdateOrchestrator } from '../services/self-update/orchestrator.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';
@@ -117,7 +121,34 @@ export interface DashboardStats {
   projects: number;
   lastConsolidationAt: Date | null;
   activeSessions: number;
-  pendingJudgments: number;
+}
+
+/**
+ * Sidebar badge counters for the shell, computed once per request:
+ * adjudicable pending judgments (both endpoints active — the same
+ * definition as `countPendingInScope`, without the scope filter) and
+ * needs-review memories, each with its per-project tooltip breakdown.
+ */
+export function computeBadgeCounters(repos: Repositories): BadgeCounters {
+  const projectSlugs = new Map(repos.projects.adminListAll().map((p) => [p.id, p.slug]));
+  const toBreakdown = (
+    rows: Array<{ projectId: string | null; count: number }>,
+  ): BadgeBreakdown => ({
+    total: rows.reduce((acc, r) => acc + r.count, 0),
+    byProject: rows.map((r) => ({
+      label: r.projectId === null ? 'global' : (projectSlugs.get(r.projectId) ?? r.projectId),
+      count: r.count,
+    })),
+  });
+  return {
+    pendingJudgments: toBreakdown(repos.relations.adminPendingAdjudicableByProject()),
+    needsReview: toBreakdown(
+      repos.memory.adminCountNeedsReviewByProject({
+        nowMs: Date.now(),
+        ttlByType: reviewTtlEntries(),
+      }),
+    ),
+  };
 }
 
 function sidebarCollapsed(c: Context): boolean {
@@ -232,6 +263,11 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     }
     c.set('update', update);
     c.set('updateCheckEnabled', deps.updates.enabled);
+    // Sidebar badges, computed once here so every page renders the same
+    // nav chrome (GET only: POST handlers never render the sidebar).
+    if (c.req.method === 'GET') {
+      c.set('badgeCounters', computeBadgeCounters(deps.repos));
+    }
     return next();
   });
 
@@ -256,7 +292,6 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     const session = c.get('session' as never) as ResolvedSession;
     const stats = deps.getStats();
     const collapsed = sidebarCollapsed(c);
-    const counters = { pendingJudgments: stats.pendingJudgments };
     const csrf = csrfInput(session.session, deps.sessions, 'sidebar.toggle');
     const updateState = (c.get('update' as never) as UpdateViewState | undefined | null) ?? null;
     const updateExtras = updateShellExtras(
@@ -267,7 +302,7 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
     );
     const sidebar = renderSidebar({
       active: 'home',
-      counters,
+      counters: badgeCountersFrom(c),
       collapsed,
       csrf,
       update: updateExtras.badge,
@@ -530,7 +565,6 @@ export function createDashboardRouter(deps: DashboardDeps): Hono {
         view: 'home',
         sidebar,
         collapsed,
-        counters,
         updateBadge: updateExtras.badge,
         updateModal: updateExtras.modal,
       }),

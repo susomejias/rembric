@@ -239,9 +239,34 @@ export function navEntry(key: NavKey): NavEntry {
 
 /* ── sidebar + mobile bar ──────────────────────────────────────────── */
 
+/** One sidebar badge's number plus its per-project tooltip breakdown. */
+export interface BadgeBreakdown {
+  total: number;
+  byProject: Array<{ label: string; count: number }>;
+}
+
+export type BadgeCounters = {
+  pendingJudgments?: BadgeBreakdown;
+  needsReview?: BadgeBreakdown;
+};
+
+export type BadgeKey = 'pendingJudgments' | 'needsReview';
+
+/** Native `title` for a sidebar badge: headline + per-project breakdown. */
+export function badgeTip(key: BadgeKey, b: BadgeBreakdown): string {
+  const head =
+    key === 'pendingJudgments'
+      ? `${b.total} pending judgment candidate${b.total === 1 ? '' : 's'} across all projects — resolve with memory.judge`
+      : `${b.total} active memor${b.total === 1 ? 'y' : 'ies'} past their review TTL across all projects — re-affirm with memory.confirm`;
+  const lines = [...b.byProject]
+    .sort((a, z) => z.count - a.count)
+    .map((r) => `${r.label}: ${r.count}`);
+  return lines.length > 0 ? `${head}\n${lines.join('\n')}` : head;
+}
+
 export interface SidebarOpts {
   active: NavKey | null;
-  counters: { pendingJudgments?: number; needsReview?: number };
+  counters: BadgeCounters;
   collapsed: boolean;
   csrf: SafeHtml;
   /** Pre-rendered update badge (see `update-modal.ts::updateBadge`). */
@@ -253,7 +278,12 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
   const sections = groups.map((g) => {
     const items = NAV.filter((n) => n.group === g).map((n) => {
       const isActive = opts.active === n.key;
-      const badgeCount = n.badgeKey ? (opts.counters[n.badgeKey] ?? 0) : 0;
+      const badge = n.badgeKey ? opts.counters[n.badgeKey] : undefined;
+      const badgeCount = badge?.total ?? 0;
+      const badgeTitle =
+        badge && n.badgeKey && badgeCount > 0
+          ? html` title="${badgeTip(n.badgeKey, badge)}"`
+          : raw('');
       return html`
         <a
           class="sb-item${isActive ? ' is-active' : ''}"
@@ -262,7 +292,7 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
         >
           <span class="icon" aria-hidden="true">${raw(NAV_ICONS[n.iconKey])}</span>
           <span class="label">${n.label}</span>
-          ${badgeCount > 0 ? html`<span class="badge">${badgeCount}</span>` : raw('')}
+          ${badgeCount > 0 ? html`<span class="badge" ${badgeTitle}>${badgeCount}</span>` : raw('')}
         </a>
       `;
     });
@@ -633,10 +663,10 @@ export interface PagerOpts {
 
 export function pager(opts: PagerOpts): SafeHtml {
   const pageCount =
-    opts.total !== undefined ? Math.max(1, Math.ceil(opts.total / PAGE_SIZE)) : undefined;
+    opts.total === undefined ? undefined : Math.max(1, Math.ceil(opts.total / PAGE_SIZE));
   const label =
     `PAGE ${opts.page + 1}` +
-    (pageCount !== undefined ? ` OF ${pageCount}` : '') +
+    (pageCount === undefined ? '' : ` OF ${pageCount}`) +
     (opts.totalLabel ? ` · ${opts.totalLabel}` : '');
   return html`
     <div class="pager">
@@ -668,7 +698,12 @@ export function pageParam(url: URL): number {
  * `pager()` round-trip the active filters.
  */
 export function urlWithPage(currentUrl: string, page: number): string {
-  const u = new URL(currentUrl);
+  let u: URL;
+  try {
+    u = new URL(currentUrl);
+  } catch {
+    return currentUrl;
+  }
   // Rebuilt from the raw query string, so the retired sentinel would survive
   // into every pager href even though `projectFilterParam` reads it as absent.
   if (u.searchParams.get('project') === RETIRED_PROJECT_FILTER) u.searchParams.delete('project');

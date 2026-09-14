@@ -996,6 +996,25 @@ export class MemoryRepository {
     return this.runCountNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs);
   }
 
+  /**
+   * Server-wide needs-review counts grouped by project (null = global scope);
+   * the grouped sibling of `adminCountNeedsReview` with no scope filter.
+   */
+  adminCountNeedsReviewByProject(opts: {
+    nowMs: number;
+    ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
+  }): Array<{ projectId: string | null; count: number }> {
+    if (opts.ttlByType.length === 0) return [];
+    return this.db
+      .select({ projectId: memory.projectId, count: count() })
+      .from(memory)
+      .where(
+        and(eq(memory.status, 'active'), this.needsReviewPredicate(opts.ttlByType, opts.nowMs)),
+      )
+      .groupBy(memory.projectId)
+      .all();
+  }
+
   adminGetByIds(ids: readonly string[]): Memory[] {
     return this.unsafeGetByIds(ids);
   }

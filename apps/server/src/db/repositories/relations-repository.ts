@@ -413,6 +413,24 @@ export class RelationsRepository {
       .all();
   }
 
+  /**
+   * Server-wide pending counts grouped by the SOURCE endpoint's project
+   * (null = global scope), counting only pairs whose source AND target are
+   * still active — the unscoped sibling of `countPendingInScope`, i.e. the
+   * adjudicable definition. Candidate pairs share one scope, so the source
+   * endpoint's project is the pair's project.
+   */
+  adminPendingAdjudicableByProject(): Array<{ projectId: string | null; count: number }> {
+    return this.db
+      .select({ projectId: sourceMemory.projectId, count: count() })
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(and(eq(memoryRelations.status, 'pending'), endpointsActive))
+      .groupBy(sourceMemory.projectId)
+      .all();
+  }
+
   adminCountByStatus(status: RelationStatus): number {
     const row = this.db
       .select({ value: count() })
