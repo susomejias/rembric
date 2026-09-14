@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.8](https://github.com/susomejias/rembric/compare/server-v0.28.7...server-v0.28.8) (2026-09-14)
+
+
+### Bug Fixes
+
+* **dashboard:** collapse badge span into one template (double-space flake) ([2f31352](https://github.com/susomejias/rembric/commit/2f31352a795ec009daa9294a1a824e3c7a2d2575))
+* **dashboard:** request-wide sidebar badges, adjudicable judgment count, badge tooltips ([a5596f9](https://github.com/susomejias/rembric/commit/a5596f9f45867140abb9af770d0fb26514438faf))
+
 ## [0.28.7](https://github.com/susomejias/rembric/compare/server-v0.28.6...server-v0.28.7) (2026-09-14)
 
 
