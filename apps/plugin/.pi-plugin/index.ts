@@ -102,6 +102,7 @@ function createMcpClient(endpoint: string, apiToken: string) {
   let negotiatedVersion = PROTOCOL_VERSION;
   let nextId = 1;
   let serverInstructions: string | null = null;
+  let discovered: DiscoveredTool[] = [];
 
   function headers(): Record<string, string> {
     const out: Record<string, string> = {
@@ -191,6 +192,12 @@ function createMcpClient(endpoint: string, apiToken: string) {
       return serverInstructions;
     },
 
+    // Discovery-resolved, so a server-side rename degrades the declaration
+    // instead of bricking the extension on a hard-coded name.
+    sessionResumeToolName(): string | null {
+      return discovered.find((tool) => tool.name.endsWith('session_resume'))?.name ?? null;
+    },
+
     async listTools(deadline: AbortSignal): Promise<DiscoveredTool[]> {
       const tools: DiscoveredTool[] = [];
       let cursor: string | undefined;
@@ -199,6 +206,7 @@ function createMcpClient(endpoint: string, apiToken: string) {
         tools.push(...((page.tools as DiscoveredTool[] | undefined) ?? []));
         cursor = typeof page.nextCursor === 'string' ? page.nextCursor : undefined;
       } while (cursor);
+      discovered = tools;
       return tools;
     },
 
@@ -228,6 +236,9 @@ function createMcpClient(endpoint: string, apiToken: string) {
         // Deliberate: the process is exiting, and a failed teardown costs the
         // server one idle transport, which it drops on close.
       });
+    },
+    sessionId(): string | null {
+      return mcpSessionId;
     },
   };
 }
@@ -309,6 +320,15 @@ export function renderToolResultLines(
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
+  // D4′: the (transport, host) pair last successfully declared; consecutive
+  // declaration failures are capped.
+  let boundKey: string | null = null;
+  // The key last ATTEMPTED, success or failure, so an exhausted budget belongs
+  // to the transport that exhausted it and a re-keyed transport starts fresh.
+  let lastBindAttemptKey: string | null = null;
+  let bindFailures = 0;
+  let missingResumeToolWarned = false;
+  const BIND_FAILURE_LIMIT = 3;
 
   pi.on('session_start', async (_event, ctx) => {
     if (core) return;
@@ -391,6 +411,36 @@ export default function rembric(pi: ExtensionApi): void {
     // one turn must never be read in the next (session-nudges D4a).
     core.beginTurn(sessionId);
     await core.ensureSession(sessionId);
+    // D4′: declare this transport's session identity by exact id, so every
+    // later resolution is a pin and never a heuristic lookup. Silent on
+    // failure; never the minting verb (session_start). The tool name comes
+    // from discovery — never a literal here.
+    const resumeTool = mcp?.sessionResumeToolName() ?? null;
+    const mcpSessionId = mcp?.sessionId() ?? null;
+    const bindKey = mcpSessionId && resumeTool ? `${mcpSessionId}::${sessionId}` : null;
+    if (mcp && bindKey === null && !missingResumeToolWarned) {
+      missingResumeToolWarned = true;
+      diag('session_resume not discovered; identity declaration skipped');
+    }
+    if (bindKey !== lastBindAttemptKey) {
+      lastBindAttemptKey = bindKey;
+      bindFailures = 0;
+    }
+    if (mcp && resumeTool && bindKey && bindKey !== boundKey && bindFailures < BIND_FAILURE_LIMIT) {
+      try {
+        const declared = await mcp.callTool(resumeTool, { sessionId });
+        if (declared.isError) {
+          bindFailures += 1;
+          diag(`session_resume bind failed: ${declared.text.slice(0, 120)}`);
+        } else {
+          boundKey = bindKey;
+          bindFailures = 0;
+        }
+      } catch (err) {
+        bindFailures += 1;
+        diag(`session_resume bind failed: ${err instanceof Error ? err.message : 'error'}`);
+      }
+    }
     core.appendUserMessage(sessionId, prompt);
 
     const result: BeforeAgentStartResult = {};

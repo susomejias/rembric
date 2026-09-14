@@ -1267,11 +1267,16 @@ describe('the successor session attributes its memories', () => {
     expect(attributedToSuccessor).toBeGreaterThan(0);
   });
 
-  it('the control — without the end, both rows stay active and the save attributes nothing', async () => {
+  it('the control — without the end, the save lands on the successor by pin, and the replaced row is untouched', async () => {
     const { savedSessionId, attributedToSuccessor } = await saveThroughSuccessor('reload');
 
-    expect(savedSessionId).toBeNull();
-    expect(attributedToSuccessor).toBe(0);
+    // Before D4′ this asserted NULL: two live rows made the ambiguous fallback
+    // refuse. The declaration pins the successor transport to its own row, so
+    // the pin — not the fallback — resolves the save. The safety property the
+    // control guards is that the REPLACED row inherits nothing.
+    expect(savedSessionId).toBe('pi-ambiguity-b-reload');
+    expect(attributedToSuccessor).toBeGreaterThan(0);
+    expect(repos.memory.adminListBySession('pi-ambiguity-a-reload')).toHaveLength(0);
   });
 });
 
@@ -1534,5 +1539,239 @@ describe('missing configuration disables the extension', () => {
       stderr.mockRestore();
       rmSync(bare, { recursive: true, force: true });
     }
+  });
+});
+
+describe('session identity declaration on the MCP transport (D4\u2032)', () => {
+  // Seeds a second live row for the same token+project, so every heuristic
+  // lookup refuses and only the declaration's pin can resolve session_start.
+  async function seedConcurrentRow(): Promise<void> {
+    const resolved = await tokens.authenticate(ADMIN_TOKEN);
+    sessions.ensure({
+      id: 'pi-bind-other',
+      tokenId: resolved.token.id,
+      projectId: project.id,
+      agent: 'pi',
+    });
+  }
+
+  function spyMcpCalls() {
+    const resumeCalls: { transport: string | null; sessionId: unknown }[] = [];
+    const toolCalls: string[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/mcp') && typeof init?.body === 'string') {
+          const parsed = JSON.parse(init.body) as {
+            method?: string;
+            params?: { name?: string; arguments?: Record<string, unknown> };
+          };
+          if (parsed.method === 'tools/call') {
+            toolCalls.push(parsed.params?.name ?? '');
+            if (parsed.params?.name === 'memory.session_resume') {
+              resumeCalls.push({
+                transport: new Headers(init.headers).get('mcp-session-id'),
+                sessionId: parsed.params.arguments?.sessionId,
+              });
+            }
+          }
+        }
+        return realFetch(input, init);
+      });
+    return { resumeCalls, toolCalls, spy, realFetch };
+  }
+
+  function resumeErrorResponse(initBody: string): Response {
+    const parsed = JSON.parse(initBody) as { id?: number };
+    return new Response(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: parsed.id ?? 0,
+        result: {
+          content: [
+            { type: 'text', text: '{"ok":false,"code":"session_not_found","message":"gone"}' },
+          ],
+          isError: true,
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  it('declares its identity after the first ensure, and the pin answers session_start', async () => {
+    const sessionId = 'pi-bind-host';
+    const harness = await startedHarness(sessionId);
+    await seedConcurrentRow();
+
+    const { resumeCalls, toolCalls, spy } = spyMcpCalls();
+    try {
+      await harness.fire('before_agent_start', { prompt: 'first turn' });
+      // The same (transport, host) pair must not re-declare on the next turn.
+      await harness.fire('before_agent_start', { prompt: 'second turn' });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(resumeCalls).toEqual([{ transport: expect.any(String), sessionId }]);
+    expect(toolCalls).not.toContain('memory.session_start');
+
+    const start = await callThroughExtension(toolNamed(harness, 'memory.session_start'), {});
+    expect(start.refused).toBe(false);
+    const out = JSON.parse(start.text) as { sessionId: string; reused: boolean };
+    expect(out.reused).toBe(true);
+    expect(out.sessionId).toBe(sessionId);
+  });
+
+  it('a failed declaration retries silently on the next turn and then binds', async () => {
+    const sessionId = 'pi-bind-retry';
+    const harness = await startedHarness(sessionId);
+    await seedConcurrentRow();
+    const realFetch = globalThis.fetch;
+    let failures = 0;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/mcp') && typeof init?.body === 'string') {
+          const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
+          if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
+            if (failures === 0) {
+              failures += 1;
+              return resumeErrorResponse(init.body);
+            }
+          }
+        }
+        return realFetch(input, init);
+      });
+    try {
+      await harness.fire('before_agent_start', { prompt: 'turn one' });
+      expect(harness.notifications).toHaveLength(0);
+      await harness.fire('before_agent_start', { prompt: 'turn two' });
+      expect(harness.notifications).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const start = await callThroughExtension(toolNamed(harness, 'memory.session_start'), {});
+    const out = JSON.parse(start.text) as { sessionId: string; reused: boolean };
+    expect(out.reused).toBe(true);
+    expect(out.sessionId).toBe(sessionId);
+  });
+
+  it('re-declares on the new transport after it re-initialises', async () => {
+    const sessionId = 'pi-bind-reinit';
+    const harness = await startedHarness(sessionId);
+    const { resumeTransports, spy } = (() => {
+      const seen: (string | null)[] = [];
+      const realFetch = globalThis.fetch;
+      const s = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url.includes('/mcp') && typeof init?.body === 'string') {
+            const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
+            if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
+              seen.push(new Headers(init.headers).get('mcp-session-id'));
+            }
+          }
+          const res = await realFetch(input, init);
+          // The declaration's own response re-keys the transport: send() adopts
+          // the fresh mcp-session-id header, which is the re-init under test.
+          if (url.includes('/mcp') && typeof init?.body === 'string') {
+            const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
+            if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
+              const headers = new Headers(res.headers);
+              headers.set('mcp-session-id', 'transport-B');
+              return new Response(res.body, { status: res.status, headers });
+            }
+          }
+          return res;
+        });
+      return { resumeTransports: seen, spy: s };
+    })();
+    try {
+      await harness.fire('before_agent_start', { prompt: 'turn one' }); // declares on A
+      await harness.fire('before_agent_start', { prompt: 'turn two' }); // transport is B now
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(resumeTransports).toHaveLength(2);
+    expect(resumeTransports[0]).not.toBe(resumeTransports[1]);
+  });
+
+  it('resets the failure budget when the transport re-keys', async () => {
+    const sessionId = 'pi-bind-rekey-budget';
+    const harness = await startedHarness(sessionId);
+    let attempts = 0;
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/mcp') && typeof init?.body === 'string') {
+          const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
+          if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
+            attempts += 1;
+            const failed = resumeErrorResponse(init.body);
+            // A fresh handshake re-keys the transport once the budget is spent.
+            if (attempts === 3) {
+              const headers = new Headers(failed.headers);
+              headers.set('mcp-session-id', 'transport-after-rekey');
+              return new Response(failed.body, { status: failed.status, headers });
+            }
+            return failed;
+          }
+        }
+        return realFetch(input, init);
+      });
+    try {
+      for (let turn = 1; turn <= 5; turn++) {
+        await harness.fire('before_agent_start', { prompt: `turn ${turn}` });
+      }
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Three failures exhaust the first transport's budget; the re-keyed one gets
+    // its own, so the declaration is attempted again instead of staying dead.
+    expect(attempts).toBe(5);
+  });
+
+  it('caps consecutive failures at BIND_FAILURE_LIMIT and degrades silently', async () => {
+    const sessionId = 'pi-bind-degrade';
+    const harness = await startedHarness(sessionId);
+    let attempts = 0;
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/mcp') && typeof init?.body === 'string') {
+          const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
+          if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
+            attempts += 1;
+            return resumeErrorResponse(init.body);
+          }
+        }
+        return realFetch(input, init);
+      });
+    try {
+      const first = (await harness.fire('before_agent_start', { prompt: 'turn 1' })) as {
+        message?: { content: string };
+      };
+      // Nudge injection is unaffected by the silent bind failures.
+      expect(first.message?.content).toContain('## Goal');
+      for (let turn = 2; turn <= 5; turn++) {
+        await harness.fire('before_agent_start', { prompt: `turn ${turn}` });
+      }
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(attempts).toBe(3);
+    expect(harness.notifications).toHaveLength(0);
   });
 });
