@@ -126,6 +126,97 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     expect(out.reused).toBe(false);
     expect(out.agent).toBe('pi');
   });
+
+  function backdate(id: string, minutesAgo: number) {
+    const past = Date.now() - minutesAgo * 60_000;
+    db.handle.raw
+      .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
+      .run(past, past, id);
+  }
+
+  function rowsForPair() {
+    return db.handle.db
+      .select()
+      .from(agentSessionsTable)
+      .where(
+        and(
+          eq(agentSessionsTable.tokenId, adminToken.id),
+          eq(agentSessionsTable.projectId, defaultProjectId),
+        ),
+      )
+      .all();
+  }
+
+  it('adopts the sole active row even when it is idle past TRANSPORT_STALENESS_MS (no first ghost)', async () => {
+    const s = startSession('pi');
+    backdate(s.id, 89);
+
+    const r = await runWithContext(makeContext(), () => handlers.sessionStart({}));
+    const out = parseText<{ sessionId: string; reused: boolean }>(r);
+    expect(out.reused).toBe(true);
+    expect(out.sessionId).toBe(s.id);
+    expect(rowsForPair()).toHaveLength(1);
+  });
+
+  it('still mints with two stale live rows: the no-guess rule is not widened into adoption', async () => {
+    const a = startSession('a');
+    const b = startSession('b');
+    backdate(a.id, 90);
+    backdate(b.id, 120);
+
+    const r = await runWithContext(makeContext(), () => handlers.sessionStart({}));
+    const out = parseText<{ sessionId: string; reused: boolean }>(r);
+    expect(out.reused).toBe(false);
+    expect(out.sessionId).not.toBe(a.id);
+    expect(out.sessionId).not.toBe(b.id);
+    expect(rowsForPair()).toHaveLength(3);
+  });
+
+  it('the transport pin answers session_start even when a fresher live row exists (binding precedes lookups)', async () => {
+    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-start' };
+    const stale = startSession('pi');
+    backdate(stale.id, 89);
+    startSession('other');
+    // Already-active resume: a no-op write that still pins the transport,
+    // so the stale row stays stale and only the binding can resolve it.
+    await runWithContext(ctx, () => handlers.sessionResume({ sessionId: stale.id }));
+
+    const r = await runWithContext(ctx, () => handlers.sessionStart({}));
+    const out = parseText<{ sessionId: string; reused: boolean }>(r);
+    expect(out.reused).toBe(true);
+    expect(out.sessionId).toBe(stale.id);
+    expect(rowsForPair()).toHaveLength(2);
+  });
+
+  it('a terminal bound row is not adopted; the binding is re-pointed to the resolved row, never cleared', async () => {
+    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-fallthrough' };
+    const ended = startSession('ended');
+    await runWithContext(ctx, () => handlers.sessionResume({ sessionId: ended.id }));
+    expect(router.get(adminToken.id, 'transport-fallthrough')?.rembricSessionId).toBe(ended.id);
+    // The plugin ends its row over HTTP, which never clears an MCP binding:
+    // after quit the pin legitimately points at a terminal row.
+    agentSessions.end(ended.id, { tokenId: adminToken.id });
+
+    const r = await runWithContext(ctx, () => handlers.sessionStart({}));
+    const out = parseText<{ sessionId: string; reused: boolean }>(r);
+    expect(out.sessionId).not.toBe(ended.id);
+    expect(out.reused).toBe(false);
+    expect(router.get(adminToken.id, 'transport-fallthrough')?.rembricSessionId).toBe(
+      out.sessionId,
+    );
+  });
+
+  it('a soft-deleted bound row is not adopted', async () => {
+    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-deleted' };
+    const s = startSession('deleted');
+    await runWithContext(ctx, () => handlers.sessionResume({ sessionId: s.id }));
+    agentSessions.softDelete(s.id, { adminBypass: true });
+
+    const r = await runWithContext(ctx, () => handlers.sessionStart({}));
+    const out = parseText<{ sessionId: string; reused: boolean }>(r);
+    expect(out.sessionId).not.toBe(s.id);
+    expect(out.reused).toBe(false);
+  });
 });
 
 describe('memory.session_summary on a session the sweep already abandoned', () => {

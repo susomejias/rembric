@@ -139,3 +139,73 @@ describe('AgentSessionsRepository admin filters', () => {
     });
   });
 });
+
+describe('findSoleActiveForReuse (session_start reuse lookup — no staleness window)', () => {
+  let t: TestDb;
+  let repo: AgentSessionsRepository;
+
+  beforeEach(() => {
+    t = createTestDb();
+    repo = new AgentSessionsRepository(t.handle.db);
+    t.handle.db
+      .insert(tokens)
+      .values([
+        { id: 'tk1', name: 'test', hash: 'x', scope: '*', createdAt: new Date(500) },
+        { id: 'other', name: 'other', hash: 'y', scope: '*', createdAt: new Date(500) },
+      ])
+      .run();
+    t.handle.db
+      .insert(projects)
+      .values([{ id: 'p1', slug: 'proj-one', createdAt: new Date(500) }])
+      .run();
+  });
+
+  afterEach(() => t.cleanup());
+
+  function insertRow(overrides: Partial<NewAgentSession> & { id: string }) {
+    t.handle.db
+      .insert(agentSessions)
+      .values([row(overrides)])
+      .run();
+  }
+
+  function backdate(id: string, minutesAgo: number) {
+    const past = Date.now() - minutesAgo * 60_000;
+    t.handle.raw
+      .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
+      .run(past, past, id);
+  }
+
+  it('returns the sole active row regardless of staleness', () => {
+    insertRow({ id: 'S10', status: 'active', startedAt: new Date(1_000) });
+    backdate('S10', 90);
+    expect(repo.findSoleActiveForReuse('tk1', null)?.id).toBe('S10');
+    // Control: the windowed lookup still refuses the same row.
+    expect(repo.findActiveForTransport('tk1', null, Date.now())).toBeUndefined();
+  });
+
+  it('returns undefined with two live rows and with three (LIMIT 2 sole-or-nothing, never recency)', () => {
+    insertRow({ id: 'SA', status: 'active', startedAt: new Date(1_000) });
+    insertRow({ id: 'SB', status: 'active', startedAt: new Date(2_000) });
+    expect(repo.findSoleActiveForReuse('tk1', null)).toBeUndefined();
+    insertRow({ id: 'SC', status: 'active', startedAt: new Date(3_000) });
+    expect(repo.findSoleActiveForReuse('tk1', null)).toBeUndefined();
+  });
+
+  it('excludes non-active, soft-deleted and out-of-scope rows', () => {
+    insertRow({ id: 'SE', status: 'ended', startedAt: new Date(1_000) });
+    expect(repo.findSoleActiveForReuse('tk1', null)).toBeUndefined();
+    insertRow({
+      id: 'SD',
+      status: 'active',
+      deletedAt: new Date(2_000),
+      startedAt: new Date(2_000),
+    });
+    expect(repo.findSoleActiveForReuse('tk1', null)).toBeUndefined();
+    insertRow({ id: 'SO', status: 'active', tokenId: 'other', startedAt: new Date(3_000) });
+    expect(repo.findSoleActiveForReuse('tk1', null)).toBeUndefined();
+    insertRow({ id: 'SP', status: 'active', projectId: 'p1', startedAt: new Date(4_000) });
+    expect(repo.findSoleActiveForReuse('tk1', 'p1')?.id).toBe('SP');
+    expect(repo.findSoleActiveForReuse('tk1', null)).toBeUndefined();
+  });
+});
