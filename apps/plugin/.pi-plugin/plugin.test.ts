@@ -1740,6 +1740,42 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
     expect(attempts).toBe(5);
   });
 
+  it('two concurrent conversations in one project each save to their own row', async () => {
+    const firstId = 'pi-concurrent-a';
+    const secondId = 'pi-concurrent-b';
+
+    // The same token and the same project, two live transports: the arrangement
+    // where every lookup-based resolution refuses (two active rows) would have
+    // attached a save to the wrong row before the declaration existed.
+    const a = await startedHarness(firstId);
+    const b = await startedHarness(secondId);
+    await a.fire('before_agent_start', { prompt: 'conversation A' });
+    await b.fire('before_agent_start', { prompt: 'conversation B' });
+
+    const saveA = await callThroughExtension(toolNamed(a, 'memory.save'), {
+      type: 'project',
+      title: 'saved by conversation A',
+      content: 'saved by conversation A',
+    });
+    const saveB = await callThroughExtension(toolNamed(b, 'memory.save'), {
+      type: 'project',
+      title: 'saved by conversation B',
+      content: 'saved by conversation B',
+    });
+
+    expect(saveA.refused).toBe(false);
+    expect(saveB.refused).toBe(false);
+    const attachedA = repos.memory.unsafeGetById(savedId(saveA.text))?.sessionId ?? null;
+    const attachedB = repos.memory.unsafeGetById(savedId(saveB.text))?.sessionId ?? null;
+
+    expect(attachedA).toBe(firstId);
+    expect(attachedB).toBe(secondId);
+    // The control that both rows were genuinely live at the same time, so the
+    // assertions above cannot be satisfied by one row having ended.
+    expect(sessions.getById(firstId)?.status).toBe('active');
+    expect(sessions.getById(secondId)?.status).toBe('active');
+  });
+
   it('caps consecutive failures at BIND_FAILURE_LIMIT and degrades silently', async () => {
     const sessionId = 'pi-bind-degrade';
     const harness = await startedHarness(sessionId);
