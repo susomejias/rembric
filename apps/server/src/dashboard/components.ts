@@ -280,9 +280,11 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
       const isActive = opts.active === n.key;
       const badge = n.badgeKey ? opts.counters[n.badgeKey] : undefined;
       const badgeCount = badge?.total ?? 0;
-      const badgeTitle =
+      // One template holds the whole span so a formatter cannot inject a
+      // second space between class and title (badgeTitle's leading space).
+      const badgeEl =
         badge && n.badgeKey && badgeCount > 0
-          ? html` title="${badgeTip(n.badgeKey, badge)}"`
+          ? html`<span class="badge" title="${badgeTip(n.badgeKey, badge)}">${badgeCount}</span>`
           : raw('');
       return html`
         <a
@@ -292,7 +294,7 @@ export function renderSidebar(opts: SidebarOpts): SafeHtml {
         >
           <span class="icon" aria-hidden="true">${raw(NAV_ICONS[n.iconKey])}</span>
           <span class="label">${n.label}</span>
-          ${badgeCount > 0 ? html`<span class="badge" ${badgeTitle}>${badgeCount}</span>` : raw('')}
+          ${badgeEl}
         </a>
       `;
     });
