@@ -1483,6 +1483,31 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     expect(persisted?.sessionId).toBeNull();
   });
 
+  it('control: a stale sole active row is still NOT adopted by auto-attach (session_id stays null)', async () => {
+    agentSessions.ensure({
+      id: 'sess-stale-sole',
+      tokenId: realTokenId,
+      projectId: projectA.id,
+      agent: 'pi',
+    });
+    const past = Date.now() - 89 * 60_000;
+    db.handle.raw
+      .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
+      .run(past, past, 'sess-stale-sole');
+
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      fallbackHandlers.save({
+        type: 'project',
+        title: 'stale sole row',
+        content: 'stale sole row',
+      }),
+    );
+    const { id } = parseText<{ id: string }>(r);
+    const persisted = memory.unsafeGetById(id);
+    // session_start may adopt a stale sole row; auto-attach must not.
+    expect(persisted?.sessionId).toBeNull();
+  });
+
   it('saves with session_id=null when no active session exists', async () => {
     const r = await runWithContext(ctxWithRealToken(projectA), () =>
       fallbackHandlers.save({

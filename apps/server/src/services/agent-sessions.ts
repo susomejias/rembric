@@ -612,6 +612,17 @@ export class AgentSessionsService {
   }
 
   /**
+   * Sole-active reuse lookup for `memory.session_start` ONLY — no staleness
+   * window (sessions spec no-guess carve-out); auto-attach MUST NOT use it.
+   */
+  findSoleActiveForReuse(input: {
+    tokenId: string;
+    projectId: string | null;
+  }): AgentSession | null {
+    return this.repos.agentSessions.findSoleActiveForReuse(input.tokenId, input.projectId) ?? null;
+  }
+
+  /**
    * N most recent sessions for the given scope, ordered newest first.
    * Soft-deleted sessions and empty sessions (those failing the shared
    * `sessionHasContent` predicate) are NEVER surfaced via this path —

@@ -792,7 +792,7 @@ describe('MCP protocol conformance', () => {
     it.each([
       ['memory.context', 1432],
       ['memory.search_prompts', 428],
-      ['memory.session_start', 818],
+      ['memory.session_start', 971],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
       ['memory.save', 1549],
@@ -874,6 +874,10 @@ describe('MCP protocol conformance', () => {
       }
       expect(desc).toMatch(/reused:true.*ADOPTED/i);
       expect(desc).toMatch(/agent.*MAY differ from the `agent` you passed/i);
+      // D3: the anti-ghost clause — a second call is never needed once a
+      // session is active on this connection.
+      expect(desc).toMatch(/do NOT call this again/i);
+      expect(desc).toMatch(/attach to it automatically/i);
     });
 
     it('memory.session_resume names every field its outputSchema requires', () => {

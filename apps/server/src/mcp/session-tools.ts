@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import type { AgentSession } from '../db/schema/agent-sessions.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
@@ -175,16 +176,32 @@ async function handleSessionStart(
     return errToMcp(err);
   }
 
-  // Idempotency on (token, project): if a session is already active for
-  // this scope (typically because the plugin's SessionStart hook created
-  // one via the HTTP /api/.../sessions path), return that one instead of
-  // minting a new ULID-based row. Prevents the duplicate-session bug
-  // where the model defensively calls memory.session_start on top of the
-  // hook-driven row, ending up with two parallel sessions.
-  let session = deps.agentSessions.findActiveForTransport({
-    tokenId: ctx.token.id,
-    projectId,
-  });
+  // Reuse resolution order (see the sessions spec's no-guess requirement
+  // and the mcp-api session-lifecycle requirement): transport pin →
+  // fresh-unique → sole-active-any-staleness → mint. The pin is an id, not
+  // a guess; the sole-active fallback is the only caller-licensed adoption
+  // of a stale-but-live row and lives in findSoleActiveForReuse.
+  const key = routerKey();
+  const boundId = key
+    ? (deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId ?? null)
+    : null;
+  const bound = boundId ? deps.agentSessions.getById(boundId) : undefined;
+  let session: AgentSession | null;
+  if (
+    bound &&
+    bound.status === 'active' &&
+    bound.deletedAt === null &&
+    bound.tokenId === ctx.token.id &&
+    bound.projectId === projectId
+  ) {
+    session = bound;
+  } else {
+    session =
+      deps.agentSessions.findActiveForTransport({
+        tokenId: ctx.token.id,
+        projectId,
+      }) ?? deps.agentSessions.findSoleActiveForReuse({ tokenId: ctx.token.id, projectId });
+  }
   let reused = false;
   if (session) {
     reused = true;
@@ -209,7 +226,6 @@ async function handleSessionStart(
 
   deps.sweep?.(projectId);
 
-  const key = routerKey();
   if (key) {
     deps.router.setActiveSession(key.tokenId, key.mcpSessionId, session.id);
     // A router entry means the agent deliberately activated this project, which

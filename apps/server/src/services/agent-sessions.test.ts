@@ -286,6 +286,61 @@ describe('AgentSessionsService', () => {
     expect(sessions.findActiveForTransport({ tokenId, projectId })).toBeNull();
   });
 
+  describe('findSoleActiveForReuse (session_start reuse lookup — no staleness window)', () => {
+    function backdate(id: string, minutesAgo: number) {
+      const past = Date.now() - minutesAgo * 60_000;
+      db.handle.raw
+        .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
+        .run(past, past, id);
+    }
+
+    it('adopts the sole active row regardless of staleness', () => {
+      const a = sessions.start({ tokenId, projectId, agent: 'a' });
+      backdate(a.id, 90);
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })?.id).toBe(a.id);
+    });
+
+    it('never guesses with two live rows and never breaks ties by recency', () => {
+      const a = sessions.start({ tokenId, projectId, agent: 'a' });
+      sessions.start({ tokenId, projectId, agent: 'b' });
+      backdate(a.id, 90);
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })).toBeNull();
+    });
+
+    it('returns null with zero or three live rows (LIMIT 2 sole-or-nothing)', () => {
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })).toBeNull();
+      sessions.start({ tokenId, projectId, agent: 'a' });
+      sessions.start({ tokenId, projectId, agent: 'b' });
+      sessions.start({ tokenId, projectId, agent: 'c' });
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })).toBeNull();
+    });
+
+    it('excludes non-active and soft-deleted rows', () => {
+      const ended = sessions.start({ tokenId, projectId, agent: 'ended' });
+      sessions.end(ended.id, { tokenId });
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })).toBeNull();
+
+      const abandoned = sessions.start({ tokenId, projectId, agent: 'abandoned' });
+      sessions.markAbandoned(abandoned.id, { adminBypass: true });
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })).toBeNull();
+
+      const deleted = sessions.start({ tokenId, projectId, agent: 'deleted' });
+      sessions.softDelete(deleted.id, { adminBypass: true });
+      expect(sessions.findSoleActiveForReuse({ tokenId, projectId })).toBeNull();
+    });
+
+    it('is scoped to (tokenId, projectId)', () => {
+      sessions.start({ tokenId, projectId, agent: 'a' });
+      expect(sessions.findSoleActiveForReuse({ tokenId: otherTokenId, projectId })).toBeNull();
+    });
+
+    it('control: the windowed lookup still refuses the stale sole row (no leak into auto-attach)', () => {
+      const a = sessions.start({ tokenId, projectId, agent: 'a' });
+      backdate(a.id, 90);
+      expect(sessions.findActiveForTransport({ tokenId, projectId })).toBeNull();
+    });
+  });
+
   it('abandonStale flips old active rows to abandoned', () => {
     const old = sessions.start({ tokenId, projectId, agent: 'old' });
     // Backdate BOTH started_at and last_activity_at by 48h via raw SQL so

@@ -169,6 +169,28 @@ export class AgentSessionsRepository {
     return rows.length === 1 ? rows[0] : undefined;
   }
 
+  /**
+   * Sole-active lookup with NO staleness window — used only by
+   * `memory.session_start`'s reuse branch (see the sessions spec's no-guess
+   * requirement); auto-attach must keep using `findActiveForTransport`.
+   */
+  findSoleActiveForReuse(tokenId: string, projectId: string | null): AgentSession | undefined {
+    const conditions = [
+      eq(agentSessions.tokenId, tokenId),
+      eq(agentSessions.status, 'active'),
+      isNull(agentSessions.deletedAt),
+      projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
+    ];
+    // No ORDER BY: "sole match or nothing" makes it unobservable.
+    const rows = this.db
+      .select()
+      .from(agentSessions)
+      .where(and(...conditions))
+      .limit(2)
+      .all();
+    return rows.length === 1 ? rows[0] : undefined;
+  }
+
   /** Bump `last_activity_at` — called by every write that resolves to this session. */
   touchActivity(id: string, at: Date): void {
     this.db.update(agentSessions).set({ lastActivityAt: at }).where(eq(agentSessions.id, id)).run();
