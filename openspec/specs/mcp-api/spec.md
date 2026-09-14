@@ -2806,9 +2806,23 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 
 `memory.session_start` SHALL NOT always insert a row. When an `active` session already exists for the caller's `(tokenId, projectId)` on this transport — the ordinary case, because every supported host registers the session over HTTP before the agent runs — the call SHALL adopt that row instead of minting a second one, and SHALL report which of the two happened in a REQUIRED `reused` field: `true` when an existing row was adopted, `false` when a row was inserted. `reused` is the only signal distinguishing "you are now attached to the host's session" from "you just created a parallel session", which is the question a defensive `memory.session_start` call is asking. Its `outputSchema` SHALL mark it required, and the tool's description SHALL name it and state what `true` means (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"): a required field the description omits from a closed-form `Returns: { … }` list is undocumented surface on the one channel the model reads.
 
+The response SHALL additionally carry a REQUIRED `agent` field reporting the attribution the resolved row actually carries: on `reused: false` the value just written, and on `reused: true` the adopted row's own value, which MAY differ from the `agent` argument the call passed. It SHALL be read from the resolved row rather than from the argument, so the field reports what is stored and not what was requested. The adopt path SHALL NOT write the passed `agent` onto the adopted row: `sessions.agent` is immutable (see the `sessions` capability, "The system SHALL never physically delete a session row and SHALL never mutate the `agent`, `token_id`, `started_at`, or `project_id` of an existing session") and no verb re-attributes a session, so a differing argument is discarded permanently and every memory and summary version anchored to that row inherits the row's attribution instead. Reporting it is therefore the entire remedy available: `reused: true` alone tells the caller it is attached to a session it did not open but not whose, and without `agent` the discard is not merely unnoticed but unobservable. Refusing the call on a mismatch SHALL NOT be adopted as the remedy — a host-registered row whose `agent` string the hook chose, adopted by a model that names itself differently, is the ordinary case the reuse exists to serve — and neither SHALL `agent` be added to the reuse key, which would restore the duplicate-session bug the reuse prevents. `agent` SHALL be non-nullable and always present, since the column is `NOT NULL` and the insert path substitutes `'unknown'`; a nullable declaration would publish a state the tool cannot produce. Its `outputSchema` SHALL mark it required and the description's closed-form `Returns: { … }` list SHALL name it, per "A tool's description and its response MUST agree, and neither may promise an unreachable state".
+
+`memory.session_start` SHALL resolve the session it reports in this order, and the order is normative: (1) the calling transport's `SessionRouter` binding; (2) the windowed sole-active lookup (`findActiveForTransport`); (3) the sole-active reuse lookup that applies no staleness window (`findSoleActiveForReuse`); (4) a mint. Steps (2) and (3) are specified in the `sessions` capability, "`findActiveForTransport` MUST NOT guess under concurrent ambiguity", and their contracts are unchanged by step (1).
+
+Step (1) SHALL be consulted before either lookup. When `SessionRouter` names a session for `(tokenId, mcpSessionId)` and that row exists, carries `status = 'active'`, has `deleted_at IS NULL`, and belongs to the `(token_id, project_id)` this call resolved to, the call SHALL adopt that row and refresh its activity rather than resolve anything. This is an explicit pin for this transport, not a guess, and it is the same binding `memory.session_end`, `memory.session_resume` and the auto-attaching writes already honour — which is why it is consistent for `memory.session_start` to lead with it, and why a defensive second call can no longer snowball into one new row per call once a second row is live. The binding need not have come from a previous `memory.session_start`: a client MAY pin its own transport by calling `memory.session_resume` with an explicit id, and for the Pi extension that is the only way a binding ever arises, because it never calls `memory.session_start`. That start-up call lands on the already-`active` no-op path published above — successful, reporting `previousStatus: 'active'` with `previousEndedAt: null`, writing nothing to the row (`started_at` and `last_activity_at` included) and still (re-)establishing the binding — which is what makes an unconditional declaration at every process start safe rather than a periodic re-key. When the bound row fails any of those conditions the handler SHALL fall through to the lookups and SHALL NOT clear the binding: `memory.session_end` remains the only writer that clears it, because clearing it here would drop every later `memory.save` on that transport to `session_id = NULL`. A transport with no binding — a connection with no MCP session id, a server restart that emptied the in-memory router, or a resumed process that arrived on a new MCP session id — behaves exactly as if step (1) were skipped, which is what keeps steps (2) and (3) load-bearing rather than decorative.
+
+Both adoption paths report the same way: `reused: true` carrying the adopted row's `sessionId` and that row's stored `agent`, and neither SHALL insert a row. Only step (4) reports `reused: false`. Minting under two-or-more live rows with no binding is preserved as published behaviour; it is now bounded to at most one row per transport, because step (1) binds whatever the mint produced.
+
+The tool's description SHALL additionally tell the model not to repeat the call on a connection that already has a session — once a session is active on this connection, do not call `memory.session_start` again, because writes attach automatically. The description is the only surface that can reduce the volume of defensive calls that create these rows in the first place; the resolution order above bounds the damage per call, and this clause is what reduces the number of calls.
+
 `memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `apps/server/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
 
 `memory.session_summary` and `memory.session_end` SHALL NOT reject a call because the resolved row is in a terminal state. `memory.session_summary` SHALL apply its summary/title write subject to the `final` precedence rules regardless of `status`; `memory.session_end` takes no summary/title arguments, so on a terminal row it SHALL be a pure no-op returning the existing `ended_at`. Neither SHALL mutate `status`, `ended_at` or `last_activity_at` on a terminal row — see the `sessions` capability, "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`". `session_already_ended` SHALL NOT be a possible error code for either tool. This matters because the plugin's `PreCompact`, `SessionStart:compact` and `Stop` nudges instruct the agent to call `memory.session_summary`, and the stale-active retirement sweep can have flipped the row to `abandoned` (the documented steady state for two of the clients) before the agent gets there.
+
+`memory.session_summary`'s response SHALL carry a REQUIRED `applied: boolean` field. `applied` is `true` when the summary/title write landed on the row (whether the row was `active` or terminal without a prior curated summary). `applied` is `false` when the terminal first-curated-stands precedence rule blocked the write: the row is terminal (`ended` or `abandoned`), `summary_final` was already `true`, and the incoming curated summary was discarded. When `applied` is `false`, the response SHALL additionally carry `discardReason: 'terminal_final'` — the only discard reason today — to name the specific rule that blocked the write. When `applied` is `true`, `discardReason` SHALL be omitted from the response. The `outputSchema` SHALL declare `applied` as required (`z.boolean()`) and `discardReason` as optional (`z.string().optional()`). This field is the entire remedy available on the MCP surface: the row cannot be repaired, the first-curated-stands rule cannot be changed (there is no `replaces` chain for sessions, so losing a curated handoff is unrecoverable), and returning an error would violate the "SHALL NOT reject a call because the resolved row is in a terminal state" clause above.
+
+`memory.session_end`'s response SHALL carry a REQUIRED `applied: boolean` field. `applied` is `true` when the call transitioned an `active` row to `ended`. `applied` is `false` when the row was already terminal (`ended` or `abandoned`) and the call was a no-op. The `outputSchema` SHALL declare `applied` as required (`z.boolean()`). This makes the two session-lifecycle write tools consistent: both report whether the call achieved a state change.
 
 `memory.session_resume` SHALL accept `{ sessionId: string }` with `sessionId` REQUIRED, and SHALL call `AgentSessionsService.resume` (specified in the `sessions` capability) with the request's token id. Its response SHALL be `{ ok: true, sessionId, status: 'active', startedAt, resumedAt, previousStatus, previousEndedAt, title }`, where `previousStatus` is the row's `status` immediately before the call and `previousEndedAt` is the `ended_at` the call discarded (`null` when the row was already `active`). Those two fields are the ONLY report of a value the server does not retain, so the tool's `outputSchema` SHALL mark them required and the description SHALL name them. `resumedAt` SHALL be the row's effective last activity after the call — the instant of the resume on the transition path, and the row's PRIOR activity on the already-`active` no-op path, since that path writes nothing by design. `resumedAt` SHALL NOT be read as "the instant this call ran": `previousStatus` is what distinguishes a transition from a no-op, and the tool description SHALL say so.
 
@@ -2823,22 +2837,22 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 #### Scenario: `memory.session_start` opens a new session
 
 - **WHEN** an MCP client calls `memory.session_start` with `{ agent?: string, description?: string }`
-- **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, `project_id` from the request scope, and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` with `title_final = false`; **AND** the response SHALL be `{ sessionId, scope, projectId, startedAt, title, reused }`
+- **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, `project_id` from the request scope, and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` with `title_final = false`; **AND** the response SHALL be `{ sessionId, scope, projectId, startedAt, title, reused, agent }`, whose `agent` SHALL equal the value just written to the row
 
 #### Scenario: `memory.session_end` ends a session without summary
 
 - **WHEN** an MCP client calls `memory.session_end` with `{ sessionId: string }` for an active session
-- **THEN** the server SHALL set `status = 'ended'` and `ended_at = now` on that row, leave `summary` and `title` unchanged, and SHALL return `{ ok: true, endedAt }`
+- **THEN** the server SHALL set `status = 'ended'` and `ended_at = now` on that row, leave `summary` and `title` unchanged, and SHALL return `{ ok: true, sessionId, endedAt, applied: true }`
 
 #### Scenario: `memory.session_end` is idempotent on already-ended sessions
 
 - **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is already `'ended'`
-- **THEN** the server SHALL return `{ ok: true, endedAt }` with the existing `ended_at` and SHALL NOT mutate the row
+- **THEN** the server SHALL return `{ ok: true, sessionId, endedAt, applied: false }` with the existing `ended_at` and SHALL NOT mutate the row
 
 #### Scenario: `memory.session_end` is idempotent on abandoned sessions
 
 - **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is `'abandoned'` with `ended_at = E`
-- **THEN** the server SHALL return `{ ok: true, endedAt: E }`, SHALL leave `status = 'abandoned'` and `ended_at = E` untouched, and SHALL NOT return `session_already_ended`
+- **THEN** the server SHALL return `{ ok: true, sessionId, endedAt: E, applied: false }`, SHALL leave `status = 'abandoned'` and `ended_at = E` untouched, and SHALL NOT return `session_already_ended`
 - **AND** the `SessionRouter` binding for the calling transport SHALL remain pointing at that session, so a subsequent `memory.save` on the same transport still auto-attaches its `session_id`
 
 #### Scenario: `memory.session_end` on an active session clears the transport binding
@@ -2849,21 +2863,21 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 #### Scenario: `memory.session_summary` writes summary and title without ending the session
 
 - **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string, title?: string }` and `summary.length <= SUMMARY_MAX_CHARS`
-- **THEN** the server SHALL resolve `sessionId` from the active MCP transport mapping when omitted, write `summary` with `summary_final = true`, write `title` (when provided, after validating length ≤100) with `title_final = true`, leave `status`/`ended_at` unchanged, and return `{ ok: true, sessionId, summary, title, summaryFinal: true, titleFinal: <true|false> }`
+- **THEN** the server SHALL resolve `sessionId` from the active MCP transport mapping when omitted, write `summary` with `summary_final = true`, write `title` (when provided, after validating length ≤100) with `title_final = true`, leave `status`/`ended_at` unchanged, and return `{ ok: true, sessionId, summary, title, summaryFinal: true, titleFinal: <true|false>, applied: true }`
 
 #### Scenario: `memory.session_summary` succeeds on a session the sweep already abandoned
 
 - **GIVEN** the agent's session was flipped to `status = 'abandoned'` with `ended_at = E` and `last_activity_at = L` by stale-active retirement while the conversation was still open, and the agent knows its `sessionId` (the plugin's nudge injects it)
 - **WHEN** the agent calls `memory.session_summary({ sessionId, summary, title })`
-- **THEN** the call SHALL succeed and return `{ ok: true, sessionId, summary, title, summaryFinal: true, … }`
+- **THEN** the call SHALL succeed and return `{ ok: true, sessionId, summary, title, summaryFinal: true, applied: true }`
 - **AND** the row SHALL retain `status = 'abandoned'`, `ended_at = E` and `last_activity_at = L`
 - **AND** the call SHALL NOT return `session_already_ended`
 
 #### Scenario: `memory.session_summary` succeeds on an ended session
 
-- **GIVEN** a row whose `status = 'ended'` with `ended_at = E`
+- **GIVEN** a row whose `status = 'ended'` with `ended_at = E` and `summary_final = false` (no curated summary written yet)
 - **WHEN** the agent calls `memory.session_summary({ sessionId, summary })`
-- **THEN** the call SHALL succeed with `summaryFinal: true`, and `status`/`ended_at` SHALL be unchanged
+- **THEN** the call SHALL succeed with `summaryFinal: true` and `applied: true`, and `status`/`ended_at` SHALL be unchanged
 
 #### Scenario: `memory.session_summary` with no resolvable session still reports `session_not_found`
 
@@ -2873,9 +2887,30 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 
 #### Scenario: `memory.session_summary` may be called multiple times; the latest call wins
 
-- **GIVEN** a session whose `summary_final = true` from a prior `memory.session_summary({summary: "A"})` call
+- **GIVEN** an `active` session whose `summary_final = true` from a prior `memory.session_summary({summary: "A"})` call
 - **WHEN** the agent calls `memory.session_summary({summary: "B"})` again
-- **THEN** `summary` SHALL be replaced with "B" (last-final-wins among final writes)
+- **THEN** `summary` SHALL be replaced with "B" (last-final-wins among final writes on active rows) and `applied` SHALL be `true`
+
+#### Scenario: `memory.session_summary` discards a second curated write on a terminal row
+
+- **GIVEN** a terminal session (`status = 'ended'` or `'abandoned'`) whose `summary_final = true` from a prior curated write with summary "A"
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "B" })`
+- **THEN** the response SHALL carry `ok: true`, `summary: "A"` (the stored value, unchanged), `summaryFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
+- **AND** the session row SHALL be unchanged in every column
+
+#### Scenario: `memory.session_summary` discards a second curated title on a terminal row
+
+- **GIVEN** a terminal session whose `title_final = true` from a prior curated write with title "First"
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "new summary", title: "Second" })`
+- **THEN** the response SHALL carry `title: "First"` (the stored value, unchanged), `titleFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
+- **AND** the session row SHALL be unchanged in every column
+
+#### Scenario: `memory.session_summary` discards summary but applies title on a terminal row
+
+- **GIVEN** a terminal session whose `summary_final = true` and `title_final = false`
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "B", title: "New Title" })`
+- **THEN** the response SHALL carry `summary: "A"` (unchanged), `summaryFinal: true`, `title: "New Title"` (applied), `titleFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
+- **AND** the summary column SHALL be unchanged but the title column SHALL reflect the new value
 
 #### Scenario: `memory.session_summary` rejects empty summary
 
@@ -2897,7 +2932,7 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 #### Scenario: `memory.session_summary` accepts summary of exactly `SUMMARY_MAX_CHARS`
 
 - **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS)`
-- **THEN** the call SHALL succeed and the row SHALL have `summary` of length `SUMMARY_MAX_CHARS` with `summary_final = true`
+- **THEN** the call SHALL succeed and the row SHALL have `summary` of length `SUMMARY_MAX_CHARS` with `summary_final = true` and `applied: true`
 
 #### Scenario: A session-lifecycle tool targets a session owned by a different token
 
@@ -2912,12 +2947,52 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 - **AND** both responses SHALL carry the SAME `sessionId` — the second call SHALL NOT insert a second `sessions` row
 - **AND** the `sessions` row count for that `(tokenId, projectId)` SHALL be 1 after both calls, which is the control that `reused: true` describes adoption rather than a coincidence of ids
 
+#### Scenario: `memory.session_start` reports the adopted session's `agent` rather than the argument
+
+- **GIVEN** exactly one `active` session for the caller's `(tokenId, projectId)`, created with `agent = 'claude-code'`
+- **WHEN** an MCP client calls `memory.session_start` with `{ agent: 'pi' }` on that connection
+- **THEN** the response SHALL carry `reused: true` AND `agent: 'claude-code'` — the adopted row's stored value, NOT the argument
+- **AND** the row's `agent` column SHALL still be `'claude-code'` and the `sessions` row count for that `(tokenId, projectId)` SHALL still be 1, so the report is of an adoption and not of a second row
+- **AND** the control, from the same connection state without the pre-existing session: `memory.session_start({ agent: 'pi' })` SHALL return `reused: false` with `agent: 'pi'`. Without it a passing adopt assertion cannot be told apart from a test that never adopted anything, and an implementation reading `agent` from the argument would satisfy the adopt assertion whenever the two values happen to agree
+
+#### Scenario: `memory.session_start` reuses the transport's bound session before any lookup
+
+- **GIVEN** a transport whose `SessionRouter` entry binds `(tokenId, mcpSessionId)` to session `<S>`, `<S>` is `active`, not soft-deleted and in the resolved scope, and `<S>`'s effective last activity is older than the staleness window
+- **AND** a second `active` row exists for the same `(tokenId, projectId)`, so both sole-active lookups would refuse
+- **WHEN** the client calls `memory.session_start` with no explicit `sessionId`
+- **THEN** the response SHALL carry `reused: true` and `sessionId = <S>`, the bound id rather than either lookup's answer
+- **AND** the `sessions` row count for that `(tokenId, projectId)` SHALL be unchanged, which is the control that the binding was followed rather than a fresh row minted and reported
+
+#### Scenario: `memory.session_start` adopts the sole active row when no fresh row exists
+
+- **GIVEN** a transport with no `SessionRouter` binding and exactly one `active`, non-deleted row `<S>` for the caller's `(tokenId, projectId)`, idle past the staleness window
+- **WHEN** the client calls `memory.session_start`
+- **THEN** the response SHALL carry `reused: true` and `sessionId = <S>`
+- **AND** the row count SHALL be unchanged, and the transport's binding SHALL afterwards point at `<S>` so the next call is answered by step (1)
+
+#### Scenario: `memory.session_start` falls through an unusable binding without clearing it
+
+- **GIVEN** a transport whose `SessionRouter` entry binds `(tokenId, mcpSessionId)` to a row that is terminal, or soft-deleted, or outside the `(token_id, project_id)` this call resolves to
+- **WHEN** the client calls `memory.session_start`
+- **THEN** the call SHALL resolve by the lookup order rather than by the binding, and SHALL NOT return the unusable row's id
+- **AND** the transport SHALL still carry a session binding after the call — the row this call resolved — and the entry SHALL NOT have been cleared, because clearing the binding belongs to `memory.session_end` alone and clearing it here would silently drop every later `memory.save` on this transport to `session_id = NULL`
+
 #### Scenario: `memory.session_start`'s description names every required output field
 
 - **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
-- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `title` and `reused`
+- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `title`, `reused` and `agent`
 - **AND** the description SHALL state that `reused: true` means the call adopted the host's already-active session rather than starting one
+- **AND** the description SHALL state that `agent` reports the attribution the resolved session carries and MAY differ from the `agent` argument the call passed, so the field is not read as an echo of that argument
 - **AND** a CI test SHALL compare the description against the `outputSchema`'s required list, so a field added to the schema without a description update fails the build
+
+#### Scenario: The `memory.session_start` description tells the model not to call again on an active connection
+
+- **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
+- **THEN** the description SHALL state that once a session is active on this connection the model SHALL NOT call `memory.session_start` again, and that writes attach automatically
+- **AND** it SHALL keep stating that in normal operation the model does not need to call the tool at all, so the two clauses read as one instruction rather than a contradiction
+- **AND** its `String.length` measured from a real `tools/list` response SHALL be at or below `DESCRIPTION_MAX_LENGTH = 1900`
+- **AND** the change SHALL record the measured length and the remaining headroom: the description measured **818 of 1900 characters, 1082 of headroom**, immediately before this clause was added, so the clause fits without reclaiming any mandated prose
+- **AND** the cap SHALL NOT be raised to accommodate it; if it ever ceases to fit, the clause is reworded shorter instead
 
 #### Scenario: `memory.session_resume` returns an ended session to active
 
@@ -2965,6 +3040,14 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 - **THEN** the call SHALL succeed with `previousStatus: 'active'` and `previousEndedAt: null`
 - **AND** the row SHALL NOT be mutated, so `last_activity_at` SHALL still be `L`
 - **AND** the `SessionRouter` entry SHALL nonetheless point at `<S>`
+
+#### Scenario: A client's start-up `memory.session_resume` is the binding that answers `memory.session_start`
+
+- **GIVEN** a host row `<H>` registered over HTTP (`agent = 'pi'`, `status = 'active'`, `last_activity_at = L`) and an MCP transport with no `SessionRouter` entry — the state a client that never called `memory.session_start` leaves behind
+- **AND** a second `active` row exists for the same `(token_id, project_id)`, so both sole-active lookups would refuse
+- **WHEN** the client calls `memory.session_resume({ sessionId: <H> })` at start-up and later calls `memory.session_start` on that transport
+- **THEN** the resume SHALL have succeeded with `previousStatus: 'active'` and `previousEndedAt: null`, and SHALL NOT have mutated `<H>`, so `started_at` and `last_activity_at` SHALL still hold their prior values — the control that a start-up declaration is a no-op rather than a re-key
+- **AND** the `memory.session_start` response SHALL carry `sessionId = <H>` with `reused: true` and the row count unchanged, which pins that step (1) answered from a binding established by `memory.session_resume` and not from either lookup
 
 #### Scenario: `memory.session_start` adopts a resumed session rather than minting a second row
 
