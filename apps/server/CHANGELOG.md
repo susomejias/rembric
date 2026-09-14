@@ -1,11 +1,12 @@
 # Changelog
 
-## [0.28.7](https://github.com/susomejias/rembric/compare/server-v0.28.6...server-v0.28.7) (2026-09-13)
+## [0.28.7](https://github.com/susomejias/rembric/compare/server-v0.28.6...server-v0.28.7) (2026-09-14)
 
 
 ### Features
 
 * **recall:** surface prior learnings at turn start ([9b3b6c3](https://github.com/susomejias/rembric/commit/9b3b6c30343576857fbb0709dada83c8a684d56f))
+* **sessions:** adopt the transport binding and the sole active row in memory.session_start ([956463a](https://github.com/susomejias/rembric/commit/956463ae6603c5320227067059bb258c932f1d95)), closes [#377](https://github.com/susomejias/rembric/issues/377)
 
 
 ### Bug Fixes
