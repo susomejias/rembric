@@ -320,6 +320,11 @@ export function renderToolResultLines(
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
+  // gentle-pi runs each subagent as a separate `pi --mode rpc` process and marks it
+  // with this env var (inherited by deeper descendants). Such a process must never
+  // register a session row — the parent conversation is the durable boundary —
+  // while its Rembric tools stay available.
+  const isGentleChild = process.env.GENTLE_PI_AGENTS_CHILD === '1';
   // D4′: the (transport, host) pair last successfully declared; consecutive
   // declaration failures are capped.
   let boundKey: string | null = null;
@@ -407,6 +412,7 @@ export default function rembric(pi: ExtensionApi): void {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     const prompt = event.prompt ?? '';
+    if (isGentleChild) core.markSubAgent(sessionId);
     // Reset BEFORE this turn's message_end events can set it — a flag set in
     // one turn must never be read in the next (session-nudges D4a).
     core.beginTurn(sessionId);
@@ -426,7 +432,14 @@ export default function rembric(pi: ExtensionApi): void {
       lastBindAttemptKey = bindKey;
       bindFailures = 0;
     }
-    if (mcp && resumeTool && bindKey && bindKey !== boundKey && bindFailures < BIND_FAILURE_LIMIT) {
+    if (
+      !isGentleChild &&
+      mcp &&
+      resumeTool &&
+      bindKey &&
+      bindKey !== boundKey &&
+      bindFailures < BIND_FAILURE_LIMIT
+    ) {
       try {
         const declared = await mcp.callTool(resumeTool, { sessionId });
         if (declared.isError) {

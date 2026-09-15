@@ -1218,6 +1218,64 @@ describe('the shutdown reason decides whether the session is ended', () => {
   });
 });
 
+describe('Gentle Pi child processes are never persisted as sessions', () => {
+  // gentle-pi marks every `pi --mode rpc` subagent with this env var, and the
+  // factory reads it once at construction time, so the stub must land before
+  // the harness (and therefore the extension) exists.
+  async function runLifecycle(sessionId: string, child: boolean): Promise<void> {
+    if (child) vi.stubEnv('GENTLE_PI_AGENTS_CHILD', '1');
+    try {
+      const harness = await startedHarness(sessionId);
+      await harness.fire('before_agent_start', { prompt: `delegated task under ${sessionId}` });
+      await harness.fire('message_end', {
+        message: { role: 'assistant', content: [{ type: 'text', text: 'child reply' }] },
+      });
+      await harness.fire('agent_settled', {});
+      await harness.fire('session_shutdown', { reason: 'quit' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+
+  it('creates no row, writes no summary and declares no identity', async () => {
+    const sessionId = 'pi-gentle-child';
+    const calls: string[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = typeof init?.body === 'string' ? init.body : '';
+        if (
+          url.endsWith('/sessions') ||
+          url.includes(`/sessions/${sessionId}`) ||
+          body.includes('memory.session_resume')
+        ) {
+          calls.push(`${new URL(url).pathname} ${body.slice(0, 80)}`);
+        }
+        return realFetch(input, init);
+      });
+    try {
+      await runLifecycle(sessionId, true);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(calls).toEqual([]);
+    expect(sessions.getById(sessionId)).toBeUndefined();
+  });
+
+  it('the control — without the marker the same lifecycle registers and ends the row', async () => {
+    const sessionId = 'pi-gentle-child-control';
+    await runLifecycle(sessionId, false);
+
+    const row = sessions.getById(sessionId);
+    expect(row?.agent).toBe('pi');
+    expect(row?.status).toBe('ended');
+    expect(row?.summary).toContain(`delegated task under ${sessionId}`);
+  });
+});
+
 describe('the successor session attributes its memories', () => {
   // A token of its own per arm: every other session in this file is active on
   // the admin token, and `findActiveForTransport` resolves nothing while more
