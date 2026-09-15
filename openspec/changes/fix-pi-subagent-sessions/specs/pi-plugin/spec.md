@@ -1,59 +1,88 @@
 ## ADDED Requirements
 
-### Requirement: The Pi extension SHALL suppress session lifecycle persistence for Gentle Pi child processes
+### Requirement: The Pi extension SHALL suppress session lifecycle persistence for non-primary pi processes
 
-Gentle Pi runs every subagent as a separate `pi --mode rpc` child process and marks that
-process with `GENTLE_PI_AGENTS_CHILD=1` in its environment (inherited by any deeper
-descendants). The parent conversation, not the child, is the durable session boundary:
-a child process that registered its own row would surface every delegated task as an
-ordinary top-level Pi session whose title is the delegated prompt and whose summary is a
-raw transcript, and an interrupted child would linger as a ghost row.
+A Rembric session row exists for a pi process's primary conversation. Some pi processes
+are not primary conversations: another program drives them as a tool, or their spawner
+declares them children. When such a process registered its own row, every delegated task
+surfaced as an ordinary top-level Pi session whose title is the delegated prompt and
+whose summary is a raw transcript, and an interrupted one lingered as a ghost row.
 
-The extension SHALL therefore read that marker once per process and, when it is present,
-mark each host session id as a sub-agent through the shared core's `markSubAgent` before
-any lifecycle call in `before_agent_start`. The shared core's sub-agent guards then
-suppress the `ensure`, the turn report, the transcript flush, the recall-hints request
-and the close for that session — the same contract the opencode plugin fulfils via its
-`parentID` signal and the Hermes plugin via its non-primary agent contexts. Rembric's MCP
-tools SHALL stay fully available inside the child: only automatic session persistence is
-suppressed, never tool registration or tool calls.
+The extension SHALL therefore mark the host session as a sub-agent through the shared
+core's `markSubAgent` — which suppresses the `ensure`, the turn report, the transcript
+flush, the recall request and the close for that session — when ANY of the following
+holds:
 
-Because a child never creates a row, the extension SHALL NOT issue the MCP identity
-declaration (`memory.session_resume`) for a child session: there is no row to declare,
-and every attempt would fail with `session_not_found`. A child's `memory.save` calls
-resolve through the server's windowed sole-active lookup like any other unbound
-transport — attaching to the parent's row when it is the sole active one, and to nothing
+- The host declares the process programmatically driven: pi's `ctx.mode` is `"rpc"`,
+  the mode every orchestrator runtime (gentle-pi, pi-subagents, IDE integrations,
+  scripts) uses when it spawns `pi --mode rpc` children. This signal is intrinsic to
+  the child and requires no cooperation from the spawner.
+- The spawner declares the child with `REMBRIC_SUBAGENT=1` — the generic contract for
+  any orchestrator whose children are not pi RPC processes (SDK runners, plugins).
+- The spawner sets gentle-pi's `GENTLE_PI_AGENTS_CHILD=1`, honoured as a legacy alias
+  for the installed base.
+
+`REMBRIC_TRACK_SESSION=1` SHALL override all of the above and force the session to
+register: an explicit operator opt-in tracks a process that would otherwise be
+suppressed. Interactive (`tui`), print and JSON sessions keep registering — a one-shot
+`pi -p` or `pi --mode json` run is the only conversation its process has, so it is the
+primary one. JSON mode is `ctx.mode === "json"`, print mode `"print"`.
+
+Rembric's MCP tools SHALL stay fully available inside a suppressed process: only
+automatic session persistence is suppressed, never tool registration or tool calls.
+Because a suppressed process never creates a row, the extension SHALL NOT issue the MCP
+identity declaration (`memory.session_resume`) for it: there is no row to declare, and
+every attempt would fail with `session_not_found`. Its `memory.save` calls resolve
+through the server's windowed sole-active lookup like any other unbound transport —
+attaching to the orchestrator's row when it is the sole active one, and to nothing
 otherwise — so no child write ever mints a row.
 
-#### Scenario: A Gentle Pi child process creates no session row
+#### Scenario: An RPC-driven process creates no session row
 
-- **GIVEN** a Pi process started with `GENTLE_PI_AGENTS_CHILD=1`
+- **GIVEN** a pi process whose host context reports `ctx.mode === "rpc"`
 - **WHEN** `before_agent_start` fires
-- **THEN** no `POST /api/<slug>/sessions` is issued for the child's session id
+- **THEN** no `POST /api/<slug>/sessions` is issued for the process's session id
 - **AND** no session row exists for that id
 
-#### Scenario: A Gentle Pi child process writes no summary and never ends
+#### Scenario: A declared child process creates no session row
 
-- **GIVEN** a Pi process started with `GENTLE_PI_AGENTS_CHILD=1`
-- **WHEN** `agent_settled` and then `session_shutdown` fire
-- **THEN** no `POST /summary` and no `POST /end` is issued for the child's session id
-
-#### Scenario: A Gentle Pi child process skips the MCP identity declaration
-
-- **GIVEN** a Pi process started with `GENTLE_PI_AGENTS_CHILD=1`
+- **GIVEN** a pi process started with `REMBRIC_SUBAGENT=1`
 - **WHEN** `before_agent_start` fires
-- **THEN** no `memory.session_resume` call is made on the MCP transport
+- **THEN** no `POST /api/<slug>/sessions` is issued for the process's session id
+- **AND** no session row exists for that id
 
-#### Scenario: Rembric tools stay available inside the child
+#### Scenario: The legacy gentle-pi marker remains honoured
 
-- **GIVEN** a Pi process started with `GENTLE_PI_AGENTS_CHILD=1`
+- **GIVEN** a pi process started with `GENTLE_PI_AGENTS_CHILD=1`
+- **WHEN** `before_agent_start` fires
+- **THEN** no `POST /api/<slug>/sessions` is issued for the process's session id
+
+#### Scenario: An explicit tracking override wins
+
+- **GIVEN** a pi process whose host context reports `ctx.mode === "rpc"` and which was
+  started with `REMBRIC_TRACK_SESSION=1`
+- **WHEN** the full lifecycle fires — `before_agent_start`, `agent_settled` and
+  `session_shutdown` with a terminal reason
+- **THEN** the session row is created, summarised and ended exactly as the other
+  requirements of this capability pin
+
+#### Scenario: Interactive sessions keep their row
+
+- **GIVEN** a pi process whose host context reports `ctx.mode === "tui"` and which was
+  started with none of the markers above
+- **WHEN** the full lifecycle fires
+- **THEN** the session row is created and ended exactly as the other requirements of
+  this capability pin
+
+#### Scenario: Rembric tools stay available inside a suppressed process
+
+- **GIVEN** a pi process that would be suppressed under any rule above
 - **WHEN** `session_start` completes
 - **THEN** the server's tools are registered exactly as in a primary session
 - **AND** a proxied `memory.save` call reaches the database
 
-#### Scenario: A primary session is unaffected
+#### Scenario: A suppressed process issues no MCP identity declaration
 
-- **GIVEN** a Pi process started without `GENTLE_PI_AGENTS_CHILD`
+- **GIVEN** a pi process that would be suppressed under any rule above
 - **WHEN** `before_agent_start` fires
-- **THEN** the session row is created and resumed exactly as the other requirements of
-  this capability pin
+- **THEN** no `memory.session_resume` call is made on the MCP transport

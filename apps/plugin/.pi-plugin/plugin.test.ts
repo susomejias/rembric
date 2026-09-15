@@ -150,13 +150,20 @@ async function rawRpc(method: string, params: Record<string, unknown>): Promise<
   return JSON.parse(frame ?? body) as unknown;
 }
 
-function makeHarness(sessionId: string, dir = cwd, withUi = true, sessionFile?: string): Harness {
+function makeHarness(
+  sessionId: string,
+  dir = cwd,
+  withUi = true,
+  sessionFile?: string,
+  mode: string = 'tui',
+): Harness {
   const tools: RegisteredTool[] = [];
   const handlers = new Map<string, Handler>();
   const notifications: Notification[] = [];
   const ui = { notify: (message: string, type?: string) => notifications.push({ message, type }) };
   const ctx = {
     cwd: dir,
+    mode,
     // `string | undefined`, as the harness declares it: a session file is absent
     // until the manager has one, and the self-resume guard must survive that.
     sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile },
@@ -180,8 +187,12 @@ function makeHarness(sessionId: string, dir = cwd, withUi = true, sessionFile?: 
   };
 }
 
-async function startedHarness(sessionId: string, sessionFile?: string): Promise<Harness> {
-  const harness = makeHarness(sessionId, cwd, true, sessionFile);
+async function startedHarness(
+  sessionId: string,
+  sessionFile?: string,
+  mode?: string,
+): Promise<Harness> {
+  const harness = makeHarness(sessionId, cwd, true, sessionFile, mode);
   await harness.fire('session_start');
   return harness;
 }
@@ -1218,14 +1229,17 @@ describe('the shutdown reason decides whether the session is ended', () => {
   });
 });
 
-describe('Gentle Pi child processes are never persisted as sessions', () => {
-  // gentle-pi marks every `pi --mode rpc` subagent with this env var, and the
-  // factory reads it once at construction time, so the stub must land before
-  // the harness (and therefore the extension) exists.
-  async function runLifecycle(sessionId: string, child: boolean): Promise<void> {
-    if (child) vi.stubEnv('GENTLE_PI_AGENTS_CHILD', '1');
+describe('child and programmatic pi processes are never persisted as sessions', () => {
+  // The factory reads the environment once at construction time, so the stubs
+  // must land before the harness (and therefore the extension) exists; the
+  // mode rides the harness context, as pi delivers it to every handler.
+  async function runLifecycle(
+    sessionId: string,
+    opts: { env?: Record<string, string>; mode?: string } = {},
+  ): Promise<void> {
+    for (const [key, value] of Object.entries(opts.env ?? {})) vi.stubEnv(key, value);
     try {
-      const harness = await startedHarness(sessionId);
+      const harness = await startedHarness(sessionId, undefined, opts.mode);
       await harness.fire('before_agent_start', { prompt: `delegated task under ${sessionId}` });
       await harness.fire('message_end', {
         message: { role: 'assistant', content: [{ type: 'text', text: 'child reply' }] },
@@ -1237,8 +1251,10 @@ describe('Gentle Pi child processes are never persisted as sessions', () => {
     }
   }
 
-  it('creates no row, writes no summary and declares no identity', async () => {
-    const sessionId = 'pi-gentle-child';
+  async function suppressedLifecycleCalls(
+    sessionId: string,
+    opts: { env?: Record<string, string>; mode?: string },
+  ): Promise<string[]> {
     const calls: string[] = [];
     const realFetch = globalThis.fetch;
     const spy = vi
@@ -1256,23 +1272,54 @@ describe('Gentle Pi child processes are never persisted as sessions', () => {
         return realFetch(input, init);
       });
     try {
-      await runLifecycle(sessionId, true);
+      await runLifecycle(sessionId, opts);
     } finally {
       spy.mockRestore();
     }
+    return calls;
+  }
 
+  it('the legacy gentle-pi marker suppresses the whole lifecycle', async () => {
+    const calls = await suppressedLifecycleCalls('pi-subagent-legacy', {
+      env: { GENTLE_PI_AGENTS_CHILD: '1' },
+    });
     expect(calls).toEqual([]);
-    expect(sessions.getById(sessionId)).toBeUndefined();
+    expect(sessions.getById('pi-subagent-legacy')).toBeUndefined();
   });
 
-  it('the control — without the marker the same lifecycle registers and ends the row', async () => {
-    const sessionId = 'pi-gentle-child-control';
-    await runLifecycle(sessionId, false);
+  it('the generic REMBRIC_SUBAGENT marker suppresses the whole lifecycle', async () => {
+    const calls = await suppressedLifecycleCalls('pi-subagent-declared', {
+      env: { REMBRIC_SUBAGENT: '1' },
+    });
+    expect(calls).toEqual([]);
+    expect(sessions.getById('pi-subagent-declared')).toBeUndefined();
+  });
 
-    const row = sessions.getById(sessionId);
+  it('an RPC-driven process suppresses the whole lifecycle without any marker', async () => {
+    const calls = await suppressedLifecycleCalls('pi-subagent-rpc', { mode: 'rpc' });
+    expect(calls).toEqual([]);
+    expect(sessions.getById('pi-subagent-rpc')).toBeUndefined();
+  });
+
+  it('REMBRIC_TRACK_SESSION=1 forces tracking even for an RPC-driven process', async () => {
+    await runLifecycle('pi-rpc-tracked', {
+      env: { REMBRIC_TRACK_SESSION: '1' },
+      mode: 'rpc',
+    });
+
+    const row = sessions.getById('pi-rpc-tracked');
     expect(row?.agent).toBe('pi');
     expect(row?.status).toBe('ended');
-    expect(row?.summary).toContain(`delegated task under ${sessionId}`);
+    expect(row?.summary).toContain('delegated task under pi-rpc-tracked');
+  });
+
+  it('the control — an interactive session with no markers registers and ends the row', async () => {
+    await runLifecycle('pi-subagent-control');
+
+    const row = sessions.getById('pi-subagent-control');
+    expect(row?.agent).toBe('pi');
+    expect(row?.status).toBe('ended');
+    expect(row?.summary).toContain('delegated task under pi-subagent-control');
   });
 });
 

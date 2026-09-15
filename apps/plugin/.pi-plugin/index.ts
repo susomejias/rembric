@@ -320,11 +320,16 @@ export function renderToolResultLines(
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
-  // gentle-pi runs each subagent as a separate `pi --mode rpc` process and marks it
-  // with this env var (inherited by deeper descendants). Such a process must never
-  // register a session row — the parent conversation is the durable boundary —
-  // while its Rembric tools stay available.
-  const isGentleChild = process.env.GENTLE_PI_AGENTS_CHILD === '1';
+  // A session row exists for a pi process's PRIMARY conversation. A process
+  // driven as a tool by another program is not one: RPC mode is pi's
+  // orchestrator interface (gentle-pi and every other subagent runtime spawns
+  // `pi --mode rpc` children), and any spawner can declare a child explicitly
+  // with REMBRIC_SUBAGENT=1 (plugins, SDK runners, scripts). The gentle-pi
+  // marker is kept as a legacy alias. REMBRIC_TRACK_SESSION=1 wins over all of
+  // it — an explicit operator opt-in tracks the session anyway.
+  const declaredChild =
+    process.env.REMBRIC_SUBAGENT === '1' || process.env.GENTLE_PI_AGENTS_CHILD === '1';
+  const trackForced = process.env.REMBRIC_TRACK_SESSION === '1';
   // D4′: the (transport, host) pair last successfully declared; consecutive
   // declaration failures are capped.
   let boundKey: string | null = null;
@@ -412,7 +417,8 @@ export default function rembric(pi: ExtensionApi): void {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     const prompt = event.prompt ?? '';
-    if (isGentleChild) core.markSubAgent(sessionId);
+    const suppress = !trackForced && (declaredChild || ctx.mode === 'rpc');
+    if (suppress) core.markSubAgent(sessionId);
     // Reset BEFORE this turn's message_end events can set it — a flag set in
     // one turn must never be read in the next (session-nudges D4a).
     core.beginTurn(sessionId);
@@ -433,7 +439,7 @@ export default function rembric(pi: ExtensionApi): void {
       bindFailures = 0;
     }
     if (
-      !isGentleChild &&
+      !suppress &&
       mcp &&
       resumeTool &&
       bindKey &&
