@@ -4,6 +4,13 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.31.1](https://github.com/susomejias/rembric/compare/plugin-v0.31.0...plugin-v0.31.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **pi-plugin:** suppress session persistence for Gentle Pi child processes ([42f7d14](https://github.com/susomejias/rembric/commit/42f7d14e9478f799df9610804e7bab0def454fb3)), closes [#383](https://github.com/susomejias/rembric/issues/383)
+
 ## [0.31.0](https://github.com/susomejias/rembric/compare/plugin-v0.30.0...plugin-v0.31.0) (2026-09-14)
 
 
