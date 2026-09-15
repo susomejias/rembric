@@ -1,6 +1,6 @@
 {
   "name": "@rembric/mcp-bridge",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "Zero-dependency stdio to Streamable HTTP MCP bridge for Rembric",
   "type": "module",
   "license": "MIT",
