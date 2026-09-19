@@ -42,6 +42,7 @@ export default tseslint.config(
           allowDefaultProject: [
             'eslint.config.js',
             'commitlint.config.js',
+            'packages/config/eslint.config.js',
             'apps/server/drizzle.config.ts',
             'apps/server/vitest.config.ts',
             'install.test.ts',
