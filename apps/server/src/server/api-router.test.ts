@@ -5,16 +5,16 @@ import { ProjectsService } from '@rembric/core';
 import { NOTICE_MAX_BYTES } from '@rembric/core';
 import { TokensService } from '@rembric/core';
 import { UsageCounters } from '@rembric/core';
+import { runWithContext, SessionRouter, type RequestContext } from '@rembric/core';
 import { createRepositories, projectScope, tokens as tokensSchema } from '@rembric/db';
+import { buildSessionHandlers } from '@rembric/mcp';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildSessionHandlers } from '../mcp/session-tools.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { createApiRouter } from './api-router.js';
-import { runWithContext, type RequestContext } from './request-context.js';
-import { SessionRouter } from './session-router.js';
+import { logInternalError } from './error-response.js';
 
 let db: TestDb;
 let agentSessions: AgentSessionsService;
@@ -1216,7 +1216,7 @@ describe('createApiRouter', () => {
         .where(eq(tokensSchema.id, adminToken.id))
         .get()!;
       const router = new SessionRouter();
-      const handlers = buildSessionHandlers({ agentSessions, projects, router });
+      const handlers = buildSessionHandlers({ logInternalError, agentSessions, projects, router });
       const mcpSessionId = 'mcp-transport-1';
       const ctx: RequestContext = {
         token: tokenRow,

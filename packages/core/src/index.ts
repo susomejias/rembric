@@ -23,6 +23,13 @@ export {
 } from './consolidation/operations.js';
 export * from './embeddings/embedder.js';
 export * from './embeddings/state.js';
+// Shared request/tool-call context. App-agnostic infrastructure that both the
+// application's HTTP layer and `@rembric/mcp` consume, so it lives here rather
+// than inside either — one `AsyncLocalStorage` instance per process, or the
+// store reads as empty with no type error (see the single-instance invariant).
+export * from './server-context/request-context.js';
+export * from './server-context/session-router.js';
+export * from './server-context/tool-call-context.js';
 export * from './services/index.js';
 export * from './services/agent-sessions.js';
 export * from './services/embedding-worker.js';

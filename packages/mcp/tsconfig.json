@@ -1,0 +1,12 @@
+{
+  "extends": "@rembric/config/tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "paths": {
+      "@rembric/core": ["../core/src/index.ts"],
+      "@rembric/db": ["../db/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

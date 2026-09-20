@@ -15,16 +15,16 @@ import { ProjectsService } from '@rembric/core';
 import { RELATION_ANNOTATION_MAX } from '@rembric/core';
 import { TokensService } from '@rembric/core';
 import { agentSessions, createRepositories } from '@rembric/db';
-import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
 import {
   CONTEXT_MEMORIES_MAX,
   CONTEXT_PROMPTS_MAX,
   CONTEXT_SESSIONS_MAX,
+  DESCRIPTION_MAX_LENGTH,
   TIMELINE_WINDOW_MAX,
-} from '../mcp/memory-tools.js';
-import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
+} from '@rembric/mcp';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
 import { type BootstrappedServer, createServer } from '../server/index.js';
 
 import { createTestDb } from './db.js';

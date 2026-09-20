@@ -5,6 +5,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { RUNTIME_IMAGE_LABEL_FILTER } from '@rembric/core';
+import type { RequestContext } from '@rembric/core';
 import { defaultMigrationsDir } from '@rembric/db';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -42,7 +43,7 @@ const srcRoot = join(here, '..');
 /**
  * The monorepo root (`../../../` from `apps/server/src/test`). Every path this
  * file reports or allow-lists is anchored here rather than on a scan root,
- * because the scan covers three trees and "the root" stopped being one directory.
+ * because the scan covers four trees and "the root" stopped being one directory.
  */
 const repoRoot = join(srcRoot, '..', '..', '..');
 /** `packages/db/src` — the extracted data layer, i.e. the SQL-confinement boundary. */
@@ -54,6 +55,13 @@ const dbRoot = join(repoRoot, 'packages/db/src');
  * police them where they now live.
  */
 const coreRoot = join(repoRoot, 'packages/core/src');
+/**
+ * `packages/mcp/src` — the extracted protocol layer (tool definitions, the
+ * server factory, scope resolution, instructions). Scanned with the app tree:
+ * it used to be `apps/server/src/mcp`, so every rule below that policed the MCP
+ * handlers must still police them where they now live.
+ */
+const mcpRoot = join(repoRoot, 'packages/mcp/src');
 
 /**
  * Paths are reported and allow-listed repo-root-relative — `apps/server/src/...`
@@ -75,7 +83,12 @@ function relToRepo(file: string): string {
  * admin-method rules they were written for.
  */
 function scanRoots(): string[] {
-  return [...listSourceFiles(srcRoot), ...listSourceFiles(coreRoot), ...listSourceFiles(dbRoot)];
+  return [
+    ...listSourceFiles(srcRoot),
+    ...listSourceFiles(coreRoot),
+    ...listSourceFiles(dbRoot),
+    ...listSourceFiles(mcpRoot),
+  ];
 }
 
 interface ForbiddenRule {
@@ -631,6 +644,7 @@ describe('data-access confinement invariant', () => {
   const appFiles = listSourceFiles(srcRoot);
   const coreFiles = listSourceFiles(coreRoot);
   const dbFiles = listSourceFiles(dbRoot);
+  const mcpFiles = listSourceFiles(mcpRoot);
 
   function scanSql(files: readonly string[]) {
     const hits: { file: string; line: number; label: string; text: string }[] = [];
@@ -664,12 +678,15 @@ describe('data-access confinement invariant', () => {
     expect(new Set(hits.map((h) => h.file)).size).toBeGreaterThan(5);
     // The domain tree is scanned by the assertion below, so it has to be a real
     // tree: a `coreRoot` that resolved nowhere would make "no SQL outside the db
-    // package" hold over a silently empty half of the scan.
+    // package" hold over a silently empty half of the scan. Same for the
+    // protocol layer, which moved out of the app tree in the `packages/mcp`
+    // extraction.
     expect(coreFiles.length).toBeGreaterThan(20);
+    expect(mcpFiles.length).toBeGreaterThan(10);
   });
 
   it('SQL executes only under packages/db/src/', () => {
-    const offenders = scanSql([...appFiles, ...coreFiles]).filter(
+    const offenders = scanSql([...appFiles, ...coreFiles, ...mcpFiles]).filter(
       (o) => o.file !== 'apps/server/src/scripts/seed-dev.ts',
     );
     if (offenders.length > 0) {
@@ -1485,7 +1502,9 @@ describe('migration discovery equivalence invariant (DS2)', () => {
 });
 
 describe('MCP tool-handler module layout invariant', () => {
-  const mcpDir = join(srcRoot, 'mcp');
+  // The tool modules live in their own package now (`packages/mcp/src`), so the
+  // layout rule re-anchors there instead of on `srcRoot/mcp`.
+  const mcpDir = mcpRoot;
   const sourceFiles = readdirSync(mcpDir).filter(
     (f) => f.endsWith('.ts') && !f.endsWith('.test.ts'),
   );
@@ -1516,11 +1535,132 @@ describe('MCP tool-handler module layout invariant', () => {
   });
 });
 
+/**
+ * `AsyncLocalStorage` single-instance invariant.
+ *
+ * The three context modules moved to `packages/core/src/server-context/`
+ * (`request-context`, `session-router`, `tool-call-context`) precisely so the
+ * application and `@rembric/mcp` share ONE storage instance per module. Two
+ * instances do not raise a type error and do not fail a functional test: the
+ * reader simply sees an empty store, so the request context silently stops
+ * propagating and tool handlers answer `project_not_found` (or throw
+ * "request context missing") on a correctly authenticated request.
+ *
+ * Static half: the module file exists once, and the only import of it anywhere
+ * in the repository is `@rembric/core`. Behavioural half: the application runs a
+ * context through core's own `runWithContext` and the package's reader observes
+ * it — with the outside-the-run control that makes the observation mean
+ * something.
+ */
+describe('server-context single-instance invariant', () => {
+  const CONTEXT_MODULES = ['request-context', 'session-router', 'tool-call-context'] as const;
+  const barrelSpecifiers = CONTEXT_MODULES.map((m) => `./server-context/${m}.js`);
+
+  it('each context module exists exactly once, under packages/core/src/server-context/', () => {
+    const tracked = execSync(`git -C ${repoRoot} ls-files -- apps/ packages/`, {
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean);
+    for (const mod of CONTEXT_MODULES) {
+      expect(
+        tracked.filter((f) => f.endsWith(`/${mod}.ts`)),
+        `${mod} must exist exactly once, in packages/core/src/server-context/`,
+      ).toEqual([`packages/core/src/server-context/${mod}.ts`]);
+    }
+    // Non-vacuity: the directory those paths name is the one that is read, and
+    // it holds exactly these three modules.
+    expect(readdirSync(join(coreRoot, 'server-context')).sort()).toEqual(
+      CONTEXT_MODULES.map((m) => `${m}.ts`).sort(),
+    );
+  });
+
+  it('the only path import of them anywhere is the core barrel', () => {
+    const hits = execSync(
+      `git -C ${repoRoot} grep -n -E "from '[^']*/(request-context|session-router|tool-call-context)\\.js'" -- apps/ packages/ || true`,
+      { encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter(Boolean);
+
+    // Exact set, not a subset: the barrel's three internal re-exports are the
+    // only statements allowed to name a module file at all, so an app-side
+    // relative import (which would instantiate a second `AsyncLocalStorage`)
+    // shows up as an unexpected member rather than passing as an extra entry.
+    const specifiers = new Set(hits.map((hit) => /from '([^']+)'/.exec(hit)?.[1] ?? '<unparsed>'));
+    expect([...specifiers].sort()).toEqual([...barrelSpecifiers].sort());
+    expect(hits.length).toBe(CONTEXT_MODULES.length);
+  });
+
+  it('every application-side consumer imports them from @rembric/core', () => {
+    // The other half of the rule: the static set above only proves nothing else
+    // *names the file*. These are the app-side consumers that would break (each
+    // wrapping or reading the store) if any of them resolved the symbol
+    // from anywhere other than the package the MCP tree reads.
+    const consumers = [
+      { file: 'apps/server/src/server/http.ts', symbol: 'runWithContext' },
+      { file: 'apps/server/src/server/bootstrap.ts', symbol: 'SessionRouter' },
+      { file: 'apps/server/src/server/auth.ts', symbol: 'RequestContext' },
+      { file: 'apps/server/src/server/api-router.ts', symbol: 'RequestContext' },
+      { file: 'apps/server/src/server/api-router.test.ts', symbol: 'runWithContext' },
+      { file: 'apps/server/src/server/session-router.test.ts', symbol: 'SessionRouter' },
+      { file: 'apps/server/src/test/mcp/memory-tools.test.ts', symbol: 'runWithContext' },
+      { file: 'apps/server/src/test/mcp/unresolvable-slug.test.ts', symbol: 'SessionRouter' },
+      { file: 'packages/mcp/src/_shared.ts', symbol: 'getRequestContext' },
+      { file: 'packages/mcp/src/server.ts', symbol: 'runWithToolCallId' },
+    ];
+    const offenders = consumers.filter(({ file, symbol }) => {
+      const src = readFileSync(join(repoRoot, file), 'utf8');
+      return !new RegExp(`import[^;]*\\b${symbol}\\b[^;]*from '@rembric/core'`).test(src);
+    });
+    expect(offenders, offenders.map((o) => `${o.file} must import ${o.symbol}`).join('\n')).toEqual(
+      [],
+    );
+  });
+
+  it('the application and @rembric/mcp read one AsyncLocalStorage instance', async () => {
+    const core = await import('@rembric/core');
+    const mcp = await import('@rembric/mcp');
+    const ctx: RequestContext = {
+      token: {
+        id: 'tk_context_guard',
+        name: 'context-guard',
+        hash: 'hash',
+        scope: '*',
+        projectId: null,
+        createdAt: new Date(0),
+        expiresAt: null,
+        revokedAt: null,
+      },
+      scope: '*',
+      memberProjectIds: [],
+      project: null,
+      requestedSlug: null,
+      mcpSessionId: null,
+    };
+
+    // Control: the reader really does read the store, so the assertion below
+    // cannot pass by the package ignoring the context altogether.
+    expect(() => mcp.isPathScoped()).toThrow(/request context missing/);
+
+    // core enters the context; the package reads it. A second instance in either
+    // tree makes this throw `request context missing` instead.
+    await expect(core.runWithContext(ctx, () => Promise.resolve(mcp.isPathScoped()))).resolves.toBe(
+      false,
+    );
+    await expect(
+      core.runWithContext({ ...ctx, requestedSlug: 'context-guard' }, () =>
+        Promise.resolve(mcp.routerKey()),
+      ),
+    ).resolves.toBeNull();
+  });
+});
+
 // Per-transport discovery state in a module-level registry only misbehaves
 // observably when two transports are live, so a re-introduced global would pass
 // every single-transport test. Asserted here as well as behaviourally.
 describe('roots-discovery state ownership invariant', () => {
-  const src = readFileSync(join(srcRoot, 'mcp/roots-discovery.ts'), 'utf8');
+  const src = readFileSync(join(mcpRoot, 'roots-discovery.ts'), 'utf8');
 
   it('declares no module-level mutable registry of per-transport state', () => {
     const registries = src.match(/^(?:const|let|var)\s+\w+[^=\n]*=\s*new\s+(?:Set|Map|Array)\b/gm);
@@ -1596,8 +1736,8 @@ describe('summary truncation keeps the same side in every layer', () => {
 // why the count is asserted rather than trusted.
 describe('the session-summary rubric has one source', () => {
   const surfaces = [
-    'apps/server/src/mcp/instructions.ts',
-    'apps/server/src/mcp/server.ts',
+    'packages/mcp/src/instructions.ts',
+    'packages/mcp/src/server.ts',
     'packages/core/src/services/session-nudge.ts',
     'apps/plugin/scripts/post-compact.sh',
     'apps/plugin/commands/summary.md',
@@ -1870,10 +2010,13 @@ function scanForPattern(
 }
 
 describe('scope-is-one-arm invariant', () => {
+  // The protocol layer is scanned here too: it builds scopes (`projectScope`) and
+  // used to be an app-internal tree, so leaving it out would exempt it.
   const files = [
     ...listAllTsFiles(srcRoot),
     ...listAllTsFiles(coreRoot),
     ...listAllTsFiles(dbRoot),
+    ...listAllTsFiles(mcpRoot),
   ];
 
   // Non-vacuity control. Every assertion below is negative, and an empty file
@@ -1910,7 +2053,7 @@ describe('scope-is-one-arm invariant', () => {
 const WIDENED_SCOPE_DISCRIMINANT = /'authorized-projects'/;
 const WIDENED_SCOPE_SITES: Record<string, number> = {
   'packages/db/src/scope.ts': 1,
-  'apps/server/src/mcp/_shared.ts': 1,
+  'packages/mcp/src/_shared.ts': 1,
 };
 
 describe('the widened scope has one construction site', () => {
@@ -1918,6 +2061,7 @@ describe('the widened scope has one construction site', () => {
     ...listAllTsFiles(srcRoot),
     ...listAllTsFiles(coreRoot),
     ...listAllTsFiles(dbRoot),
+    ...listAllTsFiles(mcpRoot),
   ].filter(
     (f) =>
       !f.endsWith('.test.ts') &&

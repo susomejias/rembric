@@ -66,6 +66,9 @@ importers:
       '@rembric/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@rembric/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
@@ -166,6 +169,9 @@ importers:
       '@huggingface/transformers':
         specifier: 4.2.0
         version: 4.2.0
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.0.0
+        version: 1.29.0(zod@4.6.5)
       '@rembric/db':
         specifier: workspace:*
         version: link:../db
@@ -210,6 +216,37 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
+  packages/mcp:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.0.0
+        version: 1.29.0(zod@4.6.5)
+      '@rembric/core':
+        specifier: workspace:*
+        version: link:../core
+      '@rembric/db':
+        specifier: workspace:*
+        version: link:../db
+      slugify:
+        specifier: ^1.6.9
+        version: 1.6.9
+      stopword:
+        specifier: ^3.1.5
+        version: 3.1.5
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@rembric/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/node':
+        specifier: ^22.7.0
+        version: 22.19.19
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
