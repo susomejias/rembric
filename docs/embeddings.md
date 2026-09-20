@@ -32,15 +32,15 @@ Why phase 3 runs in a fresh process: it exercises exactly the resolution path th
 ## 2. Boot (every start)
 
 ```
-bootstrap.ts
+apps/server/src/server/bootstrap.ts
    │
-   ├─ await loadEmbedder()                  ← embeddings/embedder.ts
+   ├─ await loadEmbedder()                  ← packages/core/src/embeddings/embedder.ts
    │     /app/models present (image) → offline, ~1.1 s
    │     absent (bare-metal dev)     → one-time pinned download
    │     ✗ load fails → BOOT ABORTS (fail fast — no degraded mode;
    │                     a listening server ALWAYS has a warm model)
    │
-   ├─ ensureVectorModel(db, dataDir)        ← embeddings/state.ts
+   ├─ ensureVectorModel(db, dataDir)        ← packages/core/src/embeddings/state.ts
    │     reads embedding-state.json (model-identity marker)
    │     ├─ matches the compiled-in model, settled → no-op
    │     └─ differs/absent/pending → mark pending
@@ -61,7 +61,7 @@ Fills vectors for rows that don't have one — backfills after a marker
 wipe, and retries rows whose inline embedding failed.
 
 ```
-worker.processBatch()                       ← services/embedding-worker.ts
+worker.processBatch()                       ← packages/core/src/services/embedding-worker.ts
    │
    ├─ SELECT memories without a vector (LIMIT 25)
    │     ├─ none → if the queue JUST drained → onDrained()
@@ -77,7 +77,7 @@ worker.processBatch()                       ← services/embedding-worker.ts
 ## 4. Save path (the hot path)
 
 ```
-memory.save (MCP)                            ← mcp/memory-tools.ts
+memory.save (MCP)                            ← apps/server/src/mcp/memory-tools.ts
    │
    ├─ insert the memory row (append-only, unchanged)
    │
@@ -87,7 +87,7 @@ memory.save (MCP)                            ← mcp/memory-tools.ts
    │     otherwise has no embedding until the next drain tick).
    │     ✗ inference error → logged, save proceeds, drain retries
    │
-   ├─ findSaveTimeCandidates()               ← services/save-time-candidates.ts
+   ├─ findSaveTimeCandidates()               ← packages/core/src/services/save-time-candidates.ts
    │     ├─ vec pass  cosine kNN over memory_vec   (≥ VEC_THRESHOLD 0.70)
    │     ├─ FTS5 pass BM25 lexical                 (top-poolSize by rank; reported
    │     │                                          similarity = token containment)
@@ -117,11 +117,11 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 ## Engine constants (not configuration)
 
-| Constant            | Value                                                  | Lives in                           |
-| ------------------- | ------------------------------------------------------ | ---------------------------------- |
-| Model + revision    | `onnx-community/gte-multilingual-base@2edbf5e`         | `embeddings/embedder.ts`           |
-| Quantization / dims | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `embeddings/embedder.ts`           |
-| `VEC_THRESHOLD`     | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `services/save-time-candidates.ts` |
+| Constant            | Value                                                  | Lives in                                             |
+| ------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| Model + revision    | `onnx-community/gte-multilingual-base@2edbf5e`         | `packages/core/src/embeddings/embedder.ts`           |
+| Quantization / dims | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `packages/core/src/embeddings/embedder.ts`           |
+| `VEC_THRESHOLD`     | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `packages/core/src/services/save-time-candidates.ts` |
 
 The lexical pass has no equivalent absolute threshold: bm25 is unbounded and
 corpus-size dependent, so no fixed floor over it is stable. Admission is by
