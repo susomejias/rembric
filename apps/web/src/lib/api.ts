@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { DomainError, type AgentSessionsService, type RequestContext } from '@rembric/core';
+import { type AgentSessionsService, type RequestContext } from '@rembric/core';
 
-import { AuthError, authenticate } from './auth';
+import { AuthError, authenticate, isDomainError } from './auth';
 import { getServices } from './services';
 
 /**
@@ -113,7 +113,7 @@ export function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 500 {
 
 /** Mirrors `api-router.ts::domainErr`: a `DomainError` keeps its code, anything else is an opaque 500. */
 export function domainErr(err: unknown): Response {
-  if (err instanceof DomainError) {
+  if (isDomainError(err)) {
     return json(errorBody(err.code, err.message), statusForCode(err.code));
   }
   return internalError(err, 'unhandled API request error');
