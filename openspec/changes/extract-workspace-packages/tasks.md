@@ -27,13 +27,20 @@
 - [ ] 3.4 Confirm the SQL-confinement guard still passes with the new files in place (no SQL was carried into `packages/core`), then run the focused core suites.
 - [ ] 3.5 Commit `packages/core` extraction as one work unit with the full suite green.
 
-## 4. packages/mcp extraction
+## 4. packages/mcp extraction — DEFERRED TO THE PORTING CHANGE (see design D6)
+
+The tasks below SHALL NOT be executed by this change. The measured app↔package dependency cycle (20 non-test import sites in 11 files reaching five app-side modules, 7 × TS6059 under `--rootDir src/mcp`, and 17 co-located test files that import app-side fixtures) is recorded in `design.md` D6 together with the rejected alternatives. The package is extracted in the porting change, alongside the `mcp-handler` integration. Checkboxes are retained as the carried-over work list; none is completable inside this change.
 
 - [ ] 4.1 `git mv apps/server/src/mcp packages/mcp/src`; confirm `git status --porcelain -M` reports renames only.
 - [ ] 4.2 Add `packages/mcp/{package.json,tsconfig.json,tsconfig.build.json}` with a public `exports` map resolving to built `dist`.
 - [ ] 4.3 Rewrite the inbound import sites for the moved tools, server factory and transport manager to import `@rembric/mcp` through its public entry point.
 - [ ] 4.4 Confirm the invariants suite and the MCP tool suites are green, and that `packages/mcp` contains no SQL execution.
 - [ ] 4.5 Commit `packages/mcp` extraction as one work unit with the full suite green.
+- [ ] 4.6 (carried to the porting change) Resolve the `AsyncLocalStorage` binding for `request-context.ts` and `tool-call-context.ts` so exactly one instance exists per process, and re-point `version.ts` at the injected application version rather than a self-relative `package.json` read.
+
+## 4b. Amendment record
+
+- [x] 4b.1 Recorded that the phase-4 extraction is deferred to the porting change: the decision and its measured evidence live in `design.md` D6, the package-inventory requirement in `specs/workspace-layout/spec.md` names the inventory this change actually delivers (`packages/{db,core,ui}` plus the `packages/config` tooling package), and `proposal.md` marks the MCP extraction as deferred. Verifiable by inspecting `design.md` D6.
 
 ## 5. Turborepo
 
