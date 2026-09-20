@@ -14,6 +14,7 @@ export default tseslint.config(
       'example-design/**',
       'apps/server/scripts/**',
       'packages/core/scripts/**',
+      'apps/web/.next/**',
       'apps/plugin/*',
       '!apps/plugin/bin',
       'apps/plugin/*/**',
