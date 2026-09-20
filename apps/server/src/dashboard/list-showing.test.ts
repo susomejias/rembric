@@ -1,14 +1,19 @@
 import { randomBytes } from 'node:crypto';
 
+import {
+  agentSessions,
+  createRepositories,
+  memory,
+  memoryRelations,
+  prompts,
+  tokens,
+  type NewMemory,
+  type NewPrompt,
+  type Repositories,
+} from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { agentSessions } from '../db/schema/agent-sessions.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
-import { memory, type NewMemory } from '../db/schema/memory.js';
-import { prompts, type NewPrompt } from '../db/schema/prompts.js';
-import { tokens } from '../db/schema/tokens.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { PromptsService } from '../services/prompts.js';

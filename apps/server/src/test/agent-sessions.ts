@@ -1,4 +1,4 @@
-import type { NewAgentSession } from '../db/schema/agent-sessions.js';
+import { type NewAgentSession } from '@rembric/db';
 
 export function agentSessionRow(
   overrides: Partial<NewAgentSession> & { id: string },

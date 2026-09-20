@@ -1,7 +1,7 @@
+import { createRepositories } from '@rembric/db';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';
 
 import { EmbeddingWorker } from './embedding-worker.js';

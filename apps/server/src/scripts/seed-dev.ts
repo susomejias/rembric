@@ -14,15 +14,13 @@
  * layer permitted to emit DELETEs against the protected tables.
  */
 
+import { createDb, createRepositories, projectScope, type DbHandle } from '@rembric/db';
 import { ulid } from 'ulid';
 
-import { type DbHandle, createDb } from '../db/index.js';
-import { createRepositories } from '../db/repositories/index.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 
 const DEMO_SLUG = 'demo';

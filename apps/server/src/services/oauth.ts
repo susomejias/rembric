@@ -1,9 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 
+import {
+  type OAuthAuthorizationCode,
+  type OAuthClient,
+  type OAuthRepository,
+  type OAuthToken,
+} from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { OAuthRepository } from '../db/repositories/oauth-repository.js';
-import type { OAuthAuthorizationCode, OAuthClient, OAuthToken } from '../db/schema/oauth.js';
 
 import { projectScopedGrant, type TokenScope } from './tokens.js';
 

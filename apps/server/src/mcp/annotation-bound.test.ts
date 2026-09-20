@@ -1,8 +1,6 @@
+import { createRepositories, projectScope, type Project, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import type { Project } from '../db/schema/projects.js';
-import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { RANK_WINDOW_CEILING } from '../services/hybrid-search.js';
 import { MemoryService } from '../services/memory.js';
@@ -16,7 +14,6 @@ import {
   RelationsService,
   SEARCH_LIMIT_MAX,
 } from '../services/relations.js';
-import { projectScope } from '../services/scope.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';

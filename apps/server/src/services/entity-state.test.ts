@@ -1,9 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
+import {
+  createRepositories,
+  projectScope,
+  type Repositories,
+  type TransactionRunner,
+} from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { TransactionRunner } from '../db/client.js';
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { EXTRACTOR_VERSION } from './entities.js';
@@ -16,7 +20,6 @@ import {
 } from './entity-state.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
 
 let db: TestDb;
 let repos: Repositories;

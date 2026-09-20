@@ -1,13 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { projectScope, type Repositories } from '@rembric/db';
 import { z } from 'zod';
 
-import type { Repositories } from '../db/repositories/index.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type ProjectsService } from '../services/projects.js';
-import { projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 
 import {

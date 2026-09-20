@@ -1,6 +1,6 @@
+import { type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
 
-import type { Repositories } from '../db/repositories/index.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { SessionsService } from '../services/sessions.js';

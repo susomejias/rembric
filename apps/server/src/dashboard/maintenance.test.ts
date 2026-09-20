@@ -2,11 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createDiagnostics, createRepositories, type Repositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDiagnostics } from '../db/diagnostics.js';
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { PromptsService } from '../services/prompts.js';

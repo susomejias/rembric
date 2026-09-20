@@ -2,11 +2,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 
 import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { createRepositories, OAuthRepository } from '@rembric/db';
 import express from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import { OAuthService } from '../services/oauth.js';
 import { ProjectsService } from '../services/projects.js';
 import { createTestDb, type TestDb } from '../test/db.js';

@@ -1,10 +1,9 @@
 import { randomBytes } from 'node:crypto';
 
+import { createRepositories, OAuthRepository } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import { signAuthRequest, type AuthRequest } from '../services/oauth-areq.js';
 import { OAuthService, resolveGrantedScope } from '../services/oauth.js';
 import { SessionsService } from '../services/sessions.js';

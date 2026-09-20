@@ -1,10 +1,8 @@
+import { createRepositories, memory, memoryRelations, projectScope, type Scope } from '@rembric/db';
 import { eq, sql } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
-import { memory } from '../db/schema/memory.js';
 import { seedProject } from '../test/default-project.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
@@ -16,7 +14,6 @@ import {
   ENTITY_RARITY_MIN_LINKS,
   findSaveTimeCandidates,
 } from './save-time-candidates.js';
-import { projectScope, type Scope } from './scope.js';
 
 let db: TestDb;
 let memorySvc: MemoryService;

@@ -1,13 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { projectScope, type Memory, type Scope, type SearchScope } from '@rembric/db';
 
-import type { Memory } from '../db/schema/memory.js';
 import { getRequestContext, type RequestContext } from '../server/request-context.js';
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import { tryGetToolCallId } from '../server/tool-call-context.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService, ProjectView } from '../services/projects.js';
-import { projectScope, type Scope, type SearchScope } from '../services/scope.js';
 import { sliceWithoutSplittingSurrogatePair } from '../services/strings.js';
 import { isAuthorized, isProjectSetScope, pinnedProjectId } from '../services/tokens.js';
 

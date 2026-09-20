@@ -1,11 +1,9 @@
 import { randomBytes } from 'node:crypto';
 
+import { agentSessions, createRepositories, tokens, type Repositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { agentSessions } from '../db/schema/agent-sessions.js';
-import { tokens } from '../db/schema/tokens.js';
 import { MemoryService } from '../services/memory.js';
 import { RelationsService } from '../services/relations.js';
 import { SessionsService } from '../services/sessions.js';

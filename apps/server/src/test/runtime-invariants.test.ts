@@ -1,12 +1,16 @@
+import {
+  consolidationOps,
+  consolidationRuns,
+  createRepositories,
+  memory,
+  type Repositories,
+} from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { undoOp } from '../consolidation/operations.js';
 import { ConsolidationRunner } from '../consolidation/runner.js';
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
-import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';

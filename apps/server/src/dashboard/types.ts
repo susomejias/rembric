@@ -1,4 +1,5 @@
-import type { DashboardSession } from '../db/schema/sessions.js';
+import { type DashboardSession } from '@rembric/db';
+
 import type { SessionsService } from '../services/sessions.js';
 
 /**

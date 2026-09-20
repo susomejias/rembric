@@ -1,9 +1,7 @@
-import type { Repositories } from '../db/repositories/index.js';
-import type { Memory } from '../db/schema/memory.js';
+import { projectScope, type Memory, type Repositories } from '@rembric/db';
 
 import type { ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
-import { projectScope } from './scope.js';
 
 /**
  * How far back through the new row's `replaces` ancestry save-time detection

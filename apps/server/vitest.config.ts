@@ -5,6 +5,25 @@ import { defineConfig } from 'vitest/config';
 
 const piHostStub = fileURLToPath(new URL('./src/test/pi-host-stub.ts', import.meta.url));
 
+// The extracted data layer lives in its own workspace package. Tests resolve it
+// from SOURCE (the package's `dist/` does not exist before the build step, and
+// CI runs the suite before it builds), which is also the layout the package's
+// own type-check uses via `paths` in tsconfig.json.
+const rembricDb = fileURLToPath(new URL('../../packages/db/src/index.ts', import.meta.url));
+
+// `apps/plugin/.pi-plugin/plugin.test.ts` reaches into the data layer by
+// relative path (`../../server/src/db/...`). That file is outside this task's
+// edit surfaces, so the two specifiers it uses are aliased onto the package
+// rather than edited there; whichever change owns that file should switch it to
+// `@rembric/db` and delete these two entries. Its 80 tests are part of this
+// suite's count, so dropping them is not an option.
+const rembricDbRepositories = fileURLToPath(
+  new URL('../../packages/db/src/repositories/index.ts', import.meta.url),
+);
+const rembricDbSchemaProjects = fileURLToPath(
+  new URL('../../packages/db/src/schema/projects.ts', import.meta.url),
+);
+
 // `mkdtemp` does not create parent directories, so pointing TMPDIR at a path
 // that does not exist yet fails every fixture instead of relocating it. This
 // config is evaluated in the main process before any worker spawns, which is
@@ -20,6 +39,9 @@ export default defineConfig({
     alias: {
       '@earendil-works/pi-tui': piHostStub,
       '@earendil-works/pi-coding-agent': piHostStub,
+      '@rembric/db': rembricDb,
+      '../../server/src/db/repositories/index.js': rembricDbRepositories,
+      '../../server/src/db/schema/projects.js': rembricDbSchemaProjects,
     },
   },
   test: {
@@ -58,19 +80,23 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
-      include: ['src/**/*.ts'],
+      // The db package is measured through this pattern once vitest can reach
+      // outside the project root; today it cannot (measured: 0 files), so the
+      // thresholds below are computed over the app tree alone. They still hold —
+      // see the phase-2 report — and are never lowered for that.
+      include: ['src/**/*.ts', '../../packages/db/src/**/*.ts'],
       exclude: [
         'src/server-entrypoint.ts',
         'src/test/**',
         'src/**/*.test.ts',
-        'src/db/migrations/**',
-        'src/db/schema/index.ts',
+        '../../packages/db/src/migrations/**',
+        '../../packages/db/src/schema/index.ts',
         'src/server/index.ts',
         'src/llm/index.ts',
         'src/mcp/index.ts',
         'src/consolidation/index.ts',
         'src/services/index.ts',
-        'src/db/index.ts',
+        '../../packages/db/src/index.ts',
       ],
       // Enforced floor, rounded down from measured coverage. Up-only
       // ratchet: raise as the suite grows, never lower to pass a PR.

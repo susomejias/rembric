@@ -5,11 +5,15 @@
  * different assumptions about which rows are eligible (proactive-recall D4).
  */
 
-import type { EntitiesRepository } from '../db/repositories/entities-repository.js';
-import type { Memory, MemoryStatus, MemoryType } from '../db/schema/memory.js';
+import {
+  type EntitiesRepository,
+  type Memory,
+  type MemoryStatus,
+  type MemoryType,
+  type SearchScope,
+} from '@rembric/db';
 
 import { extractEntities, type ExtractedEntity } from './entities.js';
-import type { SearchScope } from './scope.js';
 
 export interface EntityRelevanceMatch {
   entity: ExtractedEntity;

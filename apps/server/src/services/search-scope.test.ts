@@ -1,11 +1,16 @@
+import {
+  createRepositories,
+  homeScope,
+  projectScope,
+  type Repositories,
+  type SearchScope,
+} from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { homeScope, projectScope, type SearchScope } from './scope.js';
 
 let db: TestDb;
 let repos: Repositories;

@@ -1,9 +1,12 @@
+import {
+  agentSessions as agentSessionsTable,
+  createRepositories,
+  tokens as tokensSchema,
+  type Token,
+} from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { agentSessions as agentSessionsTable } from '../db/schema/agent-sessions.js';
-import { tokens as tokensSchema, type Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';

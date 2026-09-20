@@ -1,6 +1,6 @@
+import { createRepositories, projectScope, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { seedProject } from '../test/default-project.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
@@ -12,7 +12,6 @@ import {
   termWeightsFor,
   type GateLeader,
 } from './hybrid-search.js';
-import { projectScope } from './scope.js';
 
 /**
  * The lexical component's two halves are sourced differently and the asymmetry

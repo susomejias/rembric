@@ -1,5 +1,4 @@
-import type { DbHandle } from '../db/index.js';
-import { projectScope, type Scope } from '../services/scope.js';
+import { projectScope, type DbHandle, type Scope } from '@rembric/db';
 
 /**
  * The system default project, resolved by the boolean that IS its identity.

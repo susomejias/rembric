@@ -1,4 +1,4 @@
-import type { EntityKind } from '../db/schema/entities.js';
+import { type EntityKind } from '@rembric/db';
 
 /**
  * Pattern registry for deterministic entity extraction, separated from the

@@ -1,10 +1,8 @@
+import { projectScope, type EntitiesRepository } from '@rembric/db';
 import { describe, expect, it } from 'vitest';
-
-import type { EntitiesRepository } from '../db/repositories/entities-repository.js';
 
 import { extractEntities } from './entities.js';
 import { iterateEntityMatches } from './entity-relevance.js';
-import { projectScope } from './scope.js';
 
 describe('iterateEntityMatches', () => {
   it('does not query more entities than probeMax', () => {

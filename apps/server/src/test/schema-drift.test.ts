@@ -1,8 +1,7 @@
+import { schema } from '@rembric/db';
 import { is } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
-
-import * as schema from '../db/schema/index.js';
 
 import { createTestDb } from './db.js';
 import { ALL_TABLES } from './schema-inventory.js';

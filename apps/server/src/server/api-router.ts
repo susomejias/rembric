@@ -1,4 +1,5 @@
 import { getConnInfo } from '@hono/node-server/conninfo';
+import { projectScope } from '@rembric/db';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
@@ -12,7 +13,6 @@ import { DomainError } from '../services/errors.js';
 import type { MemoryService } from '../services/memory.js';
 import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';
-import { projectScope } from '../services/scope.js';
 import { isAuthorized } from '../services/tokens.js';
 import type { TokensService } from '../services/tokens.js';
 import type { UsageCounters } from '../services/usage-counters.js';

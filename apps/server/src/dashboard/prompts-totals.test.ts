@@ -1,11 +1,9 @@
 import { randomBytes } from 'node:crypto';
 
+import { createRepositories, projects, prompts, type NewPrompt } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { projects } from '../db/schema/projects.js';
-import { prompts, type NewPrompt } from '../db/schema/prompts.js';
 import { PromptsService } from '../services/prompts.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';

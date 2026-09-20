@@ -5,7 +5,8 @@
  * `update.ts`.
  */
 
-import type { DashboardSession } from '../db/schema/sessions.js';
+import { type DashboardSession } from '@rembric/db';
+
 import type { SelfUpdateCapability } from '../services/self-update/capability.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { UpdateInfo } from '../services/update-check.js';

@@ -1,8 +1,7 @@
+import { createRepositories, type DbHandle } from '@rembric/db';
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { DbHandle } from '../db/index.js';
-import { createRepositories } from '../db/repositories/index.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { ProjectsService } from '../services/projects.js';
 import { REMBRIC_VERSION } from '../version.js';
@@ -161,7 +160,7 @@ function loginClientLabels(html: string): string[] {
 
 /** Second connection onto the running server's data dir, for fixtures and assertions. */
 async function withDataDb<T>(dataDir: string, fn: (handle: DbHandle) => T): Promise<T> {
-  const { createDb } = await import('../db/index.js');
+  const { createDb } = await import('@rembric/db');
   const handle = createDb({ dataDir });
   try {
     return fn(handle);
@@ -325,10 +324,10 @@ describe('dashboard E2E', () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
-    const { createDb } = await import('../db/index.js');
+    const { createDb } = await import('@rembric/db');
     const { ProjectsService } = await import('../services/projects.js');
     const { AgentSessionsService } = await import('../services/agent-sessions.js');
-    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
@@ -371,11 +370,11 @@ describe('dashboard E2E', () => {
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
     // Seed a session row using the dashboard's own data dir.
-    const { createDb } = await import('../db/index.js');
+    const { createDb } = await import('@rembric/db');
     const { ProjectsService } = await import('../services/projects.js');
     const { TokensService } = await import('../services/tokens.js');
     const { AgentSessionsService } = await import('../services/agent-sessions.js');
-    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
@@ -440,10 +439,10 @@ describe('dashboard E2E', () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
-    const { createDb } = await import('../db/index.js');
+    const { createDb } = await import('@rembric/db');
     const { ProjectsService } = await import('../services/projects.js');
     const { AgentSessionsService } = await import('../services/agent-sessions.js');
-    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
@@ -708,7 +707,7 @@ describe('dashboard E2E', () => {
     expect(beforeBody).not.toContain('NO PENDING JUDGMENTS YET');
 
     // Seed: two memories + a judged 'supersedes' relation between them.
-    const { createDb } = await import('../db/index.js');
+    const { createDb } = await import('@rembric/db');
     const { MemoryService } = await import('../services/memory.js');
     const { RelationsService } = await import('../services/relations.js');
     const dataDir = server.config.dataDir;
@@ -800,7 +799,7 @@ describe('dashboard E2E', () => {
     const jar: CookieJar = { cookie: null };
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
-    const { createDb } = await import('../db/index.js');
+    const { createDb } = await import('@rembric/db');
     const { MemoryService } = await import('../services/memory.js');
     const handle = createDb({ dataDir: server.config.dataDir });
     const DAY = 24 * 60 * 60 * 1000;

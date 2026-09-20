@@ -1,6 +1,6 @@
+import { createRepositories } from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
 import { MemoryService } from '../services/memory.js';
 import { RELATION_ANNOTATION_MAX, RelationsService } from '../services/relations.js';
 import { createTestDb, type TestDb } from '../test/db.js';

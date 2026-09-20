@@ -1,7 +1,5 @@
+import { type Project, type Repositories } from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { Repositories } from '../db/repositories/index.js';
-import { type Project } from '../db/schema/projects.js';
 
 import { DomainError } from './errors.js';
 

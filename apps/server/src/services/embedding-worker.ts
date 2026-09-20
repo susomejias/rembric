@@ -1,5 +1,5 @@
-import type { Repositories } from '../db/repositories/index.js';
-import { partitionKeyFor } from '../db/repositories/scope-clause.js';
+import { partitionKeyFor, type Repositories } from '@rembric/db';
+
 import { type Embedder, embeddingInput } from '../embeddings/embedder.js';
 
 /**

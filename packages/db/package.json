@@ -1,0 +1,37 @@
+{
+  "name": "@rembric/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Rembric SQLite data layer — schema, repositories, migrations, diagnostics. The SQL-confinement boundary.",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && cp -R src/migrations dist/migrations",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.36.0",
+    "sqlite-vec": "^0.1.6",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@rembric/config": "workspace:*",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.7.0",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5.6.0"
+  }
+}

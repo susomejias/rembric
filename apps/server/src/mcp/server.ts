@@ -3,9 +3,9 @@ import {
   RootsListChangedNotificationSchema,
   type ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
+import { type Repositories } from '@rembric/db';
 import { z, type ZodObject, type ZodRawShape } from 'zod';
 
-import type { Repositories } from '../db/repositories/index.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { runWithToolCallId } from '../server/tool-call-context.js';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';

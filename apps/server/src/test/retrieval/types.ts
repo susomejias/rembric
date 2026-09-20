@@ -1,4 +1,5 @@
-import type { Memory, MemoryType } from '../../db/schema/memory.js';
+import { type Memory, type MemoryType } from '@rembric/db';
+
 import type { GateOverrides } from '../../services/memory.js';
 import type { MemoryService } from '../../services/memory.js';
 

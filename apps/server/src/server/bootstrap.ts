@@ -1,10 +1,17 @@
 import { join } from 'node:path';
 
+import {
+  createDb,
+  createDiagnostics,
+  createRepositories,
+  type DbDiagnostics,
+  type DbHandle,
+  type Repositories,
+} from '@rembric/db';
+
 import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
 import { ConsolidationRunner } from '../consolidation/index.js';
 import { undoOp, undoRun } from '../consolidation/operations.js';
-import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
-import { createDb, createRepositories, type DbHandle, type Repositories } from '../db/index.js';
 import {
   EMBEDDING_MODEL_ID,
   embeddingQueryInput,

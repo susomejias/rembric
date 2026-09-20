@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { DbDiagnostics } from '../db/diagnostics.js';
+import { type DbDiagnostics } from '@rembric/db';
 
 const MARKER_FILENAME = '.rembric-state.json';
 const MARKER_SCHEMA_VERSION = 1;

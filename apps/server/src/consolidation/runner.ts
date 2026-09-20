@@ -1,7 +1,6 @@
+import { type Repositories, type TransactionRunner } from '@rembric/db';
 import { ulid } from 'ulid';
 
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { RelationsService } from '../services/relations.js';

@@ -1,6 +1,6 @@
+import { createRepositories, projectScope, type Repositories } from '@rembric/db';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';
 
@@ -27,7 +27,6 @@ import {
 } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
 
 describe('fuseRRF', () => {
   it('ranks an item present in both lists above single-list items', () => {

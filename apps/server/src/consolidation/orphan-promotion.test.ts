@@ -1,13 +1,10 @@
+import { consolidationOps, createRepositories, memoryRelations, projectScope } from '@rembric/db';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { consolidationOps } from '../db/schema/consolidation.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope } from '../services/scope.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { undoRun } from './operations.js';

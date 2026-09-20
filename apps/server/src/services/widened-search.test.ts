@@ -1,7 +1,13 @@
+import {
+  createRepositories,
+  projectScope,
+  scopeCondition,
+  scopeWhere,
+  type Repositories,
+  type SearchScope,
+} from '@rembric/db';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { scopeCondition, scopeWhere } from '../db/repositories/scope-clause.js';
 import { loadEmbedder, type Embedder } from '../embeddings/embedder.js';
 import { createTestDb, FakeEmbedder, type TestDb } from '../test/index.js';
 
@@ -9,7 +15,6 @@ import { EmbeddingWorker } from './embedding-worker.js';
 import { applyRankingBoost, computeRankWindowSize, hybridSearch } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope, type SearchScope } from './scope.js';
 
 /**
  * A widened test corpus must hold rows on BOTH sides: a fixture with rows in one

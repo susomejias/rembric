@@ -1,4 +1,4 @@
-import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
+import { type MemoryStatus, type MemoryType } from '@rembric/db';
 
 /**
  * Time-based review (affirmation) axis — orthogonal to decay.

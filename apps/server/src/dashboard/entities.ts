@@ -1,7 +1,6 @@
+import { ENTITY_KINDS, type EntityKind, type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
 
-import type { Repositories } from '../db/repositories/index.js';
-import { ENTITY_KINDS, type EntityKind } from '../db/schema/entities.js';
 import type { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import type { SessionsService } from '../services/sessions.js';
 import type { TokensService } from '../services/tokens.js';

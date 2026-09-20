@@ -1,8 +1,10 @@
 import { execSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { defaultMigrationsDir } from '@rembric/db';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator.js';
@@ -36,13 +38,41 @@ type DbRaw = ReturnType<typeof createTestDb>['handle']['raw'];
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** `apps/server/src` — the application's own tree. */
 const srcRoot = join(here, '..');
+/**
+ * The monorepo root (`../../../` from `apps/server/src/test`). Every path this
+ * file reports or allow-lists is anchored here rather than on a scan root,
+ * because the scan covers two trees and "the root" stopped being one directory.
+ */
+const repoRoot = join(srcRoot, '..', '..', '..');
+/** `packages/db/src` — the extracted data layer, i.e. the SQL-confinement boundary. */
+const dbRoot = join(repoRoot, 'packages/db/src');
+
+/**
+ * Paths are reported and allow-listed repo-root-relative — `apps/server/src/...`
+ * for the application, `packages/db/src/...` for the data layer. One convention
+ * for both roots, so an allow-list entry is unambiguous.
+ */
+function relToRepo(file: string): string {
+  return relative(repoRoot, file).split(sep).join('/');
+}
+
+/**
+ * Every scanned non-test, non-migration source file: the application tree AND
+ * the extracted data layer. Both, because the rules below police statements
+ * that live in the db package and are called from the application — a scan that
+ * dropped either side would stop enforcing half of each contract.
+ */
+function scanRoots(): string[] {
+  return [...listSourceFiles(srcRoot), ...listSourceFiles(dbRoot)];
+}
 
 interface ForbiddenRule {
   pattern: RegExp;
   description: string;
   /**
-   * Source files (relative to `srcRoot`) where the pattern is permitted.
+   * Source files (repo-root-relative) where the pattern is permitted.
    * Empty array means the pattern is forbidden everywhere.
    */
   allow?: readonly string[];
@@ -56,8 +86,11 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory\b/i,
     description:
-      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in db/repositories/memory-repository.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['db/repositories/memory-repository.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in packages/db/src/repositories/memory-repository.ts or the dev seed reset in apps/server/src/scripts/seed-dev.ts',
+    allow: [
+      'packages/db/src/repositories/memory-repository.ts',
+      'apps/server/src/scripts/seed-dev.ts',
+    ],
   },
   {
     pattern: /update\([^)]*memory[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -88,7 +121,7 @@ const FORBIDDEN: ForbiddenRule[] = [
     // directory and the runner reads `.sql`, which is not scanned at all.
     pattern: /UPDATE\s+memory\b[^;]*\bSET\s+project_id\s*=/i,
     description:
-      'raw `UPDATE memory SET project_id = …` is forbidden outside db/migrations/ — the append-only carve-out is a migration-only one',
+      'raw `UPDATE memory SET project_id = …` is forbidden outside packages/db/src/migrations/ — the append-only carve-out is a migration-only one',
   },
   {
     pattern: /delete\s*\(\s*agentSessions\s*\)/i,
@@ -97,8 +130,11 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+sessions\b/i,
     description:
-      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in db/repositories/agent-sessions-repository.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['db/repositories/agent-sessions-repository.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in packages/db/src/repositories/agent-sessions-repository.ts or the dev seed reset in apps/server/src/scripts/seed-dev.ts',
+    allow: [
+      'packages/db/src/repositories/agent-sessions-repository.ts',
+      'apps/server/src/scripts/seed-dev.ts',
+    ],
   },
   {
     pattern:
@@ -123,8 +159,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory_relations\b/i,
     description:
-      'raw `DELETE FROM memory_relations` is forbidden — relations are append-only, except in the dev seed reset (scripts/seed-dev.ts)',
-    allow: ['scripts/seed-dev.ts'],
+      'raw `DELETE FROM memory_relations` is forbidden — relations are append-only, except in the dev seed reset (apps/server/src/scripts/seed-dev.ts)',
+    allow: ['apps/server/src/scripts/seed-dev.ts'],
   },
   {
     pattern: /delete\s*\(\s*prompts\s*\)/i,
@@ -134,8 +170,11 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+prompts\b/i,
     description:
-      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in db/repositories/prompts-repository.ts or the dev seed reset in scripts/seed-dev.ts',
-    allow: ['db/repositories/prompts-repository.ts', 'scripts/seed-dev.ts'],
+      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in packages/db/src/repositories/prompts-repository.ts or the dev seed reset in apps/server/src/scripts/seed-dev.ts',
+    allow: [
+      'packages/db/src/repositories/prompts-repository.ts',
+      'apps/server/src/scripts/seed-dev.ts',
+    ],
   },
   {
     pattern: /update\([^)]*prompts[^)]*\)[^.]*\.set\([^)]*content\s*:/i,
@@ -172,7 +211,7 @@ function listSourceFiles(dir: string): string[] {
 }
 
 describe('append-only invariants (static grep)', () => {
-  const files = listSourceFiles(srcRoot);
+  const files = scanRoots();
 
   it('discovers source files to scan', () => {
     expect(files.length).toBeGreaterThan(10);
@@ -184,7 +223,7 @@ describe('append-only invariants (static grep)', () => {
       const offenders: { file: string; line: number; text: string }[] = [];
       const allowed = new Set((allow ?? []).map((p) => p.replace(/\\/g, '/')));
       for (const file of files) {
-        const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+        const rel = relToRepo(file);
         if (allowed.has(rel)) continue;
         const lines = readFileSync(file, 'utf8').split('\n');
         for (let i = 0; i < lines.length; i++) {
@@ -212,8 +251,8 @@ describe('append-only invariants (static grep)', () => {
   // silently remove the purge implementation while keeping the allow-list
   // in place — invariant relaxation without enforcement is worse than no
   // allow-list at all.
-  it('allow-list anchors: db/repositories/memory-repository.ts contains DELETE FROM memory', () => {
-    const file = join(srcRoot, 'db/repositories/memory-repository.ts');
+  it('allow-list anchors: packages/db/src/repositories/memory-repository.ts contains DELETE FROM memory', () => {
+    const file = join(dbRoot, 'repositories/memory-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
   });
@@ -221,7 +260,8 @@ describe('append-only invariants (static grep)', () => {
   /**
    * The DELETE-FROM rules are anchored by their allow-listed files, which must
    * still contain the statement. The two `project_id` rules allow-list nothing —
-   * their exemption is `db/migrations/`, which `listSourceFiles` does not scan at
+   * their exemption is `packages/db/src/migrations/`, which `listSourceFiles`
+   * does not scan at
    * all — so with no file to anchor against, a pattern that matches nothing
    * anywhere is indistinguishable from a pattern that is doing its job. Both
    * were measured NOT CAUGHT by a mutation before this existed.
@@ -251,20 +291,20 @@ describe('append-only invariants (static grep)', () => {
     );
   });
 
-  it('allow-list anchors: db/repositories/agent-sessions-repository.ts contains DELETE FROM sessions', () => {
-    const file = join(srcRoot, 'db/repositories/agent-sessions-repository.ts');
+  it('allow-list anchors: packages/db/src/repositories/agent-sessions-repository.ts contains DELETE FROM sessions', () => {
+    const file = join(dbRoot, 'repositories/agent-sessions-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
   });
 
-  it('allow-list anchors: db/repositories/prompts-repository.ts contains DELETE FROM prompts', () => {
-    const file = join(srcRoot, 'db/repositories/prompts-repository.ts');
+  it('allow-list anchors: packages/db/src/repositories/prompts-repository.ts contains DELETE FROM prompts', () => {
+    const file = join(dbRoot, 'repositories/prompts-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+prompts\b/i.test(src)).toBe(true);
   });
 
   it('schema/prompts.ts declares content as immutable in its docstring', () => {
-    const file = join(srcRoot, 'db/schema/prompts.ts');
+    const file = join(dbRoot, 'schema/prompts.ts');
     const src = readFileSync(file, 'utf8');
     // Mirrors the pattern asserted for memory.content; the docstring must
     // make the append-only contract explicit so reviewers can rely on it.
@@ -292,17 +332,17 @@ describe('append-only invariants (static grep)', () => {
 
 /**
  * Two files suffice: the data-access invariant above already confines every
- * session `UPDATE` to `db/`, and the service is the only composer of a
+ * session `UPDATE` to the db package, and the service is the only composer of a
  * `Partial<NewAgentSession>`. Asserted on line TEXT, not line numbers, so an
  * edit elsewhere in the file cannot break it — only a new write site can.
  */
 describe('session lifecycle-column invariants', () => {
   const SESSION_WRITERS = [
-    'services/agent-sessions.ts',
-    'db/repositories/agent-sessions-repository.ts',
+    'apps/server/src/services/agent-sessions.ts',
+    'packages/db/src/repositories/agent-sessions-repository.ts',
   ] as const;
 
-  const sources = SESSION_WRITERS.map((rel) => readFileSync(join(srcRoot, rel), 'utf8'));
+  const sources = SESSION_WRITERS.map((rel) => readFileSync(join(repoRoot, rel), 'utf8'));
 
   // The one property grep can actually carry: the terminal write path derives
   // its `set` wholly from `precedenceSet` and never appends to it. Everything
@@ -347,10 +387,9 @@ describe('session lifecycle-column invariants', () => {
   });
 });
 
-// repoRoot points to the monorepo root (../../../ from apps/server/src/test).
-// srcRoot resolves to apps/server/src; the actual repo root is two levels up
-// from apps/server (one extra `..` for apps, one for the repo).
-const repoRoot = join(srcRoot, '..', '..', '..');
+// srcRoot resolves to apps/server/src and repoRoot/dbRoot/repoRoot are declared
+// with it at the top of this file — `repoRoot` used to be declared here, which
+// put it after the first `describe` that reads it.
 
 /**
  * `pnpm-workspace.yaml::allowBuilds` is the repo's entire install-time
@@ -515,22 +554,22 @@ describe('distroless runtime node-path invariants', () => {
  */
 const SCOPE_BYPASS_PATTERN = /\.unsafeGetByIds?\b/;
 const SCOPE_BYPASS_ALLOWED_PREFIXES = [
-  'db/repositories/memory-repository.ts',
-  'services/memory.ts',
-  'consolidation/',
-  'dashboard/',
+  'packages/db/src/repositories/memory-repository.ts',
+  'apps/server/src/services/memory.ts',
+  'apps/server/src/consolidation/',
+  'apps/server/src/dashboard/',
   // Eval harness ingest re-reads its own throwaway corpus across scopes
   // post-ingest — see add-retrieval-eval-harness.
-  'test/retrieval/ingest.ts',
+  'apps/server/src/test/retrieval/ingest.ts',
 ];
 
 describe('scope-leak invariant', () => {
-  const files = listSourceFiles(srcRoot);
+  const files = scanRoots();
 
   it('memory.unsafeGetBy* may only be called from allow-listed modules', () => {
     const offenders: { file: string; line: number; text: string }[] = [];
     for (const file of files) {
-      const rel = file.slice(srcRoot.length + 1);
+      const rel = relToRepo(file);
       const allowed = SCOPE_BYPASS_ALLOWED_PREFIXES.some((prefix) => rel.startsWith(prefix));
       if (allowed) continue;
       const lines = readFileSync(file, 'utf8').split('\n');
@@ -548,7 +587,8 @@ describe('scope-leak invariant', () => {
     if (offenders.length > 0) {
       const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
       throw new Error(
-        `memory.unsafeGetBy* called outside allow-list (consolidation/, dashboard/, services/memory.ts). ` +
+        `memory.unsafeGetBy* called outside allow-list (packages/db/src/repositories/memory-repository.ts, ` +
+          `apps/server/src/consolidation/, apps/server/src/dashboard/, apps/server/src/services/memory.ts). ` +
           `Use the scoped API instead, or add a justification + extend the allow-list.\n${formatted}`,
       );
     }
@@ -559,9 +599,13 @@ describe('scope-leak invariant', () => {
  * Data-access confinement invariant.
  *
  * ALL SQL — Drizzle query-builder calls, the drizzle-orm `sql` tag, and raw
- * better-sqlite3 statement APIs — lives under `src/db/`. Services, dashboard
- * handlers, MCP tools, the HTTP layer, consolidation, and embeddings are
- * SQL-free consumers of the repository layer + `db/diagnostics.ts`.
+ * better-sqlite3 statement APIs — lives under `packages/db/src/`. Services,
+ * dashboard handlers, MCP tools, the HTTP layer, consolidation, and embeddings
+ * are SQL-free consumers of the repository layer + `packages/db/src/diagnostics.ts`.
+ *
+ * The boundary is a package rather than a directory inside this app: the guard
+ * moved with the SQL, and the exemption below is now "the file came from the db
+ * package", which the app-side scan cannot reach by construction.
  */
 const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /from ['"]drizzle-orm['"]/, label: "import from 'drizzle-orm'" },
@@ -572,14 +616,13 @@ const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
 ];
 
 describe('data-access confinement invariant', () => {
-  const files = listSourceFiles(srcRoot);
+  const appFiles = listSourceFiles(srcRoot);
+  const dbFiles = listSourceFiles(dbRoot);
 
-  it('SQL executes only under src/db/', () => {
-    const offenders: { file: string; line: number; label: string; text: string }[] = [];
+  function scanSql(files: readonly string[]) {
+    const hits: { file: string; line: number; label: string; text: string }[] = [];
     for (const file of files) {
-      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
-      if (rel.startsWith('db/')) continue;
-      if (rel === 'scripts/seed-dev.ts') continue;
+      const rel = relToRepo(file);
       const lines = readFileSync(file, 'utf8').split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
@@ -588,16 +631,36 @@ describe('data-access confinement invariant', () => {
           continue;
         }
         for (const { pattern, label } of SQL_EXECUTION_PATTERNS) {
-          if (pattern.test(line)) offenders.push({ file: rel, line: i + 1, label, text: trimmed });
+          if (pattern.test(line)) hits.push({ file: rel, line: i + 1, label, text: trimmed });
         }
       }
     }
+    return hits;
+  }
+
+  /**
+   * Non-vacuity control. The rule below is a negative assertion over the app
+   * tree, and it passes trivially if the SQL it is meant to be standing next to
+   * has moved somewhere the scans never look (or if `dbRoot` resolves nowhere —
+   * `readdirSync` would throw, but a renamed directory would not). This asserts
+   * the positive half: the package really is where the SQL lives.
+   */
+  it('the db package is where the SQL actually is', () => {
+    const hits = scanSql(dbFiles);
+    expect(hits.length).toBeGreaterThan(50);
+    expect(new Set(hits.map((h) => h.file)).size).toBeGreaterThan(5);
+  });
+
+  it('SQL executes only under packages/db/src/', () => {
+    const offenders = scanSql(appFiles).filter(
+      (o) => o.file !== 'apps/server/src/scripts/seed-dev.ts',
+    );
     if (offenders.length > 0) {
       const formatted = offenders
         .map((o) => `  ${o.file}:${o.line}  [${o.label}]  ${o.text}`)
         .join('\n');
       throw new Error(
-        `SQL execution found outside src/db/. Move it into the repository layer or db/diagnostics.ts.\n${formatted}`,
+        `SQL execution found outside packages/db/src/. Move it into the repository layer or the package's diagnostics.ts.\n${formatted}`,
       );
     }
   });
@@ -611,7 +674,7 @@ describe('data-access confinement invariant', () => {
 const ADMIN_CALL_PATTERN = /\.(admin[A-Z]\w*)\(/g;
 
 const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
-  'server/dashboard-router.ts': [
+  'apps/server/src/server/dashboard-router.ts': [
     'adminCountArchived',
     'adminCountByStatus',
     'adminCountCreatedByDay',
@@ -623,25 +686,30 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
     'adminRecent',
     'adminRecentJudged',
   ],
-  'server/bootstrap.ts': [
+  'apps/server/src/server/bootstrap.ts': [
     'adminBacklogCount',
     'adminCountByStatus',
     'adminCountEntities',
     'adminCountNeedsReview',
     'adminLatestRun',
   ],
-  'services/agent-sessions.ts': ['adminCountByStatus'],
-  'services/hybrid-search.ts': ['adminDocumentCount', 'adminQueryTermFrequencies'],
+  'apps/server/src/services/agent-sessions.ts': ['adminCountByStatus'],
+  'apps/server/src/services/hybrid-search.ts': ['adminDocumentCount', 'adminQueryTermFrequencies'],
 };
 
 describe('admin-method confinement invariant', () => {
-  const files = listSourceFiles(srcRoot);
+  const files = scanRoots();
 
   it('every admin* call site is allow-listed by file AND method name', () => {
     const offenders: { file: string; line: number; method: string; text: string }[] = [];
     for (const file of files) {
-      const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
-      if (rel.startsWith('dashboard/') || rel.startsWith('db/repositories/')) continue;
+      const rel = relToRepo(file);
+      if (
+        rel.startsWith('apps/server/src/dashboard/') ||
+        rel.startsWith('packages/db/src/repositories/')
+      ) {
+        continue;
+      }
       const allowed = new Set(ADMIN_CALL_SITES[rel] ?? []);
       const lines = readFileSync(file, 'utf8').split('\n');
       for (let i = 0; i < lines.length; i++) {
@@ -671,7 +739,7 @@ describe('admin-method confinement invariant', () => {
   it('allow-list anchors: every named (file, method) pair is still called there', () => {
     const stale: string[] = [];
     for (const [rel, methods] of Object.entries(ADMIN_CALL_SITES)) {
-      const src = readFileSync(join(srcRoot, rel), 'utf8');
+      const src = readFileSync(join(repoRoot, rel), 'utf8');
       for (const method of methods) {
         if (!new RegExp(`\\.${method}\\(`).test(src)) stale.push(`${rel}::${method}`);
       }
@@ -685,7 +753,7 @@ describe('admin-method confinement invariant', () => {
  * data-access, "Scoped, unsafe, and admin method families". Set equality, so
  * both directions fail: an unlisted read, and a listed read that is gone.
  */
-const REPOSITORIES_DIR = join(srcRoot, 'db/repositories');
+const REPOSITORIES_DIR = join(dbRoot, 'repositories');
 
 const SCOPED_CONTENT_REPOSITORIES = [
   'agent-sessions-repository.ts',
@@ -1273,7 +1341,7 @@ describe('install URL drift invariant', () => {
 
 // SQLite migration FK-safety: SQLite refuses `DROP TABLE` on a parent
 // table whose children reference live rows when `foreign_keys=ON`, and
-// `db/client.ts` enables FKs before running migrations. `PRAGMA foreign_keys`
+// `packages/db/src/client.ts` enables FKs before running migrations. `PRAGMA foreign_keys`
 // cannot be changed inside a transaction and `defer_foreign_keys` does NOT
 // defer the DROP-TABLE check (verified empirically). The migration runner
 // therefore MUST disable FKs around each migration transaction and run
@@ -1282,7 +1350,7 @@ describe('install URL drift invariant', () => {
 // `rembric: FOREIGN KEY constraint failed` (the production incident that
 // motivated openspec/changes/fix-sessions-rebuild-fk-safety/).
 describe('migration runner FK-safety invariant', () => {
-  const migrateSrc = readFileSync(join(srcRoot, 'db/migrate.ts'), 'utf8');
+  const migrateSrc = readFileSync(join(dbRoot, 'migrate.ts'), 'utf8');
 
   it('migrate.ts disables foreign_keys around each migration transaction', () => {
     expect(/PRAGMA\s+foreign_keys\s*=\s*OFF/i.test(migrateSrc)).toBe(true);
@@ -1308,7 +1376,7 @@ describe('migration runner FK-safety invariant', () => {
 describe('oauth additive-migration invariant', () => {
   // The OAuth change promises the static `tokens` table is untouched and the
   // OAuth migration is purely additive (CREATE TABLE only — no rebuild dance).
-  const oauthMigration = readFileSync(join(srcRoot, 'db/migrations/0013_oauth_tables.sql'), 'utf8');
+  const oauthMigration = readFileSync(join(dbRoot, 'migrations/0013_oauth_tables.sql'), 'utf8');
 
   it('0013 never DROPs or ALTERs the static `tokens` table', () => {
     expect(/\b(DROP|ALTER)\s+TABLE\s+tokens\b/i.test(oauthMigration)).toBe(false);
@@ -1328,6 +1396,71 @@ describe('oauth additive-migration invariant', () => {
     for (const stmt of statements) {
       expect(/^CREATE\s+(TABLE|INDEX)\b/i.test(stmt), `non-additive statement: ${stmt}`).toBe(true);
     }
+  });
+});
+
+/**
+ * DS2 — migration discovery is equivalent across the extraction.
+ *
+ * Two facts make this the highest-consequence assertion in the file. The runner
+ * records a migration by FILENAME, so a rename makes it re-apply against a real
+ * database; and `defaultMigrationsDir()` resolves the directory next to the
+ * loaded module — `packages/db/src/migrations/` under test, `packages/db/dist/`
+ * `migrations/` in production. A build that copied the migrations elsewhere, or
+ * a file renamed along the way, is exactly the silent failure DS2 exists for.
+ */
+describe('migration discovery equivalence invariant (DS2)', () => {
+  const srcMigrations = join(dbRoot, 'migrations');
+  const distMigrations = join(repoRoot, 'packages/db/dist/migrations');
+
+  const sqlFiles = (dir: string): string[] =>
+    readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+
+  const digests = (dir: string, files: readonly string[]): string[] =>
+    files.map(
+      (f) =>
+        `${f} ${createHash('sha256')
+          .update(readFileSync(join(dir, f)))
+          .digest('hex')}`,
+    );
+
+  // Numbered, unique, contiguous from 0000: a rename cannot slip through. A
+  // changed number breaks contiguity, a changed name breaks the pattern, and a
+  // renumbering collides with the file that already held it.
+  it('every migration filename is numbered, unique and contiguous from 0000', () => {
+    const files = sqlFiles(srcMigrations);
+    expect(files.length).toBeGreaterThan(30);
+    for (const f of files) {
+      expect(f, `${f} is not a numbered migration filename`).toMatch(/^[0-9]{4}_[a-z0-9_]+\.sql$/);
+    }
+    expect(new Set(files).size).toBe(files.length);
+    expect(files.map((f) => f.slice(0, 4))).toEqual(
+      files.map((_, i) => String(i).padStart(4, '0')),
+    );
+  });
+
+  // The directory the runner actually resolves must be the one asserted above —
+  // otherwise the checks describe a directory nobody reads.
+  it('the runner resolves its migrations directory to the pinned source tree', () => {
+    expect(defaultMigrationsDir()).toBe(srcMigrations);
+    expect(sqlFiles(defaultMigrationsDir())).toEqual(sqlFiles(srcMigrations));
+  });
+
+  // CI runs the suite BEFORE the build, so `dist/` may legitimately not exist
+  // yet; the skip is reported rather than silent. When it does exist (a local
+  // run after `pnpm run build`, and the image), the copy must be byte-identical.
+  it('dist/migrations is byte-identical to src/migrations when the package is built', () => {
+    if (!existsSync(distMigrations)) {
+      console.warn(
+        `[DS2] ${distMigrations} absent (package not built in this run) — src == dist NOT verified here`,
+      );
+      return;
+    }
+    const names = sqlFiles(distMigrations);
+    expect(names).toEqual(sqlFiles(srcMigrations));
+    expect(digests(distMigrations, names)).toEqual(digests(srcMigrations, names));
   });
 });
 
@@ -1698,7 +1831,7 @@ function scanForPattern(
 ): { file: string; line: number; text: string }[] {
   const matches: { file: string; line: number; text: string }[] = [];
   for (const file of files) {
-    const rel = file.slice(srcRoot.length + 1).replace(/\\/g, '/');
+    const rel = relToRepo(file);
     const lines = readFileSync(file, 'utf8').split('\n');
     for (let i = 0; i < lines.length; i++) {
       const trimmed = lines[i]!.trim();
@@ -1710,7 +1843,7 @@ function scanForPattern(
 }
 
 describe('scope-is-one-arm invariant', () => {
-  const files = listAllTsFiles(srcRoot);
+  const files = [...listAllTsFiles(srcRoot), ...listAllTsFiles(dbRoot)];
 
   // Non-vacuity control. Every assertion below is negative, and an empty file
   // list — or a scan that never reads a line — satisfies all of them. This
@@ -1745,18 +1878,16 @@ describe('scope-is-one-arm invariant', () => {
  */
 const WIDENED_SCOPE_DISCRIMINANT = /'authorized-projects'/;
 const WIDENED_SCOPE_SITES: Record<string, number> = {
-  'services/scope.ts': 1,
-  'mcp/_shared.ts': 1,
+  'packages/db/src/scope.ts': 1,
+  'apps/server/src/mcp/_shared.ts': 1,
 };
 
 describe('the widened scope has one construction site', () => {
-  const production = listAllTsFiles(srcRoot).filter(
+  const production = [...listAllTsFiles(srcRoot), ...listAllTsFiles(dbRoot)].filter(
     (f) =>
       !f.endsWith('.test.ts') &&
-      !f
-        .slice(srcRoot.length + 1)
-        .replace(/\\/g, '/')
-        .startsWith('test/'),
+      !relToRepo(f).startsWith('apps/server/src/test/') &&
+      !relToRepo(f).startsWith('packages/db/src/migrations/'),
   );
 
   it('the scan reaches the production tree', () => {

@@ -1,14 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { MEMORY_TYPES, type Repositories, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
-import type { Repositories } from '../db/repositories/index.js';
-import { MEMORY_TYPES } from '../db/schema/memory.js';
 import { getRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import { DomainError } from '../services/errors.js';
 import type { ProjectsService } from '../services/projects.js';
 import { type RelationsService, type RelationView } from '../services/relations.js';
-import type { Scope } from '../services/scope.js';
 
 import { requireScope } from './_shared.js';
 import { errToMcp, mcpError } from './errors.js';

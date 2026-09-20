@@ -1,4 +1,4 @@
-import type { EntityKind } from '../../db/schema/entities.js';
+import { type EntityKind } from '@rembric/db';
 
 /**
  * Adversarial corpus behind `memory-entities`' "a kind MUST earn its place

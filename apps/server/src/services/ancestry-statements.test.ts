@@ -1,13 +1,11 @@
+import { createDb, createRepositories, type Scope } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDb } from '../db/client.js';
-import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 import { defaultProjectScope } from '../test/default-project.js';
 
 import { MemoryService, PREDECESSOR_CAP } from './memory.js';
 import { DISMISSAL_ANCESTRY_CAP, findSaveTimeCandidates } from './save-time-candidates.js';
-import type { Scope } from './scope.js';
 
 /**
  * Statement counts for the two ancestry walks, before and after the recursive CTE.

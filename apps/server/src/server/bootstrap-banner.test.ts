@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
+import { defaultMigrationsDir } from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createTestDb } from '../test/db.js';
@@ -71,9 +71,7 @@ describe('startup banner', () => {
     // EVERY file, not just the ones whose author declared a slow step: which file
     // is being applied is the runner's knowledge, so a fresh boot narrates all of
     // them. This is a fresh data dir, so every migration applies.
-    const files = readdirSync(fileURLToPath(new URL('../db/migrations', import.meta.url))).filter(
-      (f) => f.endsWith('.sql'),
-    );
+    const files = readdirSync(defaultMigrationsDir()).filter((f) => f.endsWith('.sql'));
     expect(files.length).toBeGreaterThan(1);
     expect(applying.map((l) => l.replace('[migrate] applying ', '')).sort()).toEqual(files.sort());
     const ready = lines.findIndex((l) => l.startsWith('[bootstrap] rembric v'));

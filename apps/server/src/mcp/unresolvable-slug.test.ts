@@ -1,12 +1,16 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import {
+  createRepositories,
+  memory as memoryTable,
+  projectScope,
+  prompts as promptsTable,
+  type Project,
+  type Repositories,
+  type Token,
+} from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { memory as memoryTable } from '../db/schema/memory.js';
-import type { Project } from '../db/schema/projects.js';
-import { prompts as promptsTable } from '../db/schema/prompts.js';
-import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -14,7 +18,6 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope } from '../services/scope.js';
 import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../test/index.js';
 
 import { buildInstructions } from './instructions.js';

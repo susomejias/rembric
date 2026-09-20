@@ -9,9 +9,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import { createDb, type DbHandle } from '../db/index.js';
+import { createDb, defaultMigrationsDir, type DbHandle } from '@rembric/db';
 
 /**
  * Stepping a database to the state just before one migration, then forward
@@ -23,7 +22,7 @@ import { createDb, type DbHandle } from '../db/index.js';
  * migrations directory is therefore staged file by file.
  */
 
-const SOURCE_DIR = fileURLToPath(new URL('../db/migrations', import.meta.url));
+const SOURCE_DIR = defaultMigrationsDir();
 
 export interface MigrationFixture {
   dataDir: string;

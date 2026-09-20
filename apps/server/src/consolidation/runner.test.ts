@@ -1,10 +1,15 @@
+import {
+  consolidationOps,
+  consolidationRuns,
+  createRepositories,
+  memory,
+  tokens as tokensSchema,
+  type MemoryType,
+  type NewMemory,
+} from '@rembric/db';
 import { desc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { consolidationOps, consolidationRuns } from '../db/schema/consolidation.js';
-import { memory, type MemoryType, type NewMemory } from '../db/schema/memory.js';
-import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { deriveTitle } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';

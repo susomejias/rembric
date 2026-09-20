@@ -7,11 +7,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { agentSessions, createRepositories } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { agentSessions } from '../db/schema/agent-sessions.js';
 import {
   CONTEXT_MEMORIES_MAX,
   CONTEXT_PROMPTS_MAX,

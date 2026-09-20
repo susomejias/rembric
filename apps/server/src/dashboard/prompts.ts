@@ -1,7 +1,6 @@
+import { type Prompt, type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
 
-import type { Repositories } from '../db/repositories/index.js';
-import type { Prompt } from '../db/schema/prompts.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { PromptsService } from '../services/prompts.js';

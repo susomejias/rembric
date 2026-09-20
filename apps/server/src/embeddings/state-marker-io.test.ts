@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type * as fs from 'node:fs';
 
+import { createRepositories, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { EmbeddingWorker } from '../services/embedding-worker.js';
 import { MemoryService } from '../services/memory.js';
 import { createTestDb, defaultProjectScope, FakeEmbedder, type TestDb } from '../test/index.js';

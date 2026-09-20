@@ -12,10 +12,10 @@ import {
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { type DbDiagnostics } from '@rembric/db';
 import express from 'express';
 import { Hono, type Context } from 'hono';
 
-import type { DbDiagnostics } from '../db/diagnostics.js';
 import type { McpTransportManager } from '../mcp/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { OAuthService } from '../services/oauth.js';

@@ -1,5 +1,4 @@
-import type { Repositories } from '../db/repositories/index.js';
-import type { MemoryType } from '../db/schema/memory.js';
+import { type MemoryType, type Repositories } from '@rembric/db';
 
 import type { ScopeKey } from './candidates.js';
 

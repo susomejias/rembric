@@ -1,6 +1,6 @@
+import { createDiagnostics, type DbDiagnostics } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
 import { doctorReport } from '../test/doctor.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 

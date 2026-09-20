@@ -1,7 +1,12 @@
+import {
+  MEMORY_TYPES,
+  projectScope,
+  type Memory,
+  type MemoryType,
+  type Repositories,
+} from '@rembric/db';
 import { Hono } from 'hono';
 
-import type { Repositories } from '../db/repositories/index.js';
-import { MEMORY_TYPES, type Memory, type MemoryType } from '../db/schema/memory.js';
 import { DomainError } from '../services/errors.js';
 import { sanitizeFtsQuery } from '../services/hybrid-search.js';
 import type { MemoryService } from '../services/memory.js';
@@ -12,7 +17,6 @@ import {
   REVIEW_TTL_MS,
   type ReviewState,
 } from '../services/review.js';
-import { projectScope } from '../services/scope.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import {

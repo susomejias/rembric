@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
+import { type Repositories, type TransactionRunner } from '@rembric/db';
 
 import { EXTRACTOR_VERSION } from './entities.js';
 

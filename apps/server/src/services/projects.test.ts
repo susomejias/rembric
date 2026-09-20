@@ -1,6 +1,6 @@
+import { createRepositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { ProjectsService, SLUG_REGEX } from './projects.js';
