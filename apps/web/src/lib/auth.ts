@@ -1,5 +1,4 @@
-import { DomainError } from '@rembric/core';
-import type { OAuthService } from '@rembric/core';
+import type { DomainError, OAuthService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { RequestContext } from '@rembric/core';
 import type { ResolvedToken, TokenScope, TokensService } from '@rembric/core';
@@ -34,6 +33,27 @@ export class AuthError extends Error {
     super(message);
     this.name = 'AuthError';
   }
+}
+
+/**
+ * `DomainError` identified by shape rather than by class identity.
+ *
+ * Turbopack assigns a distinct module id to `@rembric/core` per chunk group,
+ * so the `DomainError` a service throws and the one this module imported can be
+ * two different classes and `instanceof` is false across them (measured: the
+ * standalone `/.next/server/chunks/` carries two copies, and every invalid or
+ * revoked bearer came back 500 instead of 401). `name` plus a string `code` is
+ * the contract both copies share (`packages/core/src/services/errors.ts`); the
+ * `name` clause is what keeps a better-sqlite3 `SqliteError` — which also
+ * carries a string `code`, e.g. `SQLITE_BUSY` — from being reported as an
+ * authentication failure.
+ */
+export function isDomainError(err: unknown): err is DomainError {
+  return (
+    err instanceof Error &&
+    err.name === 'DomainError' &&
+    typeof (err as { code?: unknown }).code === 'string'
+  );
 }
 
 const BEARER_PREFIX = 'bearer ';
@@ -109,7 +129,7 @@ async function resolveToken(
   try {
     return await tokens.authenticate(plaintext);
   } catch (err) {
-    if (!(err instanceof DomainError)) throw err;
+    if (!isDomainError(err)) throw err;
     if (err.code === 'token_revoked') {
       throw new AuthError('token_revoked', 'token has been revoked', 401);
     }
