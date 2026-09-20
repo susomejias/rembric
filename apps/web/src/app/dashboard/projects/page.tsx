@@ -1,10 +1,15 @@
 import { SLUG_REGEX } from '@rembric/core';
 import Link from 'next/link';
 
-import { projectsQuery, readProjectsFilters, type SearchParams } from './filters';
+import {
+  DEFAULT_PROJECT_STATUS,
+  projectsQuery,
+  readProjectsFilters,
+  type SearchParams,
+} from './filters';
 
 import { StatusBadge } from '@/components/dashboard/badges';
-import { EmptyState } from '@/components/dashboard/empty-state';
+import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import { FilterBar, FilterField, FilterSelect } from '@/components/dashboard/filter-bar';
 import { PAGE_SIZE, queryWithPage } from '@/components/dashboard/format';
 import { Pager } from '@/components/dashboard/pager';
@@ -57,6 +62,10 @@ export default async function ProjectsPage({
   // them (minus `page`).
   const roundTripQuery = projectsQuery(params);
   const filterKey = queryWithPage(roundTripQuery, 0);
+
+  // "No project at all" and "no project in this status" are different answers;
+  // only the second one has a way out that this page can offer.
+  const isFiltered = filters.status !== DEFAULT_PROJECT_STATUS;
 
   const { projects } = getServices();
   // One read for every status: the retired view read both lists anyway, and the
@@ -134,7 +143,20 @@ export default async function ProjectsPage({
 
       <div id="projects-list" className="flex flex-col gap-3">
         {visible.length === 0 ? (
-          <EmptyState>No projects match this filter.</EmptyState>
+          isFiltered ? (
+            <TableNoResults what="projects" clearHref="/dashboard/projects" />
+          ) : (
+            <TableEmptyState
+              title="No projects yet"
+              description={
+                <>
+                  Nothing is registered on this server. The create form above is not wired in this
+                  port (mutation protection is pending, see the banner), so today the projects the
+                  installer or the seed script created are the ones listed here.
+                </>
+              }
+            />
+          )
         ) : (
           <Table className="font-sans">
             <TableHeader>

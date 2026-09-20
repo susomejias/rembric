@@ -38,6 +38,8 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-active-bg: var(--active-bg);
+  --color-active-border: var(--active-border);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-warn: var(--warn);
@@ -133,6 +135,13 @@
   --sidebar-border: rgb(18 20 13 / 0.08);
   --sidebar-ring: #6c8c1f;
 
+  /* The sidebar's active-item pill. Not a semantic slot: it is the one surface
+     that is a hairline-filled region of the page background rather than a
+     button, and Midday's two values — a fill a hair off `--background` and its
+     own border — are what the nav was specified against. */
+  --active-bg: #f7f7f7;
+  --active-border: #e6e6e6;
+
   /* Glass roles — owned by the identity layer, not by the semantic set. */
   --glass-tint: rgb(255 255 255 / 0.62);
   --glass-fallback-tint: #f2f4ee;
@@ -191,6 +200,9 @@
   --sidebar-accent-foreground: #f2f2f2;
   --sidebar-border: rgb(255 255 255 / 0.1);
   --sidebar-ring: #c6f24e;
+
+  --active-bg: #131313;
+  --active-border: #1d1d1d;
 
   --glass-tint: rgb(16 16 16 / 0.62);
   --glass-fallback-tint: #141414;

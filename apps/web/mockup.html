@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rembric — Midday shell</title>
+    <style>
+      :root {
+        --background: #f7f8f4;
+        --foreground: #12140d;
+        --border: #e6e6e6;
+        --border-dark: #1d1d1d;
+        --primary: #c6f24e;
+        --primary-fg: #0a0a0a;
+        --muted: #5b6053;
+        --warn: #ff8c00;
+        --active-bg: #f7f7f7;
+        --active-border: #e6e6e6;
+      }
+      .dark {
+        --background: #0a0a0a;
+        --foreground: #f2f2f2;
+        --border: #1d1d1d;
+        --primary: #c6f24e;
+        --primary-fg: #0a0a0a;
+        --muted: #9a9a9a;
+        --warn: #ff8c00;
+        --active-bg: #131313;
+        --active-border: #1d1d1d;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        background: var(--background);
+        color: var(--foreground);
+      }
+      a {
+        text-decoration: none;
+        color: inherit;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .app {
+        display: flex;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        height: 100vh;
+        flex-shrink: 0;
+        flex-direction: column;
+        justify-content: space-between;
+        position: fixed;
+        top: 0;
+        padding-bottom: 16px;
+        align-items: center;
+        display: none;
+        z-index: 50;
+        border-radius: 10px 0 0 10px;
+        background: var(--background);
+        border-right: 1px solid var(--border);
+        transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        width: 70px;
+        overflow: hidden;
+      }
+      @media (min-width: 768px) {
+        .sidebar {
+          display: flex;
+        }
+      }
+      .sidebar:hover {
+        width: 240px;
+      }
+
+      .logo-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 70px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--background);
+        border-bottom: 1px solid var(--border);
+        transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        width: 69px;
+        z-index: 1;
+      }
+      .sidebar:hover .logo-bar {
+        width: 100%;
+      }
+      .logo-bar a {
+        position: absolute;
+        left: 22px;
+        width: 28px;
+        height: 28px;
+        background: var(--primary);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 0.8rem;
+        color: var(--primary-fg);
+      }
+
+      .nav-wrap {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        padding-top: 70px;
+        flex: 1;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+      .nav-wrap .mt {
+        margin-top: 16px;
+      }
+
+      .nav-item {
+        position: relative;
+      }
+      .nav-item > a {
+        display: block;
+      }
+      .nav-bg {
+        border: 1px solid transparent;
+        height: 40px;
+        transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        margin-left: 15px;
+        margin-right: 15px;
+      }
+      .nav-item.active .nav-bg {
+        background: var(--active-bg);
+        border-color: var(--active-border);
+      }
+      .sidebar:not(:hover) .nav-bg {
+        width: 40px;
+      }
+      .sidebar:hover .nav-bg {
+        width: calc(100% - 30px);
+      }
+      .nav-icon {
+        position: absolute;
+        top: 0;
+        left: 15px;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        pointer-events: none;
+        color: var(--foreground);
+      }
+      .nav-item.active .nav-icon {
+        color: var(--primary);
+      }
+      .nav-label {
+        position: absolute;
+        top: 0;
+        left: 55px;
+        right: 4px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        pointer-events: none;
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #666;
+        white-space: nowrap;
+        overflow: hidden;
+        opacity: 0;
+        transition: opacity 200ms ease-in-out;
+      }
+      .dark .nav-label {
+        color: #9a9a9a;
+      }
+      .nav-item.active .nav-label {
+        color: var(--primary);
+      }
+      .sidebar:hover .nav-label {
+        opacity: 1;
+      }
+      .nav-badge {
+        margin-left: auto;
+        margin-right: 12px;
+        font-size: 0.6rem;
+        font-weight: 600;
+        background: var(--warn);
+        color: var(--primary-fg);
+        padding: 1px 6px;
+        border-radius: 999px;
+      }
+
+      .team-footer {
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+      }
+      .team-avatar {
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        background: var(--primary);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 0.75rem;
+        color: var(--primary-fg);
+      }
+      .team-name {
+        margin-left: 10px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 150ms 100ms;
+      }
+      .sidebar:hover .team-name {
+        opacity: 1;
+      }
+
+      .content {
+        margin-left: 70px;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+      }
+      .topbar {
+        height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 24px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        background: var(--background);
+      }
+      .trigger {
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 0.9rem;
+        background: transparent;
+        color: var(--foreground);
+      }
+      .breadcrumb {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .main {
+        padding: 24px;
+        flex: 1;
+      }
+
+      .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .stat-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .stat-card .label {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .stat-card .value {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--foreground);
+      }
+      .stat-card .value.lime {
+        color: var(--primary);
+      }
+      .stat-card .sub {
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+
+      .section-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .section-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 20px;
+      }
+      .section-card h3 {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .section-card .item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        font-size: 0.82rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .section-card .item:last-child {
+        border-bottom: none;
+      }
+      .section-card .item a {
+        color: var(--muted);
+        font-size: 0.7rem;
+      }
+
+      .tbl {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+      }
+      .tbl th {
+        text-align: left;
+        padding: 8px 12px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+      }
+      .tbl td {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .badge {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.65rem;
+        font-weight: 600;
+      }
+      .badge.lime {
+        background: rgba(198, 242, 78, 0.12);
+        color: #55750a;
+      }
+      .dark .badge.lime {
+        background: rgba(198, 242, 78, 0.08);
+        color: var(--primary);
+      }
+      .badge.warn {
+        background: rgba(255, 140, 0, 0.1);
+        color: var(--warn);
+      }
+      .badge.muted {
+        opacity: 0.4;
+      }
+
+      .spark {
+        width: 100%;
+        height: 40px;
+      }
+      .spark rect {
+        fill: var(--primary);
+        opacity: 0.3;
+      }
+
+      .theme-toggle {
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 0.9rem;
+        margin-left: auto;
+        background: transparent;
+        color: var(--foreground);
+      }
+      .mock-label {
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 8px 16px;
+        border-radius: 6px;
+        display: inline-block;
+        margin: 8px 0;
+      }
+      .mock-label.light {
+        background: var(--background);
+        color: var(--foreground);
+        border: 1px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mock-label light">☀ Light — Midday sidebar exact structure</div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="logo-bar"><a href="#">R</a></div>
+        <div class="nav-wrap">
+          <div class="nav-wrap mt"></div>
+          <nav style="width: 100%">
+            <div style="display: flex; flex-direction: column; gap: 8px; padding: 0 0">
+              <div class="nav-item active">
+                <a href="#">
+                  <div class="nav-bg"></div>
+                  <div class="nav-icon">▦</div>
+                  <div class="nav-label">Overview</div>
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="#">
+                  <div class="nav-bg"></div>
+                  <div class="nav-icon">🧠</div>
+                  <div class="nav-label">Memories</div>
+                  <div
+                    class="nav-badge"
+                    style="
+                      position: absolute;
+                      top: 0;
+                      right: 4px;
+                      height: 40px;
+                      display: flex;
+                      align-items: center;
+                      pointer-events: none;
+                      opacity: 0;
+                      transition: opacity 150ms 150ms;
+                    "
+                  >
+                    3
+                  </div>
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">💬</div>
+                  <div class="nav-label">Sessions</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">📋</div>
+                  <div class="nav-label">Prompts</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#">
+                  <div class="nav-bg"></div>
+                  <div class="nav-icon">⚖</div>
+                  <div class="nav-label">Judgments</div>
+                  <div
+                    class="nav-badge"
+                    style="
+                      position: absolute;
+                      top: 0;
+                      right: 4px;
+                      height: 40px;
+                      display: flex;
+                      align-items: center;
+                      pointer-events: none;
+                      opacity: 0;
+                      transition: opacity 150ms 150ms;
+                    "
+                  >
+                    21
+                  </div>
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🔗</div>
+                  <div class="nav-label">Consolidation</div></a
+                >
+              </div>
+            </div>
+          </nav>
+          <div
+            class="nav-group-label"
+            style="
+              font-size: 0.6rem;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.1em;
+              padding: 16px 22px 4px;
+              color: var(--muted);
+              opacity: 0;
+              transition: opacity 150ms 100ms;
+              white-space: nowrap;
+            "
+          >
+            Admin
+          </div>
+          <nav style="width: 100%">
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">📁</div>
+                  <div class="nav-label">Projects</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🔑</div>
+                  <div class="nav-label">Tokens</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🔧</div>
+                  <div class="nav-label">Maintenance</div></a
+                >
+              </div>
+            </div>
+          </nav>
+        </div>
+        <div class="team-footer">
+          <div class="team-avatar">R</div>
+          <span class="team-name">Rembric</span>
+        </div>
+      </aside>
+      <div class="content">
+        <div class="topbar">
+          <div class="trigger">☰</div>
+          <span class="breadcrumb">Overview</span>
+          <button class="theme-toggle" onclick="document.documentElement.classList.toggle('dark')">
+            🌙
+          </button>
+        </div>
+        <div class="main">
+          <h1 style="margin-bottom: 24px">Overview</h1>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="label">Total Memories</span><span class="value">35</span>
+            </div>
+            <div class="stat-card">
+              <span class="label">Active Memories</span><span class="value lime">18</span
+              ><span class="sub" style="font-size: 0.7rem; color: var(--muted)">51% of total</span>
+            </div>
+            <div class="stat-card">
+              <span class="label">Superseded</span><span class="value warn">17</span
+              ><span class="sub" style="font-size: 0.7rem; color: var(--muted)"
+                >Safe to archive</span
+              >
+            </div>
+          </div>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="label">Archived</span><span class="value">0</span
+              ><span class="sub" style="font-size: 0.7rem; color: var(--muted)">Decayed</span>
+            </div>
+            <div class="stat-card">
+              <span class="label">Projects</span><span class="value lime">20</span
+              ><span class="sub" style="font-size: 0.7rem; color: var(--muted)">0 archived</span>
+            </div>
+            <div class="stat-card">
+              <span class="label">Active Sessions</span><span class="value lime">2</span
+              ><span class="sub" style="font-size: 0.7rem; color: var(--muted)">Connected now</span>
+            </div>
+          </div>
+          <div class="section-row">
+            <div class="section-card">
+              <h3>Activity · 7 Days</h3>
+              <svg class="spark" viewBox="0 0 280 40" preserveAspectRatio="none">
+                <rect x="0" y="20" width="35" height="20" rx="2" />
+                <rect x="40" y="28" width="35" height="12" rx="2" />
+                <rect x="80" y="32" width="35" height="8" rx="2" />
+                <rect x="120" y="24" width="35" height="16" rx="2" />
+                <rect x="160" y="30" width="35" height="10" rx="2" />
+                <rect x="200" y="12" width="35" height="28" rx="2" />
+                <rect x="240" y="0" width="35" height="40" rx="2" opacity="0.6" />
+              </svg>
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  font-size: 0.6rem;
+                  color: var(--muted);
+                  margin-top: 4px;
+                "
+              >
+                <span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span
+                ><span>SAT</span><span>SUN</span>
+              </div>
+            </div>
+            <div class="section-card">
+              <h3>Consolidation Health</h3>
+              <div class="item">
+                <span style="flex: 1">Last run</span><span>OK · global · 2 ops</span>
+              </div>
+              <div class="item"><span style="flex: 1">Orphaned pendings</span><span>0</span></div>
+              <div class="item">
+                <span style="flex: 1">Trigger</span><span>ON SESSION START · THROTTLED 24H</span>
+              </div>
+            </div>
+          </div>
+          <div class="section-row">
+            <div class="section-card">
+              <h3>Recent Memories</h3>
+              <div class="item">
+                <span class="badge lime">active</span
+                ><span
+                  style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                  >Use formatTs helper for absolute timestamps</span
+                >
+              </div>
+              <div class="item">
+                <span class="badge warn">needs review</span
+                ><span
+                  style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                  >Force a manual sweep after every bulk import</span
+                >
+              </div>
+              <div class="item">
+                <span class="badge lime">active</span
+                ><span
+                  style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                  >Smoke check: curl -I -H Authorization: Bearer</span
+                >
+              </div>
+              <div style="margin-top: 8px">
+                <a href="#" style="font-size: 0.7rem; color: var(--muted)">OPEN ALL ›</a>
+              </div>
+            </div>
+            <div class="section-card">
+              <h3>Recent Sessions</h3>
+              <div class="item">
+                <span style="flex: 1">demo · 08:30 UTC</span><span class="badge lime">active</span>
+              </div>
+              <div class="item">
+                <span style="flex: 1">Hermes lifecycle smoke</span
+                ><span class="badge muted">ended</span>
+              </div>
+              <div class="item">
+                <span style="flex: 1">demo · 08:30 UTC (codex-cli)</span
+                ><span class="badge lime">active</span>
+              </div>
+              <div style="margin-top: 8px">
+                <a href="#" style="font-size: 0.7rem; color: var(--muted)">OPEN ALL ›</a>
+              </div>
+            </div>
+          </div>
+          <div class="section-row">
+            <div class="section-card">
+              <h3>System</h3>
+              <div class="item">
+                <span style="flex: 1">DB file</span
+                ><span style="font-family: monospace; font-size: 0.7rem">data-dev/data.db</span>
+              </div>
+              <div class="item">
+                <span style="flex: 1">DB size</span
+                ><span style="font-family: monospace; font-size: 0.7rem">416.0 KB</span>
+              </div>
+              <div class="item">
+                <span style="flex: 1">Node</span
+                ><span style="font-family: monospace; font-size: 0.7rem">v22.23.0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <br />
+
+    <div class="mock-label dark">🌙 Dark — same structure</div>
+    <div class="app dark">
+      <aside class="sidebar" style="background: var(--background); border-color: var(--border)">
+        <div class="logo-bar"><a href="#">R</a></div>
+        <div class="nav-wrap">
+          <div class="nav-wrap mt"></div>
+          <nav style="width: 100%">
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div class="nav-item active">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">▦</div>
+                  <div class="nav-label">Overview</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🧠</div>
+                  <div class="nav-label">Memories</div>
+                  <div
+                    class="nav-badge"
+                    style="
+                      position: absolute;
+                      top: 0;
+                      right: 4px;
+                      height: 40px;
+                      display: flex;
+                      align-items: center;
+                      pointer-events: none;
+                      opacity: 0;
+                      transition: opacity 150ms 150ms;
+                    "
+                  >
+                    3
+                  </div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">💬</div>
+                  <div class="nav-label">Sessions</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">📋</div>
+                  <div class="nav-label">Prompts</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">⚖</div>
+                  <div class="nav-label">Judgments</div>
+                  <div
+                    class="nav-badge"
+                    style="
+                      position: absolute;
+                      top: 0;
+                      right: 4px;
+                      height: 40px;
+                      display: flex;
+                      align-items: center;
+                      pointer-events: none;
+                      opacity: 0;
+                      transition: opacity 150ms 150ms;
+                    "
+                  >
+                    21
+                  </div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🔗</div>
+                  <div class="nav-label">Consolidation</div></a
+                >
+              </div>
+            </div>
+          </nav>
+          <div
+            class="nav-group-label"
+            style="
+              font-size: 0.6rem;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.1em;
+              padding: 16px 22px 4px;
+              color: var(--muted);
+              opacity: 0;
+              transition: opacity 150ms 100ms;
+              white-space: nowrap;
+            "
+          >
+            Admin
+          </div>
+          <nav style="width: 100%">
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">📁</div>
+                  <div class="nav-label">Projects</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🔑</div>
+                  <div class="nav-label">Tokens</div></a
+                >
+              </div>
+              <div class="nav-item">
+                <a href="#"
+                  ><div class="nav-bg"></div>
+                  <div class="nav-icon">🔧</div>
+                  <div class="nav-label">Maintenance</div></a
+                >
+              </div>
+            </div>
+          </nav>
+        </div>
+        <div class="team-footer">
+          <div class="team-avatar">R</div>
+          <span class="team-name">Rembric</span>
+        </div>
+      </aside>
+      <div class="content">
+        <div class="topbar">
+          <div class="trigger">☰</div>
+          <span class="breadcrumb">Overview</span>
+          <button class="theme-toggle" onclick="document.documentElement.classList.toggle('dark')">
+            ☀️
+          </button>
+        </div>
+        <div class="main">
+          <h1 style="margin-bottom: 24px">Overview</h1>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="label">Total Memories</span><span class="value">35</span>
+            </div>
+            <div class="stat-card">
+              <span class="label">Active Memories</span><span class="value lime">18</span
+              ><span class="sub" style="color: var(--muted); font-size: 0.7rem">51% of total</span>
+            </div>
+            <div class="stat-card">
+              <span class="label">Superseded</span><span class="value warn">17</span
+              ><span class="sub" style="color: var(--muted); font-size: 0.7rem"
+                >Safe to archive</span
+              >
+            </div>
+          </div>
+          <div class="section-row">
+            <div class="section-card">
+              <h3>Activity · 7 Days</h3>
+              <svg class="spark" viewBox="0 0 280 40" preserveAspectRatio="none">
+                <rect x="0" y="20" width="35" height="20" rx="2" />
+                <rect x="40" y="28" width="35" height="12" rx="2" />
+                <rect x="80" y="32" width="35" height="8" rx="2" />
+                <rect x="120" y="24" width="35" height="16" rx="2" />
+                <rect x="160" y="30" width="35" height="10" rx="2" />
+                <rect x="200" y="12" width="35" height="28" rx="2" />
+                <rect x="240" y="0" width="35" height="40" rx="2" opacity="0.6" />
+              </svg>
+            </div>
+            <div class="section-card">
+              <h3>Recent Memories</h3>
+              <div class="item">
+                <span class="badge lime">active</span
+                ><span style="flex: 1">Use formatTs helper for absolute timestamps</span>
+              </div>
+              <div class="item">
+                <span class="badge warn">needs review</span
+                ><span style="flex: 1">Force a manual sweep after every bulk import</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

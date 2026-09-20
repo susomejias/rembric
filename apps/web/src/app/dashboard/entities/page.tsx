@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 import { entitiesQuery, readEntitiesFilters, type SearchParams } from './filters';
 
-import { EmptyState } from '@/components/dashboard/empty-state';
+import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import { FilterBar, FilterField, FilterSelect } from '@/components/dashboard/filter-bar';
 import { PAGE_SIZE, queryWithPage, shortId } from '@/components/dashboard/format';
 import { Pager } from '@/components/dashboard/pager';
@@ -48,6 +48,8 @@ export default async function EntitiesPage({
   // The params the pager and the filter form round-trip.
   const roundTripQuery = entitiesQuery(params);
   const filterKey = queryWithPage(roundTripQuery, 0);
+
+  const isFiltered = filters.kind !== '' || filters.singleReferenceOnly;
 
   const { repos } = getServices();
 
@@ -113,7 +115,20 @@ export default async function EntitiesPage({
 
       <div id="entities-list" className="flex flex-col gap-3">
         {rows.length === 0 ? (
-          <EmptyState>No entities match this filter.</EmptyState>
+          isFiltered ? (
+            <TableNoResults what="entities" clearHref="/dashboard/entities" />
+          ) : (
+            <TableEmptyState
+              title="No entities yet"
+              description={
+                <>
+                  Entities are extracted from saved memories by the deterministic scan — it runs on
+                  session start and from the maintenance page's backfill, so this list fills as
+                  memories arrive.
+                </>
+              }
+            />
+          )
         ) : (
           <Table className="font-sans">
             <TableHeader>

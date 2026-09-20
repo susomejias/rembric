@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { CommandPaletteTrigger } from './command-palette';
+
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,26 +13,31 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
-import { Separator } from '@/components/ui/separator';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { navEntryForPath } from '@/lib/nav';
 
 /**
- * The slim glass header inside `SidebarInset`. It carries the sidebar trigger
- * (which is also the narrow-viewport entry point, because the provider routes
- * the trigger to its mobile sheet) and the breadcrumb for the current route.
+ * The slim sticky header over the content column: the trigger, the breadcrumb and
+ * the pointer affordance for the command palette (Cmd+K is the keyboard one, and
+ * is what `CommandPalette` listens for globally).
+ *
+ * It sits at `z-40`, one layer under the `z-50` rail, so a hover-expanded sidebar
+ * slides over the header's left edge instead of the translucent header ghosting
+ * through it. The header itself stays legible because `glass-chrome` carries the
+ * opaque fallback for engines without `backdrop-filter` (`src/styles/glass.css`).
+ *
+ * The trigger is narrow-viewport only: on a pointer device the rail expands on
+ * hover, so a click-to-toggle would fight the pointer state it is already in. The
+ * provider routes the trigger to its mobile sheet, which is the only way to reach
+ * the navigation on a phone.
  */
 export function SiteHeader() {
   const entry = navEntryForPath(usePathname());
   const isRoot = !entry || entry.href === '/dashboard';
 
   return (
-    <header className="glass-chrome sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4">
-      <SidebarTrigger className="-ml-1" />
-      <Separator
-        orientation="vertical"
-        className="mr-1 data-vertical:h-4 data-vertical:self-auto"
-      />
+    <header className="glass-chrome sticky top-0 z-40 flex h-14 shrink-0 items-center gap-3 border-b px-6">
+      <SidebarTrigger className="-ml-2 md:hidden" />
       <Breadcrumb>
         <BreadcrumbList>
           {isRoot ? null : (
@@ -48,6 +55,7 @@ export function SiteHeader() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
+      <CommandPaletteTrigger className="ml-auto hidden sm:flex" />
     </header>
   );
 }

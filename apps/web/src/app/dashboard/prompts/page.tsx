@@ -10,7 +10,7 @@ import {
   type SearchParams,
 } from './filters';
 
-import { EmptyState } from '@/components/dashboard/empty-state';
+import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import {
   FilterBar,
   FilterField,
@@ -67,6 +67,12 @@ export default async function PromptsPage({
   const filters = readPromptsFilters(params);
   const roundTripQuery = promptsQuery(params);
   const filterKey = queryWithPage(roundTripQuery, 0);
+
+  // `include_deleted` widens the list rather than narrowing it, so it is not
+  // part of "is this list filtered" — an empty result with it on is still an
+  // empty corpus.
+  const isFiltered =
+    filters.project !== '' || filters.session !== '' || filters.agent !== '' || filters.q !== '';
 
   const { repos } = getServices();
 
@@ -200,7 +206,27 @@ export default async function PromptsPage({
 
       <div className="flex flex-col gap-3">
         {visible.length === 0 ? (
-          <EmptyState>No prompts match this filter.</EmptyState>
+          isFiltered ? (
+            <TableNoResults
+              what="prompts"
+              clearHref={
+                filters.includeDeleted
+                  ? '/dashboard/prompts?include_deleted=1'
+                  : '/dashboard/prompts'
+              }
+            />
+          ) : (
+            <TableEmptyState
+              title="No prompts yet"
+              description={
+                <>
+                  Prompts are captured by the client plugins as they work, through{' '}
+                  <code className="font-mono">memory.save_prompt</code>. Nothing has been captured
+                  in this scope yet.
+                </>
+              }
+            />
+          )
         ) : (
           <Table className="font-sans">
             <TableHeader>
