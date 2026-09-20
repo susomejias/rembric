@@ -1,10 +1,5 @@
-import { REMBRIC_VERSION } from '../lib/version';
+import { redirect } from 'next/navigation';
 
-export default function HomePage() {
-  return (
-    <main>
-      <h1>Rembric</h1>
-      <p>Server version: {REMBRIC_VERSION}</p>
-    </main>
-  );
+export default function RootPage() {
+  redirect('/dashboard');
 }
