@@ -1,4 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { dirname } from 'node:path';
+
+import { ensureEntityExtractor, entityMarkerPath } from '@rembric/core';
 
 import type { Services } from './services';
 import { getServices } from './services';
@@ -7,7 +10,8 @@ import { getServices } from './services';
  * The web app's process-level responsibilities — the part of
  * `apps/server/src/server/bootstrap.ts` that belongs to the running process
  * rather than to a listener: the eager database open, the admin-token
- * bootstrap, the stale-session reaper and the embedder drain worker.
+ * bootstrap, the stale-session reaper, the embedder drain worker and the
+ * resumable entity-extraction backfill.
  *
  * `instrumentation.ts`'s `register()` is the only caller. `register()` may not
  * throw (Next treats a throwing hook as a fatal boot error), so every timer
@@ -21,6 +25,14 @@ const ADMIN_TOKEN_MIN_LENGTH = 16;
 const REAP_INTERVAL_MS = 30 * 60_000;
 const EMBED_TICK_MS = 30_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
+
+/**
+ * `bootstrap.ts`: the entity backfill self-schedules — 500 ms between batches
+ * while a backlog drains, 30 s when idle, plus an hourly forced pass.
+ */
+const ENTITY_DRAIN_DELAY_MS = 500;
+const ENTITY_IDLE_DELAY_MS = 30_000;
+const ENTITY_FALLBACK_MS = 60 * 60_000;
 
 /**
  * `register()` is documented as once per server instance, but Next re-evaluates
@@ -50,6 +62,7 @@ export function startProcess(): void {
   bootstrapAdminToken(services);
   startSessionReaper(services);
   startEmbeddingDrain(services);
+  startEntityBackfill(services);
 }
 
 /**
@@ -231,4 +244,77 @@ function startEmbeddingDrain(services: Services): void {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Port of `bootstrap.ts`'s resumable entity-extraction backfill: the extractor
+ * identity check, an immediate forced batch, and a self-scheduling drain.
+ *
+ * `ensureEntityExtractor` is boot work, not drain work, and it is what makes
+ * `entityIndexResetWarning` resolvable: `lib/mcp-server.ts` reports "the next
+ * restart" as the moment a recipe change is repaired, so a boot that skipped
+ * the check would leave that warning in `memory.doctor` forever.
+ *
+ * `dataDir` comes from the open connection rather than from
+ * `REMBRIC_DATA_DIR`, the same choice `lib/mcp-server.ts::buildDoctorReport`
+ * documents (data-safety DS1): the marker must be read from the directory this
+ * process actually opened, or a deployment whose env disagrees with the file it
+ * is serving would reset a marker next to a database it never touches.
+ *
+ * One deliberate omission: `bootstrap.ts` also clears its pending `setTimeout`
+ * on shutdown, but Next's `register()` has no teardown counterpart and the
+ * process is killed rather than drained, so the timer is only ever `unref`'d.
+ */
+function startEntityBackfill(services: Services): void {
+  const dataDir = dirname(services.db.raw.name);
+
+  try {
+    if (ensureEntityExtractor(services.repos, dataDir, services.db.db).reset) {
+      console.error(
+        '[process] entity extractor recipe changed → index reset; re-scanning in background',
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[process] entity extractor identity check failed; re-checking next boot (${entityMarkerPath(dataDir)}): ${message(err)}`,
+    );
+  }
+
+  // The worker never has to be awaited: a batch is synchronous, so a full
+  // batch costs a stall rather than a promise, and a throw is caught here
+  // instead of surfacing as an unhandled rejection.
+  const worker = services.entityBackfillWorker;
+  const tick = (force: boolean): void => {
+    try {
+      worker.processBatch({ force });
+    } catch (err) {
+      console.error('[process] entity backfill worker error', message(err));
+    }
+  };
+
+  const nextDelay = (): number =>
+    worker.hasPendingWork ? ENTITY_DRAIN_DELAY_MS : ENTITY_IDLE_DELAY_MS;
+
+  // Self-scheduling rather than a fixed tick: a recipe-change rebuild drains
+  // the whole corpus, and a 30 s tick left entity lookups incomplete for ~100
+  // minutes over 10k memories.
+  const schedule = (delayMs: number): void => {
+    const timer = setTimeout(() => {
+      tick(false);
+      schedule(nextDelay());
+    }, delayMs);
+    timer.unref?.();
+  };
+
+  // Matches the server's immediate forced first pass: whatever a prior run left
+  // unscanned — and whatever the reset above just wiped — is picked up now.
+  tick(true);
+  schedule(nextDelay());
+
+  const fallbackTimer = setInterval(() => tick(true), ENTITY_FALLBACK_MS);
+  fallbackTimer.unref?.();
+
+  console.error(
+    `[process] entity backfill worker started (idle every ${ENTITY_IDLE_DELAY_MS / 1000} s, ${ENTITY_DRAIN_DELAY_MS} ms while a backlog drains; forced hourly)`,
+  );
 }
