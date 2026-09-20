@@ -47,7 +47,7 @@ context: |
       it via memory.judge.
     - Path-scoping vs URL-routing: /mcp/<slug> connections have ctx.project
       set; /mcp connections rely on SessionRouter. Tools that need effective
-      project consult BOTH sources via resolveEffectiveProject / scopeFromContext.
+      project consult BOTH sources via resolveEffectiveScope.
 
   Cross-client distribution:
     - One shared plugin tree at apps/plugin/ feeds five clients:
