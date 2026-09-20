@@ -1,8 +1,8 @@
+import { MemoryService } from '@rembric/core';
+import { RELATION_ANNOTATION_MAX, RelationsService } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { MemoryService } from '../services/memory.js';
-import { RELATION_ANNOTATION_MAX, RelationsService } from '../services/relations.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 import { defaultProjectScope } from '../test/default-project.js';
 

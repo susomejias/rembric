@@ -1,5 +1,6 @@
+import { DomainError } from '@rembric/core';
+
 import { logInternalError } from '../server/error-response.js';
-import { DomainError } from '../services/errors.js';
 
 /**
  * Build an MCP-shaped error response with a stable `code` field embedded

@@ -1,7 +1,6 @@
+import type { GateOverrides } from '@rembric/core';
+import type { MemoryService } from '@rembric/core';
 import { type Memory, type MemoryType } from '@rembric/db';
-
-import type { GateOverrides } from '../../services/memory.js';
-import type { MemoryService } from '../../services/memory.js';
 
 /** A single corpus fixture row, before ingestion. See `corpus.ts`. */
 export interface CorpusItem {

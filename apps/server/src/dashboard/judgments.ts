@@ -1,8 +1,7 @@
+import type { RelationsService } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
 import { type AdminRelationFilters, type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
-
-import type { RelationsService } from '../services/relations.js';
-import type { SessionsService } from '../services/sessions.js';
 
 import {
   backLink,

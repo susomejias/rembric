@@ -1,3 +1,7 @@
+import { AgentSessionsService } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
 import { createRepositories, tokens as tokensTable, type Scope, type Token } from '@rembric/db';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -5,10 +9,6 @@ import { z } from 'zod';
 
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { RelationsService } from '../services/relations.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import {

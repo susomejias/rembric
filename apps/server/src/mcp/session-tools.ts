@@ -1,11 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
 import { projectScope, type AgentSession, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
 import { getRequestContext } from '../server/request-context.js';
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
-import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
-import type { ProjectsService } from '../services/projects.js';
 
 import {
   assertAuthorized,

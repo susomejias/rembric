@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
 
+import { ProjectsService } from '@rembric/core';
+import { SessionsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ProjectsService } from '../services/projects.js';
-import { SessionsService } from '../services/sessions.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { createProjectsRouter } from './projects.js';

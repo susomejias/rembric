@@ -1,6 +1,5 @@
+import { DomainError } from '@rembric/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { DomainError } from '../services/errors.js';
 
 import { errToMcp } from './errors.js';
 

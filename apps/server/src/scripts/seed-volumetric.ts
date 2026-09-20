@@ -21,6 +21,13 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
+import { AgentSessionsService } from '@rembric/core';
+import { extractEntities } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import {
   countTableRows,
   createDb,
@@ -34,14 +41,6 @@ import {
   type MemoryType,
   type Scope,
 } from '@rembric/db';
-
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { extractEntities } from '../services/entities.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { PromptsService } from '../services/prompts.js';
-import { RelationsService } from '../services/relations.js';
-import { TokensService } from '../services/tokens.js';
 
 export const SYNTHETIC_VECTOR_CAVEAT =
   'vectors are deterministic pseudo-random unit vectors, NOT embeddings — no retrieval-quality, ranking, fusion or abstention claim may be drawn from this corpus (use `pnpm run eval`)';

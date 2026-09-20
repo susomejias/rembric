@@ -1,5 +1,11 @@
 import { join } from 'node:path';
 
+import { embeddingInput } from '@rembric/core';
+import { EmbeddingWorker } from '@rembric/core';
+import { extractEntities } from '@rembric/core';
+import { EntityBackfillWorker } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { SLUG_REGEX } from '@rembric/core';
 import {
   createDb,
   createDiagnostics,
@@ -15,17 +21,11 @@ import * as sqliteVec from 'sqlite-vec';
 import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { embeddingInput } from '../../embeddings/embedder.js';
 import {
   assertDataLossGuard,
   DataLossGuardError,
   writeStateMarker,
 } from '../../server/data-loss-guard.js';
-import { EmbeddingWorker } from '../../services/embedding-worker.js';
-import { extractEntities } from '../../services/entities.js';
-import { EntityBackfillWorker } from '../../services/entity-backfill-worker.js';
-import { MemoryService } from '../../services/memory.js';
-import { SLUG_REGEX } from '../../services/projects.js';
 import { doctorReport } from '../doctor.js';
 import { FakeEmbedder } from '../embedder.js';
 import { createMigrationFixture, type MigrationFixture } from '../migration-fixture.js';

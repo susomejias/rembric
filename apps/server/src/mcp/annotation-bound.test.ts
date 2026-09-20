@@ -1,10 +1,6 @@
-import { createRepositories, projectScope, type Project, type Token } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import { runWithContext, type RequestContext } from '../server/request-context.js';
-import { RANK_WINDOW_CEILING } from '../services/hybrid-search.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
+import { RANK_WINDOW_CEILING } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
 import {
   ANNOTATION_PAYLOAD_CEILING_BYTES,
   ANNOTATION_REASON_CHARS,
@@ -13,7 +9,11 @@ import {
   RELATION_ANNOTATION_RESPONSE_BUDGET,
   RelationsService,
   SEARCH_LIMIT_MAX,
-} from '../services/relations.js';
+} from '@rembric/core';
+import { createRepositories, projectScope, type Project, type Token } from '@rembric/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';

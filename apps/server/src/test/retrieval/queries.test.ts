@@ -1,7 +1,7 @@
+import { ABSTAIN_REASON, EMPTY_POOL_REASON, hybridSearch } from '@rembric/core';
 import { projectScope } from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { ABSTAIN_REASON, EMPTY_POOL_REASON, hybridSearch } from '../../services/hybrid-search.js';
 import { FakeEmbedder } from '../embedder.js';
 
 import { CORPUS, PROJECTS } from './corpus.js';

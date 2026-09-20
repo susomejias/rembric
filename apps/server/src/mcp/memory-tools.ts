@@ -1,4 +1,27 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { extractEntities, type ExtractedEntity, projectEntities } from '@rembric/core';
+import { iterateEntityMatches } from '@rembric/core';
+import { DomainError } from '@rembric/core';
+import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';
+import {
+  DEFAULT_SEARCH_LIMIT,
+  type MemoryService,
+  type SaveMemoryInput,
+  type SearchMemoriesInput,
+} from '@rembric/core';
+import {
+  ANNOTATION_REASON_CHARS,
+  MULTI_ROW_ANNOTATION_DEFAULT,
+  RELATION_ANNOTATION_MAX,
+  RELATION_ANNOTATION_RESPONSE_BUDGET,
+  SEARCH_LIMIT_MAX,
+  type RelationsService,
+} from '@rembric/core';
+import { findSaveTimeCandidates, type CandidateOptions } from '@rembric/core';
+import type { PromptsService } from '@rembric/core';
+import type { AgentSessionsService } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
+import type { CountedTool, UsageCounters } from '@rembric/core';
 import {
   MEMORY_STATUSES,
   MEMORY_TYPES,
@@ -11,29 +34,6 @@ import { z } from 'zod';
 
 import { getRequestContext, tryGetRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
-import type { AgentSessionsService } from '../services/agent-sessions.js';
-import { extractEntities, type ExtractedEntity, projectEntities } from '../services/entities.js';
-import { iterateEntityMatches } from '../services/entity-relevance.js';
-import { DomainError } from '../services/errors.js';
-import { RANK_WINDOW_CEILING, type SearchVerdict } from '../services/hybrid-search.js';
-import {
-  DEFAULT_SEARCH_LIMIT,
-  type MemoryService,
-  type SaveMemoryInput,
-  type SearchMemoriesInput,
-} from '../services/memory.js';
-import type { ProjectsService } from '../services/projects.js';
-import type { PromptsService } from '../services/prompts.js';
-import {
-  ANNOTATION_REASON_CHARS,
-  MULTI_ROW_ANNOTATION_DEFAULT,
-  RELATION_ANNOTATION_MAX,
-  RELATION_ANNOTATION_RESPONSE_BUDGET,
-  SEARCH_LIMIT_MAX,
-  type RelationsService,
-} from '../services/relations.js';
-import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
-import type { CountedTool, UsageCounters } from '../services/usage-counters.js';
 
 import {
   assertAuthorized,

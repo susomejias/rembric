@@ -1,14 +1,14 @@
+import { AgentSessionsService } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import { pinnedProjectId, TokensService, type TokenScope } from '@rembric/core';
 import { createRepositories, type Project, type Repositories, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { PromptsService } from '../services/prompts.js';
-import { RelationsService } from '../services/relations.js';
-import { pinnedProjectId, TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';

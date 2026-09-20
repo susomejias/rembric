@@ -12,11 +12,7 @@
 
 import { hostname } from 'node:os';
 
-import {
-  DockerEngineApi,
-  type ContainerInspect,
-  type PullProgressEvent,
-} from '../services/self-update/engine-api.js';
+import { DockerEngineApi, type ContainerInspect, type PullProgressEvent } from '@rembric/core';
 
 export interface EngineLike {
   inspectContainer(idOrName: string): Promise<ContainerInspect>;

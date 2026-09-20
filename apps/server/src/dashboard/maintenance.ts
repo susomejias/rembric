@@ -2,16 +2,15 @@ import { createReadStream, mkdirSync, readdirSync, statSync, unlinkSync } from '
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
+import { type AgentSessionsService } from '@rembric/core';
+import { DomainError } from '@rembric/core';
+import { type MemoryService } from '@rembric/core';
+import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX } from '@rembric/core';
+import type { PromptsService } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
+import type { TokensService } from '@rembric/core';
 import { type DbDiagnostics } from '@rembric/db';
 import { Hono, type Context } from 'hono';
-
-import { type AgentSessionsService } from '../services/agent-sessions.js';
-import { DomainError } from '../services/errors.js';
-import { type MemoryService } from '../services/memory.js';
-import type { PromptsService } from '../services/prompts.js';
-import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX } from '../services/self-update/orchestrator.js';
-import type { SessionsService } from '../services/sessions.js';
-import type { TokensService } from '../services/tokens.js';
 
 import { btn, domainErrorPage, flash, flashErrorPage, getSession, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';

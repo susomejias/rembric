@@ -1,3 +1,5 @@
+import { deriveTitle } from '@rembric/core';
+import { REFUTED_PRIORITY_MS, REVIEW_TTL_MS } from '@rembric/core';
 import {
   confirmations,
   memory,
@@ -8,8 +10,6 @@ import {
 } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { deriveTitle } from '../../../services/memory.js';
-import { REFUTED_PRIORITY_MS, REVIEW_TTL_MS } from '../../../services/review.js';
 import { createTestDb, type TestDb } from '../../db.js';
 
 function row(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {

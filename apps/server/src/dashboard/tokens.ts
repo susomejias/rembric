@@ -1,15 +1,14 @@
-import { type Repositories } from '@rembric/db';
-import { Hono } from 'hono';
-
-import { DomainError } from '../services/errors.js';
-import type { ProjectsService } from '../services/projects.js';
-import type { SessionsService } from '../services/sessions.js';
+import type { ProjectsService } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
+import { DomainError } from '@rembric/core';
 import {
   isProjectSetScope,
   pinnedProjectId,
   type TokensService,
   type TokenScope,
-} from '../services/tokens.js';
+} from '@rembric/core';
+import { type Repositories } from '@rembric/db';
+import { Hono } from 'hono';
 
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';

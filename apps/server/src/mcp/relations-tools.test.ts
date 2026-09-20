@@ -1,3 +1,6 @@
+import { deriveTitle, MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
 import {
   createRepositories,
   memory,
@@ -11,9 +14,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
-import { deriveTitle, MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { RelationsService } from '../services/relations.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildRelationsHandlers } from './relations-tools.js';

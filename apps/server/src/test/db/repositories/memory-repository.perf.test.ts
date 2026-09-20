@@ -1,3 +1,5 @@
+import { DEFAULT_DECAY } from '@rembric/core';
+import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '@rembric/core';
 import {
   confirmations,
   consolidationOps,
@@ -12,8 +14,6 @@ import {
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DEFAULT_DECAY } from '../../../consolidation/decay.js';
-import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '../../../services/review.js';
 import { createTestDb, type TestDb } from '../../db.js';
 import { seedProject } from '../../default-project.js';
 

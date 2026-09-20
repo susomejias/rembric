@@ -1,6 +1,6 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
-import importPlugin from 'eslint-plugin-import';
+import importPlugin from 'eslint-plugin-import-x';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -43,7 +43,6 @@ export default tseslint.config(
             'eslint.config.js',
             'commitlint.config.js',
             'packages/config/eslint.config.js',
-            'apps/server/drizzle.config.ts',
             'apps/server/vitest.config.ts',
             'install.test.ts',
             'scripts/*.test.ts',
@@ -53,7 +52,7 @@ export default tseslint.config(
       },
     },
     plugins: {
-      import: importPlugin,
+      'import-x': importPlugin,
     },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
@@ -62,7 +61,7 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
-      'import/order': [
+      'import-x/order': [
         'error',
         {
           'newlines-between': 'always',

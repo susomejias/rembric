@@ -1,9 +1,8 @@
+import { DomainError } from '@rembric/core';
+import type { OAuthService } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
+import type { ResolvedToken, TokenScope, TokensService } from '@rembric/core';
 import { type Token } from '@rembric/db';
-
-import { DomainError } from '../services/errors.js';
-import type { OAuthService } from '../services/oauth.js';
-import type { ProjectsService } from '../services/projects.js';
-import type { ResolvedToken, TokenScope, TokensService } from '../services/tokens.js';
 
 import type { RequestContext } from './request-context.js';
 

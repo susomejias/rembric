@@ -1,13 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
+import { MemoryService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { SessionsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { MemoryService } from '../services/memory.js';
-import { PromptsService } from '../services/prompts.js';
-import { SessionsService } from '../services/sessions.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 import { defaultProjectScope } from '../test/default-project.js';
 

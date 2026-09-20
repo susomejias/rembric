@@ -12,12 +12,12 @@
  * demands it.
  */
 
+import type { DomainError, DomainErrorCode } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import MarkdownIt from 'markdown-it';
 
-import type { DomainError, DomainErrorCode } from '../services/errors.js';
-import type { SessionsService } from '../services/sessions.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { renderPage, type PageOpts } from './page-shell.js';

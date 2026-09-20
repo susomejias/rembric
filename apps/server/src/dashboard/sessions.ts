@@ -1,9 +1,8 @@
+import { DomainError } from '@rembric/core';
+import type { AgentSessionsService } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
 import { AGENT_SESSION_STATUSES, type AgentSessionStatus, type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
-
-import type { AgentSessionsService } from '../services/agent-sessions.js';
-import { DomainError } from '../services/errors.js';
-import type { SessionsService } from '../services/sessions.js';
 
 import {
   backLink,

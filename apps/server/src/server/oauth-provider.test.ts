@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 
+import { OAuthService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
 import { createRepositories, OAuthRepository } from '@rembric/db';
 import type { Response } from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { OAuthService } from '../services/oauth.js';
-import { ProjectsService } from '../services/projects.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
 import { createOAuthProvider } from './oauth-provider.js';

@@ -11,10 +11,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { MemoryService } from '@rembric/core';
 import { createDb, createRepositories } from '@rembric/db';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
-import { MemoryService } from '../services/memory.js';
 import { defaultProjectScope } from '../test/default-project.js';
 
 import {

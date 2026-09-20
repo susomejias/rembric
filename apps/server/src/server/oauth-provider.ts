@@ -19,11 +19,10 @@ import type {
   OAuthTokenRevocationRequest,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
+import { signAuthRequest, type AuthRequest } from '@rembric/core';
+import { OAuthError, type OAuthService, type TokenPair } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
 import type { Response } from 'express';
-
-import { signAuthRequest, type AuthRequest } from '../services/oauth-areq.js';
-import { OAuthError, type OAuthService, type TokenPair } from '../services/oauth.js';
-import type { ProjectsService } from '../services/projects.js';
 
 /**
  * Implements the MCP SDK's `OAuthServerProvider` so the vetted SDK

@@ -1,5 +1,11 @@
 import { randomBytes } from 'node:crypto';
 
+import { AgentSessionsService } from '@rembric/core';
+import { deriveTitle, MemoryService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import { SessionsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import {
   agentSessions,
   createRepositories,
@@ -14,12 +20,6 @@ import {
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { deriveTitle, MemoryService } from '../services/memory.js';
-import { PromptsService } from '../services/prompts.js';
-import { RelationsService } from '../services/relations.js';
-import { SessionsService } from '../services/sessions.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 import { seedProject } from '../test/default-project.js';
 

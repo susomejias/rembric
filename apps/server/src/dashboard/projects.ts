@@ -1,8 +1,7 @@
+import { DomainError } from '@rembric/core';
+import { SLUG_REGEX, type ProjectsService, type ProjectView } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
 import { Hono } from 'hono';
-
-import { DomainError } from '../services/errors.js';
-import { SLUG_REGEX, type ProjectsService, type ProjectView } from '../services/projects.js';
-import type { SessionsService } from '../services/sessions.js';
 
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';

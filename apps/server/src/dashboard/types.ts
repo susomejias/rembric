@@ -1,6 +1,5 @@
+import type { SessionsService } from '@rembric/core';
 import { type DashboardSession } from '@rembric/db';
-
-import type { SessionsService } from '../services/sessions.js';
 
 /**
  * Per-request session context attached to the Hono `c.set('session', …)`

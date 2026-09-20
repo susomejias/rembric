@@ -4,11 +4,11 @@
  * script consumes.
  */
 
+import type { SelfUpdateOrchestrator } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
+import type { UpdateCheckService } from '@rembric/core';
 import { Hono, type Context } from 'hono';
 
-import type { SelfUpdateOrchestrator } from '../services/self-update/orchestrator.js';
-import type { SessionsService } from '../services/sessions.js';
-import type { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { btn, getSession, viewHead } from './components.js';

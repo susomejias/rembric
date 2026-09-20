@@ -1,19 +1,19 @@
-import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import { runWithContext, type RequestContext } from '../server/request-context.js';
-import { SessionRouter } from '../server/session-router.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
+import { AgentSessionsService } from '@rembric/core';
 import {
   RELATIVE_LEVEL_RATIO,
   ABSTENTION_FLOOR,
   EMPTY_POOL_REASON,
   type SearchVerdict,
-} from '../services/hybrid-search.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { PromptsService } from '../services/prompts.js';
-import { RelationsService } from '../services/relations.js';
+} from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { runWithContext, type RequestContext } from '../server/request-context.js';
+import { SessionRouter } from '../server/session-router.js';
 import {
   createTestDb,
   defaultProject,

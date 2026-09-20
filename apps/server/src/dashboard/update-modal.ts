@@ -5,11 +5,10 @@
  * `update.ts`.
  */
 
+import type { SelfUpdateCapability } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
+import type { UpdateInfo } from '@rembric/core';
 import { type DashboardSession } from '@rembric/db';
-
-import type { SelfUpdateCapability } from '../services/self-update/capability.js';
-import type { SessionsService } from '../services/sessions.js';
-import type { UpdateInfo } from '../services/update-check.js';
 
 import { btn } from './components.js';
 import { csrfInput } from './csrf.js';

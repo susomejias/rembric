@@ -1,0 +1,32 @@
+{
+  "name": "@rembric/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Rembric domain layer — services, consolidation engine and embeddings. Depends on @rembric/db; no SQL of its own.",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "@rembric/db": "workspace:*",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@rembric/config": "workspace:*",
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0"
+  }
+}

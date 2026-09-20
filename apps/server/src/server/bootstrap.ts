@@ -1,5 +1,32 @@
 import { join } from 'node:path';
 
+import { ConsolidationRunner } from '@rembric/core';
+import { undoOp, undoRun } from '@rembric/core';
+import {
+  EMBEDDING_MODEL_ID,
+  embeddingQueryInput,
+  loadEmbedder,
+  type Embedder,
+} from '@rembric/core';
+import { embeddingMarkerPath, ensureVectorModel, vectorIndexResetWarning } from '@rembric/core';
+import { AgentSessionsService } from '@rembric/core';
+import { EmbeddingWorker } from '@rembric/core';
+import { EntityBackfillWorker } from '@rembric/core';
+import { ensureEntityExtractor, entityIndexResetWarning, entityMarkerPath } from '@rembric/core';
+import { DomainError } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import { reviewTtlEntries } from '@rembric/core';
+import { CapabilityDetector } from '@rembric/core';
+import { DockerEngineApi } from '@rembric/core';
+import { createPreUpdateBackup, SelfUpdateOrchestrator } from '@rembric/core';
+import { SessionsService } from '@rembric/core';
+import { deriveOAuthAreqKey, deriveSessionKey, TokensService } from '@rembric/core';
+import { UpdateCheckService } from '@rembric/core';
+import { UsageCounters } from '@rembric/core';
 import {
   createDb,
   createDiagnostics,
@@ -10,47 +37,9 @@ import {
 } from '@rembric/db';
 
 import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
-import { ConsolidationRunner } from '../consolidation/index.js';
-import { undoOp, undoRun } from '../consolidation/operations.js';
-import {
-  EMBEDDING_MODEL_ID,
-  embeddingQueryInput,
-  loadEmbedder,
-  type Embedder,
-} from '../embeddings/embedder.js';
-import {
-  embeddingMarkerPath,
-  ensureVectorModel,
-  vectorIndexResetWarning,
-} from '../embeddings/state.js';
 import { logger, setLogLevel } from '../logger.js';
 import { createMcpServer, McpTransportManager } from '../mcp/index.js';
 import { type DoctorReport, parseRunSummary } from '../mcp/observability-tools.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { EmbeddingWorker } from '../services/embedding-worker.js';
-import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
-import {
-  ensureEntityExtractor,
-  entityIndexResetWarning,
-  entityMarkerPath,
-} from '../services/entity-state.js';
-import { DomainError } from '../services/errors.js';
-import { MemoryService } from '../services/memory.js';
-import { OAuthService, SUPPORTED_OAUTH_SCOPES } from '../services/oauth.js';
-import { ProjectsService } from '../services/projects.js';
-import { PromptsService } from '../services/prompts.js';
-import { RelationsService } from '../services/relations.js';
-import { reviewTtlEntries } from '../services/review.js';
-import { CapabilityDetector } from '../services/self-update/capability.js';
-import { DockerEngineApi } from '../services/self-update/engine-api.js';
-import {
-  createPreUpdateBackup,
-  SelfUpdateOrchestrator,
-} from '../services/self-update/orchestrator.js';
-import { SessionsService } from '../services/sessions.js';
-import { deriveOAuthAreqKey, deriveSessionKey, TokensService } from '../services/tokens.js';
-import { UpdateCheckService } from '../services/update-check.js';
-import { UsageCounters } from '../services/usage-counters.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import type { DashboardStats } from './dashboard-router.js';
@@ -360,6 +349,9 @@ export async function bootstrap(
   const updates =
     overrides.updates ??
     new UpdateCheckService({
+      // The domain package cannot read this app's `package.json`, so the running
+      // version is injected here rather than resolved inside the service.
+      currentVersion: REMBRIC_VERSION,
       enabled: env['REMBRIC_UPDATE_CHECK'] !== 'off',
       // Test/smoke seam: point the release feed at a stub (docs/updates.md).
       releasesUrl: env['REMBRIC_UPDATE_CHECK_URL'],

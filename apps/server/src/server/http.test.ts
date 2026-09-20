@@ -1,9 +1,9 @@
+import { ProjectsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createDiagnostics, createRepositories } from '@rembric/db';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ProjectsService } from '../services/projects.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, mintTestToken, type TestDb } from '../test/index.js';
 import { REMBRIC_VERSION } from '../version.js';
 
