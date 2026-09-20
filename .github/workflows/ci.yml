@@ -309,3 +309,84 @@ jobs:
             || { echo "::error::arm64 embedder did not load"; docker logs rembric-arm64-smoke; exit 1; }
           echo "arm64 boot smoke: healthz=200, embedder loaded ✓"
           docker rm -f rembric-arm64-smoke
+
+  docker-build-check-web:
+    # The Next.js image (apps/web/Dockerfile) is the transition-phase
+    # counterpart of the server image above: the Hono server keeps
+    # shipping from apps/server/Dockerfile until the port retires it, so
+    # both images are built and booted here.
+    #
+    # amd64 only, on purpose. The build is platform-independent apart from
+    # the onnxruntime prebuilt, and the arch-specific part — the prune that
+    # drops the non-target binaries — asserts the surviving binding at
+    # build time. arm64 coverage stays on the server image so this check
+    # does not double the job's cost.
+    #
+    # The boot smoke is the real gate: the build-time checks run inside the
+    # image, while this proves the assembled tree starts, migrates and
+    # answers on the host.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build runtime target
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: rembric-web:ci
+          # Separate scope from the server image's: the two builds share the
+          # pnpm/native layers but not their builder stages.
+          cache-from: type=gha,scope=web-runtime-amd64
+          cache-to: type=gha,mode=max,scope=web-runtime-amd64
+          # Empty on fork PRs (no secrets) -> anonymous model bake, retried.
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
+
+      - name: Boot smoke — healthz, data dir, 37 migrations
+        run: |
+          set -eu
+          TOK=ci-web-token-0123456789
+          # The image runs as uid 10001; a host dir created by a rootful
+          # docker would be root-owned and the server could not open its DB.
+          D="$(mktemp -d)"; mkdir -p "$D/data" && chmod 0777 "$D/data"
+          docker run -d --name rembric-web-smoke \
+            -e REMBRIC_ADMIN_TOKEN="$TOK" \
+            -v "$D/data:/data" \
+            -p 127.0.0.1:8791:8787 \
+            rembric-web:ci
+          ok=
+          for _ in $(seq 1 60); do
+            c=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $TOK" \
+              http://127.0.0.1:8791/healthz || true)
+            [ "$c" = 200 ] && { ok=1; break; }
+            sleep 3
+          done
+          LOGS="$(docker logs rembric-web-smoke 2>&1 || true)"
+          if [ -z "$ok" ]; then
+            echo "::error::web /healthz never returned 200"
+            echo "$LOGS"
+            exit 1
+          fi
+          # DS1/DS3: the boot must resolve the mounted volume, not a fresh
+          # data.db in the container's ephemeral layer.
+          echo "$LOGS" \
+            | grep -q '\[db\] data file /data/data.db (pre-existing: false)' \
+            || { echo "::error::web boot did not open /data/data.db"; \
+                 echo "$LOGS"; exit 1; }
+          # The migrations dir arrives through outputFileTracingIncludes, so
+          # a boot that applies fewer than 37 means that path broke silently.
+          applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
+          [ "$applied" = 37 ] \
+            || { echo "::error::expected 37 migrations, got $applied"; \
+                 echo "$LOGS"; exit 1; }
+          echo "web boot smoke: healthz=200, /data/data.db, 37 migrations ✓"
+          docker rm -f rembric-web-smoke
