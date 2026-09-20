@@ -1,9 +1,216 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '../styles/glass.css';
+
+/* `.dark` on the document element selects the dark values; absent, the light
+   ones apply. The two are the same token set in both directions. */
+@custom-variant dark (&:is(.dark *));
+
 /*
- * Intentionally empty.
- *
- * The core CSS lands here during the port: the dashboard spec's locked layers
- * (tokens, base, atoms, layout, patterns, content) live in
- * `apps/server/src/dashboard/styles/core/` and are NOT copied yet. Phase 5.1 of
- * `odd/tasks/migrate-to-nextjs.md` establishes the bundling/hashing story
- * first, and `apps/server` keeps serving the live dashboard until then.
+ * Theme layer. This is the single declaration site for the dashboard's design
+ * tokens: the semantic shadcn slots, the brand role, the state roles, the
+ * light-surface text accent, the typography roles and the `--glass-*` group.
+ * No other file declares a token.
  */
+@theme inline {
+  /* Typography roles. The loader handles (`--font-grotesk`, `--font-inter`,
+     `--font-jetbrains`) are set on <html> by `next/font/local`, so the roles
+     below are what components and utilities actually consume. */
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+  --font-display: var(--font-grotesk);
+  --font-heading: var(--font-grotesk);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* ── Light: the content layer of identity A ──────────────────────────────
+   Neutral surfaces with a faint olive cast so the lime brand fill sits on the
+   page instead of fighting it. Contrast against `--background` (#f7f8f4):
+   `--foreground` 17.4:1, `--muted-foreground` 6.07:1, `--brand-accent` 5.00:1,
+   `--ring` 3.64:1. */
+:root {
+  /* Typography roles, resolvable at runtime. The `@theme inline` block above
+     already drives the `font-*` utilities from these keys, but `inline` emits
+     no custom property, so the three roles are named here as well: a consumer
+     reading `--font-display` from the document element gets the family, not an
+     empty string. */
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-grotesk);
+  --font-mono: var(--font-jetbrains);
+
+  --background: #f7f8f4;
+  --foreground: #12140d;
+  --card: #ffffff;
+  --card-foreground: #12140d;
+  --popover: #ffffff;
+  --popover-foreground: #12140d;
+
+  /* Brand role: the lime carried over from the retired brutalist palette,
+     unchanged, used as a fill. Lime is never body text on a light surface. */
+  --primary: #c6f24e;
+  --primary-foreground: #0a0a0a;
+
+  --secondary: #eaede2;
+  --secondary-foreground: #12140d;
+  --muted: #eef1e7;
+  --muted-foreground: #5b6053;
+  --accent: #eef1e7;
+  --accent-foreground: #12140d;
+
+  /* State roles. These are the two tones the confirmation contract
+     distinguishes: `--destructive` for the irreversible, `--warn` for the
+     reversible. Both are fills; their readable pair is the `-foreground`. */
+  --destructive: #ff3344;
+  --destructive-foreground: #ffffff;
+  --warn: #ff8c00;
+  --warn-foreground: #0a0a0a;
+
+  /* The lime as text: an olive inside the same family, dark enough to clear
+     AA on the light surfaces (5.00:1 on `--background`, 5.34:1 on `--card`). */
+  --brand-accent: #55750a;
+
+  --border: #dfe3d5;
+  --input: #dfe3d5;
+  --ring: #6c8c1f;
+
+  --chart-1: #c6f24e;
+  --chart-2: #55750a;
+  --chart-3: #ff8c00;
+  --chart-4: #ff3344;
+  --chart-5: #6c8c1f;
+
+  --radius: 0.625rem;
+
+  --sidebar: rgb(255 255 255 / 0.62);
+  --sidebar-foreground: #12140d;
+  --sidebar-primary: #c6f24e;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent: rgb(18 20 13 / 0.06);
+  --sidebar-accent-foreground: #12140d;
+  --sidebar-border: rgb(18 20 13 / 0.08);
+  --sidebar-ring: #6c8c1f;
+
+  /* Glass roles — owned by the identity layer, not by the semantic set. */
+  --glass-tint: rgb(255 255 255 / 0.62);
+  --glass-fallback-tint: #f2f4ee;
+  --glass-blur: 18px;
+  --glass-saturate: 160%;
+  --glass-specular: rgb(255 255 255 / 0.75);
+  --glass-border: rgb(18 20 13 / 0.08);
+  --glass-shadow: 0 1px 2px rgb(18 20 13 / 0.05), 0 12px 32px -12px rgb(18 20 13 / 0.2);
+}
+
+/* ── Dark: the near-black palette the previous dashboard shipped, now one of
+   two modes rather than the only one. Contrast against `--background`
+   (#0a0a0a): `--foreground` 17.4:1, `--muted-foreground` 6.99:1,
+   `--brand-accent` 15.2:1. */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #f2f2f2;
+  --card: #141414;
+  --card-foreground: #f2f2f2;
+  --popover: #141414;
+  --popover-foreground: #f2f2f2;
+
+  --primary: #c6f24e;
+  --primary-foreground: #0a0a0a;
+
+  --secondary: #1c1c1c;
+  --secondary-foreground: #f2f2f2;
+  --muted: #1a1a1a;
+  --muted-foreground: #9a9a9a;
+  --accent: #1a1a1a;
+  --accent-foreground: #f2f2f2;
+
+  --destructive: #ff3344;
+  --destructive-foreground: #ffffff;
+  --warn: #ff8c00;
+  --warn-foreground: #0a0a0a;
+
+  /* On the near-black surface the lime itself is the readable accent. */
+  --brand-accent: #c6f24e;
+
+  --border: rgb(255 255 255 / 0.12);
+  --input: rgb(255 255 255 / 0.16);
+  --ring: #c6f24e;
+
+  --chart-1: #c6f24e;
+  --chart-2: #9bbf3c;
+  --chart-3: #ff8c00;
+  --chart-4: #ff3344;
+  --chart-5: #6c8c1f;
+
+  --sidebar: rgb(20 20 20 / 0.62);
+  --sidebar-foreground: #f2f2f2;
+  --sidebar-primary: #c6f24e;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent: rgb(255 255 255 / 0.06);
+  --sidebar-accent-foreground: #f2f2f2;
+  --sidebar-border: rgb(255 255 255 / 0.1);
+  --sidebar-ring: #c6f24e;
+
+  --glass-tint: rgb(16 16 16 / 0.62);
+  --glass-fallback-tint: #141414;
+  --glass-blur: 18px;
+  --glass-saturate: 160%;
+  --glass-specular: rgb(255 255 255 / 0.08);
+  --glass-border: rgb(255 255 255 / 0.1);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 32px -12px rgb(0 0 0 / 0.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
