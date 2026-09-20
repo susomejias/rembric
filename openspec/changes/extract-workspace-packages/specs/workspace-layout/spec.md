@@ -2,17 +2,22 @@
 
 ### Requirement: Workspace package inventory
 
-The workspace SHALL expose extracted code as pnpm workspace members under `packages/`, each declaring its own `package.json` and `tsconfig.json` and owning exactly one surface: `packages/db` owns the SQL confinement boundary (schema, migrations, migration runner, client, diagnostics, query tokenizer and repositories); `packages/core` owns the services, consolidation and embeddings layers; `packages/mcp` owns the MCP tools, server factory and transport manager; `packages/ui` owns shared React components and is scaffold-only in this change, with no dependents until the view port. `apps/server` SHALL retain the dashboard and HTTP surfaces it owns today and SHALL consume the extracted packages through their public entry points. No file SHALL live in a package without belonging to that package's stated surface.
+The workspace SHALL expose extracted code as pnpm workspace members under `packages/`, each declaring its own `package.json` and `tsconfig.json` and owning exactly one surface: `packages/db` owns the SQL confinement boundary (schema, migrations, migration runner, client, diagnostics, query tokenizer and repositories); `packages/core` owns the services, consolidation and embeddings layers; `packages/ui` owns shared React components and is scaffold-only in this change, with no dependents until the view port. The inventory delivered by this change is `packages/{db,core,ui}` together with the development-only `packages/config`; the MCP protocol layer SHALL remain inside `apps/server/src/mcp/` and SHALL NOT be extracted by this change — its package boundary is delimited by the porting change that also serves `/mcp` from `apps/web`, because the app↔MCP dependency cycle cannot be cut from either side alone. `apps/server` SHALL retain the dashboard and HTTP surfaces it owns today and SHALL consume the extracted packages through their public entry points. No file SHALL live in a package without belonging to that package's stated surface.
 
 #### Scenario: Extracted code exists as a workspace member
 
 - **WHEN** `pnpm-workspace.yaml` and the root lockfile are inspected after this change
-- **THEN** `packages/db`, `packages/core`, `packages/mcp` and `packages/ui` SHALL each be a declared workspace member carrying its own `package.json` and `tsconfig.json`
+- **THEN** `packages/db`, `packages/core` and `packages/ui` SHALL each be a declared workspace member carrying its own `package.json` and `tsconfig.json`, `packages/config` SHALL be a declared development-only member, and no `packages/mcp` SHALL exist in the workspace
 
 #### Scenario: A package owns only its stated surface
 
 - **WHEN** a file is placed under `packages/core/src/`
 - **THEN** it SHALL be a service, consolidation or embedding module, and SHALL NOT be a repository, a migration or an MCP tool definition
+
+#### Scenario: The MCP protocol layer stays in the application for now
+
+- **WHEN** the workspace members are inspected after this change
+- **THEN** the MCP tools, server factory and transport manager SHALL still live under `apps/server/src/mcp/`, and the change SHALL NOT declare a `packages/mcp` member
 
 ### Requirement: Tooling configuration package
 
@@ -36,6 +41,11 @@ Exactly one package, `packages/db`, SHALL execute SQL. No other package, and no 
 
 - **WHEN** any non-test file outside `packages/db/src/` contains a SQL-execution pattern
 - **THEN** the invariants suite SHALL fail naming the offending file, even when that file lives in a package other than `packages/db`
+
+#### Scenario: A package that exists does not become a SQL boundary
+
+- **WHEN** the workspace contains `packages/core` alongside `packages/db`
+- **THEN** `packages/core` SHALL be covered by the same confinement rule as any other package, and the invariant SHALL NOT be satisfied by deferring a package's extraction
 
 #### Scenario: Package count does not change the boundary
 
@@ -63,7 +73,7 @@ Each package SHALL own a build script emitting its own output, and the workspace
 #### Scenario: Dependency build precedes the consumer build
 
 - **WHEN** the workspace build task runs from the repository root
-- **THEN** the builds of `packages/db`, `packages/core` and `packages/mcp` SHALL complete before the `apps/server` build starts, as declared by the task graph
+- **THEN** the builds of `packages/db` and `packages/core` SHALL complete before the `apps/server` build starts, as declared by the task graph
 
 #### Scenario: A stale dependency output blocks its consumer
 
