@@ -9,10 +9,9 @@
  * included.
  */
 
+import type { SessionsService } from '@rembric/core';
 import type { Context } from 'hono';
 import { getCookie } from 'hono/cookie';
-
-import type { SessionsService } from '../services/sessions.js';
 
 import { renderSidebar, type BadgeCounters, type NavKey } from './components.js';
 import { csrfInput } from './csrf.js';

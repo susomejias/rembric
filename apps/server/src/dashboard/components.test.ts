@@ -1,8 +1,8 @@
+import { DomainError } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
 import { Hono, type Context } from 'hono';
 import { describe, expect, it } from 'vitest';
 
-import { DomainError } from '../services/errors.js';
-import type { SessionsService } from '../services/sessions.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import {
@@ -390,8 +390,8 @@ describe('flashErrorPage + domainErrorPage', () => {
   async function withSessionApp(handler: (c: Context, sessions: SessionsService) => Response) {
     const { randomBytes } = await import('node:crypto');
     const { createRepositories } = await import('@rembric/db');
-    const { SessionsService } = await import('../services/sessions.js');
-    const { TokensService } = await import('../services/tokens.js');
+    const { SessionsService } = await import('@rembric/core');
+    const { TokensService } = await import('@rembric/core');
     const { createTestDb } = await import('../test/db.js');
 
     const t = createTestDb();

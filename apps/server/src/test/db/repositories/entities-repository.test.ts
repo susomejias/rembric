@@ -1,8 +1,8 @@
+import { deriveTitle } from '@rembric/core';
 import { EntitiesRepository, memory, projects, projectScope, type NewMemory } from '@rembric/db';
 import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { deriveTitle } from '../../../services/memory.js';
 import { createTestDb, type TestDb } from '../../db.js';
 
 function row(overrides: Partial<NewMemory> & { id: string; content: string }): NewMemory {

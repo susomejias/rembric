@@ -1,3 +1,6 @@
+import { AgentSessionsService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { TokensService, type TokenScope } from '@rembric/core';
 import {
   agentSessions as agentSessionsTable,
   createRepositories,
@@ -9,9 +12,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { ProjectsService } from '../services/projects.js';
-import { TokensService, type TokenScope } from '../services/tokens.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildSessionHandlers } from './session-tools.js';

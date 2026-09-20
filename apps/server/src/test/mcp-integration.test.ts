@@ -7,6 +7,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
+import { AgentSessionsService, SUMMARY_MAX_CHARS } from '@rembric/core';
+import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RELATION_ANNOTATION_MAX } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { agentSessions, createRepositories } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,14 +25,7 @@ import {
   TIMELINE_WINDOW_MAX,
 } from '../mcp/memory-tools.js';
 import { DESCRIPTION_MAX_LENGTH } from '../mcp/server.js';
-import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '../mcp/summary-rubric.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
-import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
-import { ABSTENTION_FLOOR, EMPTY_POOL_REASON } from '../services/hybrid-search.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { RELATION_ANNOTATION_MAX } from '../services/relations.js';
-import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';
 import { defaultProject } from './default-project.js';

@@ -14,14 +14,13 @@
  * layer permitted to emit DELETEs against the protected tables.
  */
 
+import { AgentSessionsService } from '@rembric/core';
+import { deriveTitle, MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createDb, createRepositories, projectScope, type DbHandle } from '@rembric/db';
 import { ulid } from 'ulid';
-
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { deriveTitle, MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { RelationsService } from '../services/relations.js';
-import { TokensService } from '../services/tokens.js';
 
 const DEMO_SLUG = 'demo';
 

@@ -1,3 +1,8 @@
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
+import type { AgentSessionsService } from '@rembric/core';
+import type { TokenScope } from '@rembric/core';
 import {
   createRepositories,
   memoryRelations,
@@ -10,11 +15,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
-import type { AgentSessionsService } from '../services/agent-sessions.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { RelationsService } from '../services/relations.js';
-import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { buildMemoryHandlers } from './memory-tools.js';
@@ -1414,8 +1414,8 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
   let ctxWithRealToken: (project: Project | null) => RequestContext;
 
   beforeEach(async () => {
-    const { AgentSessionsService } = await import('../services/agent-sessions.js');
-    const { TokensService } = await import('../services/tokens.js');
+    const { AgentSessionsService } = await import('@rembric/core');
+    const { TokensService } = await import('@rembric/core');
     const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
 
@@ -1568,8 +1568,8 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
   let confirmationSessionIdFor: (memoryId: string) => string | null;
 
   beforeEach(async () => {
-    const { AgentSessionsService } = await import('../services/agent-sessions.js');
-    const { TokensService } = await import('../services/tokens.js');
+    const { AgentSessionsService } = await import('@rembric/core');
+    const { TokensService } = await import('@rembric/core');
     const { tokens: tokensSchema } = await import('@rembric/db');
     const { confirmations } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');

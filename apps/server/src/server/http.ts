@@ -12,16 +12,16 @@ import {
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import type { AgentSessionsService } from '@rembric/core';
+import type { OAuthService } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
+import type { TokensService } from '@rembric/core';
+import type { UsageCounters } from '@rembric/core';
 import { type DbDiagnostics } from '@rembric/db';
 import express from 'express';
 import { Hono, type Context } from 'hono';
 
 import type { McpTransportManager } from '../mcp/index.js';
-import type { AgentSessionsService } from '../services/agent-sessions.js';
-import type { OAuthService } from '../services/oauth.js';
-import type { ProjectsService } from '../services/projects.js';
-import type { TokensService } from '../services/tokens.js';
-import type { UsageCounters } from '../services/usage-counters.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createApiRouter } from './api-router.js';

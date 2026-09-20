@@ -24,6 +24,26 @@ const rembricDbSchemaProjects = fileURLToPath(
   new URL('../../packages/db/src/schema/projects.ts', import.meta.url),
 );
 
+// The domain layer, same rule as the data layer above: tests resolve it from
+// SOURCE, because CI runs the suite BEFORE it builds anything.
+const rembricCore = fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url));
+
+// `apps/plugin/.pi-plugin/plugin.test.ts` reaches into the domain layer by
+// relative path (`../../server/src/services/...`). That file is outside this
+// task's edit surfaces, so the three specifiers it uses are aliased onto the
+// package rather than edited there; whichever change owns that file should
+// switch them to `@rembric/core` and delete these three entries. Its 80 tests
+// are part of this suite's count, so dropping them is not an option.
+const rembricCoreAgentSessions = fileURLToPath(
+  new URL('../../packages/core/src/services/agent-sessions.ts', import.meta.url),
+);
+const rembricCoreProjects = fileURLToPath(
+  new URL('../../packages/core/src/services/projects.ts', import.meta.url),
+);
+const rembricCoreTokens = fileURLToPath(
+  new URL('../../packages/core/src/services/tokens.ts', import.meta.url),
+);
+
 // `mkdtemp` does not create parent directories, so pointing TMPDIR at a path
 // that does not exist yet fails every fixture instead of relocating it. This
 // config is evaluated in the main process before any worker spawns, which is
@@ -40,8 +60,12 @@ export default defineConfig({
       '@earendil-works/pi-tui': piHostStub,
       '@earendil-works/pi-coding-agent': piHostStub,
       '@rembric/db': rembricDb,
+      '@rembric/core': rembricCore,
       '../../server/src/db/repositories/index.js': rembricDbRepositories,
       '../../server/src/db/schema/projects.js': rembricDbSchemaProjects,
+      '../../server/src/services/agent-sessions.js': rembricCoreAgentSessions,
+      '../../server/src/services/projects.js': rembricCoreProjects,
+      '../../server/src/services/tokens.js': rembricCoreTokens,
     },
   },
   test: {
@@ -80,11 +104,11 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
-      // The db package is measured through this pattern once vitest can reach
-      // outside the project root; today it cannot (measured: 0 files), so the
-      // thresholds below are computed over the app tree alone. They still hold —
-      // see the phase-2 report — and are never lowered for that.
-      include: ['src/**/*.ts', '../../packages/db/src/**/*.ts'],
+      // The db and core packages are measured through these patterns once vitest
+      // can reach outside the project root; today it cannot (measured: 0 files),
+      // so the thresholds below are computed over the app tree alone. They still
+      // hold — see the phase-3 report — and are never lowered for that.
+      include: ['src/**/*.ts', '../../packages/db/src/**/*.ts', '../../packages/core/src/**/*.ts'],
       exclude: [
         'src/server-entrypoint.ts',
         'src/test/**',
@@ -94,9 +118,10 @@ export default defineConfig({
         'src/server/index.ts',
         'src/llm/index.ts',
         'src/mcp/index.ts',
-        'src/consolidation/index.ts',
-        'src/services/index.ts',
+        '../../packages/core/src/consolidation/index.ts',
+        '../../packages/core/src/services/index.ts',
         '../../packages/db/src/index.ts',
+        '../../packages/core/src/index.ts',
       ],
       // Enforced floor, rounded down from measured coverage. Up-only
       // ratchet: raise as the suite grows, never lower to pass a PR.

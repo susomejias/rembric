@@ -1,9 +1,9 @@
+import { ProjectsService } from '@rembric/core';
 import { createRepositories, type DbHandle } from '@rembric/db';
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { type BootstrappedServer, createServer } from '../server/index.js';
-import { ProjectsService } from '../services/projects.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createTestDb } from './db.js';
@@ -325,8 +325,8 @@ describe('dashboard E2E', () => {
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
     const { createDb } = await import('@rembric/db');
-    const { ProjectsService } = await import('../services/projects.js');
-    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { ProjectsService } = await import('@rembric/core');
+    const { AgentSessionsService } = await import('@rembric/core');
     const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
@@ -371,9 +371,9 @@ describe('dashboard E2E', () => {
 
     // Seed a session row using the dashboard's own data dir.
     const { createDb } = await import('@rembric/db');
-    const { ProjectsService } = await import('../services/projects.js');
-    const { TokensService } = await import('../services/tokens.js');
-    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { ProjectsService } = await import('@rembric/core');
+    const { TokensService } = await import('@rembric/core');
+    const { AgentSessionsService } = await import('@rembric/core');
     const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
@@ -440,8 +440,8 @@ describe('dashboard E2E', () => {
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
     const { createDb } = await import('@rembric/db');
-    const { ProjectsService } = await import('../services/projects.js');
-    const { AgentSessionsService } = await import('../services/agent-sessions.js');
+    const { ProjectsService } = await import('@rembric/core');
+    const { AgentSessionsService } = await import('@rembric/core');
     const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
     const dataDir = server.config.dataDir;
@@ -708,8 +708,8 @@ describe('dashboard E2E', () => {
 
     // Seed: two memories + a judged 'supersedes' relation between them.
     const { createDb } = await import('@rembric/db');
-    const { MemoryService } = await import('../services/memory.js');
-    const { RelationsService } = await import('../services/relations.js');
+    const { MemoryService } = await import('@rembric/core');
+    const { RelationsService } = await import('@rembric/core');
     const dataDir = server.config.dataDir;
     const handle = createDb({ dataDir });
     const memSvc = new MemoryService(createRepositories(handle.db), handle.db);
@@ -800,7 +800,7 @@ describe('dashboard E2E', () => {
     await postForm(baseUrl, '/dashboard/login', jar, { token: ADMIN_TOKEN });
 
     const { createDb } = await import('@rembric/db');
-    const { MemoryService } = await import('../services/memory.js');
+    const { MemoryService } = await import('@rembric/core');
     const handle = createDb({ dataDir: server.config.dataDir });
     const DAY = 24 * 60 * 60 * 1000;
     // `project` TTL is 3 months → 120d-old + unaffirmed = needs_review.
@@ -1195,8 +1195,8 @@ describe('dashboard E2E — self-update surface', () => {
       await import('./db.js'),
       await import('./embedder.js'),
     ];
-    const { UpdateCheckService } = await import('../services/update-check.js');
-    const { SelfUpdateOrchestrator } = await import('../services/self-update/orchestrator.js');
+    const { UpdateCheckService } = await import('@rembric/core');
+    const { SelfUpdateOrchestrator } = await import('@rembric/core');
 
     const tmp = createTestDb();
     tmp.cleanup();
@@ -1218,7 +1218,11 @@ describe('dashboard E2E — self-update surface', () => {
           { status: 200 },
         ),
       )) as typeof fetch;
-    const updates = new UpdateCheckService({ enabled: true, fetchImpl: fakeFetch });
+    const updates = new UpdateCheckService({
+      currentVersion: '0.21.1',
+      enabled: true,
+      fetchImpl: fakeFetch,
+    });
     await updates.refresh();
 
     // Duck-typed stand-in for CapabilityDetector; tests mutate `capability.current`.
@@ -1377,8 +1381,8 @@ describe('dashboard E2E — manual update check', () => {
   const feed = { mode: 'old' as 'old' | 'new' | 'fail' };
 
   beforeAll(async () => {
-    const { UpdateCheckService } = await import('../services/update-check.js');
-    const { SelfUpdateOrchestrator } = await import('../services/self-update/orchestrator.js');
+    const { UpdateCheckService } = await import('@rembric/core');
+    const { SelfUpdateOrchestrator } = await import('@rembric/core');
 
     const tmp = createTestDb();
     tmp.cleanup();
@@ -1403,7 +1407,11 @@ describe('dashboard E2E — manual update check', () => {
         ),
       );
     }) as typeof fetch;
-    const updates = new UpdateCheckService({ enabled: true, fetchImpl: fakeFetch });
+    const updates = new UpdateCheckService({
+      currentVersion: '0.21.1',
+      enabled: true,
+      fetchImpl: fakeFetch,
+    });
 
     const fakeDetector = {
       detect: () => Promise.resolve({ state: 'manual', reason: 'no-socket' }),

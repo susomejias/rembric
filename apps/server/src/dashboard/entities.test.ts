@@ -1,13 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
+import { EntityBackfillWorker } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { SessionsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createRepositories, projects, projectScope, type Repositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
-import { MemoryService } from '../services/memory.js';
-import { SessionsService } from '../services/sessions.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 import { defaultProject, defaultProjectScope } from '../test/default-project.js';
 import { extractCsrf } from '../test/forms.js';

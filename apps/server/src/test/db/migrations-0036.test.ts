@@ -1,7 +1,7 @@
+import { AgentSessionsService } from '@rembric/core';
 import { createRepositories, type DbHandle } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AgentSessionsService } from '../../services/agent-sessions.js';
 import { createMigrationFixture, type MigrationFixture } from '../migration-fixture.js';
 
 /**

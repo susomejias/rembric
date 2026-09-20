@@ -1,14 +1,14 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AgentSessionsService } from '@rembric/core';
+import type { ProjectsService, ProjectView } from '@rembric/core';
+import { DomainError } from '@rembric/core';
+import { sliceWithoutSplittingSurrogatePair } from '@rembric/core';
+import { isAuthorized, isProjectSetScope, pinnedProjectId } from '@rembric/core';
 import { projectScope, type Memory, type Scope, type SearchScope } from '@rembric/db';
 
 import { getRequestContext, type RequestContext } from '../server/request-context.js';
 import type { ProjectResolutionSource, SessionRouter } from '../server/session-router.js';
 import { tryGetToolCallId } from '../server/tool-call-context.js';
-import type { AgentSessionsService } from '../services/agent-sessions.js';
-import { DomainError } from '../services/errors.js';
-import type { ProjectsService, ProjectView } from '../services/projects.js';
-import { sliceWithoutSplittingSurrogatePair } from '../services/strings.js';
-import { isAuthorized, isProjectSetScope, pinnedProjectId } from '../services/tokens.js';
 
 import { ensureRootsDiscoveryRun } from './roots-discovery.js';
 

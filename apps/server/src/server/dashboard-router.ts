@@ -3,15 +3,28 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { type DbDiagnostics, type Repositories } from '@rembric/db';
-import { Hono, type Context, type Next } from 'hono';
-import { getCookie, setCookie } from 'hono/cookie';
-
 import {
   DEFAULT_MIN_INTERVAL_MS,
   type ConsolidationRunSummary,
   type SkippedRow,
-} from '../consolidation/index.js';
+} from '@rembric/core';
+import { DomainError } from '@rembric/core';
+import { reviewTtlEntries } from '@rembric/core';
+import type { AgentSessionsService } from '@rembric/core';
+import type { EntityBackfillWorker } from '@rembric/core';
+import type { MemoryService } from '@rembric/core';
+import type { OAuthService } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
+import type { PromptsService } from '@rembric/core';
+import type { RelationsService } from '@rembric/core';
+import type { SelfUpdateOrchestrator } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
+import type { TokensService } from '@rembric/core';
+import type { UpdateCheckService } from '@rembric/core';
+import { type DbDiagnostics, type Repositories } from '@rembric/db';
+import { Hono, type Context, type Next } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
+
 import { createAssetsMiddleware } from '../dashboard/assets.js';
 import {
   btn,
@@ -52,19 +65,6 @@ import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
 import { updateShellExtras, type UpdateViewState } from '../dashboard/update-modal.js';
 import { createUpdateRouter } from '../dashboard/update.js';
-import type { AgentSessionsService } from '../services/agent-sessions.js';
-import type { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
-import { DomainError } from '../services/errors.js';
-import type { MemoryService } from '../services/memory.js';
-import type { OAuthService } from '../services/oauth.js';
-import type { ProjectsService } from '../services/projects.js';
-import type { PromptsService } from '../services/prompts.js';
-import type { RelationsService } from '../services/relations.js';
-import { reviewTtlEntries } from '../services/review.js';
-import type { SelfUpdateOrchestrator } from '../services/self-update/orchestrator.js';
-import type { SessionsService } from '../services/sessions.js';
-import type { TokensService } from '../services/tokens.js';
-import type { UpdateCheckService } from '../services/update-check.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import type { AuthLockout } from './rate-limit.js';

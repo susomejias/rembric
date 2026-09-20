@@ -1,15 +1,15 @@
+import { AgentSessionsService, SUMMARY_MAX_CHARS } from '@rembric/core';
+import { extractEntities } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { NOTICE_MAX_BYTES } from '@rembric/core';
+import { TokensService } from '@rembric/core';
+import { UsageCounters } from '@rembric/core';
 import { createRepositories, projectScope, tokens as tokensSchema } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildSessionHandlers } from '../mcp/session-tools.js';
-import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
-import { extractEntities } from '../services/entities.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { NOTICE_MAX_BYTES } from '../services/session-nudge.js';
-import { TokensService } from '../services/tokens.js';
-import { UsageCounters } from '../services/usage-counters.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { createApiRouter } from './api-router.js';

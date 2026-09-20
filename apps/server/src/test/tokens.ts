@@ -1,6 +1,5 @@
+import { TokensService, type CreatedToken, type TokenGrant } from '@rembric/core';
 import { createRepositories, type DbHandle } from '@rembric/db';
-
-import { TokensService, type CreatedToken, type TokenGrant } from '../services/tokens.js';
 
 /**
  * Helper to mint a token quickly inside a test. Returns the plaintext so

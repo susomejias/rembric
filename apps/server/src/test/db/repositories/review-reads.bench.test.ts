@@ -1,9 +1,9 @@
+import { DEFAULT_DECAY } from '@rembric/core';
+import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '@rembric/core';
 import { MemoryRepository, ProjectsRepository, type MemoryType, type NewMemory } from '@rembric/db';
 import type { Database } from 'better-sqlite3';
 import { afterEach, describe, it } from 'vitest';
 
-import { DEFAULT_DECAY } from '../../../consolidation/decay.js';
-import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '../../../services/review.js';
 import { createTestDb, type TestDb } from '../../db.js';
 
 /**

@@ -1,8 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+import type { TokenReach } from '@rembric/core';
 import { type Project, type Token } from '@rembric/db';
-
-import type { TokenReach } from '../services/tokens.js';
 
 /**
  * Per-request context propagated through MCP tool handlers via

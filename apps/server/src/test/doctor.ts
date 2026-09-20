@@ -1,3 +1,4 @@
+import { AgentSessionsService } from '@rembric/core';
 import {
   createDiagnostics,
   createRepositories,
@@ -6,7 +7,6 @@ import {
 } from '@rembric/db';
 
 import { buildDoctorReportFactory } from '../server/bootstrap.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
 
 /**
  * `memory.doctor`'s payload for a test's own handle, wired as bootstrap wires it.

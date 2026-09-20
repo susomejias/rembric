@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { EMBEDDING_DIMS, type Embedder } from '../embeddings/embedder.js';
+import { EMBEDDING_DIMS, type Embedder } from '@rembric/core';
 
 /**
  * Deterministic in-memory embedder for tests. Vectors are derived from a

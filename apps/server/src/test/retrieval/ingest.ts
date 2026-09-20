@@ -1,12 +1,12 @@
+import { type Embedder, embeddingQueryInput } from '@rembric/core';
+import { EmbeddingWorker } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
 import { createRepositories, projectScope, type Repositories, type Scope } from '@rembric/db';
 
 import { CANDIDATES_PER_SAVE_MAX_DEFAULT } from '../../config.js';
-import { type Embedder, embeddingQueryInput } from '../../embeddings/embedder.js';
 import { saveMemoryWithCandidates } from '../../mcp/memory-tools.js';
-import { EmbeddingWorker } from '../../services/embedding-worker.js';
-import { MemoryService } from '../../services/memory.js';
-import { ProjectsService } from '../../services/projects.js';
-import { RelationsService } from '../../services/relations.js';
 import { TestClock } from '../clock.js';
 import { createTestDb } from '../db.js';
 

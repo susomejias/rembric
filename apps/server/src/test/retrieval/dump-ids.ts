@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 
-import { loadEmbedder } from '../../embeddings/embedder.js';
+import { loadEmbedder } from '@rembric/core';
 
 import { CORPUS } from './corpus.js';
 import { ingestCorpus } from './ingest.js';

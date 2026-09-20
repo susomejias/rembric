@@ -1,9 +1,9 @@
+import { OAuthService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createRepositories, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { OAuthService } from '../services/oauth.js';
-import { ProjectsService } from '../services/projects.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
 import { AuthError, authenticate } from './auth.js';

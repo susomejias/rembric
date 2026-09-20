@@ -1,14 +1,14 @@
+import { AgentSessionsService } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { PromptsService } from '@rembric/core';
+import { TokensService, type TokenScope } from '@rembric/core';
 import { createRepositories, projectScope, tokens as tokensSchema, type Token } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
-import { AgentSessionsService } from '../services/agent-sessions.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { PromptsService } from '../services/prompts.js';
-import { TokensService, type TokenScope } from '../services/tokens.js';
 import { seedProject } from '../test/default-project.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 

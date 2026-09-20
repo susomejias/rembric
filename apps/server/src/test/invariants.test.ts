@@ -4,10 +4,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { RUNTIME_IMAGE_LABEL_FILTER } from '@rembric/core';
 import { defaultMigrationsDir } from '@rembric/db';
 import { afterAll, describe, expect, it } from 'vitest';
-
-import { RUNTIME_IMAGE_LABEL_FILTER } from '../services/self-update/orchestrator.js';
 
 import { createTestDb } from './db.js';
 import { DERIVED_TABLES, SHADOW_TABLE_NAMES, SOURCE_TABLES } from './schema-inventory.js';
@@ -24,16 +23,16 @@ type DbRaw = ReturnType<typeof createTestDb>['handle']['raw'];
  *
  * Both are also enforced in the application layer, but a static check
  * shouts loudly if a future PR introduces a regression in a service we
- * haven't yet covered with unit tests. The check scans every .ts file
- * under src/ (except this file and migrations) and fails if forbidden
- * SQL fragments appear.
+ * haven't yet covered with unit tests. The check scans every .ts file under
+ * `apps/server/src/`, `packages/core/src/` and `packages/db/src` (except this
+ * file and migrations) and fails if forbidden SQL fragments appear.
  *
  * Allow-list exception: the operator-only maintenance purge paths
  * (`MemoryService.purgeDisconnectedArchived` executing via
- * `db/repositories/memory-repository.ts` and
- * `src/services/agent-sessions.ts::purgeEmpty`) MAY emit `DELETE FROM
- * memory` and `DELETE FROM sessions` respectively. The check pins the
- * allowance to those exact files; introducing the same DELETE elsewhere
+ * `packages/db/src/repositories/memory-repository.ts` and
+ * `packages/core/src/services/agent-sessions.ts::purgeEmpty`) MAY emit
+ * `DELETE FROM memory` and `DELETE FROM sessions` respectively. The check pins
+ * the allowance to those exact files; introducing the same DELETE elsewhere
  * fails the build.
  */
 
@@ -43,29 +42,40 @@ const srcRoot = join(here, '..');
 /**
  * The monorepo root (`../../../` from `apps/server/src/test`). Every path this
  * file reports or allow-lists is anchored here rather than on a scan root,
- * because the scan covers two trees and "the root" stopped being one directory.
+ * because the scan covers three trees and "the root" stopped being one directory.
  */
 const repoRoot = join(srcRoot, '..', '..', '..');
 /** `packages/db/src` — the extracted data layer, i.e. the SQL-confinement boundary. */
 const dbRoot = join(repoRoot, 'packages/db/src');
+/**
+ * `packages/core/src` — the extracted domain layer. Scanned with the app tree:
+ * it holds the services, the consolidation engine and the embeddings pipeline,
+ * so every rule below that used to police `apps/server/src/<dir>` must still
+ * police them where they now live.
+ */
+const coreRoot = join(repoRoot, 'packages/core/src');
 
 /**
  * Paths are reported and allow-listed repo-root-relative — `apps/server/src/...`
- * for the application, `packages/db/src/...` for the data layer. One convention
- * for both roots, so an allow-list entry is unambiguous.
+ * for the application, `packages/core/src/...` for the domain layer and
+ * `packages/db/src/...` for the data layer. One convention for every root, so an
+ * allow-list entry is unambiguous.
  */
 function relToRepo(file: string): string {
   return relative(repoRoot, file).split(sep).join('/');
 }
 
 /**
- * Every scanned non-test, non-migration source file: the application tree AND
- * the extracted data layer. Both, because the rules below police statements
- * that live in the db package and are called from the application — a scan that
- * dropped either side would stop enforcing half of each contract.
+ * Every scanned non-test, non-migration source file: the application tree, the
+ * domain layer AND the data layer. All three, because the rules below police
+ * statements that live in the db package and are called from the application —
+ * a scan that dropped any side would stop enforcing half of each contract. The
+ * domain layer moved out of the app tree, so leaving it unscanned would have
+ * silently exempted every service from the append-only, scope-leak and
+ * admin-method rules they were written for.
  */
 function scanRoots(): string[] {
-  return [...listSourceFiles(srcRoot), ...listSourceFiles(dbRoot)];
+  return [...listSourceFiles(srcRoot), ...listSourceFiles(coreRoot), ...listSourceFiles(dbRoot)];
 }
 
 interface ForbiddenRule {
@@ -338,7 +348,7 @@ describe('append-only invariants (static grep)', () => {
  */
 describe('session lifecycle-column invariants', () => {
   const SESSION_WRITERS = [
-    'apps/server/src/services/agent-sessions.ts',
+    'packages/core/src/services/agent-sessions.ts',
     'packages/db/src/repositories/agent-sessions-repository.ts',
   ] as const;
 
@@ -387,7 +397,7 @@ describe('session lifecycle-column invariants', () => {
   });
 });
 
-// srcRoot resolves to apps/server/src and repoRoot/dbRoot/repoRoot are declared
+// srcRoot resolves to apps/server/src and repoRoot/dbRoot/coreRoot are declared
 // with it at the top of this file — `repoRoot` used to be declared here, which
 // put it after the first `describe` that reads it.
 
@@ -534,7 +544,7 @@ describe('distroless runtime node-path invariants', () => {
   });
 
   it('self-update upgrader entrypoint uses the absolute node path (runs in the NEW distroless image)', () => {
-    const orch = readFileSync(join(srcRoot, 'services/self-update/orchestrator.ts'), 'utf8');
+    const orch = readFileSync(join(coreRoot, 'services/self-update/orchestrator.ts'), 'utf8');
     expect(orch).toContain(`'${NODE}'`);
     // The bare-`node` default that bricked the upgrader must be gone.
     expect(/\[\s*'node'\s*,/.test(orch)).toBe(false);
@@ -555,8 +565,8 @@ describe('distroless runtime node-path invariants', () => {
 const SCOPE_BYPASS_PATTERN = /\.unsafeGetByIds?\b/;
 const SCOPE_BYPASS_ALLOWED_PREFIXES = [
   'packages/db/src/repositories/memory-repository.ts',
-  'apps/server/src/services/memory.ts',
-  'apps/server/src/consolidation/',
+  'packages/core/src/services/memory.ts',
+  'packages/core/src/consolidation/',
   'apps/server/src/dashboard/',
   // Eval harness ingest re-reads its own throwaway corpus across scopes
   // post-ingest — see add-retrieval-eval-harness.
@@ -588,7 +598,7 @@ describe('scope-leak invariant', () => {
       const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
       throw new Error(
         `memory.unsafeGetBy* called outside allow-list (packages/db/src/repositories/memory-repository.ts, ` +
-          `apps/server/src/consolidation/, apps/server/src/dashboard/, apps/server/src/services/memory.ts). ` +
+          `packages/core/src/consolidation/, apps/server/src/dashboard/, packages/core/src/services/memory.ts). ` +
           `Use the scoped API instead, or add a justification + extend the allow-list.\n${formatted}`,
       );
     }
@@ -605,7 +615,9 @@ describe('scope-leak invariant', () => {
  *
  * The boundary is a package rather than a directory inside this app: the guard
  * moved with the SQL, and the exemption below is now "the file came from the db
- * package", which the app-side scan cannot reach by construction.
+ * package", which the app-side scan cannot reach by construction. The domain
+ * layer is scanned too — it holds the consolidation engine and the embeddings
+ * pipeline, the two places most likely to reach for a statement directly.
  */
 const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /from ['"]drizzle-orm['"]/, label: "import from 'drizzle-orm'" },
@@ -617,6 +629,7 @@ const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
 
 describe('data-access confinement invariant', () => {
   const appFiles = listSourceFiles(srcRoot);
+  const coreFiles = listSourceFiles(coreRoot);
   const dbFiles = listSourceFiles(dbRoot);
 
   function scanSql(files: readonly string[]) {
@@ -649,10 +662,14 @@ describe('data-access confinement invariant', () => {
     const hits = scanSql(dbFiles);
     expect(hits.length).toBeGreaterThan(50);
     expect(new Set(hits.map((h) => h.file)).size).toBeGreaterThan(5);
+    // The domain tree is scanned by the assertion below, so it has to be a real
+    // tree: a `coreRoot` that resolved nowhere would make "no SQL outside the db
+    // package" hold over a silently empty half of the scan.
+    expect(coreFiles.length).toBeGreaterThan(20);
   });
 
   it('SQL executes only under packages/db/src/', () => {
-    const offenders = scanSql(appFiles).filter(
+    const offenders = scanSql([...appFiles, ...coreFiles]).filter(
       (o) => o.file !== 'apps/server/src/scripts/seed-dev.ts',
     );
     if (offenders.length > 0) {
@@ -693,8 +710,11 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
     'adminCountNeedsReview',
     'adminLatestRun',
   ],
-  'apps/server/src/services/agent-sessions.ts': ['adminCountByStatus'],
-  'apps/server/src/services/hybrid-search.ts': ['adminDocumentCount', 'adminQueryTermFrequencies'],
+  'packages/core/src/services/agent-sessions.ts': ['adminCountByStatus'],
+  'packages/core/src/services/hybrid-search.ts': [
+    'adminDocumentCount',
+    'adminQueryTermFrequencies',
+  ],
 };
 
 describe('admin-method confinement invariant', () => {
@@ -1550,7 +1570,7 @@ describe('summary truncation keeps the same side in every layer', () => {
   ];
 
   it('the server keeps the tail and marks the front', () => {
-    const src = readFileSync(join(srcRoot, 'services', 'agent-sessions.ts'), 'utf8');
+    const src = readFileSync(join(coreRoot, 'services', 'agent-sessions.ts'), 'utf8');
     const body = src.slice(src.indexOf('export function truncateSummary'));
     const fn = body.slice(0, body.indexOf('\n}'));
     expect(fn).toContain('sliceTailWithoutSplittingSurrogatePair');
@@ -1565,7 +1585,7 @@ describe('summary truncation keeps the same side in every layer', () => {
   });
 
   it('titles deliberately keep the HEAD, and that difference is intentional', () => {
-    const src = readFileSync(join(srcRoot, 'services', 'agent-sessions.ts'), 'utf8');
+    const src = readFileSync(join(coreRoot, 'services', 'agent-sessions.ts'), 'utf8');
     const body = src.slice(src.indexOf('export function truncateTitle'));
     expect(body.slice(0, body.indexOf('\n}'))).toContain('sliceWithoutSplittingSurrogatePair');
   });
@@ -1578,7 +1598,7 @@ describe('the session-summary rubric has one source', () => {
   const surfaces = [
     'apps/server/src/mcp/instructions.ts',
     'apps/server/src/mcp/server.ts',
-    'apps/server/src/services/session-nudge.ts',
+    'packages/core/src/services/session-nudge.ts',
     'apps/plugin/scripts/post-compact.sh',
     'apps/plugin/commands/summary.md',
     REMBRIC_PLUGIN_CORE_MJS,
@@ -1632,10 +1652,13 @@ describe('the session-summary rubric has one source', () => {
   // NOTE: derived from `git grep`, so it only sees TRACKED files — a new surface
   // passes until it is staged. That is why this caught `stop-nudge.sh` at
   // pre-push rather than during development, and it is the correct trade: the
-  // alternative walks the working tree and flags scratch files.
+  // alternative walks the working tree and flags scratch files. The pathspec
+  // covers `packages/` as well as `apps/`: `session-nudge.ts` moved to the
+  // domain layer, and a rubric surface that leaves the app tree must not leave
+  // the enumeration with it.
   it('the enumeration above is complete', () => {
     const candidates = execSync(
-      `git -C ${repoRoot} ls-files -- apps/ ':!*.test.*' ':!*/tests/*' ':!apps/plugin/test/**' ':!apps/plugin/bin/rembric-bridge.mjs'`,
+      `git -C ${repoRoot} ls-files -- apps/ packages/ ':!*.test.*' ':!*/tests/*' ':!apps/plugin/test/**' ':!apps/plugin/bin/rembric-bridge.mjs'`,
       { encoding: 'utf8' },
     )
       .split('\n')
@@ -1682,10 +1705,12 @@ describe('the post-compaction protocol text has one source', () => {
   // above. `plugin.ts` carries no literal copy of the text (it imports
   // POST_COMPACT_NUDGE_CORE), so the symbol name is grepped alongside the
   // literal marker — `.d.mts`'s declaration and the JSON fixture also name
-  // that symbol/text and are excluded, as summary-rubric.ts is above.
+  // that symbol/text and are excluded, as summary-rubric.ts is above. The
+  // pathspec covers `packages/` too: a surface that moves out of the app tree
+  // must not fall out of the enumeration.
   it('the enumeration above is complete', () => {
     const found = execSync(
-      `git -C ${repoRoot} grep -l -e 'Resumed from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
+      `git -C ${repoRoot} grep -l -e 'Resumed from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ packages/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
       { encoding: 'utf8' },
     )
       .split('\n')
@@ -1750,7 +1775,9 @@ describe('derived-table reproducibility invariant', () => {
   it('every named rebuild entry point is still exported by the module it names', () => {
     for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
       if (!entry.rebuild) continue;
-      const src = readFileSync(join(srcRoot, entry.rebuild.module), 'utf8');
+      // `rebuild.module` is relative to the domain layer's source root, where
+      // every rebuild module now lives.
+      const src = readFileSync(join(coreRoot, entry.rebuild.module), 'utf8');
       const exported = new RegExp(
         `export\\s+(?:async\\s+)?(?:function|const)\\s+${entry.rebuild.entryPoint}\\b`,
       ).test(src);
@@ -1763,7 +1790,7 @@ describe('derived-table reproducibility invariant', () => {
 
   it('every release-variable recipe names an exported version marker', () => {
     const markerModules = ['embeddings/embedder.ts', 'services/entities.ts'];
-    const sources = markerModules.map((m) => readFileSync(join(srcRoot, m), 'utf8')).join('\n');
+    const sources = markerModules.map((m) => readFileSync(join(coreRoot, m), 'utf8')).join('\n');
     for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
       if (!entry.markers) continue;
       for (const marker of entry.markers) {
@@ -1843,7 +1870,11 @@ function scanForPattern(
 }
 
 describe('scope-is-one-arm invariant', () => {
-  const files = [...listAllTsFiles(srcRoot), ...listAllTsFiles(dbRoot)];
+  const files = [
+    ...listAllTsFiles(srcRoot),
+    ...listAllTsFiles(coreRoot),
+    ...listAllTsFiles(dbRoot),
+  ];
 
   // Non-vacuity control. Every assertion below is negative, and an empty file
   // list — or a scan that never reads a line — satisfies all of them. This
@@ -1883,7 +1914,11 @@ const WIDENED_SCOPE_SITES: Record<string, number> = {
 };
 
 describe('the widened scope has one construction site', () => {
-  const production = [...listAllTsFiles(srcRoot), ...listAllTsFiles(dbRoot)].filter(
+  const production = [
+    ...listAllTsFiles(srcRoot),
+    ...listAllTsFiles(coreRoot),
+    ...listAllTsFiles(dbRoot),
+  ].filter(
     (f) =>
       !f.endsWith('.test.ts') &&
       !relToRepo(f).startsWith('apps/server/src/test/') &&

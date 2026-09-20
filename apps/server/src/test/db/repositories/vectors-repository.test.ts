@@ -1,3 +1,4 @@
+import { deriveTitle } from '@rembric/core';
 import {
   memory,
   partitionKeyFor,
@@ -10,7 +11,6 @@ import {
 } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { deriveTitle } from '../../../services/memory.js';
 import { createTestDb, type TestDb } from '../../db.js';
 
 const DIMS = 768;

@@ -6,6 +6,10 @@ data/
 *.db
 *.db-*
 package-lock.json
+# Written by pnpm itself; reformatting it just fights the next install.
+pnpm-lock.yaml
+# Regenerable reporter output of `@rembric/server` test:coverage.
+test-results.json
 # release-please reserializes these manifests; it owns their JSON layout.
 apps/plugin/.claude-plugin/plugin.json
 apps/plugin/.claude-plugin/mcp.json

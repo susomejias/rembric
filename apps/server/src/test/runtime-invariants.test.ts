@@ -1,3 +1,8 @@
+import { undoOp } from '@rembric/core';
+import { ConsolidationRunner } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
+import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
 import {
   consolidationOps,
   consolidationRuns,
@@ -8,12 +13,6 @@ import {
 import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
-import { undoOp } from '../consolidation/operations.js';
-import { ConsolidationRunner } from '../consolidation/runner.js';
-import { MemoryService } from '../services/memory.js';
-import { ProjectsService } from '../services/projects.js';
-import { RelationsService } from '../services/relations.js';
 
 import { createTestDb, type TestDb } from './db.js';
 import { defaultProjectScope, seedProject } from './default-project.js';

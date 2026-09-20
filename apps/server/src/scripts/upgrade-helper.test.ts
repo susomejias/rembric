@@ -1,6 +1,5 @@
+import type { ContainerInspect } from '@rembric/core';
 import { describe, expect, it } from 'vitest';
-
-import type { ContainerInspect } from '../services/self-update/engine-api.js';
 
 import {
   deriveCreatePayload,

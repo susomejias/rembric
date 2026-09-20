@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
-import { type GateLeader } from '../../services/hybrid-search.js';
+import { type Embedder, loadEmbedder } from '@rembric/core';
+import { type GateLeader } from '@rembric/core';
 
 import { checkAbstentionFlags } from './abstention-flags.js';
 import { CORPUS } from './corpus.js';

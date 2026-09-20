@@ -6,9 +6,9 @@ import {
   type ListRootsResult,
   type RequestId,
 } from '@modelcontextprotocol/sdk/types.js';
+import type { ProjectsService } from '@rembric/core';
 
 import type { SessionRouter } from '../server/session-router.js';
-import type { ProjectsService } from '../services/projects.js';
 
 /**
  * Server-driven project auto-detection via the MCP `roots` capability.

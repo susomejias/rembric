@@ -1,3 +1,4 @@
+import { sanitizeFtsQuery } from '@rembric/core';
 import {
   memory,
   MemoryRepository,
@@ -7,7 +8,6 @@ import {
 } from '@rembric/db';
 import { ulid } from 'ulid';
 
-import { sanitizeFtsQuery } from '../../services/hybrid-search.js';
 import { createTestDb } from '../db.js';
 
 import { NOISE_PROBES, type NoiseProbe } from './corpus.js';

@@ -3,18 +3,19 @@ import {
   RootsListChangedNotificationSchema,
   type ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
+import type { MemoryService } from '@rembric/core';
+import type { ProjectsService } from '@rembric/core';
+import type { PromptsService } from '@rembric/core';
+import type { RelationsService } from '@rembric/core';
+import type { CandidateOptions } from '@rembric/core';
+import type { UsageCounters } from '@rembric/core';
+import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
 import { type Repositories } from '@rembric/db';
 import { z, type ZodObject, type ZodRawShape } from 'zod';
 
 import type { SessionRouter } from '../server/session-router.js';
 import { runWithToolCallId } from '../server/tool-call-context.js';
-import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '../services/agent-sessions.js';
-import type { MemoryService } from '../services/memory.js';
-import type { ProjectsService } from '../services/projects.js';
-import type { PromptsService } from '../services/prompts.js';
-import type { RelationsService } from '../services/relations.js';
-import type { CandidateOptions } from '../services/save-time-candidates.js';
-import type { UsageCounters } from '../services/usage-counters.js';
 
 import { aboutOutput, handleAbout } from './about-tool.js';
 import { buildInstructions } from './instructions.js';
@@ -82,7 +83,6 @@ import {
   sessionSummaryOutput,
   sessionSummarySchema,
 } from './session-tools.js';
-import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from './summary-rubric.js';
 
 /**
  * Construct the MCP server and register every tool.

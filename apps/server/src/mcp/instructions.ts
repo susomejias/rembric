@@ -16,9 +16,8 @@
  * same protocol; only the trailing scope note diverges.
  */
 
-import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
-
-import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from './summary-rubric.js';
+import { SUMMARY_MAX_CHARS } from '@rembric/core';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
 
 export interface InstructionsContext {
   /** Project slug requested in the URL path; null for `/mcp` connections. */

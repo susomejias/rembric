@@ -1,8 +1,8 @@
+import { ProjectsService } from '@rembric/core';
+import { TokensService } from '@rembric/core';
 import { createRepositories, projectScope } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ProjectsService } from '../services/projects.js';
-import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { runSeed } from './seed-dev.js';

@@ -1,8 +1,7 @@
+import { verifyAuthRequest } from '@rembric/core';
+import { grantedOAuthScope, resolveGrantedScope, type OAuthService } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
 import { Hono } from 'hono';
-
-import { verifyAuthRequest } from '../services/oauth-areq.js';
-import { grantedOAuthScope, resolveGrantedScope, type OAuthService } from '../services/oauth.js';
-import type { SessionsService } from '../services/sessions.js';
 
 import { btn, flash } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';

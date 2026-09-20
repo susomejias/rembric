@@ -1,9 +1,8 @@
+import { SUMMARY_MAX_CHARS } from '@rembric/core';
+import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
 import { describe, expect, it } from 'vitest';
 
-import { SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
-
 import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from './instructions.js';
-import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from './summary-rubric.js';
 
 describe('MCP initialize instructions', () => {
   it('emits ≤ 1000 characters for the unscoped variant', () => {

@@ -1,14 +1,13 @@
-import { type Repositories } from '@rembric/db';
-import { Hono, type Context } from 'hono';
-
-import type { ConsolidationRunSummary, SkippedRow } from '../consolidation/index.js';
 import {
   NotUndoableError,
   PurgedRowMissingError,
   TERMINAL_OP_TYPES,
   type ConsolidationOpType,
-} from '../consolidation/operations.js';
-import type { SessionsService } from '../services/sessions.js';
+} from '@rembric/core';
+import type { ConsolidationRunSummary, SkippedRow } from '@rembric/core';
+import type { SessionsService } from '@rembric/core';
+import { type Repositories } from '@rembric/db';
+import { Hono, type Context } from 'hono';
 
 import {
   backLink,
