@@ -21,31 +21,77 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml .npmrc pnpm-workspace.yaml ./
 COPY apps/server/package.json ./apps/server/package.json
 COPY apps/plugin/package.json ./apps/plugin/package.json
+# Manifests of the workspace packages in the @rembric/server closure, so the
+# filtered install can resolve `workspace:*` and link them. packages/ui is NOT
+# in that closure and is deliberately absent; packages/config is a build-only
+# dependency (the shared tsconfig base), never a runtime one.
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/db/package.json ./packages/db/package.json
+COPY packages/core/package.json ./packages/core/package.json
 
 # Install the @rembric/server closure only — plugin is not needed for the runtime image.
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
 
 # Bake the embedding model BEFORE copying the source so the ~300MB layer
 # only invalidates on lockfile/script changes. Pinned revision +
-# functional validation: a drifted artifact fails the build.
-COPY apps/server/scripts/fetch-model.mjs ./apps/server/scripts/fetch-model.mjs
-WORKDIR /app/apps/server
+# functional validation: a drifted artifact fails the build. The script lives
+# with the package that owns its dependency: it imports
+# `@huggingface/transformers`, which is @rembric/core's, so it is run from
+# /app/packages/core/node_modules — not from the app, where that import can no
+# longer resolve.
+COPY packages/core/scripts/fetch-model.mjs ./packages/core/scripts/fetch-model.mjs
+WORKDIR /app/packages/core
 # Optional hf_token secret avoids anonymous-IP 429s on CI runners.
 RUN --mount=type=secret,id=hf_token,env=HF_TOKEN node scripts/fetch-model.mjs /models
 
-# Copy the server source.
+# Copy the server source. The model layer above stays cacheable: it is baked
+# before any source copy, so editing a source file never re-downloads it.
 WORKDIR /app
 COPY apps/server ./apps/server
+COPY packages/config ./packages/config
+COPY packages/db ./packages/db
+COPY packages/core ./packages/core
+
+# The workspace packages build BEFORE the app: apps/server/tsconfig.build.json
+# empties `paths`, so `@rembric/db` and `@rembric/core` resolve through their
+# `exports` map to real `dist/` output and the app would compile against
+# nothing otherwise. Explicit order rather than a task graph — turbo stays out
+# of the image. packages/db's build is also what stages `src/migrations` into
+# `dist/migrations`, which the runtime needs to migrate the mounted volume.
+RUN pnpm --filter @rembric/db run build \
+    && pnpm --filter @rembric/core run build
 
 # Build inside the server workspace.
 WORKDIR /app/apps/server
 RUN pnpm run build
 
-# pnpm deploy ships a flat node_modules to /prod-out (no symlinks into the workspace store).
+# pnpm deploy ships node_modules to /prod-out with its own virtual store, so
+# nothing links back into the workspace's.
 WORKDIR /app
 RUN pnpm deploy --filter=@rembric/server --prod --legacy /prod-out \
     && cd /prod-out \
     && pnpm rebuild better-sqlite3 sqlite-vec onnxruntime-node
+
+# The extracted packages must arrive in the deployed tree with their build
+# output: `@rembric/db` carries the 37 migrations inside `dist/`, and the
+# runtime resolves them through `defaultMigrationsDir()`. pnpm's legacy deploy
+# keeps a virtual store at `node_modules/.pnpm` and links `@rembric/*` into it,
+# so those entries ARE symlinks; the runtime dereferences them, and so do `-f`
+# and `-d` here — hence the `-type f` / `-type l` checks below rather than a
+# bare existence test that a broken link could satisfy. Asserted at build time
+# so a deploy that drops a workspace package fails here instead of shipping an
+# image that boots against a database it cannot migrate.
+RUN set -eux; \
+    for pkg in db core; do \
+      [ -f "/prod-out/node_modules/@rembric/$pkg/dist/index.js" ]; \
+    done; \
+    [ -d /prod-out/node_modules/@rembric/db/dist/migrations ]; \
+    [ -z "$(find /prod-out/node_modules/@rembric/db/dist/migrations -maxdepth 1 -name '*.sql' -type l)" ]; \
+    migrations=$(find /prod-out/node_modules/@rembric/db/dist/migrations -maxdepth 1 -name '*.sql' -type f | wc -l); \
+    [ "$migrations" -eq 37 ] || { \
+      echo "expected 37 migrations in the deployed @rembric/db, found $migrations" >&2; \
+      exit 1; \
+    }
 
 # Drop onnxruntime-node's non-target prebuilt libs (~185MB). It bundles binaries
 # for darwin + win32 + BOTH linux arches, but its loader only ever requires the
@@ -92,6 +138,10 @@ WORKDIR /app
 COPY --chown=rembric:rembric package.json pnpm-lock.yaml .npmrc pnpm-workspace.yaml ./
 COPY --chown=rembric:rembric apps/server/package.json ./apps/server/package.json
 COPY --chown=rembric:rembric apps/plugin/package.json ./apps/plugin/package.json
+# Same manifest set as the builder stage; see the comment there.
+COPY --chown=rembric:rembric packages/config/package.json ./packages/config/package.json
+COPY --chown=rembric:rembric packages/db/package.json ./packages/db/package.json
+COPY --chown=rembric:rembric packages/core/package.json ./packages/core/package.json
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
 
 # Reuse the model the builder already fetched + functionally validated —
@@ -100,6 +150,16 @@ RUN pnpm install --frozen-lockfile --filter @rembric/server...
 COPY --from=builder --chown=rembric:rembric /models /app/models
 
 COPY --chown=rembric:rembric apps/server ./apps/server
+COPY --chown=rembric:rembric packages/config ./packages/config
+COPY --chown=rembric:rembric packages/db ./packages/db
+COPY --chown=rembric:rembric packages/core ./packages/core
+
+# Packages first, then the app — same reason as the builder stage. Baked at
+# image build time, NOT mounted: docker-compose.dev.yml mounts only
+# apps/server/src, so editing packages/*/src on the host does not hot-reload
+# (it needs a rebuild). docs/docker.md says so.
+RUN pnpm --filter @rembric/db run build \
+    && pnpm --filter @rembric/core run build
 
 RUN mkdir -p /app/apps/server/dist && chown -R rembric:rembric /app
 

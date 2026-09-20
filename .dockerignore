@@ -5,6 +5,8 @@ coverage
 .git
 .github
 .husky
+.turbo
+odd/
 **/*.tsbuildinfo
 data/
 .env

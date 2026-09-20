@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { createDb, type DbHandle } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('createDb connection tuning', () => {
   let dataDir: string;
@@ -29,6 +29,44 @@ describe('createDb connection tuning', () => {
     handles.push(h);
     return h;
   }
+
+  /**
+   * Runs `fn` with stderr captured and returns only the `[db]` lines, so the
+   * DS1 line is asserted where the container reads it — the default channel,
+   * not an injected sink. The migration narration shares that channel and is
+   * filtered out.
+   */
+  function captureDbLines<T>(fn: () => T): { lines: string[]; result: T } {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      const line = args.map(String).join(' ');
+      if (line.startsWith('[db] ')) lines.push(line);
+    });
+    try {
+      return { lines, result: fn() };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it('announces the resolved path and reports a fresh database as not pre-existing', () => {
+    const { lines } = captureDbLines(() => open());
+    expect(lines).toEqual([`[db] data file ${join(dataDir, 'data.db')} (pre-existing: false)`]);
+  });
+
+  it('reports a database that was already on disk as pre-existing', () => {
+    open().close();
+    const { lines } = captureDbLines(() => open());
+    expect(lines).toEqual([`[db] data file ${join(dataDir, 'data.db')} (pre-existing: true)`]);
+  });
+
+  it('logs the resolved path even when the data dir is given relative', () => {
+    const relativeDir = relative(process.cwd(), dataDir);
+    const { lines, result } = captureDbLines(() => createDb({ dataDir: relativeDir }));
+    handles.push(result);
+    expect(lines).toEqual([`[db] data file ${join(dataDir, 'data.db')} (pre-existing: false)`]);
+    expect(existsSync(join(dataDir, 'data.db'))).toBe(true);
+  });
 
   it('applies the performance + write pragmas on the writable connection', () => {
     const { raw } = open();

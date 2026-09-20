@@ -24,8 +24,9 @@ export interface TestDb {
 export function createTestDb(): TestDb {
   const dataDir = mkdtempSync(join(tmpdir(), 'rembric-test-'));
   // Silenced: every fixture applies every migration, so the announcing ones
-  // would narrate themselves once per test.
-  const handle = createDb({ dataDir, onMigrationProgress: () => {} });
+  // would narrate themselves once per test. Same for the startup provenance
+  // line, which would otherwise print once per throwaway database.
+  const handle = createDb({ dataDir, onMigrationProgress: () => {}, onStartupLog: () => {} });
   return {
     handle,
     dataDir,
