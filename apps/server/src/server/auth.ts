@@ -1,10 +1,9 @@
 import { DomainError } from '@rembric/core';
 import type { OAuthService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
+import type { RequestContext } from '@rembric/core';
 import type { ResolvedToken, TokenScope, TokensService } from '@rembric/core';
 import { type Token } from '@rembric/db';
-
-import type { RequestContext } from './request-context.js';
 
 /**
  * HTTP-agnostic authentication helpers. The MCP and dashboard layers use

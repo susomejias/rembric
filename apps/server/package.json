@@ -23,6 +23,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@rembric/core": "workspace:*",
     "@rembric/db": "workspace:*",
+    "@rembric/mcp": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.36.0",
     "express": "^5.2.1",

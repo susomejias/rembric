@@ -4,9 +4,9 @@ import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { createRepositories, projectScope, type Repositories, type Scope } from '@rembric/db';
+import { saveMemoryWithCandidates } from '@rembric/mcp';
 
 import { CANDIDATES_PER_SAVE_MAX_DEFAULT } from '../../config.js';
-import { saveMemoryWithCandidates } from '../../mcp/memory-tools.js';
 import { TestClock } from '../clock.js';
 import { createTestDb } from '../db.js';
 

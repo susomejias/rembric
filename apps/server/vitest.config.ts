@@ -44,6 +44,32 @@ const rembricCoreTokens = fileURLToPath(
   new URL('../../packages/core/src/services/tokens.ts', import.meta.url),
 );
 
+// The protocol layer, same rule again: tests resolve it from SOURCE, because CI
+// runs the suite BEFORE it builds anything. Its co-located tests moved to
+// `src/test/mcp/` (they import app-side fixtures), so every one of them reaches
+// the package through this alias — and so does the application's own suite.
+const rembricMcp = fileURLToPath(new URL('../../packages/mcp/src/index.ts', import.meta.url));
+
+// `apps/plugin/.pi-plugin/plugin.test.ts` reaches into the protocol layer by
+// relative path (`../../server/src/mcp/instructions.js`). Same rule as the two
+// blocks above: that file is outside this task's edit surfaces, so the one
+// specifier it uses is aliased onto the package rather than edited there;
+// whichever change owns that file should switch it to `@rembric/mcp` and delete
+// this entry.
+const rembricMcpInstructions = fileURLToPath(
+  new URL('../../packages/mcp/src/instructions.ts', import.meta.url),
+);
+
+// `apps/plugin/test/command-arguments.test.ts` reaches into the protocol layer
+// the same way, for the command-facing tool schemas. Same rule again: aliased
+// rather than edited, because that tree belongs to another change.
+const rembricMcpMemoryTools = fileURLToPath(
+  new URL('../../packages/mcp/src/memory-tools.ts', import.meta.url),
+);
+const rembricMcpSessionTools = fileURLToPath(
+  new URL('../../packages/mcp/src/session-tools.ts', import.meta.url),
+);
+
 // `mkdtemp` does not create parent directories, so pointing TMPDIR at a path
 // that does not exist yet fails every fixture instead of relocating it. This
 // config is evaluated in the main process before any worker spawns, which is
@@ -61,11 +87,15 @@ export default defineConfig({
       '@earendil-works/pi-coding-agent': piHostStub,
       '@rembric/db': rembricDb,
       '@rembric/core': rembricCore,
+      '@rembric/mcp': rembricMcp,
       '../../server/src/db/repositories/index.js': rembricDbRepositories,
       '../../server/src/db/schema/projects.js': rembricDbSchemaProjects,
       '../../server/src/services/agent-sessions.js': rembricCoreAgentSessions,
       '../../server/src/services/projects.js': rembricCoreProjects,
       '../../server/src/services/tokens.js': rembricCoreTokens,
+      '../../server/src/mcp/instructions.js': rembricMcpInstructions,
+      '../../server/src/mcp/memory-tools.js': rembricMcpMemoryTools,
+      '../../server/src/mcp/session-tools.js': rembricMcpSessionTools,
     },
   },
   test: {
@@ -104,11 +134,17 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
-      // The db and core packages are measured through these patterns once vitest
-      // can reach outside the project root; today it cannot (measured: 0 files),
-      // so the thresholds below are computed over the app tree alone. They still
-      // hold — see the phase-3 report — and are never lowered for that.
-      include: ['src/**/*.ts', '../../packages/db/src/**/*.ts', '../../packages/core/src/**/*.ts'],
+      // The db, core and mcp packages are measured through these patterns once
+      // vitest can reach outside the project root; today it cannot (measured: 0
+      // files), so the thresholds below are computed over the app tree alone.
+      // They still hold — see the phase-3 report — and are never lowered for
+      // that.
+      include: [
+        'src/**/*.ts',
+        '../../packages/db/src/**/*.ts',
+        '../../packages/core/src/**/*.ts',
+        '../../packages/mcp/src/**/*.ts',
+      ],
       exclude: [
         'src/server-entrypoint.ts',
         'src/test/**',
@@ -117,11 +153,11 @@ export default defineConfig({
         '../../packages/db/src/schema/index.ts',
         'src/server/index.ts',
         'src/llm/index.ts',
-        'src/mcp/index.ts',
         '../../packages/core/src/consolidation/index.ts',
         '../../packages/core/src/services/index.ts',
         '../../packages/db/src/index.ts',
         '../../packages/core/src/index.ts',
+        '../../packages/mcp/src/index.ts',
       ],
       // Enforced floor, rounded down from measured coverage. Up-only
       // ratchet: raise as the suite grows, never lower to pass a PR.

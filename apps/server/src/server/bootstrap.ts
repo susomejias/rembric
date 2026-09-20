@@ -24,6 +24,7 @@ import { CapabilityDetector } from '@rembric/core';
 import { DockerEngineApi } from '@rembric/core';
 import { createPreUpdateBackup, SelfUpdateOrchestrator } from '@rembric/core';
 import { SessionsService } from '@rembric/core';
+import { SessionRouter } from '@rembric/core';
 import { deriveOAuthAreqKey, deriveSessionKey, TokensService } from '@rembric/core';
 import { UpdateCheckService } from '@rembric/core';
 import { UsageCounters } from '@rembric/core';
@@ -35,11 +36,15 @@ import {
   type DbHandle,
   type Repositories,
 } from '@rembric/db';
+import {
+  createMcpServer,
+  McpTransportManager,
+  parseRunSummary,
+  type DoctorReport,
+} from '@rembric/mcp';
 
 import { findStaleEnvVars, loadConfig, redactConfig, type Config } from '../config.js';
 import { logger, setLogLevel } from '../logger.js';
-import { createMcpServer, McpTransportManager } from '../mcp/index.js';
-import { type DoctorReport, parseRunSummary } from '../mcp/observability-tools.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import type { DashboardStats } from './dashboard-router.js';
@@ -50,10 +55,10 @@ import {
   writeStateMarker,
   type DataCounts,
 } from './data-loss-guard.js';
+import { logInternalError } from './error-response.js';
 import { startHttpServer, type HttpServerHandle } from './http.js';
 import { createOAuthProvider } from './oauth-provider.js';
 import { AuthLockout, RateLimiter } from './rate-limit.js';
-import { SessionRouter } from './session-router.js';
 
 /**
  * Wire dependencies, apply migrations, bootstrap the admin token, and
@@ -339,6 +344,8 @@ export async function bootstrap(
         usageCounters,
         orphanAfterMs: config.judgments.orphanAfterMs,
         requestedSlug: factoryCtx.requestedSlug,
+        version: REMBRIC_VERSION,
+        logInternalError,
       }),
     {
       allowedHosts: config.mcpTransport.allowedHosts,

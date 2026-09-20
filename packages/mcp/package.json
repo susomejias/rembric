@@ -1,9 +1,9 @@
 {
-  "name": "@rembric/core",
+  "name": "@rembric/mcp",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Rembric domain layer — services, consolidation engine and embeddings. Depends on @rembric/db; no SQL of its own.",
+  "description": "Rembric MCP protocol layer — tool definitions, the McpServer factory, scope resolution and instructions. Depends on @rembric/core; no SQL, no HTTP.",
   "license": "MIT",
   "exports": {
     ".": {
@@ -20,10 +20,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@huggingface/transformers": "4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@rembric/core": "workspace:*",
     "@rembric/db": "workspace:*",
-    "ulid": "^2.3.0"
+    "slugify": "^1.6.9",
+    "stopword": "^3.1.5",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@rembric/config": "workspace:*",

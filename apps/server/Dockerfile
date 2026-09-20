@@ -28,6 +28,7 @@ COPY apps/plugin/package.json ./apps/plugin/package.json
 COPY packages/config/package.json ./packages/config/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/core/package.json ./packages/core/package.json
+COPY packages/mcp/package.json ./packages/mcp/package.json
 
 # Install the @rembric/server closure only — plugin is not needed for the runtime image.
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
@@ -51,15 +52,18 @@ COPY apps/server ./apps/server
 COPY packages/config ./packages/config
 COPY packages/db ./packages/db
 COPY packages/core ./packages/core
+COPY packages/mcp ./packages/mcp
 
 # The workspace packages build BEFORE the app: apps/server/tsconfig.build.json
-# empties `paths`, so `@rembric/db` and `@rembric/core` resolve through their
-# `exports` map to real `dist/` output and the app would compile against
-# nothing otherwise. Explicit order rather than a task graph — turbo stays out
-# of the image. packages/db's build is also what stages `src/migrations` into
-# `dist/migrations`, which the runtime needs to migrate the mounted volume.
+# empties `paths`, so `@rembric/db`, `@rembric/core` and `@rembric/mcp` resolve
+# through their `exports` map to real `dist/` output and the app would compile
+# against nothing otherwise. Explicit order rather than a task graph — turbo
+# stays out of the image. packages/db's build is also what stages
+# `src/migrations` into `dist/migrations`, which the runtime needs to migrate
+# the mounted volume.
 RUN pnpm --filter @rembric/db run build \
-    && pnpm --filter @rembric/core run build
+    && pnpm --filter @rembric/core run build \
+    && pnpm --filter @rembric/mcp run build
 
 # Build inside the server workspace.
 WORKDIR /app/apps/server
@@ -82,7 +86,7 @@ RUN pnpm deploy --filter=@rembric/server --prod --legacy /prod-out \
 # so a deploy that drops a workspace package fails here instead of shipping an
 # image that boots against a database it cannot migrate.
 RUN set -eux; \
-    for pkg in db core; do \
+    for pkg in db core mcp; do \
       [ -f "/prod-out/node_modules/@rembric/$pkg/dist/index.js" ]; \
     done; \
     [ -d /prod-out/node_modules/@rembric/db/dist/migrations ]; \
@@ -142,6 +146,7 @@ COPY --chown=rembric:rembric apps/plugin/package.json ./apps/plugin/package.json
 COPY --chown=rembric:rembric packages/config/package.json ./packages/config/package.json
 COPY --chown=rembric:rembric packages/db/package.json ./packages/db/package.json
 COPY --chown=rembric:rembric packages/core/package.json ./packages/core/package.json
+COPY --chown=rembric:rembric packages/mcp/package.json ./packages/mcp/package.json
 RUN pnpm install --frozen-lockfile --filter @rembric/server...
 
 # Reuse the model the builder already fetched + functionally validated —
@@ -153,13 +158,15 @@ COPY --chown=rembric:rembric apps/server ./apps/server
 COPY --chown=rembric:rembric packages/config ./packages/config
 COPY --chown=rembric:rembric packages/db ./packages/db
 COPY --chown=rembric:rembric packages/core ./packages/core
+COPY --chown=rembric:rembric packages/mcp ./packages/mcp
 
 # Packages first, then the app — same reason as the builder stage. Baked at
 # image build time, NOT mounted: docker-compose.dev.yml mounts only
 # apps/server/src, so editing packages/*/src on the host does not hot-reload
 # (it needs a rebuild). docs/docker.md says so.
 RUN pnpm --filter @rembric/db run build \
-    && pnpm --filter @rembric/core run build
+    && pnpm --filter @rembric/core run build \
+    && pnpm --filter @rembric/mcp run build
 
 RUN mkdir -p /app/apps/server/dist && chown -R rembric:rembric /app
 

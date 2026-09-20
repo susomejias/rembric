@@ -1,6 +1,5 @@
+import { SessionRouter } from '@rembric/core';
 import { describe, expect, it } from 'vitest';
-
-import { SessionRouter } from './session-router.js';
 
 describe('SessionRouter', () => {
   it('isolates entries per (tokenId, mcpSessionId) pair', () => {

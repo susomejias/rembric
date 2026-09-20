@@ -6,17 +6,16 @@ import type { MemoryService } from '@rembric/core';
 import type { OAuthService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { TokensService } from '@rembric/core';
+import type { RequestContext } from '@rembric/core';
 import type { UsageCounters } from '@rembric/core';
 import { projectScope } from '@rembric/db';
+import { snippet } from '@rembric/mcp';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-
-import { snippet } from '../mcp/_shared.js';
 
 import { AuthError, authenticate } from './auth.js';
 import { httpInternalError } from './error-response.js';
 import type { AuthLockout } from './rate-limit.js';
-import type { RequestContext } from './request-context.js';
 
 type ApiEnv = { Variables: { rembricCtx: RequestContext } };
 type ApiContext = Context<ApiEnv>;

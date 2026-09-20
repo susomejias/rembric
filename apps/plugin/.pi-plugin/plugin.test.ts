@@ -34,7 +34,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
 
 const SERVER_TOOL_COUNT = (
-  readFileSync(join(repoRoot, 'apps/server/src/mcp/server.ts'), 'utf8').match(
+  readFileSync(join(repoRoot, 'packages/mcp/src/server.ts'), 'utf8').match(
     /^\s*registerTool\(/gm,
   ) ?? []
 ).length;

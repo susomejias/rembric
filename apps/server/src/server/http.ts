@@ -17,11 +17,12 @@ import type { OAuthService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { TokensService } from '@rembric/core';
 import type { UsageCounters } from '@rembric/core';
+import { runWithContext } from '@rembric/core';
 import { type DbDiagnostics } from '@rembric/db';
+import type { McpTransportManager } from '@rembric/mcp';
 import express from 'express';
 import { Hono, type Context } from 'hono';
 
-import type { McpTransportManager } from '../mcp/index.js';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { createApiRouter } from './api-router.js';
@@ -29,7 +30,6 @@ import { AuthError, authenticate } from './auth.js';
 import { createDashboardRouter, type DashboardDeps } from './dashboard-router.js';
 import { httpInternalError } from './error-response.js';
 import type { AuthLockout, RateLimiter } from './rate-limit.js';
-import { runWithContext } from './request-context.js';
 
 /**
  * HTTP layer.
