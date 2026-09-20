@@ -205,6 +205,28 @@ The connection runs `journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout 
 - **`apps/landing` stays static and untouched.** It is HTML/CSS + esbuild deployed to Cloudflare Pages; its entire value is being static. Next.js would add a runtime to a site with no data, no auth and no interactivity — nothing for the framework to leverage. Owner asked whether it should also move to Next; decided no (2026-09-20).
 - **Deferred opportunity — `packages/brand`.** The webfonts are duplicated byte-for-byte between the dashboard (`apps/server/src/dashboard/public/assets/fonts/`) and the landing (`apps/landing/public/assets/fonts/`): `space-grotesk-700`, `inter-400` and `jetbrains-mono-400` all md5-identical. Extracting a brand package (fonts + tokens + logo) consumed by both is the correct fix and fits the monorepo shape, but it is NOT part of this migration — it would widen an already large change. Revisit after the port lands, when `next/font/local` also needs a canonical font source.
 
+## Process model in apps/web (the consolidation/updater question, 2026-09-20)
+
+Owner question: how do the consolidation cron and the updater fit the Next server? Answers, per component:
+
+- **Bootstrap → `instrumentation.ts` `register()`** — Next's official once-per-boot hook replaces `apps/server/src/server/bootstrap.ts`: open the DB (migrations run inside createDb — live-proven: the standalone smoke applied all 37), banner, process state. Nothing invented; it is the framework's bootstrap surface.
+- **Consolidation sweep → NO cron exists to port.** The sweep is deterministic and throttled on session activity ("no cron" is a documented design decision, not an accident): its trigger is a service call in the request path, not a timer. Both servers invoke it from their MCP/API routes identically, so the ported routes fire it unchanged. If a time-based sweep is ever wanted, it is a separate script + OS scheduler — not invented now.
+- **Updater → split in two.** (a) The version check (dashboard badge) ports trivially: a server component calls the same update-check service. (b) The self-upgrade orchestrator LEAVES the app: a process replacing itself while serving is fragile; in Docker (the primary distribution) the upgrade is pulling the new image, and in the TUI (non-Docker) flow `install.sh`/upgrade-helper already own the swap at the deployment layer. The port DELETES the in-process orchestrator from the served app.
+- **Embedder → unchanged.** Lazy `loadEmbedder()` (dynamic import, measured single occurrence) fires when a route uses embeddings; `/models` reaches the process via the Docker COPY (absolute path, immune to tracing). The standalone onnxruntime-binding tracing hole is the port's next packaging task (measured by the tracing worker as the same class as sqlite-vec, UNVERIFIED until a route wires the embedder).
+
+## UI STACK (owner decision, 2026-09-20): shadcn/ui + Tailwind v4, total redesign
+
+Owner decision after the hand-rolled-CSS recommendation: **shadcn/ui, maximum use of its components, keep the color theme**. This supersedes the hand-rolled-CSS recommendation — under the governing objective ("maximum framework leverage, best possible end state"), the 3.8k-line CSS rewrite is work the identity redesign does anyway.
+
+Key fact that makes it fit: shadcn is NOT a black-box dependency — components are COPIED into `apps/web/src/components/ui/` and owned/edited by the repo. Its theming is CSS variables, so the color theme maps directly:
+
+- **Kept (as theme tokens)**: the lime brand → `--primary` (fill role), the light-surface accent (olive ~#5f8309) → a semantic text token, warn/danger semantic tokens, dark + light modes via the `.dark` class, fonts self-hosted via `next/font/local` (Space Grotesk / Inter / JetBrains Mono → shadcn font variables).
+- **The identity-A glass layer (liquid-glass chrome) is hand-CSS on top** — no library provides it; it is a custom utility/component layer above shadcn's theming.
+- **Deleted by the redesign**: `dashboard/styles/core/{atoms,layout,patterns,content}.css` bodies replaced by shadcn components; `components.ts` HTML-string helpers become React components; the locked brutalist token contract in the dashboard spec is REWRITTEN by the identity change (that was the precondition).
+- **Added (supply-chain-checked at install: all pure JS, no lifecycle scripts; cooldown per policy)**: `tailwindcss` v4 (CSS-first `@theme`), `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`, `@radix-ui/*` per adopted component.
+- **Client data**: React Query stays scoped (polling, search, optimistic actions); data-dense tables via RSC + shadcn Table; native `<dialog>` retained where it suffices.
+- The identity OpenSpec change carries this decision: it REWRITES the dashboard capability's visual contract (locked brutalist tokens die — the precondition), fixes the UI stack, and defines the glass layer. Unblocks the dashboard port.
+
 ## Tasks
 
 ### Phase 0 — decision and scaffolding
