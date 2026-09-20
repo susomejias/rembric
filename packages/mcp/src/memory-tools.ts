@@ -1,7 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { extractEntities, type ExtractedEntity, projectEntities } from '@rembric/core';
 import { iterateEntityMatches } from '@rembric/core';
-import { DomainError } from '@rembric/core';
 import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';
 import {
   DEFAULT_SEARCH_LIMIT,
@@ -48,7 +47,7 @@ import {
   serializeMemory,
   snippet,
 } from './_shared.js';
-import { errToMcp, mcpError, type ErrorReportingDeps } from './errors.js';
+import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 
 /**
@@ -1245,7 +1244,7 @@ async function handleConfirm(
     const { headTruncated } = deps.memory.confirm(args.id, scope, opts);
     return ok({ ok: true, ...(headTruncated ? { headTruncated } : {}) });
   } catch (err) {
-    if (err instanceof DomainError && err.code === 'memory_not_found') {
+    if (isDomainError(err) && err.code === 'memory_not_found') {
       return mcpError('not_found', 'memory not found');
     }
     return errToMcp(err, deps.logInternalError);
@@ -1259,7 +1258,7 @@ async function handleArchive(deps: MemoryToolDeps, args: { id: string }) {
     deps.memory.archive(args.id, scope);
     return ok({ ok: true, id: args.id, status: 'archived' as const });
   } catch (err) {
-    if (err instanceof DomainError && err.code === 'memory_not_found') {
+    if (isDomainError(err) && err.code === 'memory_not_found') {
       return mcpError('not_found', 'memory not found');
     }
     return errToMcp(err, deps.logInternalError);

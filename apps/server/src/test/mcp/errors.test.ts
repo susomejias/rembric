@@ -1,5 +1,5 @@
 import { DomainError } from '@rembric/core';
-import { errToMcp } from '@rembric/mcp';
+import { errToMcp, isDomainError } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { logInternalError } from '../../server/error-response.js';
@@ -86,5 +86,51 @@ describe('errToMcp', () => {
       expect(body.ok).toBe(false);
       expect(body.code).toBe('internal_error');
     });
+  });
+});
+
+/**
+ * The shape a bundled second copy of `@rembric/core` produces: same `name` +
+ * `code` contract as `packages/core/src/services/errors.ts::DomainError`, a
+ * different class, so `instanceof DomainError` is false across the two.
+ */
+class DuplicatedCoreDomainError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = 'DomainError';
+  }
+}
+
+describe('isDomainError', () => {
+  it('recognizes a DomainError thrown by a duplicated module copy', () => {
+    expect(isDomainError(new DuplicatedCoreDomainError('memory_not_found', 'gone'))).toBe(true);
+  });
+
+  it('does not classify a better-sqlite3 SqliteError as a DomainError', () => {
+    const sqlite = Object.assign(new Error('database is locked'), {
+      name: 'SqliteError',
+      code: 'SQLITE_BUSY',
+    });
+    expect(isDomainError(sqlite)).toBe(false);
+  });
+
+  it('rejects a non-Error throw and a DomainError-named error without a string code', () => {
+    const noCode = Object.assign(new Error('boom'), { name: 'DomainError' });
+    expect(isDomainError('a plain string throw')).toBe(false);
+    expect(isDomainError(noCode)).toBe(false);
+  });
+
+  it('makes errToMcp preserve the code of a duplicated-copy DomainError', () => {
+    const result = errToMcp(
+      new DuplicatedCoreDomainError('memory_not_found', 'memory not found'),
+      logInternalError,
+    );
+    const body = JSON.parse(result.content[0]?.text ?? '{}') as { code: string; message: string };
+    expect(body.code).toBe('memory_not_found');
+    expect(body.message).toBe('memory not found');
   });
 });
