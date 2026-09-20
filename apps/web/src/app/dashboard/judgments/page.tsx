@@ -10,7 +10,7 @@ import {
 } from './filters';
 
 import { StatusBadge, VerdictBadge } from '@/components/dashboard/badges';
-import { EmptyState } from '@/components/dashboard/empty-state';
+import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import { FilterBar, FilterField, FilterSelect } from '@/components/dashboard/filter-bar';
 import { PAGE_SIZE, queryWithPage, truncate } from '@/components/dashboard/format';
 import { Pager } from '@/components/dashboard/pager';
@@ -65,6 +65,10 @@ export default async function JudgmentsPage({
   const roundTripQuery = judgmentsQuery(params);
   const filterKey = queryWithPage(roundTripQuery, 0);
 
+  // Both filters are optional, so an empty filter set means "the whole queue is
+  // empty", not "nothing matched".
+  const isFiltered = filters.status !== '' || filters.kind !== '';
+
   const { repos } = getServices();
 
   const address = relationFilters(filters);
@@ -111,7 +115,20 @@ export default async function JudgmentsPage({
 
       <div className="flex flex-col gap-3">
         {visible.length === 0 ? (
-          <EmptyState>No judgments match this filter.</EmptyState>
+          isFiltered ? (
+            <TableNoResults what="judgments" clearHref="/dashboard/judgments" />
+          ) : (
+            <TableEmptyState
+              title="No judgments yet"
+              description={
+                <>
+                  A judgment appears when <code className="font-mono">memory.save</code> returns
+                  conflict candidates; close them with{' '}
+                  <code className="font-mono">memory.judge</code>.
+                </>
+              }
+            />
+          )
         ) : (
           <Table className="font-sans">
             <TableHeader>

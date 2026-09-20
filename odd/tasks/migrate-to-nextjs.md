@@ -227,6 +227,20 @@ Key fact that makes it fit: shadcn is NOT a black-box dependency — components 
 - **Client data**: React Query stays scoped (polling, search, optimistic actions); data-dense tables via RSC + shadcn Table; native `<dialog>` retained where it suffices.
 - The identity OpenSpec change carries this decision: it REWRITES the dashboard capability's visual contract (locked brutalist tokens die — the precondition), fixes the UI stack, and defines the glass layer. Unblocks the dashboard port.
 
+## Midday design reference (owner request, 2026-09-20)
+
+The owner reviewed midday-ai/midday and wants its design lines replicated with the Rembric accent palette. Cloned to /tmp/midday-review for reference. The 7 design lines to adopt:
+
+1. **Hover-expand sidebar with rounded corners** — narrow by default (70px, icons only), expands to 240px on hover with `duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]`. Rounded `rounded-tl-[10px] rounded-bl-[10px]` on the sidebar container (Midday's visual signature). Replaces the click-toggle.
+2. **Sheets for detail views** — memory/session/token details as slide-over panels (shadcn `Sheet`), not separate routes. Keeps list context visible.
+3. **Column-specific table skeletons** — `SkeletonCell` per column type matching the table structure, not a generic spinner.
+4. **Command palette (Cmd+K)** — global search modal for navigating to any view, memory, or project.
+5. **Per-table empty states with CTAs** — contextual with illustration + create button, not generic text.
+6. **`useSuspenseQuery` + Suspense boundaries** — TanStack Query v5 for the interactive islands; skeleton renders automatically.
+7. **Fixed sidebar + inset content container** — the content lives in a rounded container inset from the sidebar, creating visual separation.
+
+NOT adopted: tRPC (RSC + Server Actions instead), Midday's AI chat (not Rembric), the time tracker (not applicable), the Tauri desktop shell.
+
 ## Tasks
 
 ### Phase 0 — decision and scaffolding

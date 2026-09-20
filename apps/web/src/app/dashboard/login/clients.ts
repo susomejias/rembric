@@ -27,3 +27,33 @@ export function safeNext(next: string | undefined | null): string | null {
   if (!next) return null;
   return next.startsWith('/dashboard/oauth/') ? next : null;
 }
+
+/**
+ * The refusal copy, unchanged from `dashboard-router.ts::renderLogin`'s three
+ * failures. One structural difference: that handler could answer the form POST
+ * with a rendered page and a 400/401/429 status, while this one answers with a
+ * `302` back to `/dashboard/login` (a plain form POST cannot be answered with
+ * the page it came from and keep the browser's navigation sane). The status is
+ * therefore carried as the `?error=` code below and the copy moves with it.
+ *
+ * `unavailable` has no counterpart in the retired handler: `bootstrap.ts`
+ * refused to boot without a session secret, while this process may only refuse
+ * the sign-in.
+ */
+export const LOGIN_ERROR_MESSAGES = {
+  missing: 'Token is required.',
+  invalid: 'Invalid token.',
+  locked: 'Too many attempts. Try again shortly.',
+  unavailable: 'This server has no session secret configured.',
+} as const;
+
+export type LoginErrorCode = keyof typeof LOGIN_ERROR_MESSAGES;
+
+/**
+ * The copy for an `?error=` value, or `null` for an absent or unrecognised one.
+ * An unknown code renders nothing rather than echoing the query string.
+ */
+export function loginErrorMessage(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return code in LOGIN_ERROR_MESSAGES ? LOGIN_ERROR_MESSAGES[code as LoginErrorCode] : null;
+}

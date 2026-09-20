@@ -10,7 +10,7 @@ import {
 } from './filters';
 
 import { StatusBadge } from '@/components/dashboard/badges';
-import { EmptyState } from '@/components/dashboard/empty-state';
+import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import {
   FilterBar,
   FilterField,
@@ -65,6 +65,10 @@ export default async function SessionsPage({
   const status = parseSessionStatus(filters.status);
   const projectRows = repos.projects.adminListAll();
   const resolvedProject = resolveProjectFilter(filters.project, projectRows);
+
+  // Same distinction the memories list draws: "this scope has no sessions" is a
+  // different answer from "this filter set matches none".
+  const isFiltered = filters.project !== '' || filters.agent !== '' || filters.status !== '';
 
   const address = {
     deleted: false,
@@ -228,7 +232,28 @@ export default async function SessionsPage({
 
       <div className="flex flex-col gap-3">
         {visibleRows.length === 0 ? (
-          <EmptyState>No agent sessions match this filter.</EmptyState>
+          isFiltered ? (
+            <TableNoResults
+              what="agent sessions"
+              clearHref={
+                filters.includeDeleted
+                  ? '/dashboard/sessions?include_deleted=1'
+                  : '/dashboard/sessions'
+              }
+            />
+          ) : (
+            <TableEmptyState
+              title="No sessions yet"
+              description={
+                <>
+                  A session row is opened by the client plugin's{' '}
+                  <code className="font-mono">POST /api/&lt;slug&gt;/sessions</code> on start, not
+                  by anything in this dashboard. Point a client at this server and its sessions
+                  appear here.
+                </>
+              }
+            />
+          )
         ) : (
           <Table className="font-sans">
             {header}

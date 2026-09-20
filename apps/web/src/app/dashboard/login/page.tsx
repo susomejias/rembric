@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { LOGIN_CLIENTS, safeNext } from './clients';
+import { LOGIN_CLIENTS, loginErrorMessage, safeNext } from './clients';
 
 import { singleParam } from '@/components/dashboard/format';
 import { Badge } from '@/components/ui/badge';
@@ -19,8 +19,9 @@ import { REMBRIC_VERSION } from '@/lib/version';
  * NOT a Server Action: the retired form posted to that same path, that path's
  * handler owns the cookie attributes and the lockout, and a Server Action would
  * have to re-implement the session mint inside this view. Every rejection
- * (missing token, invalid token, too many attempts) is rendered by that handler,
- * exactly as before.
+ * (missing token, invalid token, too many attempts) comes back as an `?error=`
+ * code on a redirect to this page and is rendered here — the copy lives in
+ * `clients.ts`, one source for both sides.
  *
  * One structural divergence, disclosed rather than hidden: `dashboard/layout.tsx`
  * mounts the operator shell for every route under `/dashboard`, so this page
@@ -35,6 +36,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 export default async function LoginPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
   const next = safeNext(singleParam(params.next));
+  const error = loginErrorMessage(singleParam(params.error));
 
   return (
     <div className="fixed inset-0 z-50 grid min-h-svh overflow-y-auto bg-background lg:grid-cols-2">
@@ -99,6 +101,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
                   dashboard.
                 </p>
               </div>
+
+              {error ? (
+                <p
+                  role="alert"
+                  className="border border-destructive/50 px-3 py-2 font-mono text-xs text-destructive"
+                >
+                  {error}
+                </p>
+              ) : null}
 
               <form action="/dashboard/login" method="post" className="flex flex-col gap-4">
                 {next ? <input type="hidden" name="next" value={next} /> : null}

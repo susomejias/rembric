@@ -64,15 +64,25 @@ export function startProcess(): void {
  * instead — and the log says where it went.
  */
 function bootstrapAdminToken(services: Services): void {
+  const configured = process.env['REMBRIC_ADMIN_TOKEN'];
+  // Resolved before the row check, not after: the signing key depends on the
+  // secret alone, so a deployment that already owns token rows and passes the
+  // token in the environment must still get a usable dashboard.
+  const threaded = threadSessionSecret(configured ?? null);
+
   const existing = services.tokens.count();
   if (existing > 0) {
     console.error(
       `[process] admin token present (${existing} token row(s)) → bootstrap is a no-op`,
     );
+    if (!threaded) {
+      console.error(
+        '[process] no session secret: set REMBRIC_SESSION_SECRET or REMBRIC_ADMIN_TOKEN, otherwise `/dashboard` cannot sign anyone in',
+      );
+    }
     return;
   }
 
-  const configured = process.env['REMBRIC_ADMIN_TOKEN'];
   let token: string;
   if (configured !== undefined && configured.length > 0) {
     if (configured.length < ADMIN_TOKEN_MIN_LENGTH) {
@@ -96,6 +106,10 @@ function bootstrapAdminToken(services: Services): void {
     return;
   }
 
+  // Only after the row exists: a signing key for a token the database does not
+  // hold would sign sessions nobody can authenticate against.
+  threadSessionSecret(token);
+
   if (token === configured) {
     console.error('[process] admin token bootstrapped from REMBRIC_ADMIN_TOKEN');
     return;
@@ -107,6 +121,30 @@ function bootstrapAdminToken(services: Services): void {
   console.error(
     '[process] this value is now in this process log; set REMBRIC_ADMIN_TOKEN to keep it out of the logs',
   );
+}
+
+/**
+ * Publish the admin token as this process's session-signing key.
+ *
+ * `bootstrap.ts` resolves `REMBRIC_SESSION_SECRET ?? REMBRIC_ADMIN_TOKEN` once at
+ * boot; this process may have neither, because Next loads `.env` from
+ * `apps/web/`, never from the repository root, while the server's config does.
+ * `lib/session.ts` reads the same two variables, so writing the resolved value
+ * back into the environment is what makes a session minted here verify there and
+ * vice versa — the key is the only thing the two must agree on.
+ *
+ * An explicit `REMBRIC_SESSION_SECRET` is never overwritten: it is the operator's
+ * override, and the server gives it the same precedence.
+ *
+ * Returns whether a usable key is now in the environment.
+ */
+function threadSessionSecret(candidate: string | null): boolean {
+  const explicit = process.env['REMBRIC_SESSION_SECRET'];
+  if (explicit !== undefined && explicit.length > 0) return true;
+  if (candidate === null || candidate.length < ADMIN_TOKEN_MIN_LENGTH) return false;
+  process.env['REMBRIC_SESSION_SECRET'] = candidate;
+  console.error('[process] session signing key set from the admin token');
+  return true;
 }
 
 /**

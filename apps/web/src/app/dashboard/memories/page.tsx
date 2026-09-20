@@ -7,15 +7,17 @@ import {
 } from '@rembric/core';
 import { MEMORY_TYPES, type Memory, type MemoryStatus, type MemoryType } from '@rembric/db';
 import Link from 'next/link';
+import { Suspense } from 'react';
 
 import {
+  DEFAULT_STATUS,
   memoriesQuery,
   readMemoriesFilters,
   resolveProjectFilter,
   type SearchParams,
 } from './filters';
 
-import { EmptyState } from '@/components/dashboard/empty-state';
+import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import {
   FilterBar,
   FilterField,
@@ -25,6 +27,7 @@ import {
 import { PAGE_SIZE, queryWithPage, shortId } from '@/components/dashboard/format';
 import { MemoriesTable, type MemoriesTableRow } from '@/components/dashboard/memories-table';
 import { Pager } from '@/components/dashboard/pager';
+import { TableSkeleton } from '@/components/dashboard/table-skeleton';
 import { ViewHead } from '@/components/dashboard/view-head';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,6 +43,16 @@ import { getServices } from '@/lib/services';
  * database. Every filter, the page index and the total come from the URL, so the
  * server does the filtering and paginating and the browser back button is the
  * filter's undo.
+ *
+ * The loading state is a `Suspense` boundary whose fallback is the memories
+ * table's own column-shaped skeleton (`TableSkeleton`), and the shell therefore
+ * has to hand the awaited `searchParams` down to a child component: a page cannot
+ * suspend itself. The alternative the design line named — `useSuspenseQuery` in a
+ * client component — was rejected on measurement, not taste: it needs TanStack
+ * Query, which this workspace does not depend on, and adding a dependency is out
+ * of scope for this change. The read is synchronous SQLite, so the boundary is
+ * structural: it is where the fallback belongs, and it is what renders if the
+ * read ever becomes one that yields.
  */
 export const dynamic = 'force-dynamic';
 
@@ -53,11 +66,15 @@ const STATUS_OPTIONS = [
   { value: 'archived', label: 'archived' },
 ] as const;
 
-export default async function MemoriesPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
+export default function MemoriesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  return (
+    <Suspense fallback={<TableSkeleton />}>
+      <MemoriesView searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function MemoriesView({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
   const filters = readMemoriesFilters(params);
   // The params the pager and the filter form round-trip, as the browser sent
@@ -78,6 +95,16 @@ export default async function MemoriesPage({
   // apostrophe, a stray quote, "docker-compose") otherwise raises an FTS5 syntax
   // error and 500s the page. `filters.q` is still what the search box redisplays.
   const ftsQuery = sanitizeFtsQuery(filters.q);
+
+  // A filter the operator applied, as opposed to the listing's own default: the
+  // empty state's two shapes (nothing in this scope vs nothing matching this
+  // filter set) are told apart by exactly this.
+  const isFiltered =
+    filters.project !== '' ||
+    filters.type !== '' ||
+    filters.review !== '' ||
+    filters.q !== '' ||
+    filters.status !== DEFAULT_STATUS;
 
   const projectRows = repos.projects.adminListAll();
   const projectSlugById = new Map(projectRows.map((p) => [p.id, p.slug]));
@@ -269,7 +296,20 @@ export default async function MemoriesPage({
 
       <div id="memories-list" className="flex flex-col gap-3">
         {visible.length === 0 ? (
-          <EmptyState>No memories match this filter.</EmptyState>
+          isFiltered ? (
+            <TableNoResults what="memories" clearHref="/dashboard/memories" />
+          ) : (
+            <TableEmptyState
+              title="No memories yet"
+              description={
+                <>
+                  Nothing has been saved in this scope. Save your first memory with the{' '}
+                  <code className="font-mono">memory.save</code> MCP tool — it appears here
+                  immediately, and it is never edited or deleted afterwards.
+                </>
+              }
+            />
+          )
         ) : (
           <MemoriesTable rows={tableRows} />
         )}

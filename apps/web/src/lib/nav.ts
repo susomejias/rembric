@@ -111,10 +111,16 @@ export const NAV: readonly NavEntry[] = [
   },
 ];
 
-/** Group labels, in render order. */
+/**
+ * The two sections, in render order, each carrying the uppercase caption the
+ * sidebar paints above its items. `main`'s caption is `null` on purpose: the
+ * section starts directly under the logo bar, where a caption would label the
+ * only thing on screen — the reference (`apps/web/mockup.html`) captions
+ * `Admin` alone.
+ */
 export const NAV_GROUPS = [
-  { key: 'main', label: 'Main' },
-  { key: 'admin', label: 'Admin' },
+  { key: 'main', heading: null },
+  { key: 'admin', heading: 'Admin' },
 ] as const;
 
 export function navEntryForPath(pathname: string): NavEntry | undefined {
