@@ -8,7 +8,7 @@ ONE Node process. ONE **synchronous** better-sqlite3 connection. ONE SQLite file
 
 Synchronous means a slow query does not slow one request — it stalls **everything**: every MCP client, the HTTP API, the dashboard, and `/healthz` (long enough and the container healthcheck trips and Docker restarts the server). There is no connection pool to hide behind and no second core to absorb it. That is why a 100ms query here is worse than a 100ms query in a threaded server.
 
-ALL SQL lives under `apps/server/src/db/` — one repository per aggregate in `db/repositories/`, DB-level introspection in `db/diagnostics.ts`. If you think you found SQL elsewhere, you found a bug; report it (`invariants.test.ts` grep-enforces this).
+ALL SQL lives under `packages/db/src/` — one repository per aggregate in `db/repositories/`, DB-level introspection in `db/diagnostics.ts`. If you think you found SQL elsewhere, you found a bug; report it (`invariants.test.ts` grep-enforces this).
 
 ## Call frequency is the ranking function
 
@@ -18,15 +18,15 @@ Before you measure anything, work out how often the query runs. This decides whe
 - **Per-session-start / background** — the consolidation sweep, the embedding and entity backfill workers. Tens of ms is tolerable; hundreds is not, because the worker holds the event loop for the whole batch.
 - **Dashboard / operator** — one human, occasional clicks. Cost barely matters. Do NOT optimise these unless the plan shows something pathological (a full scan that will grow unbounded), and say plainly that the cost is acceptable.
 
-Trace the frequency through the MCP tools in `apps/server/src/mcp/` and the routers in `apps/server/src/server/` rather than guessing from the method name.
+Trace the frequency through the MCP tools in `packages/mcp/src/` and the routers in `apps/server/src/server/` rather than guessing from the method name.
 
 ## Method
 
 **1. Inventory the real index set — from two places, not one.**
 
 ```bash
-grep -rn "index(\|primaryKey(\|unique(" apps/server/src/db/schema/*.ts
-grep -rniE "CREATE (UNIQUE )?INDEX|DROP INDEX" apps/server/src/db/migrations/*.sql
+grep -rn "index(\|primaryKey(\|unique(" packages/db/src/schema/*.ts
+grep -rniE "CREATE (UNIQUE )?INDEX|DROP INDEX" packages/db/src/migrations/*.sql
 ```
 
 Diff them. **They genuinely diverge, and it matters**: two live indexes on `memory` exist only in migration SQL because Drizzle cannot express them —
@@ -55,7 +55,7 @@ Also account for `DROP INDEX` in later migrations, and for table-rebuild migrati
 
 **3. Measure at scale, on a real migrated database.**
 
-Build a temp DB through the actual migration runner (helpers live under `apps/server/src/test/` and `apps/server/src/db/`) and seed a realistic corpus — ~1.3KB bodies, ~1 confirmation per memory, relations, several projects and sessions, ~18 entities per memory. Time at **1k / 20k / 50k** rows. One data point cannot distinguish linear from quadratic, and quadratic is the thing you are hunting.
+Build a temp DB through the actual migration runner (helpers live under `apps/server/src/test/` and `packages/db/src/`) and seed a realistic corpus — ~1.3KB bodies, ~1 confirmation per memory, relations, several projects and sessions, ~18 entities per memory. Time at **1k / 20k / 50k** rows. One data point cannot distinguish linear from quadratic, and quadratic is the thing you are hunting.
 
 Report milliseconds. Distinguish warm from cold cache. Repeat enough to be above noise, and say what noise looks like on your box.
 

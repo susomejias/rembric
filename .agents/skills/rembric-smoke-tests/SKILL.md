@@ -1,6 +1,6 @@
 ---
 name: rembric-smoke-tests
-description: End-to-end smoke against the local rembric dev stack (`pnpm run dev:docker:up`). Apply when the user says "smoke", "probar contra docker", "dev:up", or after applying an OpenSpec change that touches HTTP (`apps/server/src/server/api-router.ts`), MCP tools (`apps/server/src/mcp/`), or DB migrations (`apps/server/src/db/migrations/`). Encodes bring-up, mount verification, probe pattern and teardown — not the probes themselves.
+description: End-to-end smoke against the local rembric dev stack (`pnpm run dev:docker:up`). Apply when the user says "smoke", "probar contra docker", "dev:up", or after applying an OpenSpec change that touches HTTP (`apps/server/src/server/api-router.ts`), MCP tools (`packages/mcp/src/`), or DB migrations (`packages/db/src/migrations/`). Encodes bring-up, mount verification, probe pattern and teardown — not the probes themselves.
 ---
 
 # Rembric smoke pattern
