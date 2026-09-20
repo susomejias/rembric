@@ -1,4 +1,4 @@
-import { pageParam, singleParam } from '@/components/dashboard/format';
+import { pageParam, singleParam } from '@/components/dashboard/support';
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 

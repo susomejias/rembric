@@ -1,4 +1,6 @@
-import { SLUG_REGEX } from '@rembric/core';
+import { SLUG_REGEX, REVIEW_TTL_MS } from '@rembric/core';
+import type { MemoryType } from '@rembric/db';
+import { FileText } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -8,48 +10,52 @@ import {
   type SearchParams,
 } from './filters';
 
-import { StatusBadge } from '@/components/dashboard/badges';
-import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
-import { FilterBar, FilterField, FilterSelect } from '@/components/dashboard/filter-bar';
-import { PAGE_SIZE, queryWithPage } from '@/components/dashboard/format';
-import { Pager } from '@/components/dashboard/pager';
-import { Timestamp } from '@/components/dashboard/timestamp';
-import { ViewHead } from '@/components/dashboard/view-head';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  FilterActions,
+  FilterField,
+  FilterForm,
+  FilterSelect,
+  Pager,
+} from '@/components/dashboard/filters';
+import { PAGE_SIZE, relativeTime } from '@/components/dashboard/support';
+import {
+  Chip,
+  EmptyNote,
+  Notice,
+  Page,
+  PageHead,
+  Panel,
+  PanelHead,
+  Row,
+  Rows,
+  StatTile,
+  Time,
+} from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The projects list — a server component reading `ProjectsService` directly, so
- * every filter and the page index come from the URL and the server does the
- * filtering. Same shape as `../memories/page.tsx`; the retired Hono view this
- * ports is `apps/server/src/dashboard/projects.ts`.
+ * The project registry, in the v0 composition.
  *
- * The retired view rendered two tables (active + archived) and a per-row action
- * cluster (rename / archive / unarchive). The port collapses the two tables into
- * one `status`-filtered table and renders the lifecycle as a badge: every one of
- * those verbs is a mutation, and the change's mutation-protection probe (design
- * D4, task 2.5) has not run, so this view shows state and no dead control — the
- * same boundary `../memories/[id]/page.tsx` documents. The create form renders
- * its fields, disabled, and no action is wired.
+ * The read is the ported view's own — one `projects.list(true)` for every status
+ * — and so is the rule that an unrecognised `status` filters to NOTHING rather
+ * than silently widening back to `all`.
+ *
+ * Rename, archive, unarchive and create are still NOT wired: they are mutations
+ * whose Server Action boundary is a separate slice, so this page renders
+ * lifecycle state. The per-project `Edit` and `Access` controls the retired view
+ * carried are rendered the same way — present, and disabled with the reason.
  */
 export const dynamic = 'force-dynamic';
 
+const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
+  (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
+);
+
 const STATUS_OPTIONS = [
-  { value: 'all', label: 'all statuses' },
+  { value: 'all', label: 'all projects' },
   { value: 'active', label: 'active' },
   { value: 'archived', label: 'archived' },
-] as const;
+];
 
 export default async function ProjectsPage({
   searchParams,
@@ -58,18 +64,13 @@ export default async function ProjectsPage({
 }) {
   const params = await searchParams;
   const filters = readProjectsFilters(params);
-  // The params the pager and the filter form round-trip, as the browser sent
-  // them (minus `page`).
   const roundTripQuery = projectsQuery(params);
-  const filterKey = queryWithPage(roundTripQuery, 0);
 
-  // "No project at all" and "no project in this status" are different answers;
-  // only the second one has a way out that this page can offer.
   const isFiltered = filters.status !== DEFAULT_PROJECT_STATUS;
 
-  const { projects } = getServices();
-  // One read for every status: the retired view read both lists anyway, and the
-  // table is small enough that a status-specific query would be a second rule.
+  const { projects, repos } = getServices();
+  const nowMs = Date.now();
+
   const all = projects.list(true);
   const activeCount = all.filter((p) => p.archivedAt === null).length;
   const archivedCount = all.length - activeCount;
@@ -88,169 +89,166 @@ export default async function ProjectsPage({
   const offset = filters.page * PAGE_SIZE;
   const visible = filtered.slice(offset, offset + PAGE_SIZE);
   const hasMore = offset + PAGE_SIZE < filtered.length;
-  const total = filtered.length;
+
+  // One grouped read for the whole corpus, keyed by project: a per-row count
+  // query would be a second rule for the same number.
+  const needsReviewByProject = new Map(
+    repos.memory
+      .adminCountNeedsReviewByProject({ nowMs, ttlByType: TTL_BY_TYPE })
+      .map((row) => [row.projectId ?? 'global', row.count]),
+  );
+  const totalNeedsReview = [...needsReviewByProject.values()].reduce((acc, n) => acc + n, 0);
+  const pendingJudgments = repos.relations.adminCountByStatus('pending');
 
   return (
-    <div className="flex flex-col gap-4">
-      <ViewHead
-        title="Rembric Projects."
-        metaId="projects-meta"
-        meta={[
-          { k: 'ACTIVE', v: String(activeCount) },
-          { k: 'ARCHIVED', v: String(archivedCount) },
-        ]}
+    <Page>
+      <PageHead
+        icon={FileText}
+        eyebrow="Workspace registry"
+        title="Projects"
+        description={
+          <>
+            Projects isolate sessions, memories, prompts, relations, and consolidation work behind a
+            stable slug — the value passed via <code className="font-mono">/mcp/&lt;slug&gt;</code>{' '}
+            or <code className="font-mono">project.use({'{slug}'})</code>.
+          </>
+        }
+        aside={
+          <div className="text-right text-[11px] text-(--ink)/45">
+            <p>Active {activeCount}</p>
+            <p>Archived {archivedCount}</p>
+          </div>
+        }
       />
 
-      <p className="text-sm text-muted-foreground">
-        A project is identified by its slug (the value passed via{' '}
-        <code className="font-mono">/mcp/&lt;slug&gt;</code> or{' '}
-        <code className="font-mono">project.use({'{slug}'})</code>).
-      </p>
+      <section className="mt-6 grid gap-3 sm:grid-cols-3">
+        <StatTile label="Projects" value={all.length} tone="lime" hint={`${activeCount} active`} />
+        <StatTile
+          label="Needs review"
+          value={totalNeedsReview}
+          tone={totalNeedsReview > 0 ? 'amber' : 'dim'}
+          hint="across every project"
+        />
+        <StatTile label="Pending judgments" value={pendingJudgments} hint="candidate pairs" />
+      </section>
 
-      <Card className="border-warn/40 bg-warn/5 py-3">
-        <CardContent className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge variant="outline" className="border-warn/50 font-mono text-warn">
-            NOT CONNECTED
-          </Badge>
-          <span>
-            Rename, archive, unarchive and create are <b>not wired</b> in this port: the
-            mutation-protection probe has not landed yet, so this page renders lifecycle state only.
-          </span>
-        </CardContent>
-      </Card>
+      <Notice tone="amber" badge="Not connected" className="mt-6">
+        Create, rename, archive and the per-project access controls are not wired in this port: the
+        mutation-protection probe has not landed yet, so this page renders lifecycle state only.
+      </Notice>
 
-      {/* Remounted whenever the filter set changes, so the uncontrolled controls
-          re-seed from the URL on a soft navigation (e.g. CLEAR). */}
-      <FilterBar key={filterKey} action="/dashboard/projects">
-        <FilterField label="STATUS" htmlFor="f-status" className="w-40">
+      <FilterForm action="/dashboard/projects" className="mt-6">
+        <FilterField label="Status" htmlFor="pr-status" className="w-44">
           <FilterSelect
-            id="f-status"
+            id="pr-status"
             name="status"
             value={filters.status}
             options={STATUS_OPTIONS}
           />
         </FilterField>
-        <div className="flex items-center gap-2">
-          <Button type="submit" size="sm">
-            FILTER
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/dashboard/projects">CLEAR</Link>
-          </Button>
-        </div>
-      </FilterBar>
+        <FilterActions clearHref="/dashboard/projects" />
+      </FilterForm>
 
-      <div id="projects-list" className="flex flex-col gap-3">
-        {visible.length === 0 ? (
-          isFiltered ? (
-            <TableNoResults what="projects" clearHref="/dashboard/projects" />
-          ) : (
-            <TableEmptyState
-              title="No projects yet"
-              description={
-                <>
-                  Nothing is registered on this server. The create form above is not wired in this
-                  port (mutation protection is pending, see the banner), so today the projects the
-                  installer or the seed script created are the ones listed here.
-                </>
-              }
-            />
-          )
-        ) : (
-          <Table className="font-sans">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>name</TableHead>
-                <TableHead>slug</TableHead>
-                <TableHead className="w-32">status</TableHead>
-                <TableHead className="w-56">created</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {p.label}
-                      {p.isDefault ? (
-                        <Badge
-                          variant="outline"
-                          className="border-primary/50 font-mono text-brand-accent"
-                        >
-                          default
-                        </Badge>
-                      ) : null}
-                    </span>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {p.slug}
-                      {!SLUG_REGEX.test(p.slug) ? (
-                        <Badge variant="outline" className="border-warn/50 font-mono text-warn">
-                          legacy
-                        </Badge>
-                      ) : null}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={p.archivedAt === null ? 'active' : 'archived'} />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    <Timestamp value={p.createdAt} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-        <Pager
-          page={filters.page}
-          hasMore={hasMore}
-          total={total}
-          totalLabel={`${visible.length} ROWS`}
-          path="/dashboard/projects"
-          query={roundTripQuery}
+      <Panel className="mt-6">
+        <PanelHead
+          eyebrow="Project registry"
+          title="Active and archived projects"
+          action={`${filtered.length} listed`}
         />
-      </div>
+        {visible.length === 0 ? (
+          <EmptyNote>
+            {isFiltered ? (
+              <>
+                No project matches this status.{' '}
+                <Link href="/dashboard/projects" className="text-(--accent-ink) hover:underline">
+                  Show all
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                No project exists yet. A project is created the first time a client connects with a
+                slug that matches <code className="font-mono">{String(SLUG_REGEX)}</code>.
+              </>
+            )}
+          </EmptyNote>
+        ) : (
+          <Rows>
+            {visible.map((project) => {
+              const archived = project.archivedAt !== null;
+              const needsReview = needsReviewByProject.get(project.id) ?? 0;
+              return (
+                <Row key={project.id} columns="md:grid-cols-[1.4fr_1.1fr_1.1fr_auto_auto]">
+                  <div>
+                    <Link
+                      href={`/dashboard/memories?project=${encodeURIComponent(project.slug)}`}
+                      className="text-sm text-(--ink)/80 hover:text-(--accent-ink)"
+                    >
+                      {project.displayName ?? project.slug}
+                    </Link>
+                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                      created <Time value={project.createdAt} /> ·{' '}
+                      {relativeTime(project.createdAt, nowMs)}
+                    </p>
+                  </div>
+                  <code className="text-xs text-(--ink)/45">{project.slug}</code>
+                  <span
+                    className={`text-[11px] ${needsReview > 0 && !archived ? 'text-(--warn-ink)' : 'text-(--ink)/45'}`}
+                  >
+                    {archived ? (
+                      <Time value={project.archivedAt} />
+                    ) : (
+                      <>
+                        {needsReview} to review
+                        {project.isDefault ? ' · default' : ''}
+                      </>
+                    )}
+                  </span>
+                  <Chip tone={archived ? 'dim' : 'lime'}>{archived ? 'Archived' : 'Active'}</Chip>
+                  <div className="flex flex-wrap gap-2">
+                    <ProjectControl
+                      label="Edit"
+                      title="Editing the project lands with the projects Server Action"
+                    />
+                    <ProjectControl
+                      label="Access"
+                      title="Access management lands with the tokens Server Action"
+                    />
+                  </div>
+                </Row>
+              );
+            })}
+          </Rows>
+        )}
+        <div className="px-5 pb-5 md:px-6">
+          <Pager
+            page={filters.page}
+            hasMore={hasMore}
+            total={filtered.length}
+            totalLabel={`${visible.length} rows`}
+            path="/dashboard/projects"
+            query={roundTripQuery}
+          />
+        </div>
+      </Panel>
+    </Page>
+  );
+}
 
-      <Card className="py-4">
-        <CardHeader className="px-4">
-          <CardTitle className="font-mono text-xs tracking-[0.18em] text-muted-foreground uppercase">
-            Create project
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4">
-          <form>
-            {/* A disabled fieldset is what makes "rendered but not connected"
-                true: no control can be focused, typed into or submitted, so
-                there is no dead control that looks live. */}
-            <fieldset disabled className="flex flex-wrap items-end gap-3">
-              <FilterField label="SLUG" htmlFor="new-slug" className="w-56">
-                <Input
-                  id="new-slug"
-                  name="slug"
-                  placeholder="my-project"
-                  pattern="[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?"
-                />
-              </FilterField>
-              <FilterField label="DISPLAY NAME" htmlFor="new-display-name" className="w-56">
-                <Input
-                  id="new-display-name"
-                  name="displayName"
-                  placeholder="display name (optional)"
-                />
-              </FilterField>
-              <Button type="submit" size="sm">
-                CREATE PROJECT
-              </Button>
-            </fieldset>
-          </form>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Not yet connected — the create mutation is a Server Action this port does not wire, so
-            submitting would reach no handler.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+/**
+ * The per-project action placeholder. It is disabled rather than a no-op button
+ * on purpose: the mutation behind it does not exist yet, and an enabled control
+ * that silently does nothing is a lie the operator pays for.
+ */
+function ProjectControl({ label, title }: { label: string; title: string }) {
+  return (
+    <button
+      type="button"
+      disabled
+      title={title}
+      className="w-fit border border-(--ink)/[10%] px-3 py-2 text-[10px] tracking-[.12em] text-(--ink)/55 uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {label}
+    </button>
   );
 }

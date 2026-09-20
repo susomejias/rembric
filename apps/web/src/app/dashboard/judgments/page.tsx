@@ -1,58 +1,57 @@
-import { RELATION_STATUSES } from '@rembric/db';
+import { Gavel } from 'lucide-react';
 import Link from 'next/link';
 
 import {
   judgmentsQuery,
   readJudgmentsFilters,
   relationFilters,
-  RELATION_KIND_FILTERS,
   type SearchParams,
 } from './filters';
 
-import { StatusBadge, VerdictBadge } from '@/components/dashboard/badges';
-import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
-import { FilterBar, FilterField, FilterSelect } from '@/components/dashboard/filter-bar';
-import { PAGE_SIZE, queryWithPage, truncate } from '@/components/dashboard/format';
-import { Pager } from '@/components/dashboard/pager';
-import { Timestamp } from '@/components/dashboard/timestamp';
-import { ViewHead } from '@/components/dashboard/view-head';
-import { Button } from '@/components/ui/button';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  FilterActions,
+  FilterField,
+  FilterForm,
+  FilterSelect,
+  Pager,
+} from '@/components/dashboard/filters';
+import { PAGE_SIZE, relativeTime, shortId } from '@/components/dashboard/support';
+import {
+  EmptyNote,
+  Page,
+  PageHead,
+  Panel,
+  PanelHead,
+  Pill,
+  Row,
+  Rows,
+  StatTile,
+} from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The judgment queue — a server component reading `@rembric/db` directly, with
- * the same status/kind filters, ordering (`created_at DESC` in SQL) and
- * URL-driven pagination the Hono handler used
- * (`apps/server/src/dashboard/judgments.ts`).
+ * The judgment queue, in the v0 composition: the verdict counters, the decision
+ * context panel, the review-with-context table and the policy aside.
  *
- * `Mark orphaned` is NOT ported in this slice: it is a mutation and the change's
- * mutation-protection probe has not run, so this view renders the queue and its
- * state and no dead control.
- *
- * The `source → target` cells render each memory's **title** — the label the
- * current handler shows (`adminListWithContent.sourceTitle`/`targetTitle`); the
- * published spec's sentence still names `content`, which the handler stopped
- * using when titles became required. This is the port of the behaviour, not of
- * the stale sentence.
+ * The filter model is the ported view's own (`RelationKindFilter` includes the
+ * repository's `pending` pseudo-kind), and so is the read: `adminListWithContent`
+ * joined against both endpoints, `adminCountWithFilters` for the total.
  */
 export const dynamic = 'force-dynamic';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'all statuses' },
-  ...RELATION_STATUSES.map((s) => ({ value: s, label: s })),
+  { value: 'pending', label: 'pending' },
+  { value: 'judged', label: 'judged' },
+  { value: 'orphaned', label: 'orphaned' },
 ];
 
 const KIND_OPTIONS = [
   { value: '', label: 'all kinds' },
-  ...RELATION_KIND_FILTERS.map((k) => ({ value: k, label: k })),
+  { value: 'pending', label: 'pending (unjudged)' },
+  { value: 'compatible', label: 'compatible' },
+  { value: 'supersedes', label: 'supersedes' },
+  { value: 'not_conflict', label: 'not_conflict' },
 ];
 
 export default async function JudgmentsPage({
@@ -63,132 +62,199 @@ export default async function JudgmentsPage({
   const params = await searchParams;
   const filters = readJudgmentsFilters(params);
   const roundTripQuery = judgmentsQuery(params);
-  const filterKey = queryWithPage(roundTripQuery, 0);
-
-  // Both filters are optional, so an empty filter set means "the whole queue is
-  // empty", not "nothing matched".
-  const isFiltered = filters.status !== '' || filters.kind !== '';
 
   const { repos } = getServices();
+  const nowMs = Date.now();
 
   const address = relationFilters(filters);
   const offset = filters.page * PAGE_SIZE;
-  const rows = repos.relations.adminListWithContent(address, PAGE_SIZE + 1, offset);
-  const hasMore = rows.length > PAGE_SIZE;
-  const visible = rows.slice(0, PAGE_SIZE);
+  const rowsRaw = repos.relations.adminListWithContent(address, PAGE_SIZE + 1, offset);
+  const hasMore = rowsRaw.length > PAGE_SIZE;
+  const rows = rowsRaw.slice(0, PAGE_SIZE);
   const total = repos.relations.adminCountWithFilters(address);
 
+  const pending = repos.relations.adminCountByStatus('pending');
+  const judged = repos.relations.adminCountByStatus('judged');
+  const orphaned = repos.relations.adminCountByStatus('orphaned');
+  const adjudicable = repos.relations.adminPendingAdjudicableByProject();
+  const isFiltered = filters.status !== '' || filters.kind !== '';
+
   return (
-    <div className="flex flex-col gap-4">
-      <ViewHead
-        title="Rembric Judgments."
-        meta={[
-          { k: 'TOTAL', v: String(total) },
-          { k: 'SHOWING', v: `${visible.length} ROWS` },
-        ]}
+    <Page>
+      <PageHead
+        icon={Gavel}
+        eyebrow="Memory decisions"
+        title="Judgments"
+        description="Review the signals that shape what becomes durable memory."
       />
 
-      {/* Remounted whenever the filter set changes, so the uncontrolled
-          controls re-seed from the URL on a soft navigation (e.g. CLEAR). */}
-      <FilterBar key={filterKey} action="/dashboard/judgments">
-        <FilterField label="STATUS" htmlFor="f-status" className="w-36">
+      <section className="mt-6 grid gap-3 sm:grid-cols-3">
+        <StatTile label="Pending" value={pending} tone="amber" hint="needs your attention" />
+        <StatTile label="Judged" value={judged} tone="lime" hint="verdicts recorded" />
+        <StatTile label="Orphaned" value={orphaned} hint="endpoints no longer active" />
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-(--warn-ink)/15 bg-[linear-gradient(120deg,color-mix(in_oklab,var(--warn-ink)_10%,transparent),color-mix(in_oklab,var(--surface-panel)_92%,transparent)_52%)] p-5 md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-xl">
+            <p className="text-[10px] tracking-[.14em] text-(--warn-ink)/55 uppercase">
+              Decision context
+            </p>
+            <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">What deserves a decision</h2>
+            <p className="mt-2 text-xs leading-5 text-(--ink)/45">
+              Judgments are the quality gate between temporary session signals and durable memory.
+              Review the reason, scope, and confidence before anything is kept long term.
+            </p>
+          </div>
+          <div className="rounded-lg border border-(--ink)/[10%] bg-(--ink)/[3%] px-3 py-2 text-right">
+            <p className="text-[10px] text-(--ink)/45">Review queue</p>
+            <p className="mt-1 text-lg font-medium text-(--warn-ink)">
+              {pending} <span className="text-xs font-normal text-(--ink)/45">pairs</span>
+            </p>
+          </div>
+        </div>
+        {adjudicable.length > 0 ? (
+          <div className="mt-5 flex flex-wrap gap-2">
+            {adjudicable.slice(0, 6).map((row) => (
+              <span
+                key={row.projectId ?? 'global'}
+                className="rounded-full border border-(--ink)/[7%] bg-(--ink)/[3%] px-3 py-1 text-[10px] text-(--ink)/55"
+              >
+                {projectLabel(repos, row.projectId)} · {row.count}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <FilterForm action="/dashboard/judgments" className="mt-6">
+        <FilterField label="Status" htmlFor="j-status" className="w-44">
           <FilterSelect
-            id="f-status"
+            id="j-status"
             name="status"
             value={filters.status}
             options={STATUS_OPTIONS}
           />
         </FilterField>
-        <FilterField label="KIND" htmlFor="f-kind" className="w-40">
-          <FilterSelect id="f-kind" name="kind" value={filters.kind} options={KIND_OPTIONS} />
+        <FilterField label="Kind" htmlFor="j-kind" className="w-48">
+          <FilterSelect id="j-kind" name="kind" value={filters.kind} options={KIND_OPTIONS} />
         </FilterField>
-        <div className="flex items-center gap-2">
-          <Button type="submit" size="sm">
-            FILTER
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/dashboard/judgments">CLEAR</Link>
-          </Button>
-        </div>
-      </FilterBar>
+        <FilterActions clearHref="/dashboard/judgments" />
+      </FilterForm>
 
-      <div className="flex flex-col gap-3">
-        {visible.length === 0 ? (
-          isFiltered ? (
-            <TableNoResults what="judgments" clearHref="/dashboard/judgments" />
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_.65fr]">
+        <Panel>
+          <PanelHead
+            eyebrow="Decision queue"
+            title="Review with context"
+            action={`${total} matching`}
+          />
+          {rows.length === 0 ? (
+            <EmptyNote>
+              {isFiltered
+                ? 'No judgment matches this filter set.'
+                : 'No candidate pair has been recorded. Conflicts appear the moment a save overlaps an existing memory.'}
+            </EmptyNote>
           ) : (
-            <TableEmptyState
-              title="No judgments yet"
-              description={
-                <>
-                  A judgment appears when <code className="font-mono">memory.save</code> returns
-                  conflict candidates; close them with{' '}
-                  <code className="font-mono">memory.judge</code>.
-                </>
-              }
-            />
-          )
-        ) : (
-          <Table className="font-sans">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-28">status</TableHead>
-                <TableHead className="w-44">verdict</TableHead>
-                <TableHead>source → target</TableHead>
-                <TableHead className="w-40">actor</TableHead>
-                <TableHead className="w-56">created</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>
-                    <StatusBadge status={r.status} />
-                  </TableCell>
-                  <TableCell>
-                    <VerdictBadge kind={r.relation} />
-                  </TableCell>
-                  <TableCell className="text-xs">
+            <Rows>
+              {rows.map((relation, index) => (
+                <Row key={relation.id} columns="md:grid-cols-[auto_1.3fr_1fr_auto]">
+                  <span
+                    className={`grid size-7 place-items-center rounded-lg text-[10px] ${
+                      relation.status === 'pending' || relation.status === 'orphaned'
+                        ? 'bg-(--warn-ink)/[10%] text-(--warn-ink)'
+                        : 'bg-(--accent-ink)/[8%] text-(--accent-ink)/70'
+                    }`}
+                  >
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                  <div className="min-w-0">
                     <Link
-                      href={`/dashboard/memories/${r.sourceId}`}
-                      className="underline-offset-4 hover:underline"
+                      href={`/dashboard/memories/${relation.sourceId}`}
+                      className="text-sm text-(--ink)/80 hover:text-(--accent-ink)"
                     >
-                      {truncate(r.sourceTitle, 60)}
+                      {relation.sourceTitle}
                     </Link>
-                    <span className="mx-1 text-muted-foreground">→</span>
-                    <Link
-                      href={`/dashboard/memories/${r.targetId}`}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {truncate(r.targetTitle, 60)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {r.markedByActor ?? '—'}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    <Link
-                      href={`/dashboard/judgments/${r.id}`}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      <Timestamp value={r.createdAt} />
-                    </Link>
-                  </TableCell>
-                </TableRow>
+                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                      {relation.relation ?? 'pending'} →{' '}
+                      <Link
+                        href={`/dashboard/memories/${relation.targetId}`}
+                        className="hover:text-(--accent-ink)"
+                      >
+                        {relation.targetTitle}
+                      </Link>
+                    </p>
+                  </div>
+                  <div className="text-[11px] text-(--ink)/45">
+                    <p>confidence {relation.confidence ?? '—'}</p>
+                    <p className="mt-1 text-(--ink)/38">
+                      {relation.judgmentId !== ''
+                        ? `judgment ${shortId(relation.judgmentId)}`
+                        : 'no judgment id'}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-start gap-1">
+                    <Pill tone={relation.status === 'judged' ? 'lime' : 'amber'}>
+                      {relation.status}
+                    </Pill>
+                    <span className="text-[10px] text-(--ink)/38">
+                      {relativeTime(relation.judgedAt ?? relation.createdAt, nowMs)}
+                    </span>
+                  </div>
+                </Row>
               ))}
-            </TableBody>
-          </Table>
-        )}
+            </Rows>
+          )}
+          <div className="px-5 pb-5 md:px-6">
+            <Pager
+              page={filters.page}
+              hasMore={hasMore}
+              total={total}
+              totalLabel={`${rows.length} rows`}
+              path="/dashboard/judgments"
+              query={roundTripQuery}
+            />
+          </div>
+        </Panel>
 
-        <Pager
-          page={filters.page}
-          hasMore={hasMore}
-          total={total}
-          totalLabel={`${visible.length} ROWS`}
-          path="/dashboard/judgments"
-          query={roundTripQuery}
-        />
+        <aside className="rounded-2xl border border-(--ink)/[7.5%] bg-(--surface-panel) p-5 md:p-6">
+          <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">
+            How decisions work
+          </p>
+          <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">Only durable context wins</h2>
+          <p className="mt-4 text-xs leading-5 text-(--ink)/40">
+            Rembric keeps proposed memories separate until they are accepted. Nothing is silently
+            promoted. A verdict keeps its source, target, confidence, reason, and evidence.
+          </p>
+          <div className="mt-6 border-t border-(--ink)/[6%] pt-4 text-xs text-(--ink)/45">
+            <div className="flex items-center justify-between">
+              <span>Closure</span>
+              <span className="text-(--accent-ink)">memory.judge</span>
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <span>Re-surfacing</span>
+              <span>memory.context.pendingJudgments</span>
+            </div>
+          </div>
+          <p className="mt-6 border-t border-(--ink)/[6%] pt-4 text-[11px] text-(--ink)/40">
+            Aging pendings are orphaned by the deterministic sweep, not by a cron job.
+          </p>
+          <Link
+            href="/dashboard/consolidation"
+            className="mt-4 inline-block text-[11px] text-(--accent-ink)/75 hover:text-(--accent-ink)"
+          >
+            Inspect the journal →
+          </Link>
+        </aside>
       </div>
-    </div>
+    </Page>
   );
+}
+
+function projectLabel(
+  repos: ReturnType<typeof getServices>['repos'],
+  projectId: string | null,
+): string {
+  if (projectId === null) return 'global scope';
+  return repos.projects.adminFindById(projectId)?.slug ?? projectId;
 }

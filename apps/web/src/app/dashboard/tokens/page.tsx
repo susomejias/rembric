@@ -1,51 +1,49 @@
 import { isProjectSetScope, pinnedProjectId, type TokenScope } from '@rembric/core';
 import type { Token } from '@rembric/db';
+import { KeyRound } from 'lucide-react';
+import Link from 'next/link';
 
-import { EmptyState } from '@/components/dashboard/empty-state';
-import { FilterField, FilterSelect } from '@/components/dashboard/filter-bar';
-import { shortId } from '@/components/dashboard/format';
-import { Timestamp } from '@/components/dashboard/timestamp';
-import { ViewHead } from '@/components/dashboard/view-head';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { FIELD_INK } from '@/components/dashboard/filters';
+import { PAGE_SIZE } from '@/components/dashboard/support';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  Chip,
+  EmptyNote,
+  Notice,
+  Page,
+  PageHead,
+  Panel,
+  PanelHead,
+  Row,
+  Rows,
+  StatTile,
+  Time,
+} from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The tokens list — a server component reading `TokensService` and the tokens
- * repository directly, the same reads the retired Hono view made
- * (`apps/server/src/dashboard/tokens.ts`).
+ * The tokens list, in the v0 composition: the credential rows, the mint form and
+ * the scope explanation.
  *
- * Two things this port deliberately does NOT carry over:
+ * The reads are the ported view's own (`TokensService.list`, the project set
+ * tables, the archived-inclusive project list) and so is the state derivation —
+ * revoked, expired, inert (pinned to a deleted project), no projects, active.
  *
- * - The per-row Revoke form and the one-shot plaintext banner. Both need the
- *   create/revoke mutations, which are Server Actions the mutation-protection
- *   probe (design D4, task 2.5) has not yet cleared, so the list renders state
- *   and no dead control — the boundary `../memories/[id]/page.tsx` documents.
- * - A "last used" column. No such datum exists: `tokens` has no `last_used_at`
- *   column, and `UsageCounters` is an in-memory (token, tool) tally with no
- *   timestamp. The two lifecycle columns the retired view rendered — `expires`
- *   and the derived `state` — stand in, because a token's reach without them is
- *   unreadable.
+ * Create and Revoke are still NOT wired: both are mutations whose Server Action
+ * boundary is a separate slice. The mint form renders its fields and no action.
  *
- * The mint form renders its fields, disabled, and no action is wired.
+ * The state cell is the mockup's bordered badge, not a filled pill: the tokens
+ * table is the one v0 view that draws its state that way, and the tones below
+ * are the retired view's own `.pill.{active,revoked,expired,legacy,pending}`
+ * mapping. `Chip` from `ui.tsx` cannot serve it — that component has no amber
+ * arm, and both `expired` and `inert` need one.
  */
 export const dynamic = 'force-dynamic';
 
 export default function TokensPage() {
   const { repos, projects, tokens: tokensService } = getServices();
+  const nowMs = Date.now();
 
   const tokens = tokensService.list();
-  const nowMs = Date.now();
 
   // Archived included: a token pinned to an archived project keeps authorizing,
   // so hiding the slug would misreport what it reaches.
@@ -54,197 +52,206 @@ export default function TokensPage() {
 
   // Slug-ascending per token: the repository orders by (token_id, slug).
   const memberSlugs = new Map<string, string[]>();
-  for (const m of repos.tokens.adminListProjectSlugs()) {
-    const found = memberSlugs.get(m.tokenId);
-    if (found) found.push(m.slug);
-    else memberSlugs.set(m.tokenId, [m.slug]);
+  for (const member of repos.tokens.adminListProjectSlugs()) {
+    const found = memberSlugs.get(member.tokenId);
+    if (found) found.push(member.slug);
+    else memberSlugs.set(member.tokenId, [member.slug]);
   }
 
   const rows = tokens.map((token) => {
     const scope = token.scope as TokenScope;
     const members = memberSlugs.get(token.id) ?? [];
-    const slug = token.projectId === null ? null : (slugById.get(token.projectId) ?? null);
     return {
       token,
       scope,
       members,
-      slug,
+      slug: token.projectId === null ? null : (slugById.get(token.projectId) ?? null),
       state: tokenState(token, slugById, members.length, nowMs),
     };
   });
 
+  const activeCount = rows.filter((row) => row.state.label === 'active').length;
   const selectable = projectRows.filter((p) => p.archivedAt === null);
 
   return (
-    <div className="flex flex-col gap-4">
-      <ViewHead
-        title="Rembric Tokens."
-        metaId="tokens-meta"
-        meta={[{ k: 'TOTAL', v: String(tokens.length) }]}
+    <Page>
+      <PageHead
+        icon={KeyRound}
+        eyebrow="Admin access"
+        title="Tokens"
+        description="Create and revoke scoped tokens used by agents and MCP clients to access this workspace."
+        aside={<span className="text-[11px] text-(--ink)/45">{rows.length} total</span>}
       />
 
-      <Card className="border-warn/40 bg-warn/5 py-3">
-        <CardContent className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge variant="outline" className="border-warn/50 font-mono text-warn">
-            NOT CONNECTED
-          </Badge>
-          <span>
-            Mint and revoke are <b>not wired</b> in this port: the mutation-protection probe has not
-            landed yet, so this page renders token state only. The plaintext secret is shown once at
-            mint time and never again.
-          </span>
-        </CardContent>
-      </Card>
+      <section className="mt-6 grid gap-3 sm:grid-cols-3">
+        <StatTile label="Active" value={activeCount} tone="lime" hint="authorizing right now" />
+        <StatTile
+          label="Revoked or expired"
+          value={rows.length - activeCount}
+          hint="kept for audit"
+        />
+        <StatTile label="Projects" value={selectable.length} hint="available as a scope" />
+      </section>
 
-      <div id="tokens-list" className="flex flex-col gap-3">
+      <Notice tone="amber" badge="Not connected" className="mt-6">
+        Create and revoke are not wired in this port: both are mutations whose Server Action
+        boundary is a separate slice. This page renders credential state only, and the mint form
+        submits nothing.
+      </Notice>
+
+      <Panel className="mt-7">
+        <PanelHead
+          eyebrow="Existing tokens"
+          title="Active and revoked credentials"
+          action={
+            <Link
+              href="/dashboard/projects"
+              className="text-[11px] text-(--accent-ink)/75 hover:text-(--accent-ink)"
+            >
+              Project scopes →
+            </Link>
+          }
+        />
         {rows.length === 0 ? (
-          <EmptyState>No tokens yet.</EmptyState>
+          <EmptyNote>
+            No token exists. The bootstrap admin token is minted by the server on first boot and is
+            not listed here.
+          </EmptyNote>
         ) : (
-          <Table className="font-sans">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>name</TableHead>
-                <TableHead>scope</TableHead>
-                <TableHead>project</TableHead>
-                <TableHead className="w-56">created</TableHead>
-                <TableHead className="w-56">expires</TableHead>
-                <TableHead className="w-32">state</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.token.id}>
-                  <TableCell className="font-medium">{row.token.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="font-mono">
-                      {scopeLabel(row.scope, slugById)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {row.members.length > 0
-                      ? row.members.join(', ')
-                      : (row.slug ?? <span className="text-muted-foreground">—</span>)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    <Timestamp value={row.token.createdAt} />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    <Timestamp value={row.token.expiresAt} />
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={`font-mono ${row.state.tone}`}>
-                      {row.state.label}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
+          <>
+            <div className="hidden grid-cols-[1.1fr_1.3fr_1.4fr_1fr_110px] gap-4 border-b border-(--ink)/[6%] px-5 py-3 text-[10px] tracking-[.14em] text-(--ink)/38 uppercase md:grid">
+              <span>Name</span>
+              <span>Scope</span>
+              <span>Created</span>
+              <span>State</span>
+              <span>Expires</span>
+            </div>
+            <Rows>
+              {rows.map(({ token, scope, members, slug, state }) => (
+                <Row key={token.id} columns="md:grid-cols-[1.1fr_1.3fr_1.4fr_1fr_110px]">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs text-(--ink)/75">{token.name}</p>
+                    <p className="mt-1 truncate text-[10px] text-(--ink)/38">
+                      {members.length > 0
+                        ? members.join(', ')
+                        : slug === null
+                          ? 'admin / global'
+                          : slug}
+                    </p>
+                  </div>
+                  <Chip>{scope}</Chip>
+                  <span className="text-xs text-(--ink)/40">
+                    <Time value={token.createdAt} />
+                  </span>
+                  <span
+                    className={`w-fit border px-2 py-1 text-[10px] tracking-[.12em] uppercase ${STATE_CHIP[state.tone]}`}
+                  >
+                    {state.label}
+                  </span>
+                  <span className="text-xs text-(--ink)/40">
+                    <Time value={token.expiresAt} />
+                  </span>
+                </Row>
               ))}
-            </TableBody>
-          </Table>
+            </Rows>
+          </>
         )}
-      </div>
+      </Panel>
 
-      <Card className="py-4">
-        <CardHeader className="px-4">
-          <CardTitle className="font-mono text-xs tracking-[0.18em] text-muted-foreground uppercase">
-            Create a new token
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 px-4">
-          <form>
-            {/* A disabled fieldset is what makes "rendered but not connected"
-                true: no control can be focused, typed into or submitted. */}
-            <fieldset disabled className="flex flex-col gap-4">
-              <FilterField label="NAME" htmlFor="mint-name" className="w-56">
-                <Input id="mint-name" name="name" placeholder="claude-laptop" />
-              </FilterField>
-              <div className="flex flex-col gap-2">
-                <span className="font-mono text-[0.66rem] tracking-[0.12em] text-muted-foreground uppercase">
-                  Projects (optional)
-                </span>
-                <div className="flex flex-wrap gap-3">
-                  {selectable.length === 0 ? (
-                    <span className="text-sm text-muted-foreground">No selectable projects.</span>
-                  ) : (
-                    selectable.map((p) => (
-                      <label key={p.id} className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" name="project" value={p.slug} />
-                        <span className="font-mono text-xs">{p.slug}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  None selected: ADMIN, every project + dashboard login. One: that project only. Two
-                  or more: exactly those, and still not admin.
-                </span>
-              </div>
-              <FilterField label="ACCESS" htmlFor="mint-access" className="w-64">
-                <FilterSelect
-                  id="mint-access"
-                  name="access"
-                  value="write"
-                  options={[
-                    { value: 'write', label: 'write (read and write)' },
-                    { value: 'read', label: 'read (read only)' },
-                  ]}
-                />
-              </FilterField>
-              <FilterField
-                label="EXPIRES (OPTIONAL, ISO 8601)"
-                htmlFor="mint-expires"
-                className="w-72"
-              >
-                <Input id="mint-expires" name="expires" placeholder="2027-01-01T00:00:00Z" />
-              </FilterField>
-              <Button type="submit" size="sm" className="w-fit">
-                CREATE
-              </Button>
-            </fieldset>
-          </form>
-          <p className="text-sm text-muted-foreground">
-            Not yet connected — the mint mutation is a Server Action this port does not wire, so
-            submitting would reach no handler.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+      <Panel className="mt-7" padded>
+        <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">Create a new token</p>
+        <form className="mt-4 flex flex-col gap-3 md:flex-row md:items-end">
+          <label className="flex-1 text-[10px] tracking-[.14em] text-(--ink)/45 uppercase">
+            Name
+            <input
+              disabled
+              placeholder="claude-laptop"
+              className={`mt-2 ${FIELD_INK} disabled:opacity-50`}
+            />
+          </label>
+          <label className="flex-1 text-[10px] tracking-[.14em] text-(--ink)/45 uppercase">
+            Project scope
+            <select disabled className={`mt-2 ${FIELD_INK} disabled:opacity-50`}>
+              <option>— none (admin / global) —</option>
+              {selectable.map((project) => (
+                <option key={project.id}>{project.slug}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled
+            title="Token minting is wired in a later slice"
+            className="rounded-lg bg-lime-300 px-5 py-3 text-[11px] font-medium text-[#111614] transition-colors hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create token
+          </button>
+        </form>
+        <p className="mt-3 text-[11px] text-(--ink)/38">
+          The plaintext secret is shown once, at creation, and only its hash is stored.
+        </p>
+      </Panel>
+
+      <Panel className="mt-7" padded>
+        <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">Scope model</p>
+        <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">One token, one reach</h2>
+        <div className="mt-5 grid gap-4 text-xs sm:grid-cols-2">
+          <div>
+            <p className="text-(--ink)/45">Admin scope</p>
+            <p className="mt-1">
+              <code className="font-mono">*</code> reaches every project and the dashboard itself.
+            </p>
+          </div>
+          <div>
+            <p className="text-(--ink)/45">Project scope</p>
+            <p className="mt-1">
+              A pinned <code className="font-mono">project:&lt;id&gt;</code> or a project set limits
+              the token to those scopes.
+            </p>
+          </div>
+          <div>
+            <p className="text-(--ink)/45">Revocation</p>
+            <p className="mt-1">Revoking sets a timestamp; the row is kept for audit.</p>
+          </div>
+          <div>
+            <p className="text-(--ink)/45">Expiry</p>
+            <p className="mt-1">
+              An expired token authenticates nothing and is reported as expired.
+            </p>
+          </div>
+        </div>
+        <p className="mt-6 border-t border-(--ink)/[6%] pt-4 text-[11px] text-(--ink)/40">
+          {PAGE_SIZE} is the dashboard&apos;s listing page size; tokens are listed in full because a
+          workspace has few of them.
+        </p>
+      </Panel>
+    </Page>
   );
 }
 
-/**
- * The scope with its opaque project id resolved to a slug. The retired view
- * interpolated the raw scope; `project:01M2YZ…` as a badge is unreadable and the
- * id is already resolvable here, so the substitution is the only change.
- */
-function scopeLabel(scope: TokenScope, slugById: ReadonlyMap<string, string>): string {
-  const pinned = pinnedProjectId(scope);
-  if (pinned === null) return scope;
-  const slug = slugById.get(pinned) ?? shortId(pinned);
-  return scope.startsWith('read:project:') ? `read:project:${slug}` : `project:${slug}`;
-}
+type StateTone = 'lime' | 'amber' | 'danger' | 'dim';
 
-/**
- * The retired view's `stateOf`, unchanged: revoked and expired are terminal,
- * `inert` is a pin that resolves to no live project, `no projects` is an empty
- * set (repairable, unlike `inert`), and everything else is active.
- */
+const STATE_CHIP: Record<StateTone, string> = {
+  lime: 'border-(--accent-ink)/25 text-(--accent-ink)/75',
+  amber: 'border-(--warn-ink)/30 text-(--warn-ink)',
+  danger: 'border-(--danger-ink)/40 text-(--danger-ink)',
+  dim: 'border-(--ink)/[10%] text-(--ink)/45',
+};
+
 function tokenState(
   token: Token,
   slugById: ReadonlyMap<string, string>,
   memberCount: number,
   nowMs: number,
-): { label: string; tone: string } {
-  if (token.revokedAt) return { label: 'revoked', tone: 'text-muted-foreground' };
+): { label: string; tone: StateTone } {
+  if (token.revokedAt) return { label: 'revoked', tone: 'danger' };
   if (token.expiresAt && token.expiresAt.getTime() <= nowMs) {
-    return { label: 'expired', tone: 'text-muted-foreground' };
+    return { label: 'expired', tone: 'amber' };
   }
-  const scope = token.scope as TokenScope;
-  const pinned = pinnedProjectId(scope);
-  if (pinned !== null && !slugById.has(pinned)) {
-    return { label: 'inert', tone: 'border-warn/50 text-warn' };
+  const pinned = pinnedProjectId(token.scope as TokenScope);
+  if (pinned !== null && !slugById.has(pinned)) return { label: 'inert', tone: 'amber' };
+  if (isProjectSetScope(token.scope as TokenScope) && memberCount === 0) {
+    return { label: 'no projects', tone: 'dim' };
   }
-  if (isProjectSetScope(scope) && memberCount === 0) {
-    return { label: 'no projects', tone: 'border-warn/50 text-warn' };
-  }
-  return { label: 'active', tone: 'border-primary/50 text-brand-accent' };
+  return { label: 'active', tone: 'lime' };
 }

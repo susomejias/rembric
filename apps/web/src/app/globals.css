@@ -1,267 +1,180 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
-@import '../styles/glass.css';
 
-/* `.dark` on the document element selects the dark values; absent, the light
-   ones apply. The two are the same token set in both directions. */
 @custom-variant dark (&:is(.dark *));
+@custom-variant light (&:is(.light *));
 
-/*
- * Theme layer. This is the single declaration site for the dashboard's design
- * tokens: the semantic shadcn slots, the brand role, the state roles, the
- * light-surface text accent, the typography roles and the `--glass-*` group.
- * No other file declares a token.
- */
 @theme inline {
-  /* Typography roles. The loader handles (`--font-grotesk`, `--font-inter`,
-     `--font-jetbrains`) are set on <html> by `next/font/local`, so the roles
-     below are what components and utilities actually consume. */
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-jetbrains);
-  --font-display: var(--font-grotesk);
-  --font-heading: var(--font-grotesk);
-
-  /* The metric role. `text-3xl` is used by exactly one role — the stat value —
-     and the reference's `.stat-card .value` is 2rem/700/-0.02em, so the scale
-     step is pinned here rather than restated at each call site. */
-  --text-3xl: 2rem;
-  --text-3xl--line-height: 2.25rem;
-
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-active-bg: var(--active-bg);
-  --color-active-border: var(--active-border);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-warn: var(--warn);
-  --color-warn-foreground: var(--warn-foreground);
-  --color-brand-accent: var(--brand-accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
   --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  /* Panel slots collapse onto the one radius. shadcn's generated components
-     paint their large surfaces with `rounded-xl` (dialogs, sheets) and the
-     reference is a single panel radius everywhere, so `xl` is pinned
-     to `--radius` rather than a step above it. `Card` is the exception: it is
-     square by design and carries no radius at all. */
-  --radius-xl: var(--radius);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) * 1.35);
+  --radius-2xl: calc(var(--radius) * 1.7);
 }
 
-/* ── Light: the content layer of identity A ──────────────────────────────
-   Neutral surfaces with a faint olive cast so the lime brand fill sits on the
-   page instead of fighting it. Contrast against `--background` (#f7f8f4):
-   `--foreground` 17.4:1, `--muted-foreground` 6.07:1, `--brand-accent` 5.00:1,
-   `--ring` 3.64:1. */
+/*
+ * Compatibility roles. The v0 palette is expressed in arbitrary values, but
+ * three surfaces that predate it — `app/not-found.tsx`, the OAuth consent
+ * endpoint and the generated `ui/*` primitives — still name semantic roles that
+ * the v0 token set does not declare, and an undeclared role silently generates
+ * no utility at all. Each mapping below is an alias of a role the v0 theme
+ * already declares, or of Tailwind's own font default; nothing here is read by a
+ * v0 view.
+ */
+@theme inline {
+  --color-brand-accent: var(--brand-accent);
+  --color-warn: var(--warn);
+  --font-display: var(--font-sans);
+  --font-heading: var(--font-sans);
+}
+
 :root {
-  /* Typography roles, resolvable at runtime. The `@theme inline` block above
-     already drives the `font-*` utilities from these keys, but `inline` emits
-     no custom property, so the three roles are named here as well: a consumer
-     reading `--font-display` from the document element gets the family, not an
-     empty string. */
-  --font-sans: var(--font-inter);
-  --font-display: var(--font-grotesk);
-  --font-mono: var(--font-jetbrains);
+  color-scheme: dark;
+  --background: oklch(0.145 0.012 165);
+  --foreground: oklch(0.93 0.018 145);
+  --card: oklch(0.18 0.014 165);
+  --card-foreground: oklch(0.93 0.018 145);
+  --popover: oklch(0.2 0.016 165);
+  --popover-foreground: oklch(0.93 0.018 145);
+  --primary: oklch(0.88 0.18 115);
+  --primary-foreground: oklch(0.18 0.03 140);
+  --secondary: oklch(0.24 0.02 165);
+  --secondary-foreground: oklch(0.87 0.02 145);
+  --muted: oklch(0.23 0.018 165);
+  --muted-foreground: oklch(0.62 0.025 155);
+  --accent: oklch(0.25 0.025 165);
+  --accent-foreground: oklch(0.92 0.02 145);
+  --destructive: oklch(0.68 0.18 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.8 0.12 115);
+  --radius: 0.65rem;
 
-  --background: #f7f8f4;
-  --foreground: #12140d;
-  --card: #ffffff;
-  --card-foreground: #12140d;
-  --popover: #ffffff;
-  --popover-foreground: #12140d;
+  /* Compatibility roles, dark values. `--brand-accent` is the lime itself,
+     which is the readable accent on this surface (measured 12.0:1 against
+     `--background`). */
+  --brand-accent: oklch(0.88 0.18 115);
+  --warn: oklch(0.8 0.15 75);
 
-  /* Brand role: the lime carried over from the retired brutalist palette,
-     unchanged, used as a fill. Lime is never body text on a light surface. */
-  --primary: #c6f24e;
-  --primary-foreground: #0a0a0a;
-
-  --secondary: #eaede2;
-  --secondary-foreground: #12140d;
-  --muted: #eef1e7;
-  --muted-foreground: #5b6053;
-  --accent: #eef1e7;
-  --accent-foreground: #12140d;
-
-  /* State roles. These are the two tones the confirmation contract
-     distinguishes: `--destructive` for the irreversible, `--warn` for the
-     reversible. Both are fills; their readable pair is the `-foreground`. */
-  --destructive: #ff3344;
-  --destructive-foreground: #ffffff;
-  --warn: #ff8c00;
-  --warn-foreground: #0a0a0a;
-
-  /* The lime as text: an olive inside the same family, dark enough to clear
-     AA on the light surfaces (5.00:1 on `--background`, 5.34:1 on `--card`). */
-  --brand-accent: #55750a;
-
-  --border: #dfe3d5;
-  --input: #dfe3d5;
-  --ring: #6c8c1f;
-
-  --chart-1: #c6f24e;
-  --chart-2: #55750a;
-  --chart-3: #ff8c00;
-  --chart-4: #ff3344;
-  --chart-5: #6c8c1f;
-
-  --radius: 0.375rem;
-
-  --sidebar: rgb(255 255 255 / 0.62);
-  --sidebar-foreground: #12140d;
-  --sidebar-primary: #c6f24e;
-  --sidebar-primary-foreground: #0a0a0a;
-  --sidebar-accent: rgb(18 20 13 / 0.06);
-  --sidebar-accent-foreground: #12140d;
-  --sidebar-border: rgb(18 20 13 / 0.08);
-  --sidebar-ring: #6c8c1f;
-
-  /* The sidebar's active-item pill. Not a semantic slot: it is the one surface
-     that is a hairline-filled region of the page background rather than a
-     button, and Midday's two values — a fill a hair off `--background` and its
-     own border — are what the nav was specified against. */
-  --active-bg: #f7f7f7;
-  --active-border: #e6e6e6;
-
-  /* Glass roles — owned by the identity layer, not by the semantic set. The
-     tint and the blur are deliberately strong: at 0.62/18px the chrome read as
-     a slightly lighter panel rather than as frosted glass, because a hairline
-     tint over an opaque page is indistinguishable from an opaque surface. */
-  --glass-tint: rgb(255 255 255 / 0.72);
-  --glass-fallback-tint: #f2f4ee;
-  --glass-blur: 28px;
-  --glass-saturate: 180%;
-  --glass-specular: rgb(255 255 255 / 0.9);
-  --glass-border: rgb(18 20 13 / 0.12);
-  --glass-shadow: 0 1px 2px rgb(18 20 13 / 0.06), 0 16px 40px -16px rgb(18 20 13 / 0.22);
+  /*
+   * Surface and ink roles. The v0 views paint their surfaces and their text
+   * with arbitrary values, and eleven of those values are the ones that have to
+   * move together when the theme flips: the page canvas, the rail, the topbar,
+   * a panel, a metric tile and a nested surface, plus the ink every alpha
+   * (`/45`, `/[3%]`) is mixed against, and the three accent inks.
+   *
+   * Naming them is a mechanical substitution, not a restyle: every dark value
+   * below is byte-identical to the arbitrary value it replaces (Tailwind's own
+   * `lime-200`/`lime-300`/`amber-100`/`red-300` for the three accent inks), so
+   * the dark rendering is the mockup's to the pixel. The lime *fill*
+   * (`bg-lime-300`) and the amber/red fills are deliberately NOT roles: they are
+   * read as a colour in both modes, so they stay literal.
+   */
+  --ink: #ffffff;
+  --body-ink: #e8ede7;
+  --surface-page: #0b100e;
+  --surface-rail: #070a09;
+  --surface-topbar: #090e0c;
+  --surface-panel: #111815;
+  --surface-tile: #0d1310;
+  --surface-nested: #151b18;
+  --surface-login: #111614;
+  --surface-input: #151515;
+  --accent-ink: oklch(0.938 0.189 126.165);
+  --accent-ink-strong: oklch(0.897 0.196 126.665);
+  --warn-ink: oklch(0.935 0.075 92);
+  --warn-surface: oklch(0.879 0.169 91.605 / 0.035);
+  --danger-ink: oklch(0.808 0.114 19.571);
 }
 
-/* ── Dark: the near-black palette the previous dashboard shipped, now one of
-   two modes rather than the only one. Contrast against `--background`
-   (#0a0a0a): `--foreground` 17.4:1, `--muted-foreground` 6.99:1,
-   `--brand-accent` 15.2:1. */
-.dark {
-  --background: #0a0a0a;
-  --foreground: #f2f2f2;
-  --card: #141414;
-  --card-foreground: #f2f2f2;
-  --popover: #141414;
-  --popover-foreground: #f2f2f2;
+/*
+ * Light — the opt-in variant. The same role set, inverted in lightness and
+ * flipped in `color-scheme`; the lime brand fill and the panel geometry are the
+ * two things that do not change, because the accent carries the identity in
+ * both modes and the fill is read, not the surface under it.
+ *
+ * Specificity is a tie with `:root` (both are one class-level selector), so the
+ * order of the two blocks is what makes this one win — it must stay below.
+ *
+ * Measured against `--background` (oklch(.965 .008 165)): `--foreground`
+ * 17.5:1, `--muted-foreground` 5.4:1, `--ring` 3.2:1, and
+ * `--primary-foreground` on `--primary` 13.4:1. `--brand-accent` moves to an
+ * olive of the same family (5.2:1) because lime as *text* on a light surface is
+ * unreadable at any usable weight.
+ */
+.light {
+  color-scheme: light;
+  --background: oklch(0.965 0.008 165);
+  --foreground: oklch(0.16 0.015 165);
+  --card: oklch(0.995 0.004 165);
+  --card-foreground: oklch(0.16 0.015 165);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.015 165);
+  --primary: oklch(0.88 0.18 115);
+  --primary-foreground: oklch(0.18 0.03 140);
+  --secondary: oklch(0.93 0.012 165);
+  --secondary-foreground: oklch(0.2 0.02 165);
+  --muted: oklch(0.94 0.01 165);
+  --muted-foreground: oklch(0.5 0.02 160);
+  --accent: oklch(0.92 0.015 165);
+  --accent-foreground: oklch(0.18 0.02 165);
+  --destructive: oklch(0.58 0.2 25);
+  --border: oklch(0 0 0 / 12%);
+  --input: oklch(0 0 0 / 16%);
+  --ring: oklch(0.62 0.13 118);
 
-  --primary: #c6f24e;
-  --primary-foreground: #0a0a0a;
+  --brand-accent: oklch(0.52 0.14 118);
+  --warn: oklch(0.55 0.15 70);
 
-  --secondary: #1c1c1c;
-  --secondary-foreground: #f2f2f2;
-  --muted: #1a1a1a;
-  --muted-foreground: #9a9a9a;
-  --accent: #1a1a1a;
-  --accent-foreground: #f2f2f2;
-
-  --destructive: #ff3344;
-  --destructive-foreground: #ffffff;
-  --warn: #ff8c00;
-  --warn-foreground: #0a0a0a;
-
-  /* On the near-black surface the lime itself is the readable accent. */
-  --brand-accent: #c6f24e;
-
-  --border: rgb(255 255 255 / 0.12);
-  --input: rgb(255 255 255 / 0.16);
-  --ring: #c6f24e;
-
-  --chart-1: #c6f24e;
-  --chart-2: #9bbf3c;
-  --chart-3: #ff8c00;
-  --chart-4: #ff3344;
-  --chart-5: #6c8c1f;
-
-  --sidebar: rgb(20 20 20 / 0.62);
-  --sidebar-foreground: #f2f2f2;
-  --sidebar-primary: #c6f24e;
-  --sidebar-primary-foreground: #0a0a0a;
-  --sidebar-accent: rgb(255 255 255 / 0.06);
-  --sidebar-accent-foreground: #f2f2f2;
-  --sidebar-border: rgb(255 255 255 / 0.1);
-  --sidebar-ring: #c6f24e;
-
-  --active-bg: #131313;
-  --active-border: #1d1d1d;
-
-  --glass-tint: rgb(16 16 16 / 0.72);
-  --glass-fallback-tint: #141414;
-  --glass-blur: 28px;
-  --glass-saturate: 180%;
-  --glass-specular: rgb(255 255 255 / 0.1);
-  --glass-border: rgb(255 255 255 / 0.12);
-  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.55), 0 16px 40px -16px rgb(0 0 0 / 0.65);
+  --ink: oklch(0.16 0.015 165);
+  --body-ink: oklch(0.18 0.015 165);
+  --surface-page: oklch(0.972 0.006 165);
+  --surface-rail: oklch(1 0 0);
+  --surface-topbar: oklch(1 0 0);
+  --surface-panel: oklch(1 0 0);
+  --surface-tile: oklch(0.96 0.008 165);
+  --surface-nested: oklch(0.975 0.006 165);
+  --surface-login: oklch(0.97 0.006 165);
+  --surface-input: oklch(0.995 0.004 165);
+  --accent-ink: oklch(0.5 0.14 118);
+  --accent-ink-strong: oklch(0.45 0.14 118);
+  --warn-ink: oklch(0.45 0.11 70);
+  --warn-surface: oklch(0.879 0.169 91.605 / 0.16);
+  --danger-ink: oklch(0.5 0.2 25);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-
   html {
-    @apply font-sans;
+    background: var(--background);
   }
-
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-foreground;
   }
 }
 
-/*
- * Two typographic roles the reference defines and the generated components do
- * not, applied here because the elements they target are outside this change's
- * edit surface (`stat-card.tsx`, `view-head.tsx`). Both are anchored on a
- * semantic hook — the display-font role class and the `h1` element — never on a
- * generated class or a sibling position. Unlayered on purpose: Tailwind's
- * `utilities` layer outranks `components`, and these rules exist to override
- * utilities already on the markup, so no `!important` is needed.
- */
-
-/* `.stat-card .value` in the reference. `font-display` as a direct child of a
-   card's content is the metric slot and nothing else (the login card's display
-   heading sits one level deeper, inside a wrapper div). */
-[data-slot='card-content'] > .font-display {
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-/* `h1 { font-weight: 700 }` in the reference, against the generated heading
-   role's 600. `.font-display` on the page's own `h1` is upstream of this rule
-   and keeps the display family; only the weight moves. */
-h1 {
-  font-weight: 700;
+::selection {
+  background: oklch(0.82 0.16 115 / 35%);
+  color: oklch(0.98 0.02 145);
 }

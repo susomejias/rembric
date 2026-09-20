@@ -1,6 +1,6 @@
 import type { Prompt } from '@rembric/db';
 
-import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/dashboard/format';
+import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/dashboard/support';
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
