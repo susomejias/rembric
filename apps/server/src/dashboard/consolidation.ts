@@ -25,6 +25,7 @@ import {
 } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl, tryParseJson } from './parse.js';
 import { formatTs, html, raw, shortId } from './templates.js';
 
 export interface ConsolidationDeps {
@@ -48,20 +49,18 @@ export function scopeLabel(repos: Repositories, scope: string | null): string {
 /** Sweep runs store `{"archives":N,"orphaned":M}`; legacy LLM runs store prose. */
 function formatRunSummary(summary: string | null): string {
   if (summary === null) return '—';
-  try {
-    const parsed: unknown = JSON.parse(summary);
-    if (
-      parsed !== null &&
-      typeof parsed === 'object' &&
-      typeof (parsed as Record<string, unknown>)['archives'] === 'number' &&
-      typeof (parsed as Record<string, unknown>)['orphaned'] === 'number'
-    ) {
-      const ops = parsed as { archives: number; orphaned: number };
-      return `${ops.archives} archived · ${ops.orphaned} orphaned`;
-    }
-  } catch {
-    // Legacy prose summary — fall through to the raw text.
+  const parsed = tryParseJson(summary);
+  const ops = parsed.ok ? parsed.value : null;
+  if (
+    ops !== null &&
+    typeof ops === 'object' &&
+    typeof (ops as Record<string, unknown>)['archives'] === 'number' &&
+    typeof (ops as Record<string, unknown>)['orphaned'] === 'number'
+  ) {
+    const counts = ops as { archives: number; orphaned: number };
+    return `${counts.archives} archived · ${counts.orphaned} orphaned`;
   }
+  // Legacy prose summary — the raw text is what the `<pre>` renders.
   return summary;
 }
 
@@ -72,7 +71,8 @@ export function createConsolidationRouter(deps: ConsolidationDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const url = new URL(c.req.url);
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
     const page = pageParam(url);
     const offset = page * PAGE_SIZE;
     const purgedSessions = url.searchParams.get('purged-sessions');

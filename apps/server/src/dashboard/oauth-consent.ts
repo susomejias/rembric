@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 
 import { btn, flash } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
+import { tryParseUrl } from './parse.js';
 import { html, shell } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
@@ -57,10 +58,13 @@ export function createOAuthConsentRouter(deps: OAuthConsentDeps): Hono {
     const areq = verifyAuthRequest(blob, deps.areqKey, Date.now());
     if (!areq) return c.html(renderError('This authorization request is invalid or expired.'), 400);
 
+    // A redirect_uri that cannot be parsed has no valid target: surface it as a
+    // consent error, never as an uncaught TypeError (500) on an approved grant.
+    const redirectUri = tryParseUrl(areq.redirectUri);
+    if (!redirectUri) return c.html(renderError("The client's redirect URI is invalid."), 400);
+
     if (strField(form, 'decision') !== 'approve') {
-      return c.redirect(
-        buildRedirect(areq.redirectUri, { error: 'access_denied', state: areq.state }),
-      );
+      return c.redirect(buildRedirect(redirectUri, { error: 'access_denied', state: areq.state }));
     }
 
     const code = deps.oauth.issueCode({
@@ -71,7 +75,7 @@ export function createOAuthConsentRouter(deps: OAuthConsentDeps): Hono {
       subject: session.tokenId,
       projectId: areq.projectId ?? null,
     });
-    return c.redirect(buildRedirect(areq.redirectUri, { code, state: areq.state }));
+    return c.redirect(buildRedirect(redirectUri, { code, state: areq.state }));
   });
 
   return app;
@@ -83,15 +87,10 @@ function strField(form: FormData, name: string): string {
 }
 
 function safeHost(uri: string): string {
-  try {
-    return new URL(uri).host;
-  } catch {
-    return uri;
-  }
+  return tryParseUrl(uri)?.host ?? uri;
 }
 
-function buildRedirect(redirectUri: string, params: Record<string, string | undefined>): string {
-  const url = new URL(redirectUri);
+function buildRedirect(url: URL, params: Record<string, string | undefined>): string {
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== '') url.searchParams.set(k, v);
   }

@@ -22,6 +22,7 @@ import {
 } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl, tryParseJson } from './parse.js';
 import {
   parseRelationKind,
   parseRelationStatus,
@@ -43,7 +44,8 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const url = new URL(c.req.url);
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
     const statusFilter = url.searchParams.get('status') ?? '';
     const kindFilter = url.searchParams.get('kind') ?? '';
     const page = pageParam(url);
@@ -174,12 +176,9 @@ export function createJudgmentsRouter(deps: JudgmentsDeps): Hono {
     let evidencePretty: string | null = null;
     if (row.evidence !== null && row.evidence !== undefined) {
       if (typeof row.evidence === 'string') {
-        try {
-          const parsed: unknown = JSON.parse(row.evidence);
-          evidencePretty = JSON.stringify(parsed, null, 2);
-        } catch {
-          evidencePretty = row.evidence;
-        }
+        // Unparseable evidence falls back to its raw text, escaped by `html`.
+        const parsed = tryParseJson(row.evidence);
+        evidencePretty = parsed.ok ? JSON.stringify(parsed.value, null, 2) : row.evidence;
       } else {
         evidencePretty = JSON.stringify(row.evidence, null, 2);
       }

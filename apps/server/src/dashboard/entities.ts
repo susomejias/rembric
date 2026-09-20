@@ -20,6 +20,7 @@ import {
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { requireAdmin } from './maintenance.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl } from './parse.js';
 import { html, raw, shortId } from './templates.js';
 
 export interface EntitiesDeps {
@@ -47,7 +48,8 @@ export function createEntitiesRouter(deps: EntitiesDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const url = new URL(c.req.url);
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
     const kindFilter = (url.searchParams.get('kind') ?? '') as EntityKind | '';
     const singleReferenceOnly = url.searchParams.get('single_ref') === '1';
     const page = pageParam(url);

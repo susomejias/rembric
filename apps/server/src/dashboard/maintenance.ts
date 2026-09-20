@@ -15,6 +15,7 @@ import { Hono, type Context } from 'hono';
 import { btn, domainErrorPage, flash, flashErrorPage, getSession, viewHead } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl } from './parse.js';
 import { formatTs, html, raw } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
@@ -222,7 +223,8 @@ export function createMaintenanceRouter(deps: MaintenanceDeps): Hono {
     if (guard.forbidden) return guard.forbidden;
     const session = guard.session;
 
-    const url = new URL(c.req.url);
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
     const purgedSessions = url.searchParams.get('purged-sessions');
     const purgedMemories = url.searchParams.get('purged-memories');
     const purgedPrompts = url.searchParams.get('purged-prompts');

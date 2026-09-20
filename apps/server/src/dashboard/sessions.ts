@@ -27,6 +27,7 @@ import {
 } from './components.js';
 import { csrfInput, readFormAndVerifyCsrf } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl } from './parse.js';
 import { escape, formatTs, html, raw, rawPill, shortId, statusPill } from './templates.js';
 
 export interface SessionsDeps {
@@ -42,7 +43,8 @@ export function createSessionsRouter(deps: SessionsDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const url = new URL(c.req.url);
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
     const justDeleted = url.searchParams.get('deleted');
     const justRestored = url.searchParams.get('restored');
     const justAbandoned = url.searchParams.get('abandoned');

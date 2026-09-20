@@ -262,4 +262,26 @@ describe('dashboard entities view', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it('answers 400, not a 500, when the request url cannot be parsed', async () => {
+    const session = sessionFor('*');
+    const app = appWithSession(session);
+    const route = app.routes.find((r) => r.method === 'GET' && r.path === '/');
+    if (!route) throw new Error('GET / is not registered');
+    const handler: (c: Context, next: Next) => Response | Promise<Response> = route.handler;
+
+    // `app.request()` always prefixes a valid base, so it cannot produce a
+    // malformed URL; the handler is driven directly with a stubbed context
+    // whose raw request URL is unparseable.
+    const c = {
+      req: { url: 'not-a-url' },
+      get: () => session,
+      text: (body: string, status: number) => new Response(body, { status }),
+    } as unknown as Context;
+
+    const res = await handler(c, () => Promise.resolve());
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toBe('invalid request url');
+  });
 });
