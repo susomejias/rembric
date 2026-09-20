@@ -29,3 +29,7 @@ openspec/changes/**/specs/
 .agents/skills/skill-creator/
 .claude/worktrees/
 apps/web/next-env.d.ts
+
+# Owner-installed skill manifests (pre-existing style)
+.agents/skills/shadcn/
+.agents/skills/migrate-radix-to-base/
