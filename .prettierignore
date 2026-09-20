@@ -1,6 +1,7 @@
 dist/
 node_modules/
 coverage/
+.turbo/
 data/
 *.log
 *.db

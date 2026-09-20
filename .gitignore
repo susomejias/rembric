@@ -4,6 +4,8 @@ node_modules/
 dist/
 build/
 coverage/
+# Turborepo's local task cache and per-package task logs; regenerated on every run.
+.turbo/
 *.tsbuildinfo
 
 # CI prefetch of the embedding model (local-model layout; ephemeral on runners)
