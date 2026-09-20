@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl } from './parse.js';
 import { defaultProjectPill, formatTs, html, raw } from './templates.js';
 
 export interface ProjectsDeps {
@@ -20,7 +21,8 @@ export function createProjectsRouter(deps: ProjectsDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const url = new URL(c.req.url);
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
     const justCreated = url.searchParams.get('created');
     const errorMessage = url.searchParams.get('error');
 

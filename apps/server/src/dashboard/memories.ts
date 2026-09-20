@@ -42,6 +42,7 @@ import {
 } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { tryParseUrl } from './parse.js';
 import {
   escape,
   formatTs,
@@ -62,14 +63,6 @@ export interface MemoriesDeps {
 const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
   (e): e is [MemoryType, number] => typeof e[1] === 'number',
 );
-
-function tryParseUrl(s: string): URL | undefined {
-  try {
-    return new URL(s);
-  } catch {
-    return undefined;
-  }
-}
 
 export function createMemoriesRouter(deps: MemoriesDeps): Hono {
   const app = new Hono();

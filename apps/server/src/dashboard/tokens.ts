@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import { flashErrorPage, getSession, tblEmpty, viewHead } from './components.js';
 import { readFormAndVerifyCsrf, csrfInput } from './csrf.js';
 import { renderPage } from './page-shell.js';
+import { parseRequestUrl } from './parse.js';
 import { escape, formatTs, html, raw, type SafeHtml } from './templates.js';
 
 export interface TokensDeps {
@@ -29,7 +30,9 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const session = getSession(c);
     if (!session) return c.redirect('/dashboard/login');
 
-    const params = new URL(c.req.url).searchParams;
+    const url = parseRequestUrl(c);
+    if (!url) return c.text('invalid request url', 400);
+    const params = url.searchParams;
     const justCreated = params.get('created');
     const tokens = deps.tokens.list();
     const now = Date.now();
@@ -216,6 +219,10 @@ export function createTokensRouter(deps: TokensDeps): Hono {
     const form = await readFormAndVerifyCsrf(c, session.session, deps.sessions, 'token.create');
     if (form instanceof Response) return form;
 
+    // Guarded before any mint: the redirect below is built against this base.
+    const base = parseRequestUrl(c);
+    if (!base) return c.text('invalid request url', 400);
+
     const name = readStringField(form, 'name').trim();
     // Deduplicated: the composite primary key of `token_projects` answers a
     // repeated slug with a constraint failure, and a crafted POST can repeat one.
@@ -282,7 +289,7 @@ export function createTokensRouter(deps: TokensDeps): Hono {
               { name, slugs: [firstSlug, ...restSlugs], access, expiresAt },
               deps.projects,
             );
-      const url = new URL('/dashboard/tokens', c.req.url);
+      const url = new URL('/dashboard/tokens', base);
       url.searchParams.set('created', plaintext);
       url.searchParams.set('name', name);
       return c.redirect(url.pathname + url.search);

@@ -21,6 +21,7 @@ import MarkdownIt from 'markdown-it';
 import { REMBRIC_VERSION } from '../version.js';
 
 import { renderPage, type PageOpts } from './page-shell.js';
+import { tryParseUrl } from './parse.js';
 import { escape, html, raw, type SafeHtml } from './templates.js';
 import type { ResolvedSession } from './types.js';
 
@@ -700,12 +701,8 @@ export function pageParam(url: URL): number {
  * `pager()` round-trip the active filters.
  */
 export function urlWithPage(currentUrl: string, page: number): string {
-  let u: URL;
-  try {
-    u = new URL(currentUrl);
-  } catch {
-    return currentUrl;
-  }
+  const u = tryParseUrl(currentUrl);
+  if (!u) return currentUrl;
   // Rebuilt from the raw query string, so the retired sentinel would survive
   // into every pager href even though `projectFilterParam` reads it as absent.
   if (u.searchParams.get('project') === RETIRED_PROJECT_FILTER) u.searchParams.delete('project');
