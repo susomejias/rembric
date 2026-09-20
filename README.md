@@ -421,13 +421,13 @@ Memory also exposes a **derived review state** alongside decay: a `needs_review`
 
 ### Entity index (exact-address retrieval)
 
-Hybrid ranking is the right tool for "what did we decide about auth" and the wrong one for "what do I know about `apps/server/src/db/migrate.ts`". Identifiers are where ranked retrieval performs worst: quoted as an FTS5 phrase, a path also matches every longer path containing it (`migrate.ts` → `migrate.ts.bak`, `test/…/migrate.ts`), and separators the tokenizer drops take the identifier's precision with them (`#36` degrades to any bare "36"; `nas.local` matches the prose "the nas local drive"). Measured against an adversarial corpus, that is a 50–75% false-positive rate on those classes.
+Hybrid ranking is the right tool for "what did we decide about auth" and the wrong one for "what do I know about `packages/db/src/migrate.ts`". Identifiers are where ranked retrieval performs worst: quoted as an FTS5 phrase, a path also matches every longer path containing it (`migrate.ts` → `migrate.ts.bak`, `test/…/migrate.ts`), and separators the tokenizer drops take the identifier's precision with them (`#36` degrades to any bare "36"; `nas.local` matches the prose "the nas local drive"). Measured against an adversarial corpus, that is a 50–75% false-positive rate on those classes.
 
 So Rembric keeps a small derived index of **syntactically unambiguous identifiers** — extracted by a pure regex function, no LLM, no network, ~5µs per memory, 0.05% of memory-related storage:
 
 | kind           | examples                                                                 |
 | -------------- | ------------------------------------------------------------------------ |
-| `path`         | `apps/server/src/db/migrate.ts`, `.rembric`                              |
+| `path`         | `packages/db/src/migrate.ts`, `.rembric`                                 |
 | `ticket`       | `#282`, `PROJ-1234`                                                      |
 | `cve_id`       | `CVE-2024-3094`                                                          |
 | `ip_address`   | `192.168.1.50`, `172.18.0.0/16`                                          |
@@ -501,7 +501,7 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
    │  └──────────────────────────────┬──────────────────────────────────┘  │
    │                                 ▼                                     │
    │  ┌─────────────────────────────────────────────────────────────────┐  │
-   │  │  Repositories — the ONLY place SQL lives (src/db/)              │  │
+   │  │  Repositories — the ONLY place SQL lives (packages/db/src/)     │  │
    │  └──────────────────────────────┬──────────────────────────────────┘  │
    │                                 ▼                                     │
    │  ┌─────────────────────────────────────────────────────────────────┐  │

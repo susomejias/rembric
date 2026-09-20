@@ -15,6 +15,14 @@ context: |
   Tech stack:
     - TypeScript strict (no any without a justifying comment, no floating promises)
     - Node 22+ via corepack-pinned pnpm 11.x
+    - pnpm workspace monorepo: apps/* hold deliverables, packages/* hold shared
+      libraries. packages/db is the SQL confinement boundary — schema,
+      migrations, repositories, client, migrate, diagnostics, query tokenizer
+      and scope all live under packages/db/src/ — and packages/core holds the
+      services, consolidation and embeddings layers; packages/config is
+      dev-only tooling and packages/ui is a scaffold with no dependents.
+      Turborepo owns build/typecheck/test via turbo.json; lint, format:check,
+      test:coverage, eval and dev stay direct scripts.
     - Drizzle ORM over better-sqlite3 (sqlite-vec + FTS5 extensions)
     - Hono (HTTP + dashboard SSR) + raw IncomingMessage for /mcp transport
     - HTMX for dashboard interactivity (no SPA, no build pipeline for JS)

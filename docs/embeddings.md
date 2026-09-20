@@ -10,7 +10,7 @@ The only place that ever touches the network for model artifacts.
 Dockerfile (builder / dev stage)
    │
    ▼
-scripts/fetch-model.mjs
+packages/core/scripts/fetch-model.mjs
    │
    ├─ phase 1  download @ pinned revision into a throwaway cache
    │           (transient 429/5xx retried with backoff; the optional
@@ -24,6 +24,8 @@ scripts/fetch-model.mjs
                ✗ drift/corruption → the IMAGE BUILD FAILS
                ✓ → COPY /models → /app/models
 ```
+
+CI prefetches the same artifact with a cache keyed on `packages/core/scripts/fetch-model.mjs` + `packages/core/src/embeddings/embedder.ts`, and runs the script from `packages/core` in both the `test` and `retrieval-eval` jobs — the script lives with the package that owns its `@huggingface/transformers` dependency.
 
 Why phase 3 runs in a fresh process: it exercises exactly the resolution path the runtime uses, so "builds green" implies "boots green".
 
