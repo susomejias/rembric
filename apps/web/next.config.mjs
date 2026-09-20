@@ -1,8 +1,23 @@
+// @ts-check
+
+/**
+ * Next's configuration for `@rembric/web`.
+ *
+ * The v0 mockup ships a two-key config (ignore build type errors, unoptimized
+ * images). Neither is safe to adopt here: `ignoreBuildErrors` would let a broken
+ * type ship, and the tracing entries below are load-bearing for the standalone
+ * image `apps/web/Dockerfile` assembles. The mockup's `images.unoptimized` IS
+ * adopted, because the app serves one favicon and never runs the image
+ * optimizer.
+ *
+ * Package-relative paths matter: the globs in `outputFileTracingIncludes` are
+ * resolved from the app directory, which is why the workspace root needs the
+ * `../../` prefix.
+ */
 import { join } from 'node:path';
 
-import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   output: 'standalone',
   // Next traces module dependencies starting at the app directory, so in a
   // monorepo everything outside `apps/web` — `packages/*`, `/models` — is
@@ -13,10 +28,12 @@ const nextConfig: NextConfig = {
   // are the .node addons `@rembric/db` loads, and onnxruntime-node is what
   // `@huggingface/transformers` (via `@rembric/core`) runs the embedder on.
   serverExternalPackages: ['better-sqlite3', 'sqlite-vec', 'onnxruntime-node'],
+  images: {
+    unoptimized: true,
+  },
   // Output tracing follows static imports only, so it misses the files each
-  // runtime loader opens by computed path. Every glob is resolved from the app
-  // directory, which is why the workspace root needs the `../../` prefix:
-  // `apps/web/node_modules` has no `.pnpm` in it.
+  // runtime loader opens by computed path. `apps/web/node_modules` has no
+  // `.pnpm` in it, so every glob starts at the workspace root.
   outputFileTracingIncludes: {
     '/*': [
       // `sqlite-vec` picks its native extension at runtime with an

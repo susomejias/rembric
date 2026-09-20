@@ -1,337 +1,255 @@
+import { Download, Wrench } from 'lucide-react';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
 
-import { formatBytes, ON_DEMAND_BACKUP_KEEP, readMaintenanceState, type Backup } from './data';
+import { formatBytes, readMaintenanceState } from './data';
+import { ON_DEMAND_BACKUP_KEEP } from './data';
 
-import { singleParam } from '@/components/dashboard/format';
-import { Timestamp } from '@/components/dashboard/timestamp';
-import { ViewHead } from '@/components/dashboard/view-head';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { getUpdates } from '@/app/dashboard/update/update-service';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  Bar,
+  EmptyNote,
+  Notice,
+  Page,
+  PageHead,
+  Panel,
+  PanelHead,
+  Pill,
+  Row,
+  Rows,
+  StatTile,
+  Time,
+} from '@/components/dashboard/ui';
+import { getServices } from '@/lib/services';
 
 /**
- * The maintenance view — the admin surface, ported read-only.
+ * Maintenance, in the v0 composition: the health counters, the update banner,
+ * the two policy panels, the purge-candidate rows and the disk breakdown.
  *
- * It renders exactly what the retired Hono view rendered — the DB breakdown, the
- * three purge cards with their fresh per-render counts, the disabled-at-zero
- * copy, and the backup card with every downloadable snapshot — and it wires NONE
- * of the four mutations. Each purge and the on-demand backup are Server Actions
- * gated by admin scope and the mutation protection, and that boundary is a later
- * slice; rendering a live control here would either bypass it or ship a dead
- * form. The same reason leaves the view without an admin-scope gate: this app
- * still has no dashboard session to resolve a token from.
- *
- * The counts are re-read on every render (`force-dynamic`) because the card's
- * contract is a *fresh* count: a purge card that served a cached number would
- * offer to delete rows that no longer match its predicate.
+ * No mutation lives here on purpose: the three purges and the on-demand backup
+ * are journaled writes whose boundary (admin scope + the mutation protection) is
+ * a later slice, so this view renders their *state* and their disabled controls
+ * — the same boundary the ported view drew.
  */
 export const dynamic = 'force-dynamic';
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-export default async function MaintenancePage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const params = await searchParams;
-  const withBytes = singleParam(params.bytes) === '1';
-  const flash = flashFrom(params);
-
-  const state = readMaintenanceState(withBytes);
+export default function MaintenancePage() {
+  const state = readMaintenanceState(true);
   const { breakdown } = state;
+  const { repos } = getServices();
+  const orphanedPendings = repos.relations.adminCountByStatus('orphaned');
+  const updates = getUpdates();
+  const release = updates.enabled ? updates.peek() : null;
+  const freelistShare =
+    breakdown.totalBytes > 0
+      ? Math.round((breakdown.freelistBytes / breakdown.totalBytes) * 100)
+      : 0;
 
   return (
-    <div className="flex flex-col gap-4">
-      <ViewHead title="Rembric Maintenance." meta={[{ k: 'ADMIN ONLY', v: '*' }]} />
+    <Page>
+      <PageHead
+        icon={Wrench}
+        eyebrow="System care"
+        title="Maintenance"
+        description="Keep the local memory layer healthy with small, safe, and mostly automatic checks."
+        aside={<span className="text-[11px] text-(--ink)/45">admin scope · *</span>}
+      />
 
-      {flash ? (
-        <Card className="border-primary/40 bg-primary/5 py-3">
-          <CardContent className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant="outline" className="border-primary/50 font-mono text-brand-accent">
-              {flash.label}
-            </Badge>
-            <span>{flash.body}</span>
-          </CardContent>
-        </Card>
+      <section className="mt-6 grid gap-3 sm:grid-cols-3">
+        <StatTile
+          label="System health"
+          value={breakdown.source === 'dbstat' ? 'Good' : 'Partial'}
+          tone="lime"
+          hint={`breakdown read from ${breakdown.source}`}
+        />
+        <StatTile
+          label="Database size"
+          value={formatBytes(breakdown.totalBytes)}
+          hint={`${formatBytes(breakdown.freelistBytes)} reclaimable`}
+        />
+        <StatTile
+          label="Queued work"
+          value={orphanedPendings}
+          tone={orphanedPendings > 0 ? 'amber' : 'dim'}
+          hint="orphaned judgments"
+        />
+      </section>
+
+      {release ? (
+        <section className="mt-6 rounded-2xl border border-(--accent-ink)/20 bg-[linear-gradient(110deg,color-mix(in_oklab,#c4f23f_9%,transparent),color-mix(in_oklab,var(--surface-panel)_96%,transparent)_55%)] p-5 md:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-5">
+            <div className="flex items-start gap-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-(--accent-ink)/15 text-(--accent-ink)">
+                <Download className="size-4" />
+              </div>
+              <div>
+                <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/65 uppercase">
+                  Update available
+                </p>
+                <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">
+                  Rembric v{release.latestVersion} is published
+                </h2>
+                <p className="mt-2 max-w-xl text-xs leading-5 text-(--ink)/45">
+                  The release check found a newer version. Upgrading is done on the host that runs
+                  this deployment — this dashboard never replaces its own image.
+                </p>
+              </div>
+            </div>
+            <Pill tone="lime">pending restart</Pill>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-(--ink)/[7%] pt-4">
+            <p className="text-[11px] text-(--ink)/45">
+              {release.publishedAt ? (
+                <Time value={release.publishedAt} />
+              ) : (
+                'Publication date unknown'
+              )}{' '}
+              · backup before updating
+            </p>
+            <Link
+              href="/dashboard/update"
+              className="rounded-lg bg-lime-300 px-3 py-2 text-[11px] font-medium text-[#111614] transition-colors hover:bg-lime-200"
+            >
+              Open the release
+            </Link>
+          </div>
+        </section>
       ) : null}
 
-      <Card className="py-0">
-        <CardHeader className="pt-4">
-          <CardTitle className="font-mono text-xs tracking-[0.18em] text-muted-foreground uppercase">
-            DB breakdown
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 px-0 pb-0">
-          <p className="px-4 text-sm text-muted-foreground">
-            Total: <b className="text-foreground">{formatBytes(breakdown.totalBytes)}</b> ·
-            Freelist: <b className="text-foreground">{formatBytes(breakdown.freelistBytes)}</b>
-            {breakdown.freelistBytes > 0 ? (
-              <>
-                {' '}
-                · Run <code className="font-mono">VACUUM</code> to reclaim
-              </>
-            ) : null}{' '}
-            · Source: <code className="font-mono">{breakdown.source}</code>
-            {withBytes ? null : (
-              <>
-                {' '}
-                ·{' '}
-                <Link
-                  href="/dashboard/maintenance?bytes=1"
-                  className="text-brand-accent underline-offset-4 hover:underline"
-                >
-                  Measure per-table bytes
-                </Link>
-              </>
-            )}
+      <section className="mt-6 grid gap-3 md:grid-cols-2">
+        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
+                Context
+              </p>
+              <h2 className="mt-2 text-base font-medium">Safe purges</h2>
+            </div>
+            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+              journaled
+            </span>
+          </div>
+          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+            Physical deletion is reserved for empty sessions, disconnected archived memories, and
+            deleted prompts. Every purge is journaled and reversible.
           </p>
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-4">TABLE</TableHead>
-                <TableHead>ROWS</TableHead>
-                <TableHead className="pr-4 text-right">BYTES</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {breakdown.perTable.map((row) => (
-                <TableRow key={row.name}>
-                  <TableCell className="pl-4 font-mono text-xs">{row.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{row.rowCount ?? '—'}</TableCell>
-                  <TableCell className="pr-4 text-right text-muted-foreground">
-                    {breakdown.source === 'dbstat' ? formatBytes(row.bytes) : '—'}
-                  </TableCell>
-                </TableRow>
+          <p className="mt-5 text-[11px] text-(--ink)/38">
+            Dry run only — the purge boundary is a separate slice.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
+                Context
+              </p>
+              <h2 className="mt-2 text-base font-medium">Disk recovery</h2>
+            </div>
+            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+              freelist
+            </span>
+          </div>
+          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+            The freelist is space SQLite has already reclaimed inside the file. `VACUUM` is the
+            final operator step and the only one that shrinks the file on disk.
+          </p>
+          <div className="mt-5">
+            <div className="flex justify-between text-xs">
+              <span className="text-(--ink)/45">Reclaimable</span>
+              <span>{freelistShare}% of the file</span>
+            </div>
+            <Bar percent={freelistShare} tone="amber" />
+          </div>
+        </article>
+      </section>
+
+      <Panel className="mt-6">
+        <PanelHead
+          eyebrow="Purge candidates"
+          title="What a purge would touch"
+          action="state only, no control is wired"
+        />
+        <Rows>
+          <PurgeRow label="Empty sessions" count={state.emptySessions} href="/dashboard/sessions" />
+          <PurgeRow
+            label="Disconnected archived memories"
+            count={state.archivedMemories}
+            href="/dashboard/memories?status=archived"
+          />
+          <PurgeRow
+            label="Deleted prompts"
+            count={state.deletedPrompts}
+            href="/dashboard/prompts?include_deleted=1"
+          />
+        </Rows>
+      </Panel>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
+        <Panel>
+          <PanelHead eyebrow="Storage" title="Per-table breakdown" action={breakdown.source} />
+          {breakdown.perTable.length === 0 ? (
+            <EmptyNote>No table exceeded the reporting threshold.</EmptyNote>
+          ) : (
+            <Rows>
+              {breakdown.perTable.map((table) => (
+                <Row key={table.name} columns="md:grid-cols-[1.4fr_1fr_auto]">
+                  <code className="text-xs text-(--ink)/70">{table.name}</code>
+                  <div className="max-w-[220px]">
+                    <Bar
+                      percent={Math.round((table.bytes / Math.max(1, breakdown.totalBytes)) * 100)}
+                    />
+                  </div>
+                  <span className="text-[11px] text-(--ink)/45">
+                    {formatBytes(table.bytes)}
+                    {table.rowCount === null ? '' : ` · ${table.rowCount} rows`}
+                  </span>
+                </Row>
               ))}
-              <TableRow className="hover:bg-transparent">
-                <TableCell className="pl-4 font-mono text-xs">TOTAL FILE</TableCell>
-                <TableCell className="text-muted-foreground">—</TableCell>
-                <TableCell className="pr-4 text-right font-mono">
-                  {formatBytes(breakdown.totalBytes)}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </Rows>
+          )}
+        </Panel>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <PurgeCard
-          title="Empty Sessions"
-          count={state.emptySessions}
-          disabledLabel="NO EMPTY SESSIONS TO PURGE"
-          actionLabel={`PURGE EMPTY SESSIONS (${state.emptySessions})`}
-          predicate={
-            <>
-              <p>Eligible rows match ALL of:</p>
-              <ul className="list-disc pl-5">
-                <li>status = ended or abandoned</li>
-                <li>zero memories, prompts, confirmations referencing</li>
-                <li>no summary written, no manual title</li>
-                <li>not operator-soft-deleted</li>
-                <li>ended over 1 hour ago (late summary grace)</li>
-              </ul>
-            </>
-          }
-        />
-
-        <PurgeCard
-          title="Disconnected Archived Memories"
-          count={state.archivedMemories}
-          disabledLabel="NO DISCONNECTED ARCHIVED TO PURGE"
-          actionLabel={`PURGE DISCONNECTED ARCHIVED (${state.archivedMemories})`}
-          predicate={
-            <>
-              <p>Eligible rows match ALL of:</p>
-              <ul className="list-disc pl-5">
-                <li>status = archived</li>
-                <li>
-                  no other memory&apos;s <code className="font-mono">replaces</code> points here
-                </li>
-                <li>
-                  no <code className="font-mono">consolidation_ops</code> affects this id
-                </li>
-                <li>
-                  no <code className="font-mono">memory_relations</code> references this id
-                </li>
-                <li>no confirmations target this id</li>
-              </ul>
-              <p>
-                <code className="font-mono">memory_vec</code> +{' '}
-                <code className="font-mono">memory_fts</code> shadow rows are dropped in the same
-                transaction.
-              </p>
-            </>
-          }
-        />
-
-        <PurgeCard
-          title="Deleted Prompts"
-          count={state.deletedPrompts}
-          disabledLabel="NO DELETED PROMPTS TO PURGE"
-          actionLabel={`PURGE DELETED PROMPTS (${state.deletedPrompts})`}
-          predicate={
-            <>
-              <p>Eligible rows match:</p>
-              <ul className="list-disc pl-5">
-                <li>
-                  <code className="font-mono">deleted_at IS NOT NULL</code>
-                </li>
-              </ul>
-              <p>
-                Covers both operator soft-deletes and refine supersedes (from{' '}
-                <code className="font-mono">memory.save_prompt</code>). The{' '}
-                <code className="font-mono">prompts_fts</code> shadow row is dropped in the same
-                transaction.
-              </p>
-            </>
-          }
-        />
-
-        <Card className="gap-3">
-          <CardHeader>
-            <CardTitle className="font-heading text-base">Backup Database</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3 text-sm">
-            <p className="text-muted-foreground">
-              Writes a consistent, WAL-safe snapshot of the live database via{' '}
-              <code className="font-mono">VACUUM INTO</code> (the same mechanism the self-update
-              flow uses before every upgrade), keeping the {ON_DEMAND_BACKUP_KEEP} most recent
-              on-demand snapshots.
-            </p>
-            {state.latestOnDemand ? (
-              <p className="text-muted-foreground">
-                Last backup: <Timestamp value={state.latestOnDemand.createdAt} /> ·{' '}
-                {formatBytes(state.latestOnDemand.sizeBytes)} ·{' '}
-                <Link
-                  href="/dashboard/maintenance/backup/download"
-                  className="text-brand-accent underline-offset-4 hover:underline"
-                >
-                  Download latest
-                </Link>
-              </p>
-            ) : (
-              <p className="text-muted-foreground">No on-demand backup yet.</p>
-            )}
-            {state.backups.length > 0 ? (
-              <>
-                <p className="text-muted-foreground">
-                  Every snapshot in <code className="font-mono">backups/</code> is individually
-                  downloadable, including the pre-update snapshot the self-update flow takes before
-                  every upgrade:
-                </p>
-                <ul className="flex flex-col gap-1">
-                  {state.backups.map((b) => (
-                    <li key={b.file} className="text-xs text-muted-foreground">
-                      <BackupLink backup={b} /> · <Timestamp value={b.createdAt} /> ·{' '}
-                      {formatBytes(b.sizeBytes)}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
-            <Button variant="outline" disabled>
-              BACKUP NOW
-            </Button>
-          </CardContent>
-        </Card>
+        <Panel>
+          <PanelHead
+            eyebrow="Snapshots"
+            title="Available backups"
+            action={`${state.backups.length} kept · on-demand keeps ${ON_DEMAND_BACKUP_KEEP}`}
+          />
+          {state.backups.length === 0 ? (
+            <EmptyNote>No snapshot exists in {state.backupsDir} yet.</EmptyNote>
+          ) : (
+            <Rows>
+              {state.backups.map((backup) => (
+                <Row key={backup.file} columns="md:grid-cols-[1.6fr_1fr_auto]">
+                  <code className="truncate text-xs text-(--ink)/70">{backup.file}</code>
+                  <span className="text-[11px] text-(--ink)/45">
+                    <Time value={backup.createdAt} />
+                  </span>
+                  <span className="text-[11px] text-(--ink)/38">
+                    {formatBytes(backup.sizeBytes)}
+                  </span>
+                </Row>
+              ))}
+            </Rows>
+          )}
+        </Panel>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        The three purges and <code className="font-mono">BACKUP NOW</code> are not wired in this
-        slice: each is a Server Action gated by an admin-scoped token and the mutation protection,
-        and each one is journaled in <code className="font-mono">consolidation_ops</code> for audit.
-        Until then this view renders the counts and the copy they will act on.
-      </p>
-    </div>
+      <Notice badge="Operator step" className="mt-6">
+        Restoring a snapshot and running `VACUUM` are host operations: stop the server, then work on
+        the file in <code className="font-mono">{state.backupsDir}</code>.
+      </Notice>
+    </Page>
   );
 }
 
-function PurgeCard({
-  title,
-  count,
-  predicate,
-  actionLabel,
-  disabledLabel,
-}: {
-  title: string;
-  count: number;
-  predicate: ReactNode;
-  actionLabel: string;
-  disabledLabel: string;
-}) {
+function PurgeRow({ label, count, href }: { label: string; count: number; href: string }) {
   return (
-    <Card className="gap-3">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 font-heading text-base">
-          {title}
-          <Badge
-            variant="outline"
-            className={count === 0 ? 'font-mono text-muted-foreground' : 'font-mono text-warn'}
-          >
-            {count}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
-        {predicate}
-        <Button variant="destructive" disabled>
-          {count === 0 ? disabledLabel : actionLabel}
-        </Button>
-      </CardContent>
-    </Card>
+    <Row columns="md:grid-cols-[1.4fr_1fr_auto]">
+      <p className="text-sm text-(--ink)/80">{label}</p>
+      <Link href={href} className="text-[11px] text-(--ink)/45 hover:text-(--accent-ink)">
+        Inspect candidates →
+      </Link>
+      <Pill tone={count > 0 ? 'amber' : 'dim'}>{count}</Pill>
+    </Row>
   );
-}
-
-function BackupLink({ backup }: { backup: Backup }) {
-  return (
-    <Link
-      href={`/dashboard/maintenance/backup/download/${encodeURIComponent(backup.file)}`}
-      className="text-brand-accent underline-offset-4 hover:underline"
-    >
-      {backup.kind}
-    </Link>
-  );
-}
-
-/**
- * The redirect-plus-flash contract the retired POST handlers used. Presence is
- * what signals a flash (the retired view tested `searchParams.get(...) !== null`),
- * so this reads the raw value rather than the shared single-value helper.
- */
-function flashFrom(params: SearchParams): { label: string; body: string } | null {
-  const purgedSessions = first(params['purged-sessions']);
-  if (purgedSessions !== undefined) {
-    return { label: 'PURGED', body: `Removed ${purgedSessions} empty session row(s).` };
-  }
-  const purgedMemories = first(params['purged-memories']);
-  if (purgedMemories !== undefined) {
-    return {
-      label: 'PURGED',
-      body: `Removed ${purgedMemories} disconnected archived memory row(s).`,
-    };
-  }
-  const purgedPrompts = first(params['purged-prompts']);
-  if (purgedPrompts !== undefined) {
-    return { label: 'PURGED', body: `Removed ${purgedPrompts} deleted prompt row(s).` };
-  }
-  const backedUp = first(params['backed-up']);
-  if (backedUp !== undefined) {
-    return { label: 'BACKED UP', body: `Snapshot written (${backedUp} bytes).` };
-  }
-  return null;
-}
-
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
 }

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 import { areqKey, consentCsrfToken } from './session';
 
-import { singleParam } from '@/components/dashboard/format';
+import { singleParam } from '@/components/dashboard/support';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';

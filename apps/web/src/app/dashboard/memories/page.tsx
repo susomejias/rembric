@@ -6,8 +6,8 @@ import {
   type ReviewState,
 } from '@rembric/core';
 import { MEMORY_TYPES, type Memory, type MemoryStatus, type MemoryType } from '@rembric/db';
+import { BrainCircuit } from 'lucide-react';
 import Link from 'next/link';
-import { Suspense } from 'react';
 
 import {
   DEFAULT_STATUS,
@@ -17,42 +17,38 @@ import {
   type SearchParams,
 } from './filters';
 
-import { TableEmptyState, TableNoResults } from '@/components/dashboard/empty-states';
 import {
-  FilterBar,
+  FilterActions,
   FilterField,
-  FilterSearch,
+  FilterForm,
+  FilterInput,
   FilterSelect,
-} from '@/components/dashboard/filter-bar';
-import { PAGE_SIZE, queryWithPage, shortId } from '@/components/dashboard/format';
-import { MemoriesTable, type MemoriesTableRow } from '@/components/dashboard/memories-table';
-import { Pager } from '@/components/dashboard/pager';
-import { TableSkeleton } from '@/components/dashboard/table-skeleton';
-import { ViewHead } from '@/components/dashboard/view-head';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+  Pager,
+} from '@/components/dashboard/filters';
+import { PAGE_SIZE, relativeTime, shortId } from '@/components/dashboard/support';
+import {
+  EmptyNote,
+  Notice,
+  Page,
+  PageHead,
+  Panel,
+  PanelHead,
+  Pill,
+  Row,
+  Rows,
+  StatTile,
+} from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The memories list — the first view ported off the Hono dashboard, and the
- * pattern the remaining views follow.
+ * The memories list, in the v0 composition: the metric strip, the URL-driven
+ * filter bar, and the memory rows as links into the detail page.
  *
- * It is a server component reading `@rembric/core`/`@rembric/db` directly: no
+ * It stays a server component reading `@rembric/core`/`@rembric/db` directly: no
  * API call, no client-side fetching, no cache that could disagree with the
  * database. Every filter, the page index and the total come from the URL, so the
  * server does the filtering and paginating and the browser back button is the
  * filter's undo.
- *
- * The loading state is a `Suspense` boundary whose fallback is the memories
- * table's own column-shaped skeleton (`TableSkeleton`), and the shell therefore
- * has to hand the awaited `searchParams` down to a child component: a page cannot
- * suspend itself. The alternative the design line named — `useSuspenseQuery` in a
- * client component — was rejected on measurement, not taste: it needs TanStack
- * Query, which this workspace does not depend on, and adding a dependency is out
- * of scope for this change. The read is synchronous SQLite, so the boundary is
- * structural: it is where the fallback belongs, and it is what renders if the
- * read ever becomes one that yields.
  */
 export const dynamic = 'force-dynamic';
 
@@ -64,25 +60,21 @@ const STATUS_OPTIONS = [
   { value: 'active', label: 'active' },
   { value: 'superseded', label: 'superseded' },
   { value: 'archived', label: 'archived' },
-] as const;
+];
 
-export default function MemoriesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  return (
-    <Suspense fallback={<TableSkeleton />}>
-      <MemoriesView searchParams={searchParams} />
-    </Suspense>
-  );
-}
-
-async function MemoriesView({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function MemoriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   const params = await searchParams;
   const filters = readMemoriesFilters(params);
   // The params the pager and the filter form round-trip, as the browser sent
   // them (minus `page` and the retired sentinel).
   const roundTripQuery = memoriesQuery(params);
-  const filterKey = queryWithPage(roundTripQuery, 0);
 
   const { repos } = getServices();
+  const nowMs = Date.now();
 
   const wantsNeedsReview = filters.review === 'needs_review';
   const offset = filters.page * PAGE_SIZE;
@@ -96,9 +88,6 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
   // error and 500s the page. `filters.q` is still what the search box redisplays.
   const ftsQuery = sanitizeFtsQuery(filters.q);
 
-  // A filter the operator applied, as opposed to the listing's own default: the
-  // empty state's two shapes (nothing in this scope vs nothing matching this
-  // filter set) are told apart by exactly this.
   const isFiltered =
     filters.project !== '' ||
     filters.type !== '' ||
@@ -109,7 +98,6 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
   const projectRows = repos.projects.adminListAll();
   const projectSlugById = new Map(projectRows.map((p) => [p.id, p.slug]));
   const resolvedProject = resolveProjectFilter(filters.project, projectRows);
-  const nowMs = Date.now();
 
   let rows: Memory[];
   if (resolvedProject.unknown) {
@@ -141,7 +129,7 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
     });
   }
 
-  // Derived review state per row for the badge, and to refine the FTS path when
+  // Derived review state per row for the pill, and to refine the FTS path when
   // the needs_review filter is combined with a text query.
   const reviewById = new Map<string, ReviewState | null>();
   if (rows.length > 0) {
@@ -178,8 +166,6 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
   } else if (ftsQuery && wantsNeedsReview) {
     totalCount = undefined;
   } else if (offset === 0 && !hasMore) {
-    // All three row queries over-fetch by one and paginate in SQL, so an unfull
-    // first page IS the total and the count query is skipped.
     totalCount = visible.length;
   } else if (ftsQuery) {
     totalCount = repos.memory.adminCountFts(ftsQuery, {
@@ -196,45 +182,49 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
   } else {
     totalCount = repos.memory.adminCount({ status, type, projectId: resolvedProject.projectId });
   }
-  const total = totalCount === undefined ? `${visible.length}+` : String(totalCount);
 
-  const tableRows: MemoriesTableRow[] = visible.map((m) => ({
-    id: m.id,
-    projectLabel: m.projectId ? (projectSlugById.get(m.projectId) ?? shortId(m.projectId)) : '—',
-    type: m.type,
-    title: m.title,
-    status: m.status,
-    createdAt: m.createdAt,
-    reviewState: reviewById.get(m.id) ?? null,
-  }));
+  const statusCounts = repos.memory.countRowsByStatus();
+  const totalMemories = statusCounts.reduce((acc, row) => acc + row.count, 0);
+  const activeMemories = statusCounts.find((row) => row.status === 'active')?.count ?? 0;
+  const totalNeedsReview = repos.memory.adminCountNeedsReview({ nowMs, ttlByType: TTL_BY_TYPE });
 
   return (
-    <div className="flex flex-col gap-4">
-      <ViewHead
-        title="Rembric Memories."
-        metaId="memories-meta"
-        meta={[
-          { k: 'TOTAL', v: total },
-          { k: 'SHOWING', v: `${visible.length} ROWS` },
-        ]}
+    <Page>
+      <PageHead
+        icon={BrainCircuit}
+        eyebrow="Memory layer"
+        title="Memories"
+        description="The durable context Rembric has kept across your projects, ready to be recalled when it matters."
+        aside={
+          <div className="flex items-center gap-2 rounded-full border border-(--ink)/[7.5%] bg-(--ink)/[3%] px-3 py-1.5 text-[11px] text-(--ink)/55">
+            <span className="size-1.5 rounded-full bg-lime-300" />
+            {totalMemories.toLocaleString('en-US')} stored
+          </div>
+        }
       />
 
-      <Card className="border-primary/40 bg-primary/5 py-3">
-        <CardContent className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge variant="outline" className="border-primary/50 font-mono text-brand-accent">
-            APPEND-ONLY
-          </Badge>
-          <span>
-            Memories are <b>never deleted or edited</b>. Lifecycle is <b>active</b> · supersede via
-            new save · <b>archive</b>.
-          </span>
-        </CardContent>
-      </Card>
+      <section className="mt-6 grid gap-3 sm:grid-cols-3">
+        <StatTile
+          label="Total memories"
+          value={totalMemories.toLocaleString('en-US')}
+          hint={`${activeMemories.toLocaleString('en-US')} active`}
+        />
+        <StatTile label="Showing" value={visible.length} hint={`page ${filters.page + 1}`} />
+        <StatTile
+          label="Needs review"
+          value={totalNeedsReview}
+          hint="Past their review TTL"
+          tone={totalNeedsReview > 0 ? 'amber' : 'dim'}
+        />
+      </section>
 
-      {/* Remounted whenever the filter set changes, so the uncontrolled
-          controls re-seed from the URL on a soft navigation (e.g. CLEAR). */}
-      <FilterBar key={filterKey} action="/dashboard/memories">
-        <FilterField label="SCOPE" htmlFor="f-project" className="w-44">
+      <Notice badge="Append-only" className="mt-6">
+        Memories are never deleted or edited. Lifecycle is <b>active</b> · supersede via new save ·{' '}
+        <b>archive</b>.
+      </Notice>
+
+      <FilterForm action="/dashboard/memories" className="mt-6">
+        <FilterField label="Scope" htmlFor="f-project" className="w-44">
           <FilterSelect
             id="f-project"
             name="project"
@@ -245,7 +235,7 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
             ]}
           />
         </FilterField>
-        <FilterField label="STATUS" htmlFor="f-status" className="w-36">
+        <FilterField label="Status" htmlFor="f-status" className="w-36">
           <FilterSelect
             id="f-status"
             name="status"
@@ -253,7 +243,7 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
             options={STATUS_OPTIONS}
           />
         </FilterField>
-        <FilterField label="TYPE" htmlFor="f-type" className="w-36">
+        <FilterField label="Type" htmlFor="f-type" className="w-36">
           <FilterSelect
             id="f-type"
             name="type"
@@ -264,7 +254,7 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
             ]}
           />
         </FilterField>
-        <FilterField label="REVIEW" htmlFor="f-review" className="w-40">
+        <FilterField label="Review" htmlFor="f-review" className="w-40">
           <FilterSelect
             id="f-review"
             name="review"
@@ -275,52 +265,91 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
             ]}
           />
         </FilterField>
-        <FilterField label="SEARCH" htmlFor="f-q" className="min-w-56 flex-1">
-          <FilterSearch
-            id="f-q"
-            name="q"
-            value={filters.q}
-            placeholder="FTS5 keyword, tag, topic"
-          />
+        <FilterField label="Search" htmlFor="f-q" className="min-w-56 flex-1">
+          <FilterInput id="f-q" name="q" value={filters.q} placeholder="FTS5 keyword, tag, topic" />
         </FilterField>
-        <div className="flex items-center gap-2">
-          <Button type="submit" size="sm">
-            FILTER
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/dashboard/memories">CLEAR</Link>
-          </Button>
-        </div>
-      </FilterBar>
+        <FilterActions clearHref="/dashboard/memories" />
+      </FilterForm>
 
-      <div id="memories-list" className="flex flex-col gap-3">
+      <Panel className="mt-6">
+        <PanelHead
+          eyebrow="Recent context"
+          title="What Rembric knows"
+          action={
+            isFiltered
+              ? `filtered · ${roundTripQuery['q'] ? `q=${roundTripQuery['q']}` : 'by URL'}`
+              : 'Across all projects'
+          }
+        />
         {visible.length === 0 ? (
-          isFiltered ? (
-            <TableNoResults what="memories" clearHref="/dashboard/memories" />
-          ) : (
-            <TableEmptyState
-              title="No memories yet"
-              description={
-                <>
-                  Nothing has been saved in this scope. Save your first memory with the{' '}
-                  <code className="font-mono">memory.save</code> MCP tool — it appears here
-                  immediately, and it is never edited or deleted afterwards.
-                </>
-              }
-            />
-          )
+          <EmptyNote>
+            {isFiltered ? (
+              <>
+                No memory matches this filter set.{' '}
+                <Link href="/dashboard/memories" className="text-(--accent-ink) hover:underline">
+                  Clear the filters
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                Nothing has been saved in this scope. Save your first memory with the{' '}
+                <code className="font-mono">memory.save</code> MCP tool — it appears here
+                immediately, and it is never edited or deleted afterwards.
+              </>
+            )}
+          </EmptyNote>
         ) : (
-          <MemoriesTable rows={tableRows} />
+          <Rows>
+            {visible.map((memory) => {
+              const reviewState = reviewById.get(memory.id) ?? null;
+              const tone =
+                reviewState === 'needs_review'
+                  ? 'amber'
+                  : memory.status === 'active'
+                    ? 'lime'
+                    : 'dim';
+              return (
+                <Link key={memory.id} href={`/dashboard/memories/${memory.id}`} className="block">
+                  <Row columns="md:grid-cols-[minmax(260px,1.5fr)_1fr_auto_auto]">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-(--accent-ink)/80" />
+                      <div>
+                        <p className="text-sm leading-5 text-(--ink)/80">{memory.title}</p>
+                        <p className="mt-1 text-[10px] text-(--ink)/38">
+                          {memory.type} · {shortId(memory.id)}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-(--ink)/45">
+                      {memory.projectId
+                        ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
+                        : 'global'}
+                    </span>
+                    <span className="text-[11px] text-(--ink)/38">
+                      {relativeTime(memory.createdAt, nowMs)}
+                    </span>
+                    <Pill tone={tone}>
+                      {reviewState === 'needs_review' ? 'Needs review' : memory.status}
+                    </Pill>
+                  </Row>
+                </Link>
+              );
+            })}
+          </Rows>
         )}
+      </Panel>
+
+      <div className="mt-4">
         <Pager
           page={filters.page}
           hasMore={hasMore}
           total={totalCount}
-          totalLabel={`${visible.length} ROWS`}
+          totalLabel={`${visible.length} rows`}
           path="/dashboard/memories"
           query={roundTripQuery}
         />
       </div>
-    </div>
+    </Page>
   );
 }
