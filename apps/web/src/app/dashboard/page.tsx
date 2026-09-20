@@ -1,63 +1,77 @@
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { StatCard } from '@/components/dashboard/stat-card';
+import { getServices } from '@/lib/services';
 
 /**
- * Placeholder for the overview view. Phase 15 of
- * `redesign-dashboard-identity-and-port` replaces this file with the
- * `dashboard-01` composition; until then it exists so the shell has a route to
- * render and so the theme, the fonts and the glass layer are observable.
+ * The overview — the same counts the retired Hono home rendered, as a server
+ * component reading `@rembric/core`/`@rembric/db` directly.
+ *
+ * This replaces the scaffold placeholder with real data. The full `dashboard-01`
+ * composition (the seven-day activity sparkline, the recent-judgments and
+ * recent-sessions tiles, the consolidation-health section) is phase 15 of
+ * `redesign-dashboard-identity-and-port`; the stat strip is ported here in its
+ * declared order because every count it needs is already available and the strip
+ * is what makes the shell's navigation legible.
  */
-export default function DashboardPage() {
+export const dynamic = 'force-dynamic';
+
+export default function DashboardOverviewPage() {
+  const { agentSessions, repos } = getServices();
+
+  const memoriesByStatus = repos.memory.countRowsByStatus();
+  const totalMemories = memoriesByStatus.reduce((acc, row) => acc + row.count, 0);
+  const activeMemories = memoriesByStatus.find((row) => row.status === 'active')?.count ?? 0;
+  const archivedMemories = memoriesByStatus.find((row) => row.status === 'archived')?.count ?? 0;
+  const supersededMemories = Math.max(0, totalMemories - activeMemories - archivedMemories);
+  const projects = repos.projects.count();
+  const archivedProjects = repos.projects.adminCountArchived();
+  const activeSessions = agentSessions.adminCountByStatus().active;
+
   return (
-    <>
-      <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-4">
+      <header className="flex flex-col gap-1">
         <p className="font-mono text-xs tracking-[0.18em] text-brand-accent uppercase">
-          Rembric operator surface
+          § 01 · Rembric operator surface
         </p>
         <h1 className="font-display text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          The dashboard shell is in place: collapsible sidebar, glass chrome and the theme tokens.
-          The views are ported one route per commit, starting with memories.
-        </p>
+      </header>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard label="Total memories" value={totalMemories} href="/dashboard/memories" />
+        <StatCard
+          label="Active memories"
+          value={activeMemories}
+          tone="accent"
+          href="/dashboard/memories?status=active"
+        />
+        <StatCard
+          label="Superseded memories"
+          value={supersededMemories}
+          tone={supersededMemories > 0 ? 'warn' : 'accent'}
+          hint="Safe to archive"
+          href="/dashboard/memories?status=superseded"
+        />
+        <StatCard
+          label="Archived memories"
+          value={archivedMemories}
+          tone="dim"
+          hint="Decayed"
+          href="/dashboard/memories?status=archived"
+        />
+        <StatCard
+          label="Projects"
+          value={projects}
+          tone="accent"
+          hint={`${archivedProjects} archived`}
+          href="/dashboard/projects"
+        />
+        <StatCard
+          label="Active sessions"
+          value={activeSessions}
+          tone={activeSessions > 0 ? 'accent' : 'fg'}
+          hint="Connected now"
+          href="/dashboard/sessions"
+        />
       </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardDescription>Sidebar</CardDescription>
-            <CardTitle>Collapsible, persisted</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Collapses to icons on desktop; below the tablet band the same provider opens a sheet.
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardDescription>Identity</CardDescription>
-            <CardTitle>
-              Liquid glass
-              <Badge variant="secondary" className="ml-2 align-middle">
-                identity A
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            The sidebar and header are one glass layer over the light content surface.
-          </CardContent>
-        </Card>
-
-        <Card className="glass-chrome border">
-          <CardHeader>
-            <CardDescription>Glass surface</CardDescription>
-            <CardTitle>Backdrop-filter</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Opaque fallback applies where <code className="font-mono">backdrop-filter</code> is
-            unsupported.
-          </CardContent>
-        </Card>
-      </div>
-    </>
+    </div>
   );
 }
