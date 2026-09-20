@@ -41,14 +41,16 @@ export function DetailSheet({
         if (!open) router.back();
       }}
     >
-      {/* `sheet.tsx` sets the side panel's width and max-width under
-          `data-[side=right]:`, and those selectors carry an attribute selector
-          the plain utilities cannot outrank, so every size override has to
-          repeat that variant to take effect (tailwind-merge keeps both: the
-          modifier namespaces differ). */}
+      {/* `sheet.tsx` sizes the panel with `data-[side=right]:w-3/4` and
+          `data-[side=right]:sm:max-w-sm`, and tailwind-merge does not drop
+          those when a plain utility conflicts, so every override has to repeat
+          the `data-[side=right]:` variant to beat the attribute selector. The
+          panel's width is therefore the smaller of 75vw and the max-width
+          below; the full-bleed variant that used to sit here outranked that
+          base width and pushed the panel's close button off the side. */}
       <SheetContent
         side="right"
-        className="w-full gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-2xl data-[side=right]:lg:max-w-3xl data-[side=right]:xl:max-w-4xl"
+        className="w-full gap-0 overflow-y-auto p-0 sm:w-[600px] lg:w-[720px] data-[side=right]:sm:max-w-2xl data-[side=right]:lg:max-w-3xl data-[side=right]:xl:max-w-4xl"
       >
         <SheetHeader className="glass-chrome sticky top-0 z-10 gap-1 border-b px-4 py-3">
           <SheetTitle className="pr-8 font-display text-lg font-semibold tracking-tight">
