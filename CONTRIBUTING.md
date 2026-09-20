@@ -96,8 +96,11 @@ dedicated tests in
 weaken or delete these. If a feature genuinely requires changing an invariant,
 change the spec first via an OpenSpec change.
 
-For new code, add unit tests in `apps/server/src/**/*.test.ts` next to the module, and
-integration / E2E tests where the boundary lives. Run with:
+For new code, add unit tests in `apps/server/src/**/*.test.ts` next to the
+module — for a module that lives in `packages/`, under
+`apps/server/src/test/<area>/` mirroring its package path, since the suite
+resolves `@rembric/db` and `@rembric/core` from source — and integration / E2E
+tests where the boundary lives. Run with:
 
 ```bash
 pnpm test                # full suite, one-shot

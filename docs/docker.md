@@ -167,6 +167,21 @@ Not recommended yet. Watchtower would auto-pull `:latest` and recreate the conta
 
 The embedding model (`gte-multilingual-base`, ONNX q8) ships inside the image and runs in-process — no Ollama, no API keys, no outbound calls. The container works air-gapped. Budget ~1 GB RAM minimum (2 GB recommended); the model loads at boot (~1 s from image files) and a broken model fails the boot — see [docs/embeddings.md](./embeddings.md) for the full flow.
 
+## What's in the image (workspace packages)
+
+The image builds from the monorepo root, not from `apps/server/`, because the server's runtime closure now spans three workspace packages: `@rembric/server` (the app), `@rembric/db` and `@rembric/core`. Build order is load-bearing:
+
+1. Copy the workspace manifests (`apps/server`, `apps/plugin`, `packages/{config,db,core}`) plus the lockfile, then `pnpm install --frozen-lockfile --filter @rembric/server...` — that closure only.
+2. Bake the embedding model from `packages/core/scripts/fetch-model.mjs` **before any source copy**, so the ~300 MB layer invalidates only on lockfile or script changes.
+3. Copy the source, then build `packages/db` and `packages/core` **before** the app: `apps/server/tsconfig.build.json` empties `paths`, so the app resolves `@rembric/*` through their `exports` maps to real `dist/` output.
+4. `pnpm deploy --legacy` writes `/prod-out` with its own virtual store, carrying `@rembric/db` and `@rembric/core` (`packages/ui` is outside the closure and absent). A build-time gate then asserts the deployed `dist/migrations` holds **exactly 37** `*.sql` files — a deploy that drops a package fails the build instead of shipping an image that boots against a volume it cannot migrate.
+5. Prune `onnxruntime-node`'s non-target prebuilt libs (~185 MB), asserting the target binding survives.
+
+Two consequences worth knowing:
+
+- **The packages are baked, not mounted.** The dev stack mounts only `apps/server/src`, so editing `packages/*/src` on the host does **not** hot-reload. Rebuild to see the change — `pnpm run dev:docker:up` builds, a plain `docker compose up` reuses the old layer. App code under `apps/server/src/` still reloads in ~1–2 s.
+- **In-image migrations resolve through the deploy's virtual store**, under `/prod-out/node_modules/.pnpm/…`, not `/app/node_modules/@rembric/db/…`. Your data path is unchanged: the same migrations run at startup against `./data/data.db`.
+
 ## Healthchecks
 
 The container's healthcheck calls `GET /healthz` every 30s with `Authorization: Bearer $REMBRIC_ADMIN_TOKEN`. The endpoint runs a `SELECT 1` against SQLite and returns:
@@ -235,7 +250,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml \
 
 This emits a one-line stderr warning and then deletes from `memory_relations`, `confirmations`, `consolidation_ops`, `consolidation_runs`, `prompts`, `memory`, `sessions`, `tokens`, `projects` (children-first, in one transaction). Triggers clean up `memory_vec` and `memory_fts` automatically.
 
-`--reset` is the only path outside the operator-only purges (`apps/server/src/services/memory.ts::purgeDisconnectedArchived` and `apps/server/src/services/agent-sessions.ts::purgeEmpty`) permitted to `DELETE FROM` the protected tables. The invariant test (`apps/server/src/test/invariants.test.ts`) pins this allow-list and asserts that `apps/server/src/scripts/seed-dev.ts` actually contains the expected `DELETE FROM` strings — so removing the script's seed wouldn't silently expand the allow-list.
+`--reset` is the only path outside the operator-only purges (`packages/core/src/services/memory.ts::purgeDisconnectedArchived` and `packages/core/src/services/agent-sessions.ts::purgeEmpty`) permitted to `DELETE FROM` the protected tables. The invariant test (`apps/server/src/test/invariants.test.ts`) pins this allow-list and asserts that `apps/server/src/scripts/seed-dev.ts` actually contains the expected `DELETE FROM` strings — so removing the script's seed wouldn't silently expand the allow-list.
 
 ### How it avoids colliding with prod
 
