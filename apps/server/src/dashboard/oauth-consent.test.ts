@@ -122,4 +122,14 @@ describe('OAuth consent route', () => {
     const res = await post({ areq: tampered, decision: 'approve', csrf: csrf() });
     expect(res.status).toBe(400);
   });
+
+  it('POST with an unparseable redirect_uri answers the consent error page, not a 500', async () => {
+    const res = await post({
+      areq: areq({ redirectUri: 'not-a-url' }),
+      decision: 'approve',
+      csrf: csrf(),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('redirect URI is invalid');
+  });
 });

@@ -34,13 +34,13 @@ Why phase 3 runs in a fresh process: it exercises exactly the resolution path th
 ```
 apps/server/src/server/bootstrap.ts
    │
-   ├─ await loadEmbedder()                  ← packages/core/src/embeddings/embedder.ts
+   ├─ await loadEmbedder()                      ← packages/core/src/embeddings/embedder.ts
    │     /app/models present (image) → offline, ~1.1 s
    │     absent (bare-metal dev)     → one-time pinned download
    │     ✗ load fails → BOOT ABORTS (fail fast — no degraded mode;
    │                     a listening server ALWAYS has a warm model)
    │
-   ├─ ensureVectorModel(db, dataDir)        ← packages/core/src/embeddings/state.ts
+   ├─ ensureVectorModel(repos, config.dataDir)  ← packages/core/src/embeddings/state.ts
    │     reads embedding-state.json (model-identity marker)
    │     ├─ matches the compiled-in model, settled → no-op
    │     └─ differs/absent/pending → mark pending
@@ -51,7 +51,7 @@ apps/server/src/server/bootstrap.ts
    │         emptied; either way the reset is re-checked next boot»
    │        «a pre-upgrade DB self-migrates; flow 3 refills it»
    │
-   ├─ new EmbeddingWorker({ db, embedder })
+   ├─ new EmbeddingWorker({ repos, embedder })
    └─ setInterval(drain tick, 30 s)
 ```
 
