@@ -1,0 +1,11 @@
+# Next's build and dev output for this app. `next dev` / `next build` also
+# generate `next-env.d.ts`, which is regenerated on every run and edited by
+# nobody.
+.next/
+next-env.d.ts
+
+# Destination the production image extracts `.next/standalone` into. Nothing
+# writes here yet; the bundle itself lands at `.next/standalone/` (covered
+# above). Remove this entry if a future `apps/web/standalone/` source directory
+# ever exists.
+standalone/
