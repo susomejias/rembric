@@ -1,6 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { DomainError } from '@rembric/core';
-import { type RelationsService, type RelationView } from '@rembric/core';
+import { type DomainError, type RelationsService, type RelationView } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { SessionRouter } from '@rembric/core';
@@ -8,7 +7,7 @@ import { MEMORY_TYPES, type Repositories, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
 import { requireScope } from './_shared.js';
-import { errToMcp, mcpError, type ErrorReportingDeps } from './errors.js';
+import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
 
@@ -251,7 +250,7 @@ async function handleJudge(
           judgedAt: row.judgedAt,
         };
       } catch (err) {
-        if (err instanceof DomainError) {
+        if (isDomainError(err)) {
           return {
             ok: false as const,
             judgmentId: j.judgmentId,
@@ -285,7 +284,7 @@ async function handleJudge(
       judgedAt: row.judgedAt,
     });
   } catch (err) {
-    if (err instanceof DomainError) return mcpError(maskNotFound(err.code), err.message);
+    if (isDomainError(err)) return mcpError(maskNotFound(err.code), err.message);
     throw err;
   }
 }
@@ -332,7 +331,7 @@ async function handleCompare(
       status: row.status,
     });
   } catch (err) {
-    if (err instanceof DomainError) {
+    if (isDomainError(err)) {
       return mcpError(maskNotFound(err.code), err.message);
     }
     throw err;

@@ -1,4 +1,4 @@
-import { DomainError } from '@rembric/core';
+import type { DomainError } from '@rembric/core';
 
 /**
  * Server-side error logging for the non-domain branch below, injected at the
@@ -14,6 +14,27 @@ export type LogInternalError = (err: unknown, context: string) => string;
 /** Every `build*Handlers` deps object, so no tool module can forget to wire it. */
 export interface ErrorReportingDeps {
   logInternalError: LogInternalError;
+}
+
+/**
+ * `DomainError` identified by shape rather than by class identity.
+ *
+ * Turbopack assigns a distinct module id to `@rembric/core` per chunk group,
+ * so the `DomainError` a service throws and the one a caller imported can be
+ * two different classes and `instanceof` is false across them (measured in
+ * `apps/web`: the standalone `/.next/server/chunks/` carries two copies, and
+ * every invalid or revoked bearer came back 500 instead of 401). `name` plus a
+ * string `code` is the contract both copies share
+ * (`packages/core/src/services/errors.ts`); the `name` clause is what keeps a
+ * better-sqlite3 `SqliteError` — which also carries a string `code`, e.g.
+ * `SQLITE_BUSY` — from being classified as a domain error.
+ */
+export function isDomainError(err: unknown): err is DomainError {
+  return (
+    err instanceof Error &&
+    err.name === 'DomainError' &&
+    typeof (err as { code?: unknown }).code === 'string'
+  );
 }
 
 /**
@@ -39,7 +60,7 @@ export function mcpError(code: string, message: string, extra?: Record<string, u
  * stack logged server-side but never returned to the client (mcp-api spec).
  */
 export function errToMcp(err: unknown, logInternalError: LogInternalError) {
-  if (err instanceof DomainError) {
+  if (isDomainError(err)) {
     return mcpError(err.code, err.message, err.details);
   }
   const errorId = logInternalError(err, 'unhandled MCP tool error');

@@ -1,5 +1,4 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { DomainError } from '@rembric/core';
 import { type ProjectsService } from '@rembric/core';
 import { isAuthorized } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
@@ -15,7 +14,7 @@ import {
   routerKey,
   type EffectiveScope,
 } from './_shared.js';
-import { errToMcp, mcpError, type ErrorReportingDeps } from './errors.js';
+import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 
 /**
@@ -117,7 +116,7 @@ function handleUse(
         project = deps.projects.create({ slug: args.slug });
         created = true;
       } catch (err) {
-        if (err instanceof DomainError) return mcpError(err.code, err.message);
+        if (isDomainError(err)) return mcpError(err.code, err.message);
         throw err;
       }
     } else {
