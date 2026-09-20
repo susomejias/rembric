@@ -1,0 +1,196 @@
+import { randomBytes } from 'node:crypto';
+
+import type { Services } from './services';
+import { getServices } from './services';
+
+/**
+ * The web app's process-level responsibilities — the part of
+ * `apps/server/src/server/bootstrap.ts` that belongs to the running process
+ * rather than to a listener: the eager database open, the admin-token
+ * bootstrap, the stale-session reaper and the embedder drain worker.
+ *
+ * `instrumentation.ts`'s `register()` is the only caller. `register()` may not
+ * throw (Next treats a throwing hook as a fatal boot error), so every timer
+ * below owns its own error handling and this module never propagates.
+ */
+
+/** `apps/server/src/config.ts` requires at least this much entropy. */
+const ADMIN_TOKEN_MIN_LENGTH = 16;
+
+/** `bootstrap.ts`: reap every 30 min, hourly forced embedding pass, 30 s tick. */
+const REAP_INTERVAL_MS = 30 * 60_000;
+const EMBED_TICK_MS = 30_000;
+const EMBED_FALLBACK_MS = 60 * 60_000;
+
+/**
+ * `register()` is documented as once per server instance, but Next re-evaluates
+ * modules on an HMR edit, so a module-level flag alone lets a reload start a
+ * second reaper and a second drain over the same database. The flag lives on
+ * `globalThis` for the same reason `lib/db.ts` caches the handle there.
+ */
+const globalForProcess = globalThis as typeof globalThis & {
+  __rembricProcessStarted?: boolean;
+};
+
+export function startProcess(): void {
+  if (globalForProcess.__rembricProcessStarted === true) {
+    // Loud on purpose: this is the only evidence that a re-invocation of
+    // `register()` was absorbed instead of starting a second reaper.
+    console.error('[process] already started in this process → skipping re-entry');
+    return;
+  }
+  globalForProcess.__rembricProcessStarted = true;
+
+  // Eager `getServices()` is what opens the SQLite file: `createDb` runs the
+  // migrations and narrates the resolved absolute path (data-safety DS1) before
+  // this returns. Called lazily on the first request instead, that line moves
+  // past the point where a mistyped `REMBRIC_DATA_DIR` could still be caught.
+  const services = getServices();
+
+  bootstrapAdminToken(services);
+  startSessionReaper(services);
+  startEmbeddingDrain(services);
+}
+
+/**
+ * Port of `bootstrap.ts`'s `tokens.bootstrapAdmin(config.adminToken)` call,
+ * which is a no-op once any token row exists (the env var is authoritative
+ * only at first run).
+ *
+ * One deliberate divergence: the server refuses to boot (exit 78) when
+ * `REMBRIC_ADMIN_TOKEN` is unset on first run, while `register()` may not
+ * terminate the process. An operator who never set the variable would then own
+ * a database nobody can sign in to, so the token is minted and printed once
+ * instead — and the log says where it went.
+ */
+function bootstrapAdminToken(services: Services): void {
+  const existing = services.tokens.count();
+  if (existing > 0) {
+    console.error(
+      `[process] admin token present (${existing} token row(s)) → bootstrap is a no-op`,
+    );
+    return;
+  }
+
+  const configured = process.env['REMBRIC_ADMIN_TOKEN'];
+  let token: string;
+  if (configured !== undefined && configured.length > 0) {
+    if (configured.length < ADMIN_TOKEN_MIN_LENGTH) {
+      // Same refusal as the server's `REMBRIC_ADMIN_TOKEN: z.string().min(16)`,
+      // minus the exit: an operator who set a weak value is told why it was not
+      // used, and no token is invented over their explicit intent.
+      console.error(
+        `[process] REMBRIC_ADMIN_TOKEN is shorter than ${ADMIN_TOKEN_MIN_LENGTH} characters and was NOT used; no admin token created — set a strong random value (openssl rand -hex 32)`,
+      );
+      return;
+    }
+    token = configured;
+  } else {
+    token = randomBytes(32).toString('hex');
+  }
+
+  try {
+    services.tokens.bootstrapAdmin(token);
+  } catch (err) {
+    console.error('[process] admin token bootstrap failed', message(err));
+    return;
+  }
+
+  if (token === configured) {
+    console.error('[process] admin token bootstrapped from REMBRIC_ADMIN_TOKEN');
+    return;
+  }
+  console.error(
+    '[process] no admin token in the database and REMBRIC_ADMIN_TOKEN is unset → first-run bootstrap created one:',
+  );
+  console.error(`[process]   REMBRIC_ADMIN_TOKEN=${token}`);
+  console.error(
+    '[process] this value is now in this process log; set REMBRIC_ADMIN_TOKEN to keep it out of the logs',
+  );
+}
+
+/**
+ * Port of `bootstrap.ts`'s boot sweep plus its periodic reaper. The boot sweep
+ * catches rows leaked by a PRIOR run; the interval catches a client killed
+ * mid-session while THIS process keeps running, which would otherwise block
+ * `findActiveForTransport` for the next session on the same (token, project)
+ * for as long as the server stays up.
+ */
+function startSessionReaper(services: Services): void {
+  const { agentSessions, sessionAbandonAfterMs } = services;
+
+  try {
+    const boot = agentSessions.abandonStale({ olderThanMs: sessionAbandonAfterMs });
+    if (boot.abandoned > 0) {
+      console.error(`[process] ${boot.abandoned} stale session(s) marked abandoned`);
+    }
+  } catch (err) {
+    console.error('[process] boot session sweep failed', message(err));
+  }
+
+  const reaper = setInterval(() => {
+    try {
+      const reaped = agentSessions.abandonStale({ olderThanMs: sessionAbandonAfterMs });
+      if (reaped.abandoned > 0) {
+        console.error(
+          `[process] ${reaped.abandoned} stale session(s) marked abandoned (periodic reap)`,
+        );
+      }
+    } catch (err) {
+      console.error('[process] periodic session reap failed', message(err));
+    }
+  }, REAP_INTERVAL_MS);
+  reaper.unref?.();
+
+  console.error(
+    `[process] session reaper started (every ${REAP_INTERVAL_MS / 60_000} min; abandon after ${sessionAbandonAfterMs} ms)`,
+  );
+}
+
+/**
+ * Port of `bootstrap.ts`'s embedder drain: an immediate first pass, a 30 s
+ * tick, and an hourly forced full re-scan in case some insert path forgets to
+ * signal the worker.
+ *
+ * The one deliberate difference is the embedder. The server loads the model
+ * eagerly at boot and treats a load failure as fatal; this app loads it lazily
+ * (the recorded process-model decision for `apps/web`), so a pass with no
+ * backlog returns before `embeddingWorker()` — an idle boot never pays for the
+ * model, while the first pending row makes the drain behave exactly as the
+ * server's.
+ */
+function startEmbeddingDrain(services: Services): void {
+  let inFlight = false;
+
+  const tick = async (force: boolean): Promise<void> => {
+    if (inFlight) return;
+    if (!force && !services.hasEmbeddingBacklog()) return;
+    inFlight = true;
+    try {
+      const worker = await services.embeddingWorker();
+      await worker.processBatch({ force });
+    } finally {
+      inFlight = false;
+    }
+  };
+  const run = (force: boolean): void => {
+    tick(force).catch((err) => console.error('[process] embedding worker error', message(err)));
+  };
+
+  const tickTimer = setInterval(() => run(false), EMBED_TICK_MS);
+  const fallbackTimer = setInterval(() => run(true), EMBED_FALLBACK_MS);
+  tickTimer.unref?.();
+  fallbackTimer.unref?.();
+
+  // Matches the server's immediate first pass: whatever a prior run left
+  // unembedded is picked up now rather than one tick from now.
+  run(false);
+
+  console.error(
+    `[process] embedder drain started (every ${EMBED_TICK_MS / 1000} s, forced hourly; the model loads on the first pending row)`,
+  );
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
