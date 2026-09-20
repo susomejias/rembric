@@ -1,6 +1,7 @@
 import {
   AgentSessionsService,
   ConsolidationRunner,
+  EmbeddingWorker,
   MemoryService,
   OAuthService,
   ProjectsService,
@@ -19,10 +20,10 @@ import { getDb } from './db';
 /**
  * The services the session-lifecycle HTTP API's handlers call, wired the way
  * `apps/server/src/server/bootstrap.ts` wires them for the same router. This
- * module is the web app's counterpart of that bootstrapper; it deliberately
- * wires NO background timers, no embedder drain worker and no admin-token
- * bootstrap, because during the transition `apps/server` keeps owning those
- * over the one shared database.
+ * module is the web app's counterpart of that bootstrapper: it owns the
+ * service graph, the embedder memo and the embedder drain worker, while
+ * `lib/process.ts` owns the process-level pieces that need timers or the
+ * boot-time admin-token bootstrap.
  *
  * Construction is lazy: `getDb()` and everything below it open the SQLite file,
  * which must never happen while `next build` imports these modules. The result
@@ -40,6 +41,19 @@ export interface Services {
   memory: MemoryService;
   usageCounters: UsageCounters;
   authLockout: AuthLockout;
+  /**
+   * `SESSION_ABANDON_AFTER_MS` at the server's bounds and default — read by
+   * `lib/process.ts` for the boot sweep and the periodic reaper.
+   */
+  sessionAbandonAfterMs: number;
+  /**
+   * The drain's worker, memoized. Constructing it pulls the embedder, so a
+   * caller that only wants to know whether there is work must use
+   * `hasEmbeddingBacklog()` instead.
+   */
+  embeddingWorker: () => Promise<EmbeddingWorker>;
+  /** The worker's own anti-join query, without the model: does the drain have anything to do? */
+  hasEmbeddingBacklog: () => boolean;
   /** The `/api` access-token fallback, exactly as the server gates it: present iff `REMBRIC_PUBLIC_URL` is set. */
   oauth: OAuthService | null;
   /** Fire-and-forget consolidation sweep; never affects a response. */
@@ -78,6 +92,16 @@ function buildServices(): Services {
     getEmbedder().then((embedder) => embedder.embed(embeddingQueryInput(text))),
   );
 
+  // Memoized on the same embedder promise: whichever comes first, the MCP
+  // save path's inline `embedNow` or `lib/process.ts`'s drain, pays for exactly
+  // one model load. A failed load stays failed for the process, exactly as the
+  // memory service's `getEmbedder` above documents.
+  let embeddingWorkerPromise: Promise<EmbeddingWorker> | null = null;
+  const embeddingWorker = (): Promise<EmbeddingWorker> =>
+    (embeddingWorkerPromise ??= getEmbedder().then(
+      (embedder) => new EmbeddingWorker({ repos, embedder }),
+    ));
+
   const runner = new ConsolidationRunner({
     repos,
     tx: db.db,
@@ -112,6 +136,12 @@ function buildServices(): Services {
       windowMs: envInt('AUTH_LOCKOUT_WINDOW_MS', 60_000, { min: 1_000, max: 3_600_000 }),
       lockoutMs: envInt('AUTH_LOCKOUT_MS', 60_000, { min: 1_000, max: 24 * 3_600_000 }),
     }),
+    sessionAbandonAfterMs: envInt('SESSION_ABANDON_AFTER_MS', 86_400_000, {
+      min: 60_000,
+      max: 30 * 86_400_000,
+    }),
+    embeddingWorker,
+    hasEmbeddingBacklog: () => repos.vectors.findMissingEmbeddings(1).length > 0,
     oauth: buildOAuthService(repos),
     sweep,
   };
