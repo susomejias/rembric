@@ -1,0 +1,9 @@
+/*
+ * Intentionally empty.
+ *
+ * The core CSS lands here during the port: the dashboard spec's locked layers
+ * (tokens, base, atoms, layout, patterns, content) live in
+ * `apps/server/src/dashboard/styles/core/` and are NOT copied yet. Phase 5.1 of
+ * `odd/tasks/migrate-to-nextjs.md` establishes the bundling/hashing story
+ * first, and `apps/server` keeps serving the live dashboard until then.
+ */
