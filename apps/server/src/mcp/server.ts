@@ -199,7 +199,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     },
     cb: ToolCallback<InputArgs>,
   ): void => {
-    server.registerTool<OutputArgs, ZodObject<InputArgs, 'strict'>>(
+    server.registerTool<OutputArgs, ZodObject<InputArgs, z.core.$strict>>(
       name,
       { ...config, inputSchema: z.object(config.inputSchema).strict() },
       // The sole registration funnel, so every tool — including one added
