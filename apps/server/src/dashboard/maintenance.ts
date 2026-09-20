@@ -2,9 +2,9 @@ import { createReadStream, mkdirSync, readdirSync, statSync, unlinkSync } from '
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
+import { type DbDiagnostics } from '@rembric/db';
 import { Hono, type Context } from 'hono';
 
-import type { DbDiagnostics } from '../db/diagnostics.js';
 import { type AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import { type MemoryService } from '../services/memory.js';

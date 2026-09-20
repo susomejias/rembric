@@ -1,9 +1,12 @@
-import type { Repositories } from '../db/repositories/index.js';
-import { partitionKeysFor } from '../db/repositories/scope-clause.js';
-import type { QueryTermFrequencies } from '../db/repositories/term-statistics-repository.js';
-import type { MemoryStatus, MemoryType } from '../db/schema/memory.js';
-
-import { homeScope, type SearchScope } from './scope.js';
+import {
+  homeScope,
+  partitionKeysFor,
+  type MemoryStatus,
+  type MemoryType,
+  type QueryTermFrequencies,
+  type Repositories,
+  type SearchScope,
+} from '@rembric/db';
 
 /**
  * Standard hybrid retrieval for `memory.search`, expressed in the repo's flat

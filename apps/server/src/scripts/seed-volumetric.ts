@@ -21,19 +21,26 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
-import { countTableRows, refreshStatistics } from '../db/diagnostics.js';
-import { createDb, type DbHandle } from '../db/index.js';
-import { createRepositories } from '../db/repositories/index.js';
-import { partitionKeyFor } from '../db/repositories/scope-clause.js';
-import { RELATION_VALUES } from '../db/schema/memory-relations.js';
-import { MEMORY_TYPES, type MemoryType } from '../db/schema/memory.js';
+import {
+  countTableRows,
+  createDb,
+  createRepositories,
+  MEMORY_TYPES,
+  partitionKeyFor,
+  projectScope,
+  refreshStatistics,
+  RELATION_VALUES,
+  type DbHandle,
+  type MemoryType,
+  type Scope,
+} from '@rembric/db';
+
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { extractEntities } from '../services/entities.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope, type Scope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 
 export const SYNTHETIC_VECTOR_CAVEAT =

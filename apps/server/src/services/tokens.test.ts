@@ -1,6 +1,6 @@
+import { createRepositories, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import {

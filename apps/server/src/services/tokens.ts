@@ -8,12 +8,8 @@ import {
   type ScryptOptions,
 } from 'node:crypto';
 
+import { type Project, type Repositories, type Token, type TransactionRunner } from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
-import type { Project } from '../db/schema/projects.js';
-import { type Token } from '../db/schema/tokens.js';
 
 import { DomainError } from './errors.js';
 import type { ProjectsService } from './projects.js';

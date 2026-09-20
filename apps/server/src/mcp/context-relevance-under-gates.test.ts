@@ -1,7 +1,6 @@
+import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
@@ -15,7 +14,6 @@ import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { PromptsService } from '../services/prompts.js';
 import { RelationsService } from '../services/relations.js';
-import type { Scope } from '../services/scope.js';
 import {
   createTestDb,
   defaultProject,

@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 
+import { OAuthRepository } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { OAuthRepository } from '../db/repositories/oauth-repository.js';
 import { createTestDb, type TestDb } from '../test/db.js';
 
 import { grantedOAuthScope, OAuthError, OAuthService, resolveGrantedScope } from './oauth.js';

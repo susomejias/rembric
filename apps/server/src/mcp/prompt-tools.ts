@@ -1,4 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { type Scope } from '@rembric/db';
 import { z } from 'zod';
 
 import { getRequestContext } from '../server/request-context.js';
@@ -6,7 +7,6 @@ import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { ProjectsService } from '../services/projects.js';
 import { type PromptsService } from '../services/prompts.js';
-import type { Scope } from '../services/scope.js';
 
 import {
   assertAuthorized,

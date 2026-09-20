@@ -1,8 +1,14 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  MEMORY_STATUSES,
+  MEMORY_TYPES,
+  type Memory,
+  type Repositories,
+  type Scope,
+  type SearchScope,
+} from '@rembric/db';
 import { z } from 'zod';
 
-import type { Repositories } from '../db/repositories/index.js';
-import { MEMORY_STATUSES, MEMORY_TYPES, type Memory } from '../db/schema/memory.js';
 import { getRequestContext, tryGetRequestContext } from '../server/request-context.js';
 import type { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
@@ -27,7 +33,6 @@ import {
   type RelationsService,
 } from '../services/relations.js';
 import { findSaveTimeCandidates, type CandidateOptions } from '../services/save-time-candidates.js';
-import type { Scope, SearchScope } from '../services/scope.js';
 import type { CountedTool, UsageCounters } from '../services/usage-counters.js';
 
 import {

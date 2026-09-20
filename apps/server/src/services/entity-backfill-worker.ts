@@ -1,5 +1,4 @@
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
+import { type Repositories, type TransactionRunner } from '@rembric/db';
 
 import { extractEntities } from './entities.js';
 import { resetEntityIndex } from './entity-state.js';

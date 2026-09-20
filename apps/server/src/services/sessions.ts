@@ -1,9 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
+import { type DashboardSession, type Repositories } from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { Repositories } from '../db/repositories/index.js';
-import { type DashboardSession } from '../db/schema/sessions.js';
 
 import { DomainError } from './errors.js';
 

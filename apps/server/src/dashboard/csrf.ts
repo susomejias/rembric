@@ -1,6 +1,6 @@
+import { type DashboardSession } from '@rembric/db';
 import type { Context } from 'hono';
 
-import type { DashboardSession } from '../db/schema/sessions.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import { raw, type SafeHtml } from './templates.js';

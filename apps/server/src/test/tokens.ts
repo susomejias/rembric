@@ -1,5 +1,5 @@
-import type { DbHandle } from '../db/index.js';
-import { createRepositories } from '../db/repositories/index.js';
+import { createRepositories, type DbHandle } from '@rembric/db';
+
 import { TokensService, type CreatedToken, type TokenGrant } from '../services/tokens.js';
 
 /**

@@ -1,4 +1,5 @@
-import type { SearchScope } from '../../../services/scope.js';
+import { type SearchScope } from '@rembric/db';
+
 import type { IngestedCorpus, QueryScope, Retriever } from '../types.js';
 
 /**

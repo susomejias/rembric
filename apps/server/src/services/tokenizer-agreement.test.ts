@@ -1,7 +1,7 @@
+import { inheritedFts5Arguments } from '@rembric/db';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { inheritedFts5Arguments } from '../db/query-tokenizer.js';
 import { createTestDb } from '../test/index.js';
 import { CORPUS } from '../test/retrieval/corpus.js';
 import { QUERIES } from '../test/retrieval/queries.js';

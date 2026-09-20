@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createRepositories, projectScope, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import {
@@ -16,7 +16,6 @@ import {
 } from './hybrid-search.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
 
 const row = (title: string, content: string) => ({ title, content });
 /** `null` is the read's absent marker: the index reported no entry for that term. */

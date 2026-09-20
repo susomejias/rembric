@@ -1,4 +1,5 @@
-import type { Token } from '../db/schema/tokens.js';
+import { type Token } from '@rembric/db';
+
 import { DomainError } from '../services/errors.js';
 import type { OAuthService } from '../services/oauth.js';
 import type { ProjectsService } from '../services/projects.js';

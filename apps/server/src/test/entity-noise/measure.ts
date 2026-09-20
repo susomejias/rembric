@@ -1,11 +1,13 @@
+import {
+  memory,
+  MemoryRepository,
+  projectScope,
+  ProjectsRepository,
+  type EntityKind,
+} from '@rembric/db';
 import { ulid } from 'ulid';
 
-import { MemoryRepository } from '../../db/repositories/memory-repository.js';
-import { ProjectsRepository } from '../../db/repositories/projects-repository.js';
-import type { EntityKind } from '../../db/schema/entities.js';
-import { memory } from '../../db/schema/memory.js';
 import { sanitizeFtsQuery } from '../../services/hybrid-search.js';
-import { projectScope } from '../../services/scope.js';
 import { createTestDb } from '../db.js';
 
 import { NOISE_PROBES, type NoiseProbe } from './corpus.js';

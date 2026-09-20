@@ -1,7 +1,7 @@
+import { createRepositories, projectScope } from '@rembric/db';
 import { decodeTime } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
 import {
   createTestDb,
   defaultProject,
@@ -14,7 +14,6 @@ import { EntityBackfillWorker } from './entity-backfill-worker.js';
 import { DomainError } from './errors.js';
 import { deriveTitle, MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
 
 let db: TestDb;
 let projects: ProjectsService;

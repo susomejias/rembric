@@ -1,16 +1,14 @@
+import { createRepositories, tokens as tokensTable, type Scope, type Token } from '@rembric/db';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { tokens as tokensTable, type Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import type { Scope } from '../services/scope.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import {

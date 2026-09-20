@@ -1,10 +1,17 @@
+import {
+  memoryMatchesScope,
+  type ConfirmationVerdict,
+  type ConsolidationOpType,
+  type Memory,
+  type MemorySource,
+  type MemoryStatus,
+  type MemoryType,
+  type Repositories,
+  type Scope,
+  type SearchScope,
+  type TransactionRunner,
+} from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
-import type { ConfirmationVerdict } from '../db/schema/confirmations.js';
-import type { ConsolidationOpType } from '../db/schema/consolidation.js';
-import type { Memory, MemorySource, MemoryStatus, MemoryType } from '../db/schema/memory.js';
 
 import { DomainError } from './errors.js';
 import {
@@ -21,7 +28,6 @@ import {
   reviewTtlEntries,
   type ReviewState,
 } from './review.js';
-import { memoryMatchesScope, type Scope, type SearchScope } from './scope.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';

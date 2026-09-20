@@ -1,8 +1,5 @@
+import { type ConsolidationOpType, type Repositories, type TransactionRunner } from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
-import { type ConsolidationOpType } from '../db/schema/consolidation.js';
 
 /**
  * Atomic consolidation operations. Each runs inside a SQLite transaction; on

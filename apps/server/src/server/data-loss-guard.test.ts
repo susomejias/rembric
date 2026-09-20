@@ -1,9 +1,9 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createDiagnostics } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDiagnostics } from '../db/diagnostics.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import {

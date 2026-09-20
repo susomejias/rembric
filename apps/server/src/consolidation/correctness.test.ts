@@ -1,8 +1,7 @@
+import { createRepositories, memory } from '@rembric/db';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { memory } from '../db/schema/memory.js';
 import { MemoryService } from '../services/memory.js';
 import { createTestDb, defaultProjectScope } from '../test/index.js';
 

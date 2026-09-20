@@ -1,6 +1,6 @@
+import { type AdminRelationFilters, type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
 
-import type { AdminRelationFilters, Repositories } from '../db/repositories/index.js';
 import type { RelationsService } from '../services/relations.js';
 import type { SessionsService } from '../services/sessions.js';
 

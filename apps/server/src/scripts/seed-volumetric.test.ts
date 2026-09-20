@@ -11,10 +11,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { createDb, createRepositories } from '@rembric/db';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
-import { createDb } from '../db/index.js';
-import { createRepositories } from '../db/repositories/index.js';
 import { MemoryService } from '../services/memory.js';
 import { defaultProjectScope } from '../test/default-project.js';
 
@@ -155,9 +154,10 @@ describe('seed-volumetric is structurally incapable of deleting', () => {
     const invariants = readFileSync(new URL('../test/invariants.test.ts', import.meta.url), 'utf8');
     expect(invariants).not.toMatch(/seed-volumetric/);
     // Positive anchor: the allow-list this change must not widen is still the
-    // closed pair design D1 argues from.
-    expect(invariants).toContain(
-      "allow: ['db/repositories/memory-repository.ts', 'scripts/seed-dev.ts'],",
+    // closed pair design D1 argues from. Matched structurally rather than as one
+    // literal line, because prettier owns the line breaks of that array.
+    expect(invariants).toMatch(
+      /allow:\s*\[\s*'packages\/db\/src\/repositories\/memory-repository\.ts',\s*'apps\/server\/src\/scripts\/seed-dev\.ts',\s*\]/,
     );
   });
 });

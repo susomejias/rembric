@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Repositories } from '../db/repositories/index.js';
+import { type Repositories } from '@rembric/db';
 
 import { EMBEDDING_INPUT_VERSION, EMBEDDING_MODEL_ID } from './embedder.js';
 

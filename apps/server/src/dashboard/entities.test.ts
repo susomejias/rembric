@@ -1,13 +1,11 @@
 import { randomBytes } from 'node:crypto';
 
+import { createRepositories, projects, projectScope, type Repositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { projects } from '../db/schema/projects.js';
 import { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import { MemoryService } from '../services/memory.js';
-import { projectScope } from '../services/scope.js';
 import { SessionsService } from '../services/sessions.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/db.js';

@@ -1,7 +1,6 @@
+import { createRepositories, projectScope, RELATION_VALUES, type Scope } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { RELATION_VALUES } from '../db/schema/memory-relations.js';
 import { createTestDb, TestClock, type TestDb } from '../test/index.js';
 
 import { MemoryService } from './memory.js';
@@ -13,7 +12,6 @@ import {
   type AnnotationKey,
   type AnnotationKind,
 } from './relations.js';
-import { projectScope, type Scope } from './scope.js';
 
 let db: TestDb;
 let memory: MemoryService;

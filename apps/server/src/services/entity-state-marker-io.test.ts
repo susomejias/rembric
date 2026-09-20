@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type * as fs from 'node:fs';
 
+import { createRepositories, projectScope, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 
 import { EXTRACTOR_VERSION } from './entities.js';
@@ -11,7 +11,6 @@ import { EntityBackfillWorker } from './entity-backfill-worker.js';
 import { ensureEntityExtractor, entityMarkerPath } from './entity-state.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
 
 /**
  * Marker-write failures are injected through a partial `node:fs` mock, not

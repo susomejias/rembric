@@ -12,7 +12,7 @@
  * loosen defensively "just in case".
  */
 
-import type { EntityKind } from '../db/schema/entities.js';
+import { type EntityKind } from '@rembric/db';
 
 import { EXTRACTOR_RULES, type ExtractorRule } from './extractor-rules.js';
 

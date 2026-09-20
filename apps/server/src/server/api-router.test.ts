@@ -1,14 +1,12 @@
+import { createRepositories, projectScope, tokens as tokensSchema } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { buildSessionHandlers } from '../mcp/session-tools.js';
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from '../services/agent-sessions.js';
 import { extractEntities } from '../services/entities.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
-import { projectScope } from '../services/scope.js';
 import { NOTICE_MAX_BYTES } from '../services/session-nudge.js';
 import { TokensService } from '../services/tokens.js';
 import { UsageCounters } from '../services/usage-counters.js';

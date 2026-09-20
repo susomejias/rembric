@@ -1,11 +1,9 @@
 import { randomBytes } from 'node:crypto';
 
+import { createRepositories, memory, memoryRelations, type NewMemory } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
-import { memory, type NewMemory } from '../db/schema/memory.js';
 import { computeBadgeCounters } from '../server/dashboard-router.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { SessionsService } from '../services/sessions.js';

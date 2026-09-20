@@ -1,6 +1,10 @@
-import { createDiagnostics, type DbDiagnostics } from '../db/diagnostics.js';
-import type { DbHandle } from '../db/index.js';
-import { createRepositories } from '../db/repositories/index.js';
+import {
+  createDiagnostics,
+  createRepositories,
+  type DbDiagnostics,
+  type DbHandle,
+} from '@rembric/db';
+
 import { buildDoctorReportFactory } from '../server/bootstrap.js';
 import { AgentSessionsService } from '../services/agent-sessions.js';
 

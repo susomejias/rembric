@@ -1,14 +1,12 @@
+import { createRepositories, projectScope, tokens as tokensSchema } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { tokens as tokensSchema } from '../db/schema/tokens.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { AgentSessionsService, SUMMARY_MAX_CHARS } from './agent-sessions.js';
 import { DomainError } from './errors.js';
 import { ProjectsService } from './projects.js';
-import { projectScope } from './scope.js';
 import { TokensService } from './tokens.js';
 
 let db: TestDb;

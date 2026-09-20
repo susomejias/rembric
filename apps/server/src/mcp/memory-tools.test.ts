@@ -1,17 +1,19 @@
+import {
+  createRepositories,
+  memoryRelations,
+  projectScope,
+  type Project,
+  type Token,
+} from '@rembric/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { memoryRelations } from '../db/schema/memory-relations.js';
-import type { Project } from '../db/schema/projects.js';
-import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope } from '../services/scope.js';
 import type { TokenScope } from '../services/tokens.js';
 import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../test/index.js';
 
@@ -1414,7 +1416,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
   beforeEach(async () => {
     const { AgentSessionsService } = await import('../services/agent-sessions.js');
     const { TokensService } = await import('../services/tokens.js');
-    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
+    const { tokens: tokensSchema } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
 
     agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
@@ -1568,8 +1570,8 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
   beforeEach(async () => {
     const { AgentSessionsService } = await import('../services/agent-sessions.js');
     const { TokensService } = await import('../services/tokens.js');
-    const { tokens: tokensSchema } = await import('../db/schema/tokens.js');
-    const { confirmations } = await import('../db/schema/confirmations.js');
+    const { tokens: tokensSchema } = await import('@rembric/db');
+    const { confirmations } = await import('@rembric/db');
     const { eq } = await import('drizzle-orm');
 
     agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);

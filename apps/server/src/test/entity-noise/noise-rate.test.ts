@@ -1,6 +1,5 @@
+import { ENTITY_KINDS } from '@rembric/db';
 import { describe, expect, it } from 'vitest';
-
-import { ENTITY_KINDS } from '../../db/schema/entities.js';
 
 import { NOISE_PROBES, PUBLISHED_NOISE } from './corpus.js';
 import { measureLexicalNoise, noisePercent } from './measure.js';

@@ -1,16 +1,16 @@
-import { ulid } from 'ulid';
-
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
 import {
-  type MemoryRelation,
+  memoryMatchesScope,
   type MarkedByKind,
+  type MemoryRelation,
   type RelationKind,
-} from '../db/schema/memory-relations.js';
+  type Repositories,
+  type Scope,
+  type TransactionRunner,
+} from '@rembric/db';
+import { ulid } from 'ulid';
 
 import { DomainError } from './errors.js';
 import { RANK_WINDOW_CEILING } from './hybrid-search.js';
-import { memoryMatchesScope, type Scope } from './scope.js';
 
 /**
  * Service for the judgment graph between memories.

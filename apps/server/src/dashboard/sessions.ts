@@ -1,7 +1,6 @@
+import { AGENT_SESSION_STATUSES, type AgentSessionStatus, type Repositories } from '@rembric/db';
 import { Hono } from 'hono';
 
-import type { Repositories } from '../db/repositories/index.js';
-import { AGENT_SESSION_STATUSES, type AgentSessionStatus } from '../db/schema/agent-sessions.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import { DomainError } from '../services/errors.js';
 import type { SessionsService } from '../services/sessions.js';

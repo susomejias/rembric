@@ -1,0 +1,82 @@
+import type { Db } from '../client.js';
+
+import { AgentSessionsRepository } from './agent-sessions-repository.js';
+import { ConsolidationRepository } from './consolidation-repository.js';
+import { DashboardSessionsRepository } from './dashboard-sessions-repository.js';
+import { EntitiesRepository } from './entities-repository.js';
+import { MemoryRepository } from './memory-repository.js';
+import { OAuthRepository } from './oauth-repository.js';
+import { ProjectsRepository } from './projects-repository.js';
+import { PromptsRepository } from './prompts-repository.js';
+import { RelationsRepository } from './relations-repository.js';
+import { TermStatisticsRepository } from './term-statistics-repository.js';
+import { TokensRepository } from './tokens-repository.js';
+import { VectorsRepository } from './vectors-repository.js';
+
+export {
+  AgentSessionsRepository,
+  type AdminRecentSession,
+  type AdminSessionDetail,
+  type AdminSessionFilters,
+  type AdminSessionRow,
+  type ListSessionsOpts,
+} from './agent-sessions-repository.js';
+export { ConsolidationRepository } from './consolidation-repository.js';
+export {
+  DashboardSessionsRepository,
+  type ResolvedDashboardSession,
+} from './dashboard-sessions-repository.js';
+export {
+  EntitiesRepository,
+  type EntityRef,
+  type MemoryEntityView,
+  type PendingEntityScan,
+} from './entities-repository.js';
+export { MemoryRepository, type AdminListMemoriesOpts } from './memory-repository.js';
+export { OAuthRepository } from './oauth-repository.js';
+export { ProjectsRepository } from './projects-repository.js';
+export {
+  PromptsRepository,
+  type AdminListPromptsOpts,
+  type AdminPromptFilters,
+} from './prompts-repository.js';
+export {
+  RelationsRepository,
+  type AdminRelationFilters,
+  type AdminRelationWithContent,
+} from './relations-repository.js';
+export { TermStatisticsRepository } from './term-statistics-repository.js';
+export { TokensRepository, type AdminTokenProjectSlug } from './tokens-repository.js';
+export { decodeEmbedding, VectorsRepository } from './vectors-repository.js';
+
+export interface Repositories {
+  memory: MemoryRepository;
+  relations: RelationsRepository;
+  agentSessions: AgentSessionsRepository;
+  prompts: PromptsRepository;
+  projects: ProjectsRepository;
+  tokens: TokensRepository;
+  oauth: OAuthRepository;
+  consolidation: ConsolidationRepository;
+  vectors: VectorsRepository;
+  dashboardSessions: DashboardSessionsRepository;
+  entities: EntitiesRepository;
+  termStatistics: TermStatisticsRepository;
+}
+
+export function createRepositories(db: Db): Repositories {
+  return {
+    memory: new MemoryRepository(db),
+    relations: new RelationsRepository(db),
+    agentSessions: new AgentSessionsRepository(db),
+    prompts: new PromptsRepository(db),
+    projects: new ProjectsRepository(db),
+    tokens: new TokensRepository(db),
+    oauth: new OAuthRepository(db),
+    consolidation: new ConsolidationRepository(db),
+    vectors: new VectorsRepository(db),
+    dashboardSessions: new DashboardSessionsRepository(db),
+    entities: new EntitiesRepository(db),
+    termStatistics: new TermStatisticsRepository(db),
+  };
+}

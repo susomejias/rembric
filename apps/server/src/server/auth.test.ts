@@ -1,6 +1,6 @@
+import { createRepositories, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import { OAuthService } from '../services/oauth.js';
 import { ProjectsService } from '../services/projects.js';
 import { TokensService } from '../services/tokens.js';

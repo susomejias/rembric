@@ -1,12 +1,8 @@
+import { type Prompt, type Repositories, type Scope, type TransactionRunner } from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
-import { type Prompt } from '../db/schema/prompts.js';
 
 import { DomainError } from './errors.js';
 import { sanitizeFtsQuery } from './hybrid-search.js';
-import { type Scope } from './scope.js';
 
 const PROMPT_TITLE_MAX_LENGTH = 100;
 const PROMPT_PURGE_REASONING = 'operator purge of soft-deleted prompts';

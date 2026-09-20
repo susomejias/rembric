@@ -1,14 +1,17 @@
+import {
+  projectScope,
+  type AgentSession,
+  type MemoryType,
+  type NewAgentSession,
+  type Repositories,
+  type Scope,
+  type TransactionRunner,
+} from '@rembric/db';
 import { ulid } from 'ulid';
-
-import type { TransactionRunner } from '../db/client.js';
-import type { Repositories } from '../db/repositories/index.js';
-import type { AgentSession, NewAgentSession } from '../db/schema/agent-sessions.js';
-import type { MemoryType } from '../db/schema/memory.js';
 
 import type { ExtractedEntity } from './entities.js';
 import { iterateEntityMatches } from './entity-relevance.js';
 import { DomainError } from './errors.js';
-import { projectScope, type Scope } from './scope.js';
 import { evaluateSessionNudge, NOTICE_MAX_BYTES, type SessionNudgeRow } from './session-nudge.js';
 import {
   assertNoNul,

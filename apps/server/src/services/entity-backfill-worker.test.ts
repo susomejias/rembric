@@ -1,6 +1,6 @@
+import { createRepositories, type EntitiesRepository } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type EntitiesRepository } from '../db/repositories/index.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { EntityBackfillWorker } from './entity-backfill-worker.js';

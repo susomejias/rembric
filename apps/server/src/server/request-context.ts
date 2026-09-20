@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import type { Project } from '../db/schema/projects.js';
-import type { Token } from '../db/schema/tokens.js';
+import { type Project, type Token } from '@rembric/db';
+
 import type { TokenReach } from '../services/tokens.js';
 
 /**

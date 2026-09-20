@@ -1,13 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createRepositories, memory, tokens as tokensTable, type Project } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { memory } from '../db/schema/memory.js';
-import type { Project } from '../db/schema/projects.js';
-import { tokens as tokensTable } from '../db/schema/tokens.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { ProjectsService } from '../services/projects.js';
 

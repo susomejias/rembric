@@ -1,8 +1,7 @@
+import { createRepositories, projectScope } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
 import { ProjectsService } from '../services/projects.js';
-import { projectScope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 import { createTestDb, type TestDb } from '../test/index.js';
 

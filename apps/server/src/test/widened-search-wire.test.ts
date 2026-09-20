@@ -1,14 +1,12 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createRepositories, projectScope, type Project } from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import type { Project } from '../db/schema/projects.js';
 import { type BootstrappedServer, createServer } from '../server/index.js';
 import { extractEntities } from '../services/entities.js';
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
-import { projectScope } from '../services/scope.js';
 import { TokensService } from '../services/tokens.js';
 
 import { createTestDb } from './db.js';

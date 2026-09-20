@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createDb, type DbHandle } from '../db/index.js';
+import { createDb, type DbHandle } from '@rembric/db';
 
 /**
  * Per-test DB fixture: opens a fresh on-disk SQLite under a unique temp

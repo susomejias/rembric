@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { getConnInfo } from '@hono/node-server/conninfo';
+import { type DbDiagnostics, type Repositories } from '@rembric/db';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
@@ -51,8 +52,6 @@ import { createTokensRouter } from '../dashboard/tokens.js';
 import type { ResolvedSession } from '../dashboard/types.js';
 import { updateShellExtras, type UpdateViewState } from '../dashboard/update-modal.js';
 import { createUpdateRouter } from '../dashboard/update.js';
-import type { DbDiagnostics } from '../db/diagnostics.js';
-import type { Repositories } from '../db/repositories/index.js';
 import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { EntityBackfillWorker } from '../services/entity-backfill-worker.js';
 import { DomainError } from '../services/errors.js';

@@ -1,15 +1,16 @@
-import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
 import {
   CONSOLIDATION_OP_TYPES,
   consolidationOps,
   consolidationRuns,
-} from '../db/schema/consolidation.js';
+  createRepositories,
+  projectScope,
+  type Repositories,
+} from '@rembric/db';
+import { eq } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
-import { projectScope } from '../services/scope.js';
 import { createTestDb, type TestDb, TestClock } from '../test/index.js';
 
 import { DEFAULT_DECAY, findDecayCandidates } from './decay.js';

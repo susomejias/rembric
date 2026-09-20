@@ -1,12 +1,10 @@
+import { consolidationOps, createRepositories, projectScope } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories } from '../db/repositories/index.js';
-import { consolidationOps } from '../db/schema/consolidation.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test/index.js';
 
 import { ProjectsService } from './projects.js';
 import { PromptsService } from './prompts.js';
-import { projectScope } from './scope.js';
 
 /**
  * Typed helper for asserting on `DomainError.code` without tripping the

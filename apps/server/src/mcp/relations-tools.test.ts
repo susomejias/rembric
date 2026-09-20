@@ -1,15 +1,19 @@
+import {
+  createRepositories,
+  memory,
+  projectScope,
+  type NewMemory,
+  type Project,
+  type Repositories,
+  type Token,
+} from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, type Repositories } from '../db/repositories/index.js';
-import { memory, type NewMemory } from '../db/schema/memory.js';
-import type { Project } from '../db/schema/projects.js';
-import type { Token } from '../db/schema/tokens.js';
 import { runWithContext, type RequestContext } from '../server/request-context.js';
 import { SessionRouter } from '../server/session-router.js';
 import { deriveTitle, MemoryService } from '../services/memory.js';
 import { ProjectsService } from '../services/projects.js';
 import { RelationsService } from '../services/relations.js';
-import { projectScope } from '../services/scope.js';
 import { createTestDb, defaultProject, type TestDb } from '../test/index.js';
 
 import { buildRelationsHandlers } from './relations-tools.js';

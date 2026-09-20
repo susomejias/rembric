@@ -1,3 +1,4 @@
+import { type Repositories } from '@rembric/db';
 import { Hono, type Context } from 'hono';
 
 import type { ConsolidationRunSummary, SkippedRow } from '../consolidation/index.js';
@@ -7,7 +8,6 @@ import {
   TERMINAL_OP_TYPES,
   type ConsolidationOpType,
 } from '../consolidation/operations.js';
-import type { Repositories } from '../db/repositories/index.js';
 import type { SessionsService } from '../services/sessions.js';
 
 import {

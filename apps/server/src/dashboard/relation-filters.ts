@@ -4,12 +4,12 @@
  * reaching the filter bar.
  */
 
-import type { AdminRelationFilters } from '../db/repositories/index.js';
 import {
   RELATION_STATUSES,
   RELATION_VALUES,
+  type AdminRelationFilters,
   type RelationStatus,
-} from '../db/schema/memory-relations.js';
+} from '@rembric/db';
 
 import type { SelOption } from './components.js';
 

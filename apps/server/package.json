@@ -16,14 +16,13 @@
     "test": "vitest run --exclude '../../install.test.ts' --exclude '../../scripts/*.history.test.ts'",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --reporter=json --outputFile=test-results.json --exclude '../../install.test.ts' --exclude '../../scripts/*.history.test.ts'",
-    "eval": "tsx src/test/retrieval/run-eval.ts",
-    "db:generate": "drizzle-kit generate",
-    "db:check": "drizzle-kit check"
+    "eval": "tsx src/test/retrieval/run-eval.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.5",
     "@huggingface/transformers": "4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@rembric/db": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.36.0",
     "express": "^5.2.1",
@@ -41,7 +40,6 @@
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.7.0",
     "@vitest/coverage-v8": "^2.1.0",
-    "drizzle-kit": "^0.31.10",
     "fast-check": "^3.22.0",
     "lightningcss": "^1.32.0",
     "tsx": "^4.22.1",
