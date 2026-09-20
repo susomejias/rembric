@@ -2,6 +2,7 @@ import {
   AgentSessionsService,
   ConsolidationRunner,
   EmbeddingWorker,
+  EntityBackfillWorker,
   MemoryService,
   OAuthService,
   ProjectsService,
@@ -21,9 +22,9 @@ import { getDb } from './db';
  * The services the session-lifecycle HTTP API's handlers call, wired the way
  * `apps/server/src/server/bootstrap.ts` wires them for the same router. This
  * module is the web app's counterpart of that bootstrapper: it owns the
- * service graph, the embedder memo and the embedder drain worker, while
- * `lib/process.ts` owns the process-level pieces that need timers or the
- * boot-time admin-token bootstrap.
+ * service graph, the embedder memo and the two background workers (embedding
+ * drain, entity backfill), while `lib/process.ts` owns the process-level pieces
+ * that need timers or the boot-time admin-token bootstrap.
  *
  * Construction is lazy: `getDb()` and everything below it open the SQLite file,
  * which must never happen while `next build` imports these modules. The result
@@ -54,6 +55,12 @@ export interface Services {
   embeddingWorker: () => Promise<EmbeddingWorker>;
   /** The worker's own anti-join query, without the model: does the drain have anything to do? */
   hasEmbeddingBacklog: () => boolean;
+  /**
+   * The entity-extraction backfill's worker. Extraction is pure and synchronous
+   * (no model, no network), so unlike `embeddingWorker` this is constructed with
+   * the rest of the graph instead of being memoized behind a promise.
+   */
+  entityBackfillWorker: EntityBackfillWorker;
   /** The `/api` access-token fallback, exactly as the server gates it: present iff `REMBRIC_PUBLIC_URL` is set. */
   oauth: OAuthService | null;
   /** Fire-and-forget consolidation sweep; never affects a response. */
@@ -102,6 +109,10 @@ function buildServices(): Services {
       (embedder) => new EmbeddingWorker({ repos, embedder }),
     ));
 
+  // `bootstrap.ts` passes neither `batchSize` nor `now`, so the worker's own
+  // defaults (100 rows per batch) are the contract here too.
+  const entityBackfillWorker = new EntityBackfillWorker({ repos, tx: db.db });
+
   const runner = new ConsolidationRunner({
     repos,
     tx: db.db,
@@ -142,6 +153,7 @@ function buildServices(): Services {
     }),
     embeddingWorker,
     hasEmbeddingBacklog: () => repos.vectors.findMissingEmbeddings(1).length > 0,
+    entityBackfillWorker,
     oauth: buildOAuthService(repos),
     sweep,
   };
