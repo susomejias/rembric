@@ -77,7 +77,7 @@ worker.processBatch()                       ← packages/core/src/services/embed
 ## 4. Save path (the hot path)
 
 ```
-memory.save (MCP)                            ← apps/server/src/mcp/memory-tools.ts
+memory.save (MCP)                            ← packages/mcp/src/memory-tools.ts
    │
    ├─ insert the memory row (append-only, unchanged)
    │
