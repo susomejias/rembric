@@ -61,8 +61,8 @@ export default function DashboardOverviewPage() {
     : null;
 
   return (
-    <div className="flex flex-col gap-4">
-      <ViewHead num="01" title="Rembric Overview." />
+    <div className="flex flex-col gap-3">
+      <ViewHead title="Rembric Overview." />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard

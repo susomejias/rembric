@@ -21,7 +21,6 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="03"
         title={title}
         meta={[
           { k: 'ID', v: <span className="font-mono">{shortId(row.id)}</span> },

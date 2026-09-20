@@ -16,6 +16,14 @@
         --warn: #ff8c00;
         --active-bg: #f7f7f7;
         --active-border: #e6e6e6;
+        /* Mirror of `src/app/globals.css`'s `--glass-*` group. The reference has
+           to carry the same values or it stops being a reference. */
+        --glass-tint: rgb(255 255 255 / 0.72);
+        --glass-blur: 28px;
+        --glass-saturate: 180%;
+        --glass-specular: rgb(255 255 255 / 0.9);
+        --glass-border: rgb(18 20 13 / 0.12);
+        --glass-shadow: 0 1px 2px rgb(18 20 13 / 0.06), 0 16px 40px -16px rgb(18 20 13 / 0.22);
       }
       .dark {
         --background: #0a0a0a;
@@ -27,6 +35,12 @@
         --warn: #ff8c00;
         --active-bg: #131313;
         --active-border: #1d1d1d;
+        --glass-tint: rgb(16 16 16 / 0.72);
+        --glass-blur: 28px;
+        --glass-saturate: 180%;
+        --glass-specular: rgb(255 255 255 / 0.1);
+        --glass-border: rgb(255 255 255 / 0.12);
+        --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.55), 0 16px 40px -16px rgb(0 0 0 / 0.65);
       }
       * {
         box-sizing: border-box;
@@ -71,8 +85,13 @@
         display: none;
         z-index: 50;
         border-radius: 10px 0 0 10px;
-        background: var(--background);
-        border-right: 1px solid var(--border);
+        background: var(--glass-tint);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        border-right: 1px solid var(--glass-border);
+        box-shadow:
+          inset 0 1px 0 0 var(--glass-specular),
+          var(--glass-shadow);
         transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
         width: 70px;
         overflow: hidden;
@@ -94,7 +113,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: var(--background);
+        background: transparent;
         border-bottom: 1px solid var(--border);
         transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
         width: 69px;
@@ -250,11 +269,16 @@
         align-items: center;
         gap: 12px;
         padding: 0 24px;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid var(--glass-border);
         position: sticky;
         top: 0;
         z-index: 40;
-        background: var(--background);
+        background: var(--glass-tint);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        box-shadow:
+          inset 0 1px 0 0 var(--glass-specular),
+          var(--glass-shadow);
       }
       .trigger {
         width: 28px;
@@ -305,6 +329,7 @@
         letter-spacing: -0.02em;
         color: var(--foreground);
       }
+
       .stat-card .value.lime {
         color: var(--primary);
       }

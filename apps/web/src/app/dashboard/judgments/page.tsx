@@ -81,7 +81,6 @@ export default async function JudgmentsPage({
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="04"
         title="Rembric Judgments."
         meta={[
           { k: 'TOTAL', v: String(total) },

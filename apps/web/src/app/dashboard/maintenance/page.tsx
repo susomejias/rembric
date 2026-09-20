@@ -52,7 +52,7 @@ export default async function MaintenancePage({
 
   return (
     <div className="flex flex-col gap-4">
-      <ViewHead num="08" title="Rembric Maintenance." meta={[{ k: 'ADMIN ONLY', v: '*' }]} />
+      <ViewHead title="Rembric Maintenance." meta={[{ k: 'ADMIN ONLY', v: '*' }]} />
 
       {flash ? (
         <Card className="border-primary/40 bg-primary/5 py-3">

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
 import { NavUser } from '@/components/dashboard/nav-user';
+import { Separator } from '@/components/ui/separator';
 import {
   Sheet,
   SheetContent,
@@ -22,6 +23,7 @@ import {
   type NavEntry,
 } from '@/lib/nav';
 import { cn } from '@/lib/utils';
+import { REMBRIC_VERSION } from '@/lib/version';
 
 /**
  * The dashboard's primary navigation — Midday's `sidebar.tsx` + `main-menu.tsx`
@@ -35,14 +37,27 @@ import { cn } from '@/lib/utils';
  *    reserves a static `70px` to the left) instead of pushing it, so the page
  *    never reflows while the pointer travels down the nav.
  *  - The logo bar is an absolutely-positioned `70px` strip whose width follows
- *    the rail, with the mark pinned at `left-[22px]` so it never moves.
+ *    the rail, with the mark pinned at `left-[22px]` and the wordmark at
+ *    `left-[58px]` so neither moves as the rail grows under them.
  *  - Every nav item is three layers: a background div that grows from a `40px`
  *    square to the full pill width, an absolutely-positioned icon at
  *    `left-[15px]` that never moves, and an absolutely-positioned label at
  *    `left-[55px]` revealed by the expansion. A row of plain flex children would
  *    move the icon sideways as the width animates; the absolute layers are the
  *    whole point of the pattern.
- *  - The brand block sits at the bottom, where Midday keeps its team dropdown.
+ *  - The brand block *is* the logo bar: the mark, the wordmark and the running
+ *    version, and nothing else. Midday keeps its brand in the bottom slot
+ *    beside a team dropdown, but Rembric has no teams, and a second brand block
+ *    down there only duplicated the wordmark — the bottom slot is the sign-out.
+ *    The release state is deliberately NOT rendered here: two versions in the
+ *    stripped rail read as broken, and `/dashboard/update` owns that status.
+ *  - The two nav groups are divided by a rule rather than by the `Admin`
+ *    caption alone: the caption is one of the labels that collapses away, and
+ *    without the rule a collapsed rail reads as one nine-item column.
+ *
+ * The rail's own transition — its width plus the two theme colours — is declared
+ * in `src/styles/glass.css` on `[data-slot='app-sidebar']`, beside the glass that
+ * needs the colours transitioned.
  *
  * Two Rembric divergences from the reference, both deliberate: the label and the
  * icon of the active item wear `--brand-accent` rather than `--primary`, because
@@ -65,7 +80,29 @@ const PILL_TRANSITION = `transition-all ${RAIL_TRANSITION}`;
 /** The label fade the reference pairs with the expansion. */
 const LABEL_FADE = 'transition-opacity duration-150 delay-100';
 
-export function AppSidebar({ counters = {} }: { counters?: NavBadgeCounters }) {
+/**
+ * The release state the layout resolved from `UpdateCheckService`. It is a prop
+ * and not a read of the service in this client module because the service is
+ * stateful — it memoizes the GitHub response, the ETag and the 24h window on
+ * `globalThis` — and reaches the network.
+ *
+ * The rail no longer renders it — the brand block is logo, wordmark and version
+ * only. The prop stays in the contract because `dashboard/layout.tsx` is a
+ * server component that resolves the release once and hands it down, and the
+ * rail is not the only consumer of that resolution.
+ */
+export type SidebarUpdate =
+  | { readonly state: 'disabled' }
+  | { readonly state: 'up-to-date' }
+  | { readonly state: 'available'; readonly latestVersion: string };
+
+export function AppSidebar({
+  counters = {},
+}: {
+  counters?: NavBadgeCounters;
+  /** Resolved server-side: `UpdateCheckService` is stateful and reaches the network. */
+  update: SidebarUpdate;
+}) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { openMobile, setOpenMobile } = useSidebar();
   const activeKey = navEntryForPath(usePathname())?.key;
@@ -78,7 +115,6 @@ export function AppSidebar({ counters = {} }: { counters?: NavBadgeCounters }) {
         aria-label="Primary"
         className={cn(
           'fixed top-0 z-50 hidden h-screen shrink-0 flex-col items-center justify-between rounded-tl-[10px] rounded-bl-[10px] border-r border-border bg-background pb-4 md:flex',
-          RAIL_TRANSITION,
           isExpanded ? 'w-[240px]' : 'w-[70px]',
         )}
         onMouseEnter={() => setIsExpanded(true)}
@@ -87,12 +123,21 @@ export function AppSidebar({ counters = {} }: { counters?: NavBadgeCounters }) {
         <div
           data-slot="sidebar-logo"
           className={cn(
-            'absolute top-0 left-0 z-[1] flex h-[70px] items-center justify-center border-b border-border bg-background',
+            'absolute top-0 left-0 z-[1] flex h-[70px] items-center justify-center overflow-hidden border-b border-border bg-background',
             RAIL_WIDTH_TRANSITION,
             isExpanded ? 'w-full' : 'w-[69px]',
           )}
         >
           <BrandMark className="absolute left-[22px]" />
+          <div
+            className={cn(
+              'absolute inset-y-0 right-2 left-[58px] flex items-center',
+              LABEL_FADE,
+              isExpanded ? 'opacity-100' : 'opacity-0',
+            )}
+          >
+            <BrandText />
+          </div>
         </div>
 
         <div className="mb-3 flex min-h-0 w-full flex-1 flex-col overflow-y-auto border-b border-border pt-[70px]">
@@ -109,8 +154,12 @@ export function AppSidebar({ counters = {} }: { counters?: NavBadgeCounters }) {
             <SheetDescription>The dashboard's primary navigation.</SheetDescription>
           </SheetHeader>
           <div className="flex h-full flex-col justify-between pb-4">
-            <div className="flex h-[70px] shrink-0 items-center border-b border-border px-[22px]">
+            <div
+              data-slot="sidebar-logo"
+              className="flex h-[70px] shrink-0 items-center gap-3 overflow-hidden border-b border-border px-[22px]"
+            >
               <BrandMark />
+              <BrandText />
             </div>
             <div className="mt-4 flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
               <NavList
@@ -129,21 +178,47 @@ export function AppSidebar({ counters = {} }: { counters?: NavBadgeCounters }) {
 }
 
 /**
- * The 28px lime tile with the wordmark's initial. The mark itself is ink on
- * lime, not the transparent lime PNG the login card uses: a lime glyph on a lime
- * tile would disappear.
+ * The 28px brand mark — the actual Rembric logo, the same transparent PNG the
+ * login card wears, not the initial it used to be drawn as a lime tile with.
  */
 function BrandMark({ className }: { className?: string }) {
   return (
     <Link
       href="/dashboard"
-      className={cn(
-        'flex size-7 items-center justify-center rounded-md bg-primary font-display text-[0.8rem] font-extrabold text-primary-foreground',
-        className,
-      )}
+      title="REMBRIC — go to the overview"
+      className={cn('flex size-7 shrink-0 items-center justify-center', className)}
     >
-      R<span className="sr-only">Rembric — go to the overview</span>
+      <img
+        src="/dashboard/assets/logo-transparent.png"
+        alt=""
+        aria-hidden="true"
+        className="size-7"
+      />
+      <span className="sr-only">Rembric — go to the overview</span>
     </Link>
+  );
+}
+
+/**
+ * The wordmark and the running version — the rail's brand block, revealed with
+ * the rail. It is the only brand block in the rail: the one the footer used to
+ * carry is gone.
+ *
+ * No release state renders beside the version: a badge reading `UPDATE v0.28.8`
+ * next to `v0.0.0` is two versions in a cramped strip, and the rail is the wrong
+ * place to act on one — `/dashboard/update` is where the status is read and the
+ * upgrade is run.
+ */
+function BrandText() {
+  return (
+    <span data-slot="sidebar-brand" className="flex min-w-0 flex-col leading-tight">
+      <span className="truncate font-display text-[0.8rem] font-semibold tracking-[0.18em]">
+        REMBRIC
+      </span>
+      <span className="truncate font-mono text-[0.65rem] text-muted-foreground">
+        v{REMBRIC_VERSION}
+      </span>
+    </span>
   );
 }
 
@@ -160,12 +235,17 @@ function NavList({
 }) {
   return (
     <div className="mt-4 w-full">
-      {NAV_GROUPS.map((group) => {
+      {NAV_GROUPS.map((group, index) => {
         const entries = NAV.filter((entry) => entry.group === group.key);
         if (entries.length === 0) return null;
 
         return (
           <div key={group.key}>
+            {index === 0 ? null : (
+              <div className="px-[15px] py-2">
+                <Separator data-slot="nav-group-separator" />
+              </div>
+            )}
             {group.heading === null ? null : (
               <p
                 data-slot="nav-heading"

@@ -93,7 +93,6 @@ export default async function ProjectsPage({
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="06"
         title="Rembric Projects."
         metaId="projects-meta"
         meta={[
