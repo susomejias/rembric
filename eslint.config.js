@@ -13,6 +13,7 @@ export default tseslint.config(
       'examples/**',
       'example-design/**',
       'apps/server/scripts/**',
+      'packages/core/scripts/**',
       'apps/plugin/*',
       '!apps/plugin/bin',
       'apps/plugin/*/**',

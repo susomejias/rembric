@@ -1096,7 +1096,15 @@ describe('migration 0031 — progress output', () => {
     fx.stage();
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const first = createDb({ dataDir: fx.dataDir, migrationsDir: fx.migrationsDir });
+      // `onStartupLog` muted: the assertion below is about the migration
+      // progress lines on the default stderr channel, and the DS1 provenance
+      // line shares it. Leaving it in would make "no line repeats on the second
+      // boot" unprovable without also weakening it.
+      const first = createDb({
+        dataDir: fx.dataDir,
+        migrationsDir: fx.migrationsDir,
+        onStartupLog: () => {},
+      });
       const lines = spy.mock.calls.map((c) => String(c[0]));
       first.close();
       expect(lines).toContain(`[migrate] applying ${MIGRATION}`);
@@ -1108,7 +1116,11 @@ describe('migration 0031 — progress output', () => {
       );
 
       spy.mockClear();
-      const second = createDb({ dataDir: fx.dataDir, migrationsDir: fx.migrationsDir });
+      const second = createDb({
+        dataDir: fx.dataDir,
+        migrationsDir: fx.migrationsDir,
+        onStartupLog: () => {},
+      });
       try {
         expect(spy.mock.calls.map((c) => String(c[0]))).toEqual([]);
       } finally {

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
@@ -33,6 +33,13 @@ export interface CreateDbOptions {
   readonly?: boolean;
   /** Migration progress sink; defaults to stderr. See `migrate.ts`. */
   onMigrationProgress?: (line: string) => void;
+  /**
+   * Sink for the one provenance line emitted before the connection opens.
+   * Defaults to stderr — the channel `migrate.ts` narrates on, so container
+   * logs carry it. Injectable because a fixture opening thousands of
+   * throwaway databases should not narrate every one.
+   */
+  onStartupLog?: (line: string) => void;
 }
 
 export interface DbHandle {
@@ -49,6 +56,15 @@ export function createDb(opts: CreateDbOptions): DbHandle {
   }
 
   const dbPath = join(opts.dataDir, 'data.db');
+
+  // better-sqlite3 creates an empty database when the file is missing, so a
+  // mistyped or unmounted REMBRIC_DATA_DIR makes the process read and write a
+  // *different* file in complete silence. Naming the resolved path and whether
+  // the file already existed is what turns that into a visible failure. The
+  // `resolve` is for the log only: the path actually opened is unchanged.
+  const log = opts.onStartupLog ?? ((line: string) => console.error(`[db] ${line}`));
+  log(`data file ${resolve(dbPath)} (pre-existing: ${existsSync(dbPath)})`);
+
   const sqlite = new Database(dbPath, opts.readonly ? { readonly: true } : undefined);
 
   // Load the sqlite-vec extension before anything touches the DB.

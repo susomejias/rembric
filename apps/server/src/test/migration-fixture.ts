@@ -74,7 +74,7 @@ export function createMigrationFixture(migration: string): MigrationFixture {
     // Silenced by default, as `createTestDb` is: every open applies migrations,
     // so the progress lines would narrate themselves once per test.
     open: (onMigrationProgress = () => {}) =>
-      createDb({ dataDir, migrationsDir, onMigrationProgress }),
+      createDb({ dataDir, migrationsDir, onMigrationProgress, onStartupLog: () => {} }),
     cleanup: () => {
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(migrationsDir, { recursive: true, force: true });
