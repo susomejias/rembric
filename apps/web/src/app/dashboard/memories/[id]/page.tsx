@@ -9,8 +9,8 @@ import { BackLink, ViewHead } from '@/components/dashboard/view-head';
  * The memory detail page — the direct-link carrier of the body the intercepted
  * `@modal/(.)memories/[id]` route opens as a slide-over. Both carriers read the
  * same `loadMemoryDetail` and render the same `MemoryDetail`, so the sheet and
- * the page cannot drift; this one adds the numbered header and the way back to
- * the list, which a panel opened from that list does not need.
+ * the page cannot drift; this one adds the header and the way back to the list,
+ * which a panel opened from that list does not need.
  */
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,6 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="02"
         title={row.title}
         meta={[
           { k: 'ID', v: <span className="font-mono">{shortId(row.id)}</span> },

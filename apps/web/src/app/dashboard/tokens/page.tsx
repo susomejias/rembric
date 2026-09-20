@@ -78,7 +78,6 @@ export default function TokensPage() {
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="07"
         title="Rembric Tokens."
         metaId="tokens-meta"
         meta={[{ k: 'TOTAL', v: String(tokens.length) }]}

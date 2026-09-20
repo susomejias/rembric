@@ -73,7 +73,7 @@ export default async function ConsolidationPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <ViewHead num="05" title="Rembric Consolidation." meta={[{ k: 'TOTAL', v: total }]} />
+      <ViewHead title="Rembric Consolidation." meta={[{ k: 'TOTAL', v: total }]} />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard

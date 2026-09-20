@@ -131,7 +131,6 @@ export default async function PromptsPage({
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="03b"
         title="Rembric Prompts."
         meta={[
           { k: 'TOTAL', v: total },

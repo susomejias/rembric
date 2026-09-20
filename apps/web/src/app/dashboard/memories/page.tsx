@@ -211,7 +211,6 @@ async function MemoriesView({ searchParams }: { searchParams: Promise<SearchPara
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="02"
         title="Rembric Memories."
         metaId="memories-meta"
         meta={[

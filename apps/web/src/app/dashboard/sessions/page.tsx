@@ -165,7 +165,6 @@ export default async function SessionsPage({
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="03"
         title="Rembric Sessions."
         meta={[
           { k: 'TOTAL', v: String(total) },

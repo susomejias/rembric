@@ -70,7 +70,6 @@ export default async function EntitiesPage({
   return (
     <div className="flex flex-col gap-4">
       <ViewHead
-        num="05b"
         title="Rembric Entities."
         metaId="entities-meta"
         meta={[

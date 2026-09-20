@@ -41,7 +41,15 @@ export function DetailSheet({
         if (!open) router.back();
       }}
     >
-      <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-0 sm:max-w-3xl">
+      {/* `sheet.tsx` sets the side panel's width and max-width under
+          `data-[side=right]:`, and those selectors carry an attribute selector
+          the plain utilities cannot outrank, so every size override has to
+          repeat that variant to take effect (tailwind-merge keeps both: the
+          modifier namespaces differ). */}
+      <SheetContent
+        side="right"
+        className="w-full gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-2xl data-[side=right]:lg:max-w-3xl data-[side=right]:xl:max-w-4xl"
+      >
         <SheetHeader className="glass-chrome sticky top-0 z-10 gap-1 border-b px-4 py-3">
           <SheetTitle className="pr-8 font-display text-lg font-semibold tracking-tight">
             {title}

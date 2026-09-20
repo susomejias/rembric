@@ -46,7 +46,7 @@ export default async function UpdatePage({
 
   return (
     <div className="flex flex-col gap-4">
-      <ViewHead num="09" title="Rembric Updates." />
+      <ViewHead title="Rembric Updates." />
 
       {notice ? (
         <Card
