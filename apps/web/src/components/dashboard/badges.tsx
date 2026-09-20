@@ -13,6 +13,13 @@ const STATUS_TONE: Record<string, string> = {
   active: 'border-primary/50 text-brand-accent',
   superseded: 'border-warn/50 text-warn',
   archived: 'text-muted-foreground',
+  // The `memory_relations.status` vocabulary, rendered by the memories detail's
+  // judgments section and by the judgments list. The retired status pill toned
+  // these three from CSS; `ended`/`abandoned` had no rule there, so an untoned
+  // key is the faithful default rather than an omission.
+  pending: 'border-dashed text-muted-foreground',
+  judged: 'border-primary/50 text-brand-accent',
+  orphaned: 'border-destructive/50 text-destructive',
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
@@ -28,6 +35,15 @@ export function ReviewBadge({ className }: { className?: string }) {
   return (
     <Badge variant="outline" className={cn('border-warn/50 font-mono text-warn', className)}>
       needs_review
+    </Badge>
+  );
+}
+
+/** Rendered beside an uncurated (`summary_final = 0`) session summary. */
+export function RawBadge({ className }: { className?: string }) {
+  return (
+    <Badge variant="outline" className={cn('border-warn/50 font-mono text-warn', className)}>
+      RAW
     </Badge>
   );
 }
