@@ -177,9 +177,23 @@ RUN set -eux; cd /runtime/node_modules/onnxruntime-node; \
 # baked model turns the embedder into a runtime download. The native modules
 # are not merely resolved but loaded, which is what the runtime does — the
 # embedder loads eagerly in the server image, and `sqlite-vec.load()` here is
-# the same call `createDb` makes.
+# the same call `createDb` makes. The release-identity gate checks the exact
+# `/app/apps/web/package.json` the runner stage copies in: a bootstrap `0.0.0`
+# reaching the image would make the brand report a version that is not running
+# — the failure this reanchor exists to prevent — so the build fails loudly
+# rather than shipping the sentinel. (`lib/version.ts` finds that file by
+# walking up from `/app/apps/web`.)
 RUN set -eux; \
     [ -f /runtime/apps/web/server.js ]; \
+    release_version=$(node -p "require('/app/apps/web/package.json').version"); \
+    printf '%s' "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || { \
+      echo "release identity is not a semver: '$release_version'" >&2; \
+      exit 1; \
+    }; \
+    [ "$release_version" != '0.0.0' ] || { \
+      echo "release identity is the unset bootstrap version 0.0.0" >&2; \
+      exit 1; \
+    }; \
     [ -d /runtime/packages/db/dist/migrations ]; \
     migrations=$(find /runtime/packages/db/dist/migrations -maxdepth 1 -name '*.sql' -type f | wc -l); \
     [ "$migrations" -eq 37 ] || { \
@@ -219,6 +233,12 @@ LABEL rembric.stage=runtime
 WORKDIR /app
 
 COPY --from=builder --chown=10001:10001 /runtime ./
+# `lib/version.ts` reads `apps/web/package.json` by computed path, so Next's tracer never
+# sees it. That manifest IS the release identity release-please bumps and tags
+# `server-v<version>`; without this copy the standalone tree has no manifest at the
+# walk-up root and the brand falls back to the `0.0.0` sentinel. The build gate above
+# checks this exact file.
+COPY --from=builder --chown=10001:10001 /app/apps/web/package.json ./apps/web/package.json
 # Next does not put these in the standalone output; it documents copying them
 # next to the server, which is the same `apps/web` directory here.
 COPY --from=builder --chown=10001:10001 /app/apps/web/.next/static ./apps/web/.next/static

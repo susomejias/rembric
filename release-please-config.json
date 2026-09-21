@@ -2,10 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "separate-pull-requests": true,
   "packages": {
-    "apps/server": {
+    "apps/web": {
       "release-type": "node",
       "component": "server",
-      "package-name": "@rembric/server",
+      "package-name": "@rembric/web",
       "include-component-in-tag": true,
       "include-v-in-tag": true,
       "changelog-path": "CHANGELOG.md",

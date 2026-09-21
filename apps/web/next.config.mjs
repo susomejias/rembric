@@ -36,15 +36,6 @@ const nextConfig = {
   // `.pnpm` in it, so every glob starts at the workspace root.
   outputFileTracingIncludes: {
     '/*': [
-      // `lib/version.ts` is the app's release identity: it `readFileSync`es
-      // `apps/server/package.json`, the field release-please bumps and tags
-      // `server-v<version>`. The path is computed at runtime, so tracing never
-      // sees it, and the standalone tree ships without it — measured, the
-      // image then reports the `0.0.0` sentinel instead of the running release.
-      // `apps/server` sits inside `outputFileTracingRoot`, so the glob carries
-      // it; `findRepositoryRoot()` walks up to the traced root-relative path
-      // (`/app` in the image, `.next/standalone` in a local build).
-      '../../apps/server/package.json',
       // `sqlite-vec` picks its native extension at runtime with an
       // `import.meta.resolve('sqlite-vec-<platform>-<arch>/vec0.<ext>')`. pnpm
       // links that optional dependency inside the package's own virtual-store

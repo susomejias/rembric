@@ -29,12 +29,14 @@ jobs:
       # Multi-component manifest mode: release-please-action exposes
       # `releases_created` (object keyed by package path) and `paths_released`
       # (JSON array of paths). We forward the raw outputs and let the
-      # publish-docker condition gate on the apps/server path.
+      # publish-docker condition gate on the apps/web path (the `server`
+      # component's release identity lives there now).
       releases_created: ${{ steps.release.outputs.releases_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
-      # apps/server-specific outputs (release-please prefixes per-path outputs)
-      server_release_created: ${{ steps.release.outputs['apps/server--release_created'] }}
-      server_tag_name: ${{ steps.release.outputs['apps/server--tag_name'] }}
+      # server-component outputs (release-please prefixes per-path outputs; the
+      # `server` component is anchored on `apps/web`)
+      server_release_created: ${{ steps.release.outputs['apps/web--release_created'] }}
+      server_tag_name: ${{ steps.release.outputs['apps/web--tag_name'] }}
       plugin_release_created: ${{ steps.release.outputs['apps/plugin--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v5

@@ -8,7 +8,7 @@ Releases are fully automated. You never tag, bump, or publish by hand.
 
 | Component | Path           | Tag format      | npm package-name  | Bumps when commits touch…                                        |
 | --------- | -------------- | --------------- | ----------------- | ---------------------------------------------------------------- |
-| `server`  | `apps/server/` | `server-vX.Y.Z` | `@rembric/server` | anything under `apps/server/`                                    |
+| `server`  | `apps/web/`    | `server-vX.Y.Z` | `@rembric/web`    | anything under `apps/web/`                                       |
 | `plugin`  | `apps/plugin/` | `plugin-vX.Y.Z` | `@rembric/plugin` | anything under `apps/plugin/` — a shared asset or any client dir |
 
 The `plugin` component covers the **whole** `apps/plugin/` tree (it declares no `exclude-paths`), and its single version is shared by all five clients: Claude Code, Codex CLI, Hermes Agent, opencode, and Pi. The component's `extra-files` rewrite every client's version carrier in lock-step:
