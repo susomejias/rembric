@@ -1,8 +1,11 @@
-import { RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 
+import { checkForUpdates, UPDATE_CHECK_FORM } from './actions';
+import { CopyCommand } from './copy-command';
 import { getUpdates } from './update-service';
 
+import { ActionForm } from '@/components/dashboard/action-form';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { singleParam } from '@/components/dashboard/support';
 import {
@@ -15,6 +18,7 @@ import {
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
 import { REMBRIC_VERSION } from '@/lib/version';
 
 /**
@@ -23,15 +27,17 @@ import { REMBRIC_VERSION } from '@/lib/version';
  *
  * `apps/server`'s view had two faces: this one, and the in-process self-upgrade
  * (Docker pull, restart, progress polling). The retired second face is not part
- * of this port either, so this reads the release feed through
- * `UpdateCheckService.peek()` — cached result plus a background refresh when the
- * 24h window has passed — and renders whatever it finds.
- *
- * The manual check (`POST /dashboard/update/check`) is not wired: it is a
- * mutation-shaped action whose Server Action boundary is a separate slice. The
- * card states its honest outcome as copy and its control stays disabled.
+ * of this port — the orchestrator leaves the served application (design D7), so
+ * there is no `update.start` anywhere on this page. The manual check
+ * (`POST /dashboard/update/check`) is wired as a Server Action and shows only
+ * while the deployment is up to date, exactly as main's up-to-date quadrant did;
+ * when a release is available the capability-appropriate block is main's
+ * `MANUAL UPDATE` note, whose command the operator runs on the host.
  */
 export const dynamic = 'force-dynamic';
+
+const MANUAL_UPDATE_COMMAND = 'docker compose pull && docker compose up -d';
+const UPDATE_DOCS_URL = 'https://github.com/susomejias/rembric/blob/main/docs/updates.md';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -117,15 +123,17 @@ export default async function UpdatePage({
         </p>
       </section>
 
-      <button
-        type="button"
-        disabled
-        title="The manual check is wired in a later slice"
-        className="mt-5 flex items-center gap-3 border border-border px-5 py-4 font-mono text-[11px] font-semibold uppercase tracking-[.16em] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <RefreshCw className="size-3.5" />
-        Check now <span aria-hidden="true">→</span>
-      </button>
+      {/* Main rendered the manual check only in the up-to-date quadrant; once a
+          release is known the check has nothing new to say, and the manual path
+          below is the actionable one. */}
+      {enabled && info === null ? (
+        <ActionForm action={checkForUpdates} className="mt-5">
+          <CsrfField form={UPDATE_CHECK_FORM} />
+          <Button type="submit" variant="outline" size="sm">
+            CHECK NOW →
+          </Button>
+        </ActionForm>
+      ) : null}
 
       <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
         <StatCard
@@ -149,8 +157,8 @@ export default async function UpdatePage({
         />
         <StatCard
           k="MANUAL CHECK"
-          v="Not wired"
-          sub={<span>THE SERVER ACTION BOUNDARY IS A SEPARATE SLICE</span>}
+          v={enabled ? 'On demand' : 'Unavailable'}
+          sub={<span>{enabled ? 'FORCES A RELEASE CHECK NOW' : 'THE CHECK IS TURNED OFF'}</span>}
         />
       </StatGrid>
 
@@ -182,6 +190,28 @@ export default async function UpdatePage({
               PUBLISHED <Time value={info.publishedAt} />
             </p>
           ) : null}
+
+          {/* Main's `MANUAL UPDATE` block (`update-modal.ts`), which is the only
+              capability state left once the in-process orchestrator retires. */}
+          <div className="mt-6 max-w-[900px] border border-border bg-card p-5 md:p-6">
+            <p className="font-mono text-[11px] uppercase tracking-[.16em] text-primary">
+              MANUAL UPDATE
+            </p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Run this on the host, then this page will reload on the new version:
+            </p>
+            <div className="mt-4">
+              <CopyCommand command={MANUAL_UPDATE_COMMAND} />
+            </div>
+            <a
+              href={UPDATE_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 inline-block font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground transition-colors hover:text-primary"
+            >
+              HOW TO ENABLE ONE-CLICK UPDATES ›
+            </a>
+          </div>
         </div>
       ) : null}
     </Page>
@@ -189,11 +219,11 @@ export default async function UpdatePage({
 }
 
 /**
- * The three outcomes of a manual check, plus the `err` codes the retired start
- * action could redirect with. Only `no_update` can still occur now that the
- * orchestrator is retired; the rest are kept so an old bookmark or a lagging
- * redirect renders a sentence instead of a raw code. An unrecognised `checked`
- * value flashes nothing, exactly as before.
+ * The three outcomes of a manual check. The `err` codes the retired start action
+ * could redirect with are still mapped: only `none` can occur now that the
+ * orchestrator is retired, but an old bookmark or a lagging redirect renders a
+ * sentence instead of a raw code. An unrecognised `checked` value flashes
+ * nothing, exactly as before.
  */
 function noticeFrom(
   params: SearchParams,

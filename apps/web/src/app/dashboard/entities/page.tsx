@@ -1,8 +1,13 @@
+import type { EntityBackfillWorker } from '@rembric/core';
 import { ENTITY_KINDS, type EntityKind } from '@rembric/db';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 import { entitiesQuery, readEntitiesFilters, type SearchParams } from './filters';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import {
   FilterActions,
   FilterField,
@@ -10,7 +15,7 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, shortId } from '@/components/dashboard/support';
+import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import {
   Chip,
   DataBody,
@@ -19,6 +24,7 @@ import {
   DataTd,
   DataTh,
   DataTr,
+  Flash,
   Page,
   StatCard,
   StatGrid,
@@ -26,6 +32,7 @@ import {
   ViewHead,
 } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
@@ -41,11 +48,48 @@ import { getServices } from '@/lib/services';
  * The kind cards count the whole corpus (`adminCountsByKind`), not the filtered
  * page, so they stay stable while filtering and double as the kind filter links.
  *
- * The retired view's Rebuild is still NOT ported: it is a mutation whose Server
- * Action boundary is a separate slice. Instead of hiding it, its control renders
- * disabled with the backlog count, so the gap is visible and honest.
+ * The rebuild is `apps/server/src/dashboard/entities.ts`'s `POST /rebuild`:
+ * guarded first (admin scope + a token bound to `entities.rebuild`), the live
+ * worker's index truncated, then its batches drained under the same
+ * `REBUILD_MAX_BATCHES` bound, and the processed count flashed on the redirect.
  */
 export const dynamic = 'force-dynamic';
+
+const REBUILD_FORM = 'entities.rebuild';
+
+/**
+ * Bounds a manual "rebuild" click to a single request/response cycle instead of
+ * an unbounded loop. A corpus larger than this drains the rest on the next
+ * periodic backfill tick — genuinely soon, because the rebuild reuses the SAME
+ * live worker instance, so its `possiblyPending` flag reflects any backlog left
+ * over from hitting this cap.
+ */
+const REBUILD_MAX_BATCHES = 200;
+
+/**
+ * Truncate the derived index and drain it, returning the memories re-scanned.
+ * Exported so the regression test can drive the same production loop — the page
+ * itself is a Server Component the node test project cannot import.
+ */
+export function runEntityRebuild(worker: EntityBackfillWorker): number {
+  worker.resetIndex();
+  let processed = 0;
+  for (let i = 0; i < REBUILD_MAX_BATCHES; i++) {
+    const result = worker.processBatch({ force: true });
+    processed += result.processed;
+    if (result.processed === 0) break;
+  }
+  return processed;
+}
+
+async function rebuildEntities(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, REBUILD_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const processed = runEntityRebuild(guard.services.entityBackfillWorker);
+  redirect(`/dashboard/entities?rebuilt=${processed}`);
+}
 
 const KIND_OPTIONS = [
   { value: '', label: 'all kinds' },
@@ -60,6 +104,8 @@ export default async function EntitiesPage({
   const params = await searchParams;
   const filters = readEntitiesFilters(params);
   const roundTripQuery = entitiesQuery(params);
+  // Main's rebuild flash: present for any non-empty `rebuilt`, including `0`.
+  const rebuilt = singleParam(params['rebuilt']);
 
   const { repos } = getServices();
 
@@ -82,6 +128,14 @@ export default async function EntitiesPage({
     <Page>
       <ViewHead title="Rembric Entities." hl="Rembric" />
 
+      {rebuilt !== '' ? (
+        <div className="mt-5">
+          <Flash tone="lime" label="REBUILT">
+            Entity index rebuilt ({rebuilt} memor{rebuilt === '1' ? 'y' : 'ies'} re-scanned).
+          </Flash>
+        </div>
+      ) : null}
+
       <StatGrid variant="cards" className="mt-6">
         <StatCard compact k="ALL KINDS" v={corpusTotal} tone="lime" href="/dashboard/entities" />
         {ENTITY_KINDS.map((entityKind) => (
@@ -97,15 +151,19 @@ export default async function EntitiesPage({
       </StatGrid>
 
       <div className="mt-6">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled
-          title="Entity rebuild is not connected yet"
-        >
-          Rebuild entity index ({backlog} pending)
-        </Button>
+        <ActionForm action={rebuildEntities}>
+          <CsrfField form={REBUILD_FORM} />
+          <ConfirmSubmit
+            tone="warn"
+            title="Truncate and re-scan the entity index from every memory, archived included?"
+            description="Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
+            confirmLabel="REBUILD ENTITY INDEX"
+          >
+            <Button type="button" variant="outline" size="sm">
+              REBUILD ENTITY INDEX{backlog > 0 ? ` (${backlog} PENDING)` : ''}
+            </Button>
+          </ConfirmSubmit>
+        </ActionForm>
       </div>
 
       <FilterForm action="/dashboard/entities" className="mt-6">
