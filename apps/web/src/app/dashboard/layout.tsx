@@ -2,15 +2,15 @@ import { REVIEW_TTL_MS } from '@rembric/core';
 import type { MemoryType } from '@rembric/db';
 import type { ReactNode } from 'react';
 
-import { ActionNav } from '@/components/navigation/action-nav';
+import { SidebarFrame } from '@/components/dashboard/app-sidebar';
+import { type BadgeBreakdown, type NavBadgeCounters } from '@/lib/nav';
 import { getServices } from '@/lib/services';
-import { REMBRIC_VERSION } from '@/lib/version';
 
 /**
  * The dashboard shell. Two things live here rather than in the navigation
  * component, because both are server-side facts:
  *
- * - **The nav's two badge counts.** They come from the service graph, so the
+ * - **The rail's two badge counts.** They come from the service graph, so the
  *   client component is handed values and never the repositories. Every
  *   `/dashboard` page is `force-dynamic`, so this runs per request and never
  *   during `next build`.
@@ -22,7 +22,7 @@ import { REMBRIC_VERSION } from '@/lib/version';
  *
  * `THEME_STORAGE_KEY` is declared here, in the server component that renders the
  * script, and threaded down to the toggle as a prop rather than exported from
- * `action-nav.tsx`: an export of a `'use client'` module is a client reference,
+ * `site-header.tsx`: an export of a `'use client'` module is a client reference,
  * so reading it during the server render throws instead of returning the string.
  */
 export const dynamic = 'force-dynamic';
@@ -34,28 +34,55 @@ const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
 );
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const { repos } = getServices();
-  const needsReview = repos.memory.adminCountNeedsReview({
-    nowMs: Date.now(),
-    ttlByType: TTL_BY_TYPE,
-  });
-  const pendingJudgments = repos.relations.adminCountByStatus('pending');
-
   return (
     <>
       <script>{themeScript()}</script>
-      <div className="min-h-screen bg-background text-foreground">
-        <ActionNav
-          version={REMBRIC_VERSION}
-          themeStorageKey={THEME_STORAGE_KEY}
-          badges={{ needsReview, pendingJudgments }}
-        >
-          {children}
-        </ActionNav>
-      </div>
+      <SidebarFrame counters={badgeCounters()} themeStorageKey={THEME_STORAGE_KEY}>
+        {children}
+      </SidebarFrame>
       <script>{timezoneScript()}</script>
     </>
   );
+}
+
+/**
+ * The rail's badges, grouped by project the way main's sidebar groups them
+ * (`apps/server/src/server/dashboard-router.ts::computeBadgeCounters`). A badge
+ * carries its per-project split as well as its total because the dashboard reads
+ * across every project at once: a bare total would say "3" where the operator
+ * needs to know which project to open, and the split is what the item's `title`
+ * renders as one line per project.
+ *
+ * The breakdown is not merely a display detail — it is why the total is read from
+ * the *grouped* siblings of the counters this shell used to read. They are also a
+ * narrower definition, and deliberately so: `adminPendingAdjudicableByProject`
+ * counts pending pairs whose source and target memories are both still active,
+ * which is the set `memory.judge` can actually resolve and therefore the set the
+ * badge's own tooltip promises. A pair with an archived endpoint is not a
+ * candidate, so the judgments badge can read lower than a raw pending count.
+ */
+function badgeCounters(): NavBadgeCounters {
+  const { repos } = getServices();
+  const projectSlugs = new Map(
+    repos.projects.adminListAll().map((project) => [project.id, project.slug]),
+  );
+
+  const toBreakdown = (
+    rows: ReadonlyArray<{ projectId: string | null; count: number }>,
+  ): BadgeBreakdown => ({
+    total: rows.reduce((acc, row) => acc + row.count, 0),
+    byProject: rows.map((row) => ({
+      label: row.projectId === null ? 'global' : (projectSlugs.get(row.projectId) ?? row.projectId),
+      count: row.count,
+    })),
+  });
+
+  return {
+    pendingJudgments: toBreakdown(repos.relations.adminPendingAdjudicableByProject()),
+    needsReview: toBreakdown(
+      repos.memory.adminCountNeedsReviewByProject({ nowMs: Date.now(), ttlByType: TTL_BY_TYPE }),
+    ),
+  };
 }
 
 function themeScript(): string {
