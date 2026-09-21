@@ -76,7 +76,7 @@ Behavioral changes are spec-driven. Specs in `openspec/specs/<area>/`; active pr
 - TypeScript strict; no `any` / `as unknown as T` without a justifying comment.
 - No floating promises (ESLint enforces).
 - `import type` for types; imports ordered builtin → external → internal → relative (auto-fixed).
-- Co-located tests `**/*.test.ts` beside the unit they cover (every workspace). Invariant tests are `apps/server/src/test/{invariants,runtime-invariants}.test.ts` and are sacred; the confinement scan they run covers three roots — `apps/server/src/`, `packages/db/src/` and `packages/core/src/`.
+- Co-located tests `**/*.test.ts` beside the unit they cover (every workspace). Invariant tests are `apps/web/src/test/{invariants,runtime-invariants}.test.ts` and are sacred; the confinement scan they run covers four roots — `apps/web/src/`, `packages/db/src/`, `packages/core/src/` and `packages/mcp/src/`. `apps/server` is still present and deliberately unscanned while it is being deleted.
 - **Default to no comments.** Comment only when absence costs a future reader real time (magic numbers, hidden invariants, library quirks, public-API docstrings). Never restate code or reference the current task/PR. **Banner/section-divider comments (`// ──────`, `// === API ===`), structural labels that just name the block below, and docstrings that paraphrase the signature are an anti-pattern — do not add them.** A licit comment documents one concrete non-obvious fact (a why, an invariant, an ordering constraint), nothing more.
 
 ## Skills

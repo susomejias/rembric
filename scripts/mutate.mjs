@@ -21,9 +21,11 @@
  */
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, relative, resolve } from 'node:path';
 
 const REPO = resolve(import.meta.dirname, '..');
+/** The workspace whose vitest project owns the suites these mutations target. */
+const WORKSPACE = resolve(REPO, 'apps/web');
 
 function parseArgs(argv) {
   const out = { mutations: [], filter: null, file: null, spec: null };
@@ -48,15 +50,26 @@ function parseArgs(argv) {
 
 /** Vitest exits non-zero on failure, so a throw here means "something went red". */
 function runSpec(spec, filter) {
-  const args = ['vitest', 'run', spec, ...(filter ? ['-t', filter] : [])];
+  const args = ['vitest', 'run', specArg(spec), ...(filter ? ['-t', filter] : [])];
   try {
     return {
       red: false,
-      out: execFileSync('pnpm', args, { cwd: resolve(REPO, 'apps/server'), encoding: 'utf8' }),
+      out: execFileSync('pnpm', args, { cwd: WORKSPACE, encoding: 'utf8' }),
     };
   } catch (err) {
     return { red: true, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
   }
+}
+
+/**
+ * Vitest matches a positional argument against paths relative to the config
+ * root, so a repo-relative spec (`apps/web/src/test/x.test.ts`, the form a task
+ * writes) matches nothing and reads as a red baseline. Both forms are accepted;
+ * anything outside the workspace is passed through untouched.
+ */
+function specArg(spec) {
+  const abs = resolve(REPO, spec);
+  return abs.startsWith(`${WORKSPACE}/`) ? relative(WORKSPACE, abs) : spec;
 }
 
 function failedTestNames(output) {
