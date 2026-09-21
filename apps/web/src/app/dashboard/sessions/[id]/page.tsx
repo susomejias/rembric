@@ -1,6 +1,10 @@
+import { DomainError } from '@rembric/core';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { durationBetween, shortId, truncate } from '@/components/dashboard/support';
 import {
@@ -22,17 +26,78 @@ import {
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
  * The session detail, in the production dashboard's composition: the head with
- * the status meta, the key/value grid, the session summary as rendered markdown
- * with a copy control, and the memories and prompts the run produced as tables.
+ * the status meta, the key/value grid, the run's own action bar, the summary as
+ * rendered markdown, and the memories and prompts the run produced as tables.
  *
  * The reads are the retired `sessions.ts` `/:id` handler's own — the same
- * `adminGetDetail`, the same per-session memory and prompt lists.
+ * `adminGetDetail`, the same per-session memory and prompt lists — and so are
+ * the three mutations in the action bar (see `../page.tsx` for the list's copy):
+ * a soft-deleted run offers only Undelete, a live one offers Abandon while it is
+ * active plus Delete, and each redirects to the list with the flash param main
+ * used.
  */
 export const dynamic = 'force-dynamic';
+
+const ABANDON_FORM = 'session.abandon';
+const DELETE_FORM = 'session.delete';
+const UNDELETE_FORM = 'session.undelete';
+
+async function abandonSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, ABANDON_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  try {
+    guard.services.agentSessions.markAbandoned(id, { adminBypass: true });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/sessions?abandoned=${encodeURIComponent(id)}`);
+}
+
+async function deleteSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, DELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  try {
+    guard.services.agentSessions.softDelete(id, { adminBypass: true });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/sessions?deleted=${encodeURIComponent(id)}`);
+}
+
+async function undeleteSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, UNDELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  try {
+    guard.services.agentSessions.undelete(id, { adminBypass: true });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/sessions?restored=${encodeURIComponent(id)}`);
+}
+
+/** The trimmed string field `dashboard/sessions.ts` reads; a repeated field takes its first value. */
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
 
 export default async function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -106,6 +171,49 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         <Kv k="Memories" v={memories.length} />
         <Kv k="Prompts" v={prompts.length} />
       </KvGrid>
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        {row.deletedAt ? (
+          <ActionForm action={undeleteSession}>
+            <CsrfField form={UNDELETE_FORM} />
+            <input type="hidden" name="id" value={row.id} />
+            <Button type="submit">Undelete</Button>
+          </ActionForm>
+        ) : (
+          <>
+            {row.status === 'active' ? (
+              <ActionForm action={abandonSession}>
+                <CsrfField form={ABANDON_FORM} />
+                <input type="hidden" name="id" value={row.id} />
+                <ConfirmSubmit
+                  tone="warn"
+                  title="Mark this session as abandoned?"
+                  description={`Its ${memories.length} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard.`}
+                  confirmLabel="ABANDON SESSION"
+                >
+                  <Button type="button" variant="outline" size="sm">
+                    Abandon
+                  </Button>
+                </ConfirmSubmit>
+              </ActionForm>
+            ) : null}
+            <ActionForm action={deleteSession}>
+              <CsrfField form={DELETE_FORM} />
+              <input type="hidden" name="id" value={row.id} />
+              <ConfirmSubmit
+                tone="danger"
+                title="Soft-delete this session?"
+                description="Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
+                confirmLabel="DELETE SESSION"
+              >
+                <Button type="button" variant="destructive" size="sm">
+                  Delete
+                </Button>
+              </ConfirmSubmit>
+            </ActionForm>
+          </>
+        )}
+      </div>
 
       <MarkdownPanel
         eyebrow="Session summary"

@@ -1,13 +1,15 @@
 import { grantedOAuthScope, resolveGrantedScope, verifyAuthRequest } from '@rembric/core';
 import type { ReactNode } from 'react';
 
-import { areqKey, consentCsrfToken } from './session';
+import { areqKey, CONSENT_FORM } from './session';
 
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import { singleParam } from '@/components/dashboard/support';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 /**
  * The OAuth consent screen — the one dashboard view that is a protocol endpoint
@@ -87,7 +89,7 @@ export default async function OAuthConsentPage({
 
   const grantedScope = grantedOAuthScope(areq.scope);
   const access = resolveGrantedScope(grantedScope) === 'read:*' ? 'Read-only' : 'Read & write';
-  const csrf = await consentCsrfToken();
+  const csrf = await dashboardCsrfToken(CONSENT_FORM);
 
   return (
     <ConsentShell hl="Authorize" rest="Application.">
@@ -122,13 +124,13 @@ export default async function OAuthConsentPage({
 
       <div className="flex flex-wrap items-center gap-3">
         <form action="/dashboard/oauth/consent" method="post">
-          {csrf === null ? null : <CsrfField token={csrf} />}
+          <CsrfField form={CONSENT_FORM} />
           <input type="hidden" name="areq" value={blob} />
           <input type="hidden" name="decision" value="approve" />
           <Button type="submit">AUTHORIZE →</Button>
         </form>
         <form action="/dashboard/oauth/consent" method="post">
-          {csrf === null ? null : <CsrfField token={csrf} />}
+          <CsrfField form={CONSENT_FORM} />
           <input type="hidden" name="areq" value={blob} />
           <input type="hidden" name="decision" value="deny" />
           <Button type="submit" variant="outline">
@@ -138,11 +140,6 @@ export default async function OAuthConsentPage({
       </div>
     </ConsentShell>
   );
-}
-
-/** The hidden CSRF field `apps/server/src/dashboard/csrf.ts` reads. */
-function CsrfField({ token }: { token: string }) {
-  return <input type="hidden" name="csrf" value={token} />;
 }
 
 function ConsentShell({

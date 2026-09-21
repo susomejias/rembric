@@ -103,6 +103,51 @@ export function getSession(source: SessionCookieSource): SessionContext | null {
 }
 
 /**
+ * The resolved session together with the service that verified it — the pair a
+ * dashboard mutation needs, because the same service owns the CSRF check the
+ * resolved row's `csrfSecret` feeds. A second `SessionsService` over the same
+ * rows would be a second view of the same sessions, which is why this hands the
+ * cached one back instead of letting the caller construct its own.
+ *
+ * `source` is optional so a Server Action can pass the test-injected cookies and
+ * a real request can fall through to `next/headers`; the import is deferred to
+ * that fallback because `next/headers` is a request-scoped module this file's
+ * node-environment tests never reach.
+ */
+export async function resolveDashboardSession(
+  source?: SessionCookieSource,
+): Promise<{ session: SessionContext; sessions: SessionsService } | null> {
+  const sessions = sessionsService();
+  if (sessions === null) return null;
+  const cookies = source ?? (await requestCookieSource());
+  const resolved = sessions.resolve(cookies.get(SessionsService.cookieName())?.value);
+  if (resolved === null) return null;
+  return { session: resolved, sessions };
+}
+
+/**
+ * The CSRF token for one form name, bound to the session this request carries.
+ * `null` is not a permissive state: `dashboardCsrfToken` in the page and
+ * `guardAction` on the submission derive the same value from the same session
+ * row and the same form name, so a `null` on either side is a submission the
+ * guard refuses.
+ */
+export async function dashboardCsrfToken(
+  formName: string,
+  source?: SessionCookieSource,
+): Promise<string | null> {
+  const resolved = await resolveDashboardSession(source);
+  if (resolved === null) return null;
+  return resolved.sessions.csrfToken(resolved.session.session, formName);
+}
+
+/** The request's own cookie store, reached without a static `next/headers` import. */
+async function requestCookieSource(): Promise<SessionCookieSource> {
+  const { cookies } = await import('next/headers');
+  return cookies();
+}
+
+/**
  * The `Set-Cookie` a successful login writes, or `null` when this process has no
  * signing key. A `null` is not a silent success: the login route answers it with
  * the `unavailable` error rather than a cookie no later request could verify.

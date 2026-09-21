@@ -1,5 +1,9 @@
-import { SLUG_REGEX, type ProjectView } from '@rembric/core';
+import { DomainError, SLUG_REGEX, type ProjectView } from '@rembric/core';
+import { redirect } from 'next/navigation';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import { singleParam } from '@/components/dashboard/support';
 import {
   DataBody,
@@ -10,7 +14,6 @@ import {
   DataTr,
   Flash,
   LABEL,
-  Notice,
   Page,
   Pill,
   SectionBar,
@@ -21,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
@@ -32,15 +36,94 @@ import { getServices } from '@/lib/services';
  * and `projects.listArchived()` for the archived one — and so is the legacy
  * slug rule (`SLUG_REGEX`) and the default-project exception to archiving.
  *
- * Create, rename, archive and unarchive are still NOT wired: they are mutations
- * whose handler is a separate slice. Every field and control main carries is
- * rendered, disabled, with the reason on its `title`; nothing submits. The
- * created/error flashes are read off the URL the create redirect would carry,
- * so they render only for a hand-crafted query string.
+ * The four mutations are `apps/server/src/dashboard/projects.ts`'s POST
+ * handlers: the same service calls, in the same order (guard first, service
+ * second) and landing on the same query string. Two divergences, both forced by
+ * the surface — a refusal renders as a `Flash` above its own form instead of a
+ * redirect to `?error=`, and the archive confirmation is the ported dialog
+ * rather than the retired scripted one. Main's archive form is the only one of
+ * the four carrying a confirmation; rename and unarchive submit directly, and
+ * this page keeps that split.
  */
 export const dynamic = 'force-dynamic';
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+const CREATE_FORM = 'project.create';
+const ARCHIVE_FORM = 'project.archive';
+const UNARCHIVE_FORM = 'project.unarchive';
+const RENAME_FORM = 'project.rename';
+
+async function createProject(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, CREATE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const slug = readField(formData, 'slug');
+  const displayNameInput = readField(formData, 'displayName');
+  const displayName = displayNameInput.length > 0 ? displayNameInput : null;
+  if (!slug) return { error: 'Slug is required.' };
+
+  let created: string;
+  try {
+    created = guard.services.projects.create({ slug, displayName }).slug;
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/projects?created=${encodeURIComponent(created)}`);
+}
+
+async function archiveProject(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, ARCHIVE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  try {
+    guard.services.projects.archive(readField(formData, 'id'));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect('/dashboard/projects');
+}
+
+async function unarchiveProject(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, UNARCHIVE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  try {
+    guard.services.projects.unarchive(readField(formData, 'id'));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect('/dashboard/projects');
+}
+
+async function renameProject(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, RENAME_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const displayName = readField(formData, 'displayName');
+  if (!displayName) return { error: 'Display name is required.' };
+
+  try {
+    guard.services.projects.rename(readField(formData, 'id'), displayName);
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect('/dashboard/projects');
+}
+
+/** The trimmed string field `dashboard/projects.ts` reads; a repeated field takes its first value. */
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
 
 export default async function ProjectsPage({
   searchParams,
@@ -76,41 +159,42 @@ export default async function ProjectsPage({
         </DataTd>
         <DataTd>
           <div className="flex flex-wrap items-center gap-2">
-            <Input
-              disabled
-              defaultValue={project.displayName ?? ''}
-              placeholder="display name"
-              className="w-[280px]"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled
-              title="Renaming a project lands with the projects Server Action"
-            >
-              RENAME
-            </Button>
+            <ActionForm action={renameProject} className="flex flex-wrap items-center gap-2">
+              <CsrfField form={RENAME_FORM} />
+              <input type="hidden" name="id" value={project.id} />
+              <Input
+                name="displayName"
+                defaultValue={project.displayName ?? ''}
+                placeholder="display name"
+                className="w-[280px]"
+              />
+              <Button type="submit" variant="outline" size="sm">
+                RENAME
+              </Button>
+            </ActionForm>
             {project.archivedAt ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled
-                title="Unarchiving a project lands with the projects Server Action"
-              >
-                UNARCHIVE
-              </Button>
+              <ActionForm action={unarchiveProject}>
+                <CsrfField form={UNARCHIVE_FORM} />
+                <input type="hidden" name="id" value={project.id} />
+                <Button type="submit" variant="outline" size="sm">
+                  UNARCHIVE
+                </Button>
+              </ActionForm>
             ) : project.isDefault ? null : (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled
-                title="Archiving a project lands with the projects Server Action"
-              >
-                ARCHIVE
-              </Button>
+              <ActionForm action={archiveProject}>
+                <CsrfField form={ARCHIVE_FORM} />
+                <input type="hidden" name="id" value={project.id} />
+                <ConfirmSubmit
+                  tone="warn"
+                  title={`Archive project "${project.label}"?`}
+                  description="New writes will be rejected; existing memories stay queryable. You can unarchive later."
+                  confirmLabel="ARCHIVE PROJECT"
+                >
+                  <Button type="button" variant="outline" size="sm">
+                    ARCHIVE
+                  </Button>
+                </ConfirmSubmit>
+              </ActionForm>
             )}
           </div>
         </DataTd>
@@ -136,11 +220,6 @@ export default async function ProjectsPage({
         <code className="font-mono">{'project.use({slug})'}</code>).
       </p>
 
-      <Notice tone="amber" badge="Not connected" className="mt-5">
-        Create, rename, archive and unarchive are not wired in this port: the projects Server Action
-        is a separate slice, so this page renders lifecycle state only. No control here submits.
-      </Notice>
-
       {justCreated ? (
         <div className="mt-5">
           <Flash tone="lime" label="CREATED">
@@ -156,7 +235,8 @@ export default async function ProjectsPage({
         </div>
       ) : null}
 
-      <form className="mt-5 flex flex-wrap items-end gap-3">
+      <ActionForm action={createProject} className="mt-5 flex flex-wrap items-end gap-3">
+        <CsrfField form={CREATE_FORM} />
         <div className="flex flex-col gap-2">
           <Label htmlFor="project-slug" className={`${LABEL} text-muted-foreground`}>
             Slug
@@ -164,7 +244,7 @@ export default async function ProjectsPage({
           <Input
             id="project-slug"
             name="slug"
-            disabled
+            required
             placeholder="my-project"
             pattern="[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?"
             className="w-[220px]"
@@ -177,19 +257,12 @@ export default async function ProjectsPage({
           <Input
             id="project-display-name"
             name="displayName"
-            disabled
             placeholder="display name (optional)"
             className="w-[320px]"
           />
         </div>
-        <Button
-          type="submit"
-          disabled
-          title="Project creation lands with the projects Server Action"
-        >
-          Create project
-        </Button>
-      </form>
+        <Button type="submit">Create project</Button>
+      </ActionForm>
 
       <div className="mt-8">
         <SectionBar name={`Active (${active.length})`} />

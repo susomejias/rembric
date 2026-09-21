@@ -17,14 +17,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const error = loginErrorMessage(singleParam(params.error));
 
   return (
-    <main className="grid min-h-screen bg-background font-sans text-foreground lg:grid-cols-[1fr_480px]">
-      <section className="flex flex-col justify-between gap-4 border-b border-border p-6 lg:border-r lg:border-b-0 lg:p-12">
+    <main className="grid min-h-screen bg-background font-sans text-foreground min-[981px]:grid-cols-[1fr_480px]">
+      <section className="flex flex-col justify-between gap-3 border-b border-border px-4 pt-6 pb-4 min-[641px]:gap-4 min-[641px]:px-6 min-[641px]:py-8 min-[981px]:gap-8 min-[981px]:border-r min-[981px]:border-b-0 min-[981px]:p-12">
         <div className="flex items-center gap-3">
           <img
             src="/dashboard/assets/logo-transparent.png"
             alt=""
             aria-hidden="true"
-            className="size-12 shrink-0"
+            className="size-10 shrink-0 min-[641px]:size-12 min-[981px]:size-14"
           />
           <div className="font-mono text-xs tracking-widest text-muted-foreground uppercase">
             <p>REMBRIC</p>
@@ -33,7 +33,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
 
         <div>
-          <h1 className="font-display text-4xl leading-snug font-bold tracking-tight sm:text-5xl lg:text-7xl">
+          <h1 className="font-display text-[2.2rem] leading-[1.3] font-bold tracking-tight min-[641px]:text-[3.2rem] min-[981px]:text-[5rem] min-[981px]:leading-[1.35]">
             <span className="bg-primary px-[.25em] text-primary-foreground">REMBRIC</span>
             <br />
             DASHBOARD<span className="text-primary">.</span>
@@ -48,7 +48,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </p>
         </div>
 
-        <ul className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs tracking-widest text-muted-foreground uppercase max-sm:hidden">
+        <ul className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs tracking-widest text-muted-foreground uppercase max-[641px]:hidden">
           {LOGIN_CLIENTS.map((client) => (
             <li key={client} className="flex items-center gap-2">
               <span aria-hidden="true" className="size-1.5 bg-primary" />
@@ -58,7 +58,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </ul>
       </section>
 
-      <section className="flex flex-col justify-center p-6 lg:p-12">
+      <section className="flex flex-col justify-center px-4 pt-6 pb-8 min-[641px]:px-6 min-[641px]:py-8 min-[981px]:p-12">
         <form method="post" action="/dashboard/login" className="grid w-full gap-3">
           {next ? <input type="hidden" name="next" value={next} /> : null}
 
@@ -84,11 +84,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               autoFocus
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'login-error' : undefined}
+              className="min-h-11"
             />
           </div>
 
           <div className="flex gap-3">
-            <Button type="submit">SIGN IN →</Button>
+            <Button type="submit" className="min-h-11">
+              SIGN IN →
+            </Button>
           </div>
         </form>
       </section>
