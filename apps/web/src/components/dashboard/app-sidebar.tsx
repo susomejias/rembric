@@ -92,7 +92,7 @@ export function SidebarFrame({
         <AppSidebar counters={counters} version={version} updater={updater} />
         <SidebarInset className="min-w-0">
           <SiteHeader />
-          <div className="w-full min-w-0 px-5 py-6">{children}</div>
+          <div className="w-full min-w-0 px-4 py-5">{children}</div>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

@@ -126,7 +126,7 @@ Always copy the `-shm` and `-wal` siblings — they hold transactions not yet ch
 
 ### The container has no shell
 
-`FROM gcr.io/distroless/nodejs22-debian12` (see `apps/server/Dockerfile`) ships only the Node runtime and the compiled app — no `/bin/sh`, no package manager, no `sqlite3`. `docker compose exec rembric <anything>` will fail with "executable file not found". Anything you need to run against the database goes through the dashboard (backup/restore, diagnostics) or the host-side `cp` recipe above, never `exec`.
+`FROM gcr.io/distroless/nodejs22-debian12` (see `apps/web/Dockerfile`, the published runtime image) ships only the Node runtime and the compiled app — no `/bin/sh`, no package manager, no `sqlite3`. `docker compose exec rembric <anything>` will fail with "executable file not found". Anything you need to run against the database goes through the dashboard (backup/restore, diagnostics) or the host-side `cp` recipe above, never `exec`.
 
 ## Upgrade & rollback
 

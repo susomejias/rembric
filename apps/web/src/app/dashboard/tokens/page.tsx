@@ -1,6 +1,10 @@
-import { isProjectSetScope, pinnedProjectId, type TokenScope } from '@rembric/core';
+import { DomainError, isProjectSetScope, pinnedProjectId, type TokenScope } from '@rembric/core';
 import type { Token } from '@rembric/db';
+import { redirect } from 'next/navigation';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import { singleParam } from '@/components/dashboard/support';
 import {
   Chip,
@@ -11,7 +15,6 @@ import {
   DataTh,
   DataTr,
   LABEL,
-  Notice,
   Page,
   Pill,
   SectionBar,
@@ -31,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
@@ -42,14 +46,112 @@ import { getServices } from '@/lib/services';
  * tables, the archived-inclusive project list) and so is the state derivation —
  * revoked, expired, inert (pinned to a deleted project), no projects, active.
  *
- * Create and Revoke are still NOT wired: both are mutations whose handler is a
- * separate slice. The mint form renders main's fields, all disabled, and no
- * control submits. The plaintext panel is read off the URL the create redirect
- * would carry, so it renders only for a hand-crafted `?created=…`.
+ * Create and Revoke are `apps/server/src/dashboard/tokens.ts`'s two POST
+ * handlers: the same validation in the same order (retired `scope` field first,
+ * then name, then access, then expiry), the same `create` / `createForSlugs`
+ * split — one selected slug is the single-project arm, not a one-member set —
+ * and the same `?created=<plaintext>&name=<name>` redirect that is the one place
+ * the plaintext is ever readable. The refusal that main rendered as an error page
+ * renders as a `Flash` above the mint form instead.
  */
 export const dynamic = 'force-dynamic';
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+const CREATE_FORM = 'token.create';
+const REVOKE_FORM = 'token.revoke';
+
+async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, CREATE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const name = readField(formData, 'name');
+  // Deduplicated: the composite primary key of `token_projects` answers a
+  // repeated slug with a constraint failure, and a crafted POST can repeat one.
+  const projectInputs = [
+    ...new Set(
+      formData
+        .getAll('project')
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter((value) => value.length > 0),
+    ),
+  ];
+  const accessInput = readField(formData, 'access');
+  const expiresInput = readField(formData, 'expires');
+
+  if (formData.has('scope')) {
+    return {
+      error:
+        "The 'scope' field was retired. Reach comes from 'project' (empty = every project) " +
+        "and the verb from 'access' ('write' or 'read'): scope=* is access=write, " +
+        'scope=read:* is access=read.',
+    };
+  }
+
+  if (!name) return { error: 'Name is required.' };
+
+  // Refused rather than defaulted: an omitted `access` resolving to `write`
+  // silently picks the more privileged verb, and with no project that is `*`,
+  // the only scope the dashboard login accepts.
+  if (accessInput !== 'read' && accessInput !== 'write') {
+    return { error: "Access must be 'write' or 'read'." };
+  }
+  const access = accessInput;
+
+  let expiresAt: Date | null = null;
+  if (expiresInput) {
+    const parsed = new Date(expiresInput);
+    if (Number.isNaN(parsed.getTime())) {
+      return { error: `Invalid expires timestamp '${expiresInput}'.` };
+    }
+    expiresAt = parsed;
+  }
+
+  // Destructured rather than length-checked: the set arm is typed non-empty,
+  // and this is what tells the compiler which branch supplies it.
+  const [firstSlug, ...restSlugs] = projectInputs;
+
+  let secret: { plaintext: string };
+  try {
+    secret =
+      firstSlug === undefined
+        ? guard.services.tokens.create({
+            name,
+            scope: access === 'read' ? 'read:*' : '*',
+            expiresAt,
+          })
+        : guard.services.tokens.createForSlugs(
+            { name, slugs: [firstSlug, ...restSlugs], access, expiresAt },
+            guard.services.projects,
+          );
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  const query = new URLSearchParams({ created: secret.plaintext, name });
+  redirect(`/dashboard/tokens?${query.toString()}`);
+}
+
+async function revokeToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, REVOKE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  try {
+    guard.services.tokens.revoke(readField(formData, 'name'));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect('/dashboard/tokens');
+}
+
+/** The trimmed string field `dashboard/tokens.ts` reads; a repeated field takes its first value. */
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
 
 export default async function TokensPage({
   searchParams,
@@ -106,11 +208,6 @@ export default async function TokensPage({
         hl="Rembric"
         meta={[{ k: 'TOTAL', v: rows.length }]}
       />
-
-      <Notice tone="amber" badge="Not connected" className="mt-6">
-        Create and revoke are not wired in this port: both are mutations whose handler is a separate
-        slice. This page renders credential state only, and the mint form submits nothing.
-      </Notice>
 
       {justCreated ? (
         <div className="mt-6 border border-primary/40 bg-card p-5">
@@ -183,15 +280,20 @@ export default async function TokensPage({
                     {token.revokedAt ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        disabled
-                        title="Token revocation lands with the tokens Server Action"
-                      >
-                        Revoke
-                      </Button>
+                      <ActionForm action={revokeToken}>
+                        <CsrfField form={REVOKE_FORM} />
+                        <input type="hidden" name="name" value={token.name} />
+                        <ConfirmSubmit
+                          tone="danger"
+                          title={`Revoke token "${token.name}"?`}
+                          description="This is IRREVERSIBLE. Any agent using this token will lose access immediately."
+                          confirmLabel="REVOKE TOKEN"
+                        >
+                          <Button type="button" variant="destructive" size="sm">
+                            Revoke
+                          </Button>
+                        </ConfirmSubmit>
+                      </ActionForm>
                     )}
                   </DataTd>
                 </DataTr>
@@ -203,12 +305,13 @@ export default async function TokensPage({
 
       <div className="mt-8">
         <SectionBar name="Create a new token" />
-        <form className="flex max-w-[480px] flex-col gap-4">
+        <ActionForm action={createToken} className="flex max-w-[480px] flex-col gap-4">
+          <CsrfField form={CREATE_FORM} />
           <div className="flex flex-col gap-2">
             <Label htmlFor="token-name" className={`${LABEL} text-muted-foreground`}>
               Name
             </Label>
-            <Input id="token-name" name="name" disabled placeholder="claude-laptop" />
+            <Input id="token-name" name="name" required placeholder="claude-laptop" />
           </div>
 
           <fieldset className="flex flex-col gap-2">
@@ -220,7 +323,6 @@ export default async function TokensPage({
                     id={`token-project-${project.id}`}
                     name="project"
                     value={project.slug}
-                    disabled
                   />
                   <Label
                     htmlFor={`token-project-${project.id}`}
@@ -241,9 +343,9 @@ export default async function TokensPage({
             <Label htmlFor="token-access" className={`${LABEL} text-muted-foreground`}>
               Access
             </Label>
-            <Select name="access" defaultValue="write" disabled>
+            <Select name="access" defaultValue="write">
               <SelectTrigger id="token-access" className="w-full">
-                <SelectValue>write (read and write)</SelectValue>
+                <SelectValue placeholder="select access" />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -258,15 +360,13 @@ export default async function TokensPage({
             <Label htmlFor="token-expires" className={`${LABEL} text-muted-foreground`}>
               Expires (optional, ISO 8601)
             </Label>
-            <Input id="token-expires" name="expires" disabled placeholder="2027-01-01T00:00:00Z" />
+            <Input id="token-expires" name="expires" placeholder="2027-01-01T00:00:00Z" />
           </div>
 
           <div>
-            <Button type="submit" disabled title="Token minting is wired in a later slice">
-              Create
-            </Button>
+            <Button type="submit">Create</Button>
           </div>
-        </form>
+        </ActionForm>
       </div>
     </Page>
   );
