@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.10
 
-# The Next.js app's production image (`@rembric/web`) — the counterpart of
-# apps/server/Dockerfile during the port's transition phase.
+# The Next.js app's production image (`@rembric/web`) — the image the release
+# channel publishes.
 #
 # Stage order is load-bearing: `runner` MUST be last so `docker build .` without
-# `--target` builds the prod image by default. Same contract as
-# apps/server/Dockerfile; see openspec/specs/development-environment/spec.md.
+# `--target` builds the prod image by default; see
+# openspec/specs/development-environment/spec.md.
 #
 # Build context is the repo root (the monorepo's pnpm workspace):
 #   docker build -f apps/web/Dockerfile -t rembric-web .
@@ -14,8 +14,8 @@
 # `turbo prune web --docker`: turbo is a root devDependency, so pruning inside
 # the image needs the workspace installed *before* the prune can run — a second
 # install, of the whole workspace, ahead of the one that matters. A plain
-# filtered install from the manifests apps/server/Dockerfile already copies
-# resolves the exact `@rembric/web` closure out of the locked graph in one step.
+# filtered install from the manifests copied below resolves the exact
+# `@rembric/web` closure out of the locked graph in one step.
 #
 # Data-safety contract (DS3, see odd/tasks/migrate-to-nextjs.md): the runtime
 # keeps `REMBRIC_DATA_DIR=/data` and `VOLUME ["/data"]` so an existing
@@ -120,8 +120,8 @@ RUN pnpm run build
 # It is the full closure, devDependencies included. Trimming them needs either
 # `pnpm install --prod`, which fails here on the root `prepare` script (husky is
 # a devDependency, so `--prod` removes it before running it), or `pnpm deploy
-# --prod`, which would need the `pnpm rebuild` the supply-chain inventory only
-# polices inside apps/server/Dockerfile. A production runtime tree without the
+# --prod`, which would need the `pnpm rebuild` the supply-chain inventory polices
+# in this file. A production runtime tree without the
 # build toolchain is worth a follow-up; it is not worth an unguarded rebuild.
 #
 #   apps/web/server.js + .next/**   — the standalone server and its chunks
@@ -143,11 +143,11 @@ RUN set -eux; \
     rm -rf /runtime/apps/web/node_modules; \
     cp -a /app/node_modules /runtime/node_modules
 
-# onnxruntime-node's non-target prebuilt libs (~185MB) are pruned exactly as in
-# apps/server/Dockerfile: its loader only ever requires the running
-# platform/arch, so every other pair is unreachable in this single-arch Linux
-# image. The target binding is asserted so a layout change fails the build
-# loudly instead of shipping an embedder that cannot load.
+# onnxruntime-node's non-target prebuilt libs (~185MB) are pruned: its loader
+# only ever requires the running platform/arch, so every other pair is
+# unreachable in this single-arch Linux image. The target binding is asserted so
+# a layout change fails the build loudly instead of shipping an embedder that
+# cannot load.
 ARG TARGETARCH
 RUN set -eux; cd /runtime/node_modules/onnxruntime-node; \
     case "$TARGETARCH" in \
