@@ -60,7 +60,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
     <Page className="max-w-[1100px]">
       <Link
         href="/dashboard/sessions"
-        className="mb-6 flex items-center gap-2 text-xs text-(--ink)/40 transition-colors hover:text-(--accent-ink)"
+        className="mb-6 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-primary"
       >
         <ArrowLeft className="size-3.5" />
         Back to sessions
@@ -68,12 +68,12 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
 
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div className="max-w-2xl">
-          <div className="flex items-center gap-2 text-[10px] tracking-[.15em] text-(--accent-ink-strong)/70 uppercase">
+          <div className="flex items-center gap-2 text-[10px] tracking-[.15em] text-primary uppercase">
             <Radio className="size-3" />
             Session · {row.agent}
           </div>
           <h1 className="mt-3 text-2xl font-medium tracking-[-.06em] md:text-4xl">{title}</h1>
-          <p className="mt-3 text-sm leading-6 text-(--ink)/45">
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
             {row.description ?? 'No description was reported for this run.'}
           </p>
         </div>
@@ -115,7 +115,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
             action={`${memories.length} row${memories.length === 1 ? '' : 's'}`}
           />
           {memories.length === 0 ? (
-            <p className="px-5 py-5 text-sm text-(--ink)/45 md:px-6">
+            <p className="px-5 py-5 text-sm text-muted-foreground md:px-6">
               This run wrote no memory. Prompts and session activity are still recorded.
             </p>
           ) : (
@@ -123,15 +123,15 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
               {memories.map((memory) => (
                 <Row key={memory.id} columns="md:grid-cols-[minmax(220px,1.4fr)_1fr_auto]">
                   <div className="flex items-start gap-3">
-                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-(--accent-ink)/80" />
+                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/10" />
                     <Link
                       href={`/dashboard/memories/${memory.id}`}
-                      className="text-sm text-(--ink)/80 hover:text-(--accent-ink)"
+                      className="text-sm text-foreground hover:text-primary"
                     >
                       {memory.title}
                     </Link>
                   </div>
-                  <span className="text-[11px] text-(--ink)/45">{memory.type}</span>
+                  <span className="text-[11px] text-muted-foreground">{memory.type}</span>
                   <Pill tone={memory.status === 'active' ? 'lime' : 'dim'}>{memory.status}</Pill>
                 </Row>
               ))}
@@ -146,15 +146,17 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
             action={`${prompts.length} row${prompts.length === 1 ? '' : 's'}`}
           />
           {prompts.length === 0 ? (
-            <p className="px-5 py-5 text-sm text-(--ink)/45 md:px-6">No prompt was captured.</p>
+            <p className="px-5 py-5 text-sm text-muted-foreground md:px-6">
+              No prompt was captured.
+            </p>
           ) : (
             <Rows>
               {prompts.map((prompt) => (
                 <div key={prompt.id} className="px-5 py-4 md:px-6">
-                  <p className="text-xs leading-5 text-(--ink)/65">
+                  <p className="text-xs leading-5 text-muted-foreground">
                     {prompt.content.slice(0, 220)}
                   </p>
-                  <p className="mt-2 text-[10px] text-(--ink)/38">
+                  <p className="mt-2 text-[10px] text-muted-foreground">
                     <Time value={prompt.createdAt} /> · {prompt.deletedAt ? 'deleted' : 'active'}
                   </p>
                 </div>
@@ -164,8 +166,8 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         </Panel>
       </div>
 
-      <aside className="mt-6 rounded-2xl border border-(--ink)/[7.5%] bg-(--surface-panel) p-5">
-        <p className="flex items-center gap-2 text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">
+      <aside className="mt-6 rounded-2xl border border-border bg-card p-5">
+        <p className="flex items-center gap-2 text-[10px] tracking-[.14em] text-muted-foreground uppercase">
           <Database className="size-3" />
           Metadata
         </p>
@@ -186,8 +188,8 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
 function Metadata({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="text-(--ink)/40">{label}</span>
-      <span className="text-(--ink)/75">{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground">{value}</span>
     </div>
   );
 }

@@ -114,7 +114,7 @@ export default async function ProjectsPage({
           </>
         }
         aside={
-          <div className="text-right text-[11px] text-(--ink)/45">
+          <div className="text-right text-[11px] text-muted-foreground">
             <p>Active {activeCount}</p>
             <p>Archived {archivedCount}</p>
           </div>
@@ -160,7 +160,7 @@ export default async function ProjectsPage({
             {isFiltered ? (
               <>
                 No project matches this status.{' '}
-                <Link href="/dashboard/projects" className="text-(--accent-ink) hover:underline">
+                <Link href="/dashboard/projects" className="text-primary hover:underline">
                   Show all
                 </Link>
                 .
@@ -182,18 +182,18 @@ export default async function ProjectsPage({
                   <div>
                     <Link
                       href={`/dashboard/memories?project=${encodeURIComponent(project.slug)}`}
-                      className="text-sm text-(--ink)/80 hover:text-(--accent-ink)"
+                      className="text-sm text-foreground hover:text-primary"
                     >
                       {project.displayName ?? project.slug}
                     </Link>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       created <Time value={project.createdAt} /> ·{' '}
                       {relativeTime(project.createdAt, nowMs)}
                     </p>
                   </div>
-                  <code className="text-xs text-(--ink)/45">{project.slug}</code>
+                  <code className="text-xs text-muted-foreground">{project.slug}</code>
                   <span
-                    className={`text-[11px] ${needsReview > 0 && !archived ? 'text-(--warn-ink)' : 'text-(--ink)/45'}`}
+                    className={`text-[11px] ${needsReview > 0 && !archived ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
                   >
                     {archived ? (
                       <Time value={project.archivedAt} />
@@ -246,7 +246,7 @@ function ProjectControl({ label, title }: { label: string; title: string }) {
       type="button"
       disabled
       title={title}
-      className="w-fit border border-(--ink)/[10%] px-3 py-2 text-[10px] tracking-[.12em] text-(--ink)/55 uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+      className="w-fit border border-border px-3 py-2 text-[10px] tracking-[.12em] text-muted-foreground uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
     >
       {label}
     </button>

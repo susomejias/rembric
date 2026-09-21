@@ -1,5 +1,4 @@
 import {
-  Activity,
   BrainCircuit,
   FileText,
   Gavel,
@@ -8,7 +7,6 @@ import {
   ListChecks,
   Radio,
   RefreshCw,
-  Settings,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -24,8 +22,13 @@ export interface NavEntry {
 
 /**
  * The navigation table is data, not markup: ordering, labels and icons are
- * pinned here so the sidebar and the topbar's page title read one source. The
- * order is the v0 mockup's — Workspace above Admin, Settings last.
+ * pinned here so the bar and the topbar's page title read one source. The order
+ * is the mockup's — Workspace above Admin.
+ *
+ * Activity and Settings are deliberately absent: neither carries a decision the
+ * operator can act on here (Activity only restates what the other views show,
+ * and Settings has nothing to configure yet), so listing them would be navigable
+ * surface with no user value. Their routes still resolve for a bookmarked URL.
  */
 export const NAV: readonly NavEntry[] = [
   { key: 'overview', group: 'main', label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
@@ -61,13 +64,6 @@ export const NAV: readonly NavEntry[] = [
   },
   { key: 'updates', group: 'main', label: 'Updates', href: '/dashboard/update', icon: RefreshCw },
   {
-    key: 'activity',
-    group: 'main',
-    label: 'Activity',
-    href: '/dashboard/activity',
-    icon: Activity,
-  },
-  {
     key: 'projects',
     group: 'admin',
     label: 'Projects',
@@ -75,13 +71,6 @@ export const NAV: readonly NavEntry[] = [
     icon: FileText,
   },
   { key: 'tokens', group: 'admin', label: 'Tokens', href: '/dashboard/tokens', icon: KeyRound },
-  {
-    key: 'settings',
-    group: 'admin',
-    label: 'Settings',
-    href: '/dashboard/settings',
-    icon: Settings,
-  },
 ];
 
 /** The two sections, in render order, each carrying the caption the sidebar paints above its items. */

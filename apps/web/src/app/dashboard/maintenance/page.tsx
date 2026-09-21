@@ -51,7 +51,7 @@ export default function MaintenancePage() {
         eyebrow="System care"
         title="Maintenance"
         description="Keep the local memory layer healthy with small, safe, and mostly automatic checks."
-        aside={<span className="text-[11px] text-(--ink)/45">admin scope · *</span>}
+        aside={<span className="text-[11px] text-muted-foreground">admin scope · *</span>}
       />
 
       <section className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -75,20 +75,20 @@ export default function MaintenancePage() {
       </section>
 
       {release ? (
-        <section className="mt-6 rounded-2xl border border-(--accent-ink)/20 bg-[linear-gradient(110deg,color-mix(in_oklab,#c4f23f_9%,transparent),color-mix(in_oklab,var(--surface-panel)_96%,transparent)_55%)] p-5 md:p-6">
+        <section className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-5 md:p-6">
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div className="flex items-start gap-3">
-              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-(--accent-ink)/15 text-(--accent-ink)">
+              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
                 <Download className="size-4" />
               </div>
               <div>
-                <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/65 uppercase">
+                <p className="text-[10px] tracking-[.14em] text-primary uppercase">
                   Update available
                 </p>
                 <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">
                   Rembric v{release.latestVersion} is published
                 </h2>
-                <p className="mt-2 max-w-xl text-xs leading-5 text-(--ink)/45">
+                <p className="mt-2 max-w-xl text-xs leading-5 text-muted-foreground">
                   The release check found a newer version. Upgrading is done on the host that runs
                   this deployment — this dashboard never replaces its own image.
                 </p>
@@ -96,8 +96,8 @@ export default function MaintenancePage() {
             </div>
             <Pill tone="lime">pending restart</Pill>
           </div>
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-(--ink)/[7%] pt-4">
-            <p className="text-[11px] text-(--ink)/45">
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <p className="text-[11px] text-muted-foreground">
               {release.publishedAt ? (
                 <Time value={release.publishedAt} />
               ) : (
@@ -107,7 +107,7 @@ export default function MaintenancePage() {
             </p>
             <Link
               href="/dashboard/update"
-              className="rounded-lg bg-lime-300 px-3 py-2 text-[11px] font-medium text-[#111614] transition-colors hover:bg-lime-200"
+              className="rounded-lg bg-primary px-3 py-2 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               Open the release
             </Link>
@@ -116,45 +116,41 @@ export default function MaintenancePage() {
       ) : null}
 
       <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
-                Context
-              </p>
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
               <h2 className="mt-2 text-base font-medium">Safe purges</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               journaled
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Physical deletion is reserved for empty sessions, disconnected archived memories, and
             deleted prompts. Every purge is journaled and reversible.
           </p>
-          <p className="mt-5 text-[11px] text-(--ink)/38">
+          <p className="mt-5 text-[11px] text-muted-foreground">
             Dry run only — the purge boundary is a separate slice.
           </p>
         </article>
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
-                Context
-              </p>
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
               <h2 className="mt-2 text-base font-medium">Disk recovery</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               freelist
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             The freelist is space SQLite has already reclaimed inside the file. `VACUUM` is the
             final operator step and the only one that shrinks the file on disk.
           </p>
           <div className="mt-5">
             <div className="flex justify-between text-xs">
-              <span className="text-(--ink)/45">Reclaimable</span>
+              <span className="text-muted-foreground">Reclaimable</span>
               <span>{freelistShare}% of the file</span>
             </div>
             <Bar percent={freelistShare} tone="amber" />
@@ -192,13 +188,13 @@ export default function MaintenancePage() {
             <Rows>
               {breakdown.perTable.map((table) => (
                 <Row key={table.name} columns="md:grid-cols-[1.4fr_1fr_auto]">
-                  <code className="text-xs text-(--ink)/70">{table.name}</code>
+                  <code className="text-xs text-muted-foreground">{table.name}</code>
                   <div className="max-w-[220px]">
                     <Bar
                       percent={Math.round((table.bytes / Math.max(1, breakdown.totalBytes)) * 100)}
                     />
                   </div>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <span className="text-[11px] text-muted-foreground">
                     {formatBytes(table.bytes)}
                     {table.rowCount === null ? '' : ` · ${table.rowCount} rows`}
                   </span>
@@ -220,11 +216,11 @@ export default function MaintenancePage() {
             <Rows>
               {state.backups.map((backup) => (
                 <Row key={backup.file} columns="md:grid-cols-[1.6fr_1fr_auto]">
-                  <code className="truncate text-xs text-(--ink)/70">{backup.file}</code>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <code className="truncate text-xs text-muted-foreground">{backup.file}</code>
+                  <span className="text-[11px] text-muted-foreground">
                     <Time value={backup.createdAt} />
                   </span>
-                  <span className="text-[11px] text-(--ink)/38">
+                  <span className="text-[11px] text-muted-foreground">
                     {formatBytes(backup.sizeBytes)}
                   </span>
                 </Row>
@@ -245,8 +241,8 @@ export default function MaintenancePage() {
 function PurgeRow({ label, count, href }: { label: string; count: number; href: string }) {
   return (
     <Row columns="md:grid-cols-[1.4fr_1fr_auto]">
-      <p className="text-sm text-(--ink)/80">{label}</p>
-      <Link href={href} className="text-[11px] text-(--ink)/45 hover:text-(--accent-ink)">
+      <p className="text-sm text-foreground">{label}</p>
+      <Link href={href} className="text-[11px] text-muted-foreground hover:text-primary">
         Inspect candidates →
       </Link>
       <Pill tone={count > 0 ? 'amber' : 'dim'}>{count}</Pill>

@@ -60,42 +60,42 @@ export default function SettingsPage() {
       </section>
 
       <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">
                 Runtime defaults
               </p>
               <h2 className="mt-2 text-base font-medium">Local-first by construction</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               one process
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             One Node process, one SQLite file, no external service and no API key required. The
             embedder runs in-process; the database is the only durable store.
           </p>
         </article>
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">
                 Operator controls
               </p>
               <h2 className="mt-2 text-base font-medium">Configured at the server boundary</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               env
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Updates, tokens, retention and OAuth are set where the server boots, not stored in the
             database — so a change is one restart and always visible in the process environment.
           </p>
           <Link
             href="/dashboard/tokens"
-            className="mt-5 inline-block text-[11px] text-(--accent-ink)/75 hover:text-(--accent-ink)"
+            className="mt-5 inline-block text-[11px] text-primary hover:text-primary"
           >
             Manage access tokens →
           </Link>
@@ -186,8 +186,8 @@ function SettingRow({
 }) {
   return (
     <Row columns="md:grid-cols-[1fr_1.6fr_auto]">
-      <p className="text-sm text-(--ink)/80">{name}</p>
-      <p className="text-[11px] leading-5 text-(--ink)/45">{value}</p>
+      <p className="text-sm text-foreground">{name}</p>
+      <p className="text-[11px] leading-5 text-muted-foreground">{value}</p>
       <Pill tone={tone}>{state}</Pill>
     </Row>
   );

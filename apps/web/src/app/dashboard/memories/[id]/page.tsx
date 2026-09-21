@@ -79,7 +79,7 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
     <Page className="max-w-[1100px]">
       <Link
         href="/dashboard/memories"
-        className="mb-6 flex items-center gap-2 text-xs text-(--ink)/40 transition-colors hover:text-(--accent-ink)"
+        className="mb-6 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-primary"
       >
         <ArrowLeft className="size-3.5" />
         Back to memories
@@ -87,12 +87,14 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
 
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div className="max-w-2xl">
-          <div className="flex items-center gap-2 text-[10px] tracking-[.15em] text-(--accent-ink-strong)/70 uppercase">
+          <div className="flex items-center gap-2 text-[10px] tracking-[.15em] text-primary uppercase">
             <Database className="size-3" />
             Memory · {row.type} · {row.scope}
           </div>
           <h1 className="mt-3 text-2xl font-medium tracking-[-.06em] md:text-4xl">{row.title}</h1>
-          <p className="mt-3 text-sm leading-6 text-(--ink)/45">{truncate(row.content, 240)}</p>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            {truncate(row.content, 240)}
+          </p>
         </div>
         <Pill
           tone={reviewState === 'needs_review' ? 'amber' : row.status === 'active' ? 'lime' : 'dim'}
@@ -121,7 +123,7 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
         <Panel>
           <PanelHead eyebrow="Lineage" title="What this memory replaced, and what replaced it" />
           {predecessors.length === 0 && successor === undefined && touching.length === 0 ? (
-            <p className="px-5 py-5 text-sm text-(--ink)/45 md:px-6">
+            <p className="px-5 py-5 text-sm text-muted-foreground md:px-6">
               This memory stands alone: no predecessor, no successor, and no judgment recorded
               against it.
             </p>
@@ -129,14 +131,14 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
             <Rows>
               {predecessors.map((predecessor) => (
                 <Row key={predecessor.id} columns="md:grid-cols-[auto_1fr_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-(--ink)/[5%] text-(--ink)/55">
+                  <span className="grid size-7 place-items-center rounded-lg bg-accent text-muted-foreground">
                     <Tag className="size-3.5" />
                   </span>
                   <Link href={`/dashboard/memories/${predecessor.id}`} className="group">
-                    <p className="text-sm text-(--ink)/80 group-hover:text-(--accent-ink)">
+                    <p className="text-sm text-foreground group-hover:text-primary">
                       {predecessor.title}
                     </p>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       replaced · {predecessor.status}
                     </p>
                   </Link>
@@ -145,14 +147,14 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
               ))}
               {successor ? (
                 <Row columns="md:grid-cols-[auto_1fr_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-(--accent-ink)/[8%] text-(--accent-ink)/70">
+                  <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
                     <Tag className="size-3.5" />
                   </span>
                   <Link href={`/dashboard/memories/${successor.id}`} className="group">
-                    <p className="text-sm text-(--ink)/80 group-hover:text-(--accent-ink)">
+                    <p className="text-sm text-foreground group-hover:text-primary">
                       {successor.title}
                     </p>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       superseded this memory · {successor.status}
                     </p>
                   </Link>
@@ -161,21 +163,21 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
               ) : null}
               {touching.map(({ relation, kind }) => (
                 <Row key={relation.id} columns="md:grid-cols-[auto_1.3fr_1fr_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-(--ink)/[5%] text-[10px] text-(--ink)/55">
+                  <span className="grid size-7 place-items-center rounded-lg bg-accent text-[10px] text-muted-foreground">
                     {relation.judgmentId === '' ? '—' : relation.judgmentId.slice(0, 2)}
                   </span>
                   <Link
                     href={`/dashboard/memories/${relation.sourceId === row.id ? relation.targetId : relation.sourceId}`}
                     className="group"
                   >
-                    <p className="text-sm text-(--ink)/80 group-hover:text-(--accent-ink)">
+                    <p className="text-sm text-foreground group-hover:text-primary">
                       {relation.sourceId === row.id ? relation.targetTitle : relation.sourceTitle}
                     </p>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       {relation.relation ?? 'pending'} · {relation.confidence ?? '—'} confidence
                     </p>
                   </Link>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <span className="text-[11px] text-muted-foreground">
                     <Time value={relation.judgedAt ?? relation.createdAt} />
                   </span>
                   <Pill tone={kind === 'pending_conflict' ? 'amber' : 'lime'}>{kind}</Pill>
@@ -185,8 +187,8 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
           )}
         </Panel>
 
-        <aside className="rounded-2xl border border-(--ink)/[7.5%] bg-(--surface-panel) p-5">
-          <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">Metadata</p>
+        <aside className="rounded-2xl border border-border bg-card p-5">
+          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">Metadata</p>
           <dl className="mt-5 flex flex-col gap-4 text-xs">
             <MetadataRow
               label="Memory id"
@@ -199,7 +201,7 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
             <MetadataRow label="Source session" value={shortId(row.sessionId)} />
             <MetadataRow label="Source agent" value={row.source?.agent ?? '—'} />
           </dl>
-          <p className="mt-6 border-t border-(--ink)/[6%] pt-4 text-[11px] text-(--ink)/40">
+          <p className="mt-6 border-t border-border pt-4 text-[11px] text-muted-foreground">
             Local, append-only storage. Nothing here was edited after it was written.
           </p>
         </aside>
@@ -211,8 +213,8 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
 function MetadataRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3">
-      <dt className="text-(--ink)/40">{label}</dt>
-      <dd className="max-w-[60%] truncate text-right text-(--ink)/75">{value}</dd>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="max-w-[60%] truncate text-right text-muted-foreground">{value}</dd>
     </div>
   );
 }

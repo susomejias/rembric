@@ -3,7 +3,6 @@
 @import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
-@custom-variant light (&:is(.light *));
 
 @theme inline {
   --color-background: var(--background);
@@ -24,157 +23,105 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.35);
-  --radius-2xl: calc(var(--radius) * 1.7);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 /*
- * Compatibility roles. The v0 palette is expressed in arbitrary values, but
- * three surfaces that predate it — `app/not-found.tsx`, the OAuth consent
- * endpoint and the generated `ui/*` primitives — still name semantic roles that
- * the v0 token set does not declare, and an undeclared role silently generates
- * no utility at all. Each mapping below is an alias of a role the v0 theme
- * already declares, or of Tailwind's own font default; nothing here is read by a
- * v0 view.
+ * The stock shadcn neutral theme. The single value this project owns is
+ * `--primary`, the Rembric lime, declared identically in both modes so the
+ * brand fill reads the same on either canvas.
  */
-@theme inline {
-  --color-brand-accent: var(--brand-accent);
-  --color-warn: var(--warn);
-  --font-display: var(--font-sans);
-  --font-heading: var(--font-sans);
-}
-
 :root {
-  color-scheme: dark;
-  --background: oklch(0.145 0.012 165);
-  --foreground: oklch(0.93 0.018 145);
-  --card: oklch(0.18 0.014 165);
-  --card-foreground: oklch(0.93 0.018 145);
-  --popover: oklch(0.2 0.016 165);
-  --popover-foreground: oklch(0.93 0.018 145);
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.88 0.18 115);
   --primary-foreground: oklch(0.18 0.03 140);
-  --secondary: oklch(0.24 0.02 165);
-  --secondary-foreground: oklch(0.87 0.02 145);
-  --muted: oklch(0.23 0.018 165);
-  --muted-foreground: oklch(0.62 0.025 155);
-  --accent: oklch(0.25 0.025 165);
-  --accent-foreground: oklch(0.92 0.02 145);
-  --destructive: oklch(0.68 0.18 25);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.8 0.12 115);
-  --radius: 0.65rem;
-
-  /* Compatibility roles, dark values. `--brand-accent` is the lime itself,
-     which is the readable accent on this surface (measured 12.0:1 against
-     `--background`). */
-  --brand-accent: oklch(0.88 0.18 115);
-  --warn: oklch(0.8 0.15 75);
-
-  /*
-   * Surface and ink roles. The v0 views paint their surfaces and their text
-   * with arbitrary values, and eleven of those values are the ones that have to
-   * move together when the theme flips: the page canvas, the rail, the topbar,
-   * a panel, a metric tile and a nested surface, plus the ink every alpha
-   * (`/45`, `/[3%]`) is mixed against, and the three accent inks.
-   *
-   * Naming them is a mechanical substitution, not a restyle: every dark value
-   * below is byte-identical to the arbitrary value it replaces (Tailwind's own
-   * `lime-200`/`lime-300`/`amber-100`/`red-300` for the three accent inks), so
-   * the dark rendering is the mockup's to the pixel. The lime *fill*
-   * (`bg-lime-300`) and the amber/red fills are deliberately NOT roles: they are
-   * read as a colour in both modes, so they stay literal.
-   */
-  --ink: #ffffff;
-  --body-ink: #e8ede7;
-  --surface-page: #0b100e;
-  --surface-rail: #070a09;
-  --surface-topbar: #090e0c;
-  --surface-panel: #111815;
-  --surface-tile: #0d1310;
-  --surface-nested: #151b18;
-  --surface-login: #111614;
-  --surface-input: #151515;
-  --accent-ink: oklch(0.938 0.189 126.165);
-  --accent-ink-strong: oklch(0.897 0.196 126.665);
-  --warn-ink: oklch(0.935 0.075 92);
-  --warn-surface: oklch(0.879 0.169 91.605 / 0.035);
-  --danger-ink: oklch(0.808 0.114 19.571);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
 }
 
-/*
- * Light — the opt-in variant. The same role set, inverted in lightness and
- * flipped in `color-scheme`; the lime brand fill and the panel geometry are the
- * two things that do not change, because the accent carries the identity in
- * both modes and the fill is read, not the surface under it.
- *
- * Specificity is a tie with `:root` (both are one class-level selector), so the
- * order of the two blocks is what makes this one win — it must stay below.
- *
- * Measured against `--background` (oklch(.965 .008 165)): `--foreground`
- * 17.5:1, `--muted-foreground` 5.4:1, `--ring` 3.2:1, and
- * `--primary-foreground` on `--primary` 13.4:1. `--brand-accent` moves to an
- * olive of the same family (5.2:1) because lime as *text* on a light surface is
- * unreadable at any usable weight.
- */
-.light {
-  color-scheme: light;
-  --background: oklch(0.965 0.008 165);
-  --foreground: oklch(0.16 0.015 165);
-  --card: oklch(0.995 0.004 165);
-  --card-foreground: oklch(0.16 0.015 165);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0.015 165);
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.88 0.18 115);
   --primary-foreground: oklch(0.18 0.03 140);
-  --secondary: oklch(0.93 0.012 165);
-  --secondary-foreground: oklch(0.2 0.02 165);
-  --muted: oklch(0.94 0.01 165);
-  --muted-foreground: oklch(0.5 0.02 160);
-  --accent: oklch(0.92 0.015 165);
-  --accent-foreground: oklch(0.18 0.02 165);
-  --destructive: oklch(0.58 0.2 25);
-  --border: oklch(0 0 0 / 12%);
-  --input: oklch(0 0 0 / 16%);
-  --ring: oklch(0.62 0.13 118);
-
-  --brand-accent: oklch(0.52 0.14 118);
-  --warn: oklch(0.55 0.15 70);
-
-  --ink: oklch(0.16 0.015 165);
-  --body-ink: oklch(0.18 0.015 165);
-  --surface-page: oklch(0.972 0.006 165);
-  --surface-rail: oklch(1 0 0);
-  --surface-topbar: oklch(1 0 0);
-  --surface-panel: oklch(1 0 0);
-  --surface-tile: oklch(0.96 0.008 165);
-  --surface-nested: oklch(0.975 0.006 165);
-  --surface-login: oklch(0.97 0.006 165);
-  --surface-input: oklch(0.995 0.004 165);
-  --accent-ink: oklch(0.5 0.14 118);
-  --accent-ink-strong: oklch(0.45 0.14 118);
-  --warn-ink: oklch(0.45 0.11 70);
-  --warn-surface: oklch(0.879 0.169 91.605 / 0.16);
-  --danger-ink: oklch(0.5 0.2 25);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  html {
-    background: var(--background);
-  }
+
   body {
     @apply bg-background text-foreground;
   }
-}
-
-::selection {
-  background: oklch(0.82 0.16 115 / 35%);
-  color: oklch(0.98 0.02 145);
 }

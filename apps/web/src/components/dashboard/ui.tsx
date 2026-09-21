@@ -6,19 +6,16 @@ import { utcStamp } from './support';
 import { cn } from '@/lib/utils';
 
 /**
- * The dashboard's presentation vocabulary, in one file, because the v0 design
- * expresses itself in long utility strings rather than in semantic tokens: a
- * `rounded-2xl` frame with a hairline border for a panel, a filled pill for a
- * state, 45%-ink body copy. Naming those once is what keeps the twelve views
- * looking like one product, and it is why no view reaches for the shadcn
- * `Card`.
+ * The dashboard's presentation vocabulary, in one file: the shared frame for a
+ * panel, the metric tile, the state pill, the row grid. Every class here is a
+ * default shadcn semantic token (`bg-card`, `text-muted-foreground`,
+ * `border-border`, `text-primary`) or a stock Tailwind palette entry for the
+ * warning tone, which the shadcn theme does not declare.
  *
- * The surfaces and the text alphas are read through the role variables the
- * theme declares (`--ink`, `--surface-panel`, …) instead of the mockup's literal
- * hex and `white/45`. In the dark theme — the default — every substitution is
- * byte-identical to the value it replaces, so the mockup's rendering is
- * unchanged; in the light theme the same string resolves to the light role and
- * the view flips with the theme instead of staying dark-on-dark.
+ * The yellow/amber tone is the one role shadcn has no token for: the theme
+ * declares `--destructive` and nothing between it and the accent. Warning
+ * states use Tailwind's stock amber, with a `dark:` pair because the same ink
+ * cannot clear contrast on both canvases.
  *
  * Nothing here reads the request or the database.
  */
@@ -26,27 +23,27 @@ import { cn } from '@/lib/utils';
 export type Tone = 'lime' | 'amber' | 'dim' | 'danger';
 
 const TONE_TEXT: Record<Tone, string> = {
-  lime: 'text-(--accent-ink)',
-  amber: 'text-(--warn-ink)',
-  dim: 'text-(--ink)/45',
-  danger: 'text-(--danger-ink)',
+  lime: 'text-primary',
+  amber: 'text-amber-600 dark:text-amber-400',
+  dim: 'text-muted-foreground',
+  danger: 'text-destructive',
 };
 
 const TONE_PILL: Record<Tone, string> = {
-  lime: 'bg-(--accent-ink)/[8%] text-(--accent-ink)/70',
-  amber: 'bg-(--warn-ink)/[10%] text-(--warn-ink)/75',
-  dim: 'bg-(--ink)/[5%] text-(--ink)/55',
-  danger: 'bg-(--danger-ink)/10 text-(--danger-ink)',
+  lime: 'bg-primary/10 text-primary',
+  amber: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  dim: 'bg-muted text-muted-foreground',
+  danger: 'bg-destructive/10 text-destructive',
 };
 
 const TONE_TILE: Record<Tone, string> = {
-  lime: 'border-(--accent-ink)/15 bg-(--accent-ink)/[4.5%]',
-  amber: 'border-(--warn-ink)/15 bg-(--warn-surface)',
-  dim: 'border-(--ink)/[6.5%] bg-(--surface-panel)',
-  danger: 'border-(--danger-ink)/20 bg-(--danger-ink)/[4%]',
+  lime: 'border-primary/30 bg-primary/5',
+  amber: 'border-amber-500/30 bg-amber-500/5',
+  dim: 'border-border bg-card',
+  danger: 'border-destructive/30 bg-destructive/5',
 };
 
-/** The eyebrow label every page and panel carries: uppercase, tracked, accent ink. */
+/** The eyebrow label every page and panel carries: uppercase, tracked, muted. */
 export const EYEBROW = 'text-[10px] tracking-[.14em] uppercase';
 
 /** The page column: one max width, one padding rhythm, for every view. */
@@ -60,7 +57,7 @@ export function Page({ children, className }: { children: ReactNode; className?:
 
 export function Eyebrow({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
-    <div className={cn('flex items-center gap-2 text-(--accent-ink-strong)/70', EYEBROW)}>
+    <div className={cn('flex items-center gap-2 text-primary', EYEBROW)}>
       <Icon className="size-3" />
       {children}
     </div>
@@ -86,7 +83,7 @@ export function PageHead({
         <Eyebrow icon={icon}>{eyebrow}</Eyebrow>
         <h1 className="mt-2 text-2xl font-medium tracking-[-.06em] md:text-3xl">{title}</h1>
         {description ? (
-          <p className="mt-2 max-w-2xl text-xs leading-5 text-(--ink)/45">{description}</p>
+          <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {aside}
@@ -109,16 +106,16 @@ export function PanelHead({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center justify-between gap-3 border-b border-(--ink)/[7%] px-5 py-4 md:px-6',
+        'flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 md:px-6',
         className,
       )}
     >
       <div>
-        <p className={cn('text-(--ink)/38', EYEBROW)}>{eyebrow}</p>
+        <p className={cn('text-muted-foreground', EYEBROW)}>{eyebrow}</p>
         <h2 className="mt-1 text-base font-medium">{title}</h2>
       </div>
       {typeof action === 'string' ? (
-        <span className="text-[11px] text-(--ink)/38">{action}</span>
+        <span className="text-[11px] text-muted-foreground">{action}</span>
       ) : (
         action
       )}
@@ -139,7 +136,7 @@ export function Panel({
   return (
     <section
       className={cn(
-        'overflow-hidden rounded-2xl border border-(--ink)/[7.5%] bg-(--surface-panel)',
+        'overflow-hidden rounded-xl border border-border bg-card',
         padded && 'p-5 md:p-6',
         className,
       )}
@@ -149,9 +146,9 @@ export function Panel({
   );
 }
 
-/** A row container with the mockup's hairline separators. */
+/** A row container with the default theme's hairline separators. */
 export function Rows({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('divide-y divide-(--ink)/[6%]', className)}>{children}</div>;
+  return <div className={cn('divide-y divide-border', className)}>{children}</div>;
 }
 
 export function Row({
@@ -166,7 +163,7 @@ export function Row({
   return (
     <div
       className={cn(
-        'grid w-full gap-3 px-5 py-4 text-left transition-colors hover:bg-(--accent-ink)/[3.5%] md:items-center md:px-6',
+        'grid w-full gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/50 md:items-center md:px-6',
         columns,
         className,
       )}
@@ -191,9 +188,9 @@ export function StatTile({
 }) {
   return (
     <div className={cn('rounded-xl border px-4 py-4', TONE_TILE[tone], className)}>
-      <p className={cn('text-(--ink)/38', EYEBROW)}>{label}</p>
+      <p className={cn('text-muted-foreground', EYEBROW)}>{label}</p>
       <p className={cn('mt-2 text-2xl font-medium tracking-[-.05em]', TONE_TEXT[tone])}>{value}</p>
-      {hint ? <p className="mt-1 text-[10px] text-(--ink)/45">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -206,14 +203,14 @@ export function Pill({ children, tone = 'dim' }: { children: ReactNode; tone?: T
   );
 }
 
-/** The square bordered chip — the mockup's shape for a scope. */
+/** The square bordered chip — the shape for a scope. */
 export function Chip({ children, tone = 'lime' }: { children: ReactNode; tone?: Tone }) {
   const border =
     tone === 'lime'
-      ? 'border-(--accent-ink)/25 text-(--accent-ink)/75'
+      ? 'border-primary/40 text-primary'
       : tone === 'danger'
-        ? 'border-(--danger-ink)/40 text-(--danger-ink)'
-        : 'border-(--ink)/[10%] text-(--ink)/45';
+        ? 'border-destructive/40 text-destructive'
+        : 'border-border text-muted-foreground';
   return (
     <span className={cn('w-fit border px-2 py-1 text-[10px] tracking-[.12em] uppercase', border)}>
       {children}
@@ -223,9 +220,9 @@ export function Chip({ children, tone = 'lime' }: { children: ReactNode; tone?: 
 
 export function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-xl border border-(--ink)/[6.5%] bg-(--surface-panel) px-4 py-3">
-      <p className={cn('text-(--ink)/38', EYEBROW)}>{label}</p>
-      <p className="mt-2 text-sm text-(--ink)/80">{value}</p>
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <p className={cn('text-muted-foreground', EYEBROW)}>{label}</p>
+      <p className="mt-2 text-sm">{value}</p>
     </div>
   );
 }
@@ -233,12 +230,9 @@ export function Fact({ label, value }: { label: string; value: ReactNode }) {
 export function Bar({ percent, tone = 'lime' }: { percent: number; tone?: 'lime' | 'amber' }) {
   const clamped = Math.min(100, Math.max(0, percent));
   return (
-    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-(--ink)/[7%]">
+    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
       <div
-        className={cn(
-          'h-full rounded-full',
-          tone === 'lime' ? 'bg-(--accent-ink)/70' : 'bg-(--warn-ink)/70',
-        )}
+        className={cn('h-full rounded-full', tone === 'lime' ? 'bg-primary' : 'bg-amber-500')}
         style={{ width: `${clamped}%` }}
       />
     </div>
@@ -258,15 +252,15 @@ export function Notice({
 }) {
   const accent =
     tone === 'amber'
-      ? 'border-(--warn-ink)/15 bg-(--warn-surface)'
+      ? 'border-amber-500/30 bg-amber-500/5'
       : tone === 'danger'
-        ? 'border-(--danger-ink)/25 bg-(--danger-ink)/[5%]'
-        : 'border-(--accent-ink)/20 bg-(--accent-ink)/[4.5%]';
+        ? 'border-destructive/30 bg-destructive/5'
+        : 'border-primary/30 bg-primary/5';
   return (
     <div className={cn('rounded-xl border px-4 py-3 text-sm', accent, className)}>
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(TONE_TEXT[tone], EYEBROW)}>{badge}</span>
-        <span className="text-xs text-(--ink)/70">{children}</span>
+        <span className="text-xs text-muted-foreground">{children}</span>
       </div>
     </div>
   );
@@ -275,7 +269,7 @@ export function Notice({
 export function EmptyNote({ children }: { children: ReactNode }) {
   return (
     <div className="px-5 py-10 text-center md:px-6">
-      <p className="text-xs text-(--ink)/45">{children}</p>
+      <p className="text-xs text-muted-foreground">{children}</p>
     </div>
   );
 }
