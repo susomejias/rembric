@@ -81,7 +81,6 @@ export default async function JudgmentsPage({
   const pending = repos.relations.adminCountByStatus('pending');
   const judged = repos.relations.adminCountByStatus('judged');
   const orphaned = repos.relations.adminCountByStatus('orphaned');
-  const adjudicable = repos.relations.adminPendingAdjudicableByProject();
   const isFiltered = filters.status !== '' || filters.kind !== '';
 
   return (
@@ -106,43 +105,6 @@ export default async function JudgmentsPage({
         <StatCard k="JUDGED" v={judged} tone="lime" sub={<span>VERDICTS RECORDED</span>} />
         <StatCard k="ORPHANED" v={orphaned} sub={<span>ENDPOINTS NO LONGER ACTIVE</span>} />
       </StatGrid>
-
-      <div className="mt-6 border border-amber-500/40 bg-amber-500/5 p-5 md:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-xl">
-            <p className="font-mono text-[11px] uppercase tracking-[.14em] text-amber-600 dark:text-amber-400">
-              DECISION CONTEXT
-            </p>
-            <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
-              What deserves a decision
-            </h2>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Judgments are the quality gate between temporary session signals and durable memory.
-              Review the reason, scope, and confidence before anything is kept long term.
-            </p>
-          </div>
-          <div className="border border-border bg-card px-3 py-2 text-right">
-            <p className="font-mono text-[10px] uppercase tracking-[.14em] text-muted-foreground">
-              REVIEW QUEUE
-            </p>
-            <p className="mt-1 font-display text-lg font-bold text-amber-600 dark:text-amber-400">
-              {pending} <span className="text-xs font-normal text-muted-foreground">pairs</span>
-            </p>
-          </div>
-        </div>
-        {adjudicable.length > 0 ? (
-          <div className="mt-5 flex flex-wrap gap-2">
-            {adjudicable.slice(0, 6).map((row) => (
-              <span
-                key={row.projectId ?? 'global'}
-                className="border border-border bg-card px-3 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground"
-              >
-                {projectLabel(repos, row.projectId)} · {row.count}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
 
       <FilterForm action="/dashboard/judgments" className="mt-6">
         <FilterField label="STATUS" htmlFor="j-status">
@@ -262,12 +224,4 @@ export default async function JudgmentsPage({
       </aside>
     </Page>
   );
-}
-
-function projectLabel(
-  repos: ReturnType<typeof getServices>['repos'],
-  projectId: string | null,
-): string {
-  if (projectId === null) return 'global scope';
-  return repos.projects.adminFindById(projectId)?.slug ?? projectId;
 }

@@ -193,15 +193,7 @@ export default async function MemoriesPage({
 
   return (
     <Page>
-      <ViewHead
-        num="02"
-        title="Rembric Memories."
-        hl="Rembric"
-        meta={[
-          { k: 'TOTAL', v: totalCount === undefined ? `${visible.length}+` : totalCount },
-          { k: 'SHOWING', v: `${visible.length} ROWS` },
-        ]}
-      />
+      <ViewHead num="02" title="Rembric Memories." hl="Rembric" />
 
       <StatGrid className="mt-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
         <StatCard

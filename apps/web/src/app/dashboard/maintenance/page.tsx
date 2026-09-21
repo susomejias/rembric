@@ -184,8 +184,12 @@ export default function MaintenancePage() {
         </DataBody>
       </DataTable>
 
+      {/* `min-w-0` on both columns is load-bearing: a grid item's default
+          `min-width: auto` floors its track at its min-content width, and this
+          min-content is the tables' own 720px. Without it the grid — not the
+          tables — overflows the viewport. */}
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
-        <div>
+        <div className="min-w-0">
           <SectionBar name="Per-table breakdown" meta={breakdown.source.toUpperCase()} />
           {breakdown.perTable.length === 0 ? (
             <TableEmpty>NO TABLE EXCEEDED THE REPORTING THRESHOLD</TableEmpty>
@@ -221,7 +225,7 @@ export default function MaintenancePage() {
           )}
         </div>
 
-        <div>
+        <div className="min-w-0">
           <SectionBar
             name="Available backups"
             meta={`${state.backups.length} KEPT · ON-DEMAND KEEPS ${ON_DEMAND_BACKUP_KEEP}`}

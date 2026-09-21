@@ -2,8 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { utcStamp } from './support';
-
+import { NumberTicker } from '@/components/motion/number-ticker';
 import {
   Table,
   TableBody,
@@ -19,32 +18,40 @@ import { cn } from '@/lib/utils';
  * production dashboard's component helpers (`apps/server/src/dashboard/
  * components.ts` + `styles/core/patterns.css`) as React: the numbered view
  * head, the stat card, the section bar, the data table, the key/value grid,
- * the state pill, the flash. Every colour is a stock shadcn semantic token
- * (`bg-card`, `text-muted-foreground`, `border-border`, `text-primary`) or
- * Tailwind's stock amber for the warning tone the theme does not declare.
+ * the state pill, the flash. Every colour is a semantic token the theme
+ * declares (`bg-card`, `text-muted-foreground`, `border-border`, `text-primary`,
+ * `text-warn`).
  *
  * Nothing here reads the request or the database.
  */
 
-export type Tone = 'lime' | 'amber' | 'dim' | 'danger';
+/**
+ * `fg` is main's neutral tone: a bright value over the default lime bullet
+ * (`.bn` in `styles/core/atoms.css`). `amber` is the theme's `--warn`; the key
+ * keeps its historical name so call sites outside this file do not churn.
+ */
+export type Tone = 'fg' | 'lime' | 'amber' | 'dim' | 'danger';
 
 const TONE_TEXT: Record<Tone, string> = {
+  fg: 'text-foreground',
   lime: 'text-primary',
-  amber: 'text-amber-600 dark:text-amber-400',
+  amber: 'text-warn',
   dim: 'text-muted-foreground',
   danger: 'text-destructive',
 };
 
 const TONE_DOT: Record<Tone, string> = {
+  fg: 'bg-primary',
   lime: 'bg-primary',
-  amber: 'bg-amber-500',
+  amber: 'bg-warn',
   dim: 'bg-muted-foreground',
   danger: 'bg-destructive',
 };
 
 const TONE_BORDER: Record<Tone, string> = {
+  fg: 'border-border text-foreground',
   lime: 'border-primary/40 text-primary',
-  amber: 'border-amber-500/40 text-amber-600 dark:text-amber-400',
+  amber: 'border-warn/40 text-warn',
   dim: 'border-border text-muted-foreground',
   danger: 'border-destructive/40 text-destructive',
 };
@@ -62,52 +69,67 @@ function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string 
 /** The mono, tracked, uppercase label every page, panel and stat carries. */
 export const LABEL = 'font-mono text-[11px] uppercase tracking-[.14em]';
 
-/** The page column: one max width, one padding rhythm, for every view. */
+/**
+ * The page column. It takes the full width the shell's content column offers
+ * rather than capping itself: a wide viewport has the rail on the left and real
+ * estate to spare, and a cap here only re-created the void the shell stopped
+ * leaving. Readable-content widths are owned by the content that needs them
+ * (markdown panels, forms), not by the page. Vertical rhythm belongs to the
+ * shell's content column, so a page nested in the shell never pays for both.
+ */
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn('mx-auto max-w-[1320px] px-5 py-6 md:px-8', className)}>{children}</div>
-  );
+  return <div className={cn('w-full min-w-0 px-5 md:px-8', className)}>{children}</div>;
 }
 
 export function ViewHead({
-  num,
   title,
   hl,
-  meta,
+  titleVisible = false,
 }: {
-  num: string;
+  /** No longer rendered: the per-page number was dropped. Kept so call sites stay put. */
+  num?: string;
   title: string;
   hl?: string;
+  /**
+   * Accepted and deliberately not rendered. The top-right strip it described was
+   * removed from every page: a list's count already lives in its stat cards and
+   * its section bars, and the strip left a ruled gap above the content of a page
+   * whose own heading is not on screen. Kept in the props type because call sites
+   * still pass it, exactly like `num` above.
+   */
   meta?: ReadonlyArray<{ k: string; v: ReactNode }>;
+  /**
+   * Detail views pass `true`: the record's own title heads the page and there is
+   * no breadcrumb entry that names it. A listing or the overview leaves it
+   * `false` — the shell breadcrumb already names the page — and the heading
+   * stays in the DOM as the single `sr-only` `h1` instead of repeating on
+   * screen.
+   */
+  titleVisible?: boolean;
 }) {
   const parts = hl && title.includes(hl) ? title.split(hl) : null;
-  return (
-    <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3 border-b border-border pb-4">
-      <div className="flex items-baseline gap-3">
-        <span className={cn('text-muted-foreground', LABEL)}>{num}</span>
-        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] md:text-3xl">
-          {parts ? (
-            <>
-              {parts[0]}
-              <span className="text-primary">{hl}</span>
-              {parts[1]}
-            </>
-          ) : (
-            title
-          )}
-        </h1>
-      </div>
-      {meta && meta.length > 0 ? (
-        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
-          {meta.map((m) => (
-            <span key={m.k} className={cn('text-muted-foreground', LABEL)}>
-              <b className="font-semibold text-foreground">{m.k}</b> {m.v}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </header>
+  const heading = (
+    <h1
+      className={cn(
+        'font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl',
+        !titleVisible && 'sr-only',
+      )}
+    >
+      {parts ? (
+        <>
+          {parts[0]}
+          <span className="bg-primary px-[.18em] pb-[.04em] text-primary-foreground">{hl}</span>
+          {parts[1]}
+        </>
+      ) : (
+        title
+      )}
+    </h1>
   );
+  // A page whose heading is off screen renders the heading and nothing else, so
+  // it never gains an empty bordered strip — or the vertical space one left.
+  if (!titleVisible) return heading;
+  return <header className="min-w-0 border-b border-border pb-4">{heading}</header>;
 }
 
 /** Back link rendered as the first element of a detail view's content. */
@@ -157,13 +179,14 @@ export interface StatOpts {
   sub?: ReactNode;
   href?: string;
   className?: string;
+  compact?: boolean;
 }
 
 /**
  * One metric: a labelled value with a mono sub line, the production
  * dashboard's `statCard` hierarchy. Renders as a link when `href` is set.
  */
-export function StatCard({ k, v, tone = 'dim', sub, href, className }: StatOpts) {
+export function StatCard({ k, v, tone = 'dim', sub, href, className, compact }: StatOpts) {
   const inner = (
     <>
       <div className={cn('flex items-center gap-2 text-muted-foreground', LABEL)}>
@@ -172,11 +195,12 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className }: StatOpts)
       </div>
       <div
         className={cn(
-          'font-display text-4xl leading-none font-bold tracking-[-.025em]',
+          'font-display leading-none font-bold tracking-[-.025em]',
+          compact ? 'text-3xl' : 'text-4xl',
           TONE_TEXT[tone],
         )}
       >
-        {v}
+        {typeof v === 'number' ? <NumberTicker value={v} /> : v}
       </div>
       {sub ? (
         <div className={cn('mt-auto flex items-center justify-between gap-3', LABEL)}>{sub}</div>
@@ -184,7 +208,8 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className }: StatOpts)
     </>
   );
   const box = cn(
-    'flex min-h-[132px] flex-col gap-3 border border-border bg-card p-5 transition-colors',
+    'flex flex-col border border-border bg-card transition-colors',
+    compact ? 'min-h-[92px] gap-1.5 p-4' : 'min-h-[132px] gap-3 p-5',
     href && 'hover:border-primary',
     className,
   );
@@ -197,10 +222,34 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className }: StatOpts)
   );
 }
 
-/** The stat strip: six columns at desktop, two at mobile, hairline separators. */
-export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
+/**
+ * The stat strip: one contiguous grid, its cells separated by a 1px gap that
+ * shows the grid's own background, so every divider is a single hairline and
+ * the strip needs one border instead of one per cell.
+ *
+ * `variant="cards"` is main's auto-fill kind grid: individually bordered
+ * cards on the page background, so empty trailing slots stay invisible
+ * instead of painting the frame grey.
+ */
+export function StatGrid({
+  children,
+  className,
+  variant = 'frame',
+}: {
+  children: ReactNode;
+  className?: string;
+  variant?: 'frame' | 'cards';
+}) {
   return (
-    <div className={cn('grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6', className)}>
+    <div
+      className={cn(
+        variant === 'frame' &&
+          'grid grid-cols-2 gap-px border border-border bg-border [&>*]:border-0! md:grid-cols-3 xl:grid-cols-6',
+        variant === 'cards' &&
+          'grid [grid-template-columns:repeat(auto-fill,minmax(148px,1fr))] [&>*]:-ml-px! [&>*]:-mt-px!',
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -443,11 +492,7 @@ export function Bar({
       <div
         className={cn(
           'h-full',
-          tone === 'lime'
-            ? 'bg-primary'
-            : tone === 'amber'
-              ? 'bg-amber-500'
-              : 'bg-muted-foreground',
+          tone === 'lime' ? 'bg-primary' : tone === 'amber' ? 'bg-warn' : 'bg-muted-foreground',
         )}
         style={{ width: `${clamped}%` }}
       />
@@ -471,7 +516,7 @@ export function Notice({
       className={cn(
         'flex flex-wrap items-center gap-3 border bg-card px-4 py-3',
         tone === 'amber'
-          ? 'border-amber-500/40'
+          ? 'border-warn/40'
           : tone === 'danger'
             ? 'border-destructive/40'
             : 'border-primary/40',
@@ -513,20 +558,4 @@ export function Flash({
   );
 }
 
-export function Time({
-  value,
-  className,
-}: {
-  value: Date | string | number | null | undefined;
-  className?: string;
-}) {
-  if (value === null || value === undefined) return <>—</>;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return <>—</>;
-  const iso = date.toISOString();
-  return (
-    <time dateTime={iso} data-rembric-ts className={className}>
-      {utcStamp(date)}
-    </time>
-  );
-}
+export { Time } from './time';
