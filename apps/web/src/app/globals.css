@@ -23,6 +23,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-warn: var(--warn);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -46,15 +47,24 @@
 }
 
 /*
- * The stock shadcn neutral theme. The single value this project owns is
- * `--primary`, the Rembric lime from the production dashboard's tokens
- * (`apps/server/src/dashboard/styles/core/tokens.css`), declared identically in
- * both modes so the brand fill reads the same on either canvas. Its ink is the
- * stock dark `--primary-foreground`, used in both modes because a lime fill
- * needs dark text on either background.
+ * The stock shadcn neutral theme. The values this project owns are the two from
+ * the production dashboard's tokens
+ * (`apps/server/src/dashboard/styles/core/tokens.css`): `--primary`, the Rembric
+ * lime, declared identically in both modes so the brand fill reads the same on
+ * either canvas; and `--warn`, the badge amber main paints a sidebar count with.
+ * `--primary`'s ink is the stock dark `--primary-foreground`, used in both modes
+ * because a lime fill needs dark text on either background.
+ *
+ * The `--sidebar*` block is remapped rather than restyled, because main's rail is
+ * flush: it is painted with the page's own background and separated from the
+ * column by a border (`.sb` in `styles/core/layout.css`), where shadcn's default
+ * is a distinctly tinted panel. Pointing the tokens at the page's own values is
+ * what makes the rail and the column read as one surface, and it keeps every
+ * primitive that consumes `bg-sidebar` in step with it.
  */
 :root {
   --radius: 0.625rem;
+  --warn: #ff8c00;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -78,17 +88,18 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
 .dark {
+  --warn: #ff8c00;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -112,14 +123,17 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  /* Main's `--bg-row-hover`: the hovered row warms toward the lime rather than
+   * going neutral grey, which is what makes a hovered nav item read as a
+   * candidate for the active state instead of as a selected row. */
+  --sidebar-accent: #15170d;
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
 @layer base {
