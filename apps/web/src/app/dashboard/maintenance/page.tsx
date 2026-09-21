@@ -1,9 +1,15 @@
+import { DomainError } from '@rembric/core';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 import { formatBytes, readMaintenanceState } from './data';
 import { ON_DEMAND_BACKUP_KEEP } from './data';
 
 import { getUpdates } from '@/app/dashboard/update/update-service';
+import { ActionForm, type ActionState, type FormAction } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
+import { singleParam } from '@/components/dashboard/support';
 import {
   Bar,
   DataBody,
@@ -12,6 +18,7 @@ import {
   DataTd,
   DataTh,
   DataTr,
+  Flash,
   Notice,
   Page,
   Pill,
@@ -22,6 +29,8 @@ import {
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
@@ -29,14 +38,73 @@ import { getServices } from '@/lib/services';
  * the health counters, the update banner, the two policy cards, and the purge
  * candidates, disk breakdown and snapshots as tables.
  *
- * No mutation lives here on purpose: the three purges and the on-demand backup
- * are journaled writes whose boundary (admin scope + the mutation protection) is
- * a later slice, so this view renders their *state* and their disabled controls
- * — the same boundary the ported view drew.
+ * The three purges are `apps/server/src/dashboard/maintenance.ts`'s POST
+ * handlers: guarded first (admin scope + CSRF), then the journaled service call,
+ * then a redirect carrying the deleted count the flash above reads. The
+ * on-demand backup is still a later slice and stays unimplemented here.
  */
 export const dynamic = 'force-dynamic';
 
-export default function MaintenancePage() {
+const PURGE_SESSIONS_FORM = 'maintenance.purge-sessions';
+const PURGE_MEMORIES_FORM = 'maintenance.purge-archived-memories';
+const PURGE_PROMPTS_FORM = 'maintenance.purge-prompts';
+
+async function purgeSessions(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, PURGE_SESSIONS_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  let purged: number;
+  try {
+    purged = guard.services.agentSessions.purgeEmpty({ adminBypass: true }).deletedIds.length;
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/maintenance?purged-sessions=${purged}`);
+}
+
+async function purgeArchivedMemories(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, PURGE_MEMORIES_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  let purged: number;
+  try {
+    purged = guard.services.memory.purgeDisconnectedArchived({
+      adminBypass: true,
+    }).deletedIds.length;
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/maintenance?purged-memories=${purged}`);
+}
+
+async function purgePrompts(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, PURGE_PROMPTS_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  let purged: number;
+  try {
+    purged = guard.services.prompts.purgeDeleted({ adminBypass: true }).deletedIds.length;
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/maintenance?purged-prompts=${purged}`);
+}
+
+export default async function MaintenancePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const purgedSessions = singleParam(params['purged-sessions']);
+  const purgedMemories = singleParam(params['purged-memories']);
+  const purgedPrompts = singleParam(params['purged-prompts']);
   const state = readMaintenanceState(true);
   const { breakdown } = state;
   const { repos } = getServices();
@@ -56,6 +124,26 @@ export default function MaintenancePage() {
         hl="Rembric"
         meta={[{ k: 'ADMIN ONLY', v: '*' }]}
       />
+
+      {purgedSessions !== '' ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="PURGED">
+            Removed {purgedSessions} empty session row(s).
+          </Flash>
+        </div>
+      ) : purgedMemories !== '' ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="PURGED">
+            Removed {purgedMemories} disconnected archived memory row(s).
+          </Flash>
+        </div>
+      ) : purgedPrompts !== '' ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="PURGED">
+            Removed {purgedPrompts} deleted prompt row(s).
+          </Flash>
+        </div>
+      ) : null}
 
       <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
         <StatCard
@@ -130,9 +218,6 @@ export default function MaintenancePage() {
             Physical deletion is reserved for empty sessions, disconnected archived memories, and
             deleted prompts. Every purge is journaled and reversible.
           </p>
-          <p className="mt-5 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
-            DRY RUN ONLY — THE PURGE BOUNDARY IS A SEPARATE SLICE
-          </p>
         </div>
         <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
@@ -161,7 +246,7 @@ export default function MaintenancePage() {
       </div>
 
       <div className="mt-8">
-        <SectionBar name="Purge candidates" meta="STATE ONLY · NO CONTROL IS WIRED" />
+        <SectionBar name="Purge candidates" meta="JOURNALED · REVERSIBLE" />
       </div>
       <DataTable>
         <DataHead>
@@ -170,16 +255,41 @@ export default function MaintenancePage() {
           <DataTh>actions</DataTh>
         </DataHead>
         <DataBody>
-          <PurgeRow label="Empty sessions" count={state.emptySessions} href="/dashboard/sessions" />
+          <PurgeRow
+            label="Empty sessions"
+            count={state.emptySessions}
+            href="/dashboard/sessions"
+            action={purgeSessions}
+            formName={PURGE_SESSIONS_FORM}
+            confirmTitle={`Purge ${state.emptySessions} empty session row(s)?`}
+            confirmDescription="This is irreversible. The deletion is journaled in consolidation_ops for audit."
+            confirmLabel={`PURGE ${state.emptySessions} SESSIONS`}
+            buttonLabel={`PURGE EMPTY SESSIONS (${state.emptySessions})`}
+            emptyLabel="NO EMPTY SESSIONS TO PURGE"
+          />
           <PurgeRow
             label="Disconnected archived memories"
             count={state.archivedMemories}
             href="/dashboard/memories?status=archived"
+            action={purgeArchivedMemories}
+            formName={PURGE_MEMORIES_FORM}
+            confirmTitle={`Purge ${state.archivedMemories} disconnected archived memory row(s)?`}
+            confirmDescription="This is irreversible. memory_vec and memory_fts shadow rows are also removed. The deletion is journaled in consolidation_ops for audit."
+            confirmLabel={`PURGE ${state.archivedMemories} MEMORIES`}
+            buttonLabel={`PURGE DISCONNECTED ARCHIVED (${state.archivedMemories})`}
+            emptyLabel="NO DISCONNECTED ARCHIVED TO PURGE"
           />
           <PurgeRow
             label="Deleted prompts"
             count={state.deletedPrompts}
             href="/dashboard/prompts?include_deleted=1"
+            action={purgePrompts}
+            formName={PURGE_PROMPTS_FORM}
+            confirmTitle={`Purge ${state.deletedPrompts} soft-deleted prompt row(s)?`}
+            confirmDescription="This is irreversible. prompts_fts shadow rows are also removed. The deletion is journaled in consolidation_ops for audit."
+            confirmLabel={`PURGE ${state.deletedPrompts} PROMPTS`}
+            buttonLabel={`PURGE DELETED PROMPTS (${state.deletedPrompts})`}
+            emptyLabel="NO DELETED PROMPTS TO PURGE"
           />
         </DataBody>
       </DataTable>
@@ -267,7 +377,29 @@ export default function MaintenancePage() {
   );
 }
 
-function PurgeRow({ label, count, href }: { label: string; count: number; href: string }) {
+function PurgeRow({
+  label,
+  count,
+  href,
+  action,
+  formName,
+  confirmTitle,
+  confirmDescription,
+  confirmLabel,
+  buttonLabel,
+  emptyLabel,
+}: {
+  label: string;
+  count: number;
+  href: string;
+  action: FormAction;
+  formName: string;
+  confirmTitle: string;
+  confirmDescription: string;
+  confirmLabel: string;
+  buttonLabel: string;
+  emptyLabel: string;
+}) {
   return (
     <DataTr>
       <DataTd>{label}</DataTd>
@@ -275,12 +407,35 @@ function PurgeRow({ label, count, href }: { label: string; count: number; href: 
         <Pill tone={count > 0 ? 'amber' : 'dim'}>{count}</Pill>
       </DataTd>
       <DataTd>
-        <Link
-          href={href}
-          className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
-        >
-          Inspect candidates →
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={href}
+            className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
+          >
+            Inspect candidates →
+          </Link>
+          {/* Main's zero-count swap: a real form when there is something to
+              purge, an inert labelled button when there is not. */}
+          {count > 0 ? (
+            <ActionForm action={action}>
+              <CsrfField form={formName} />
+              <ConfirmSubmit
+                tone="danger"
+                title={confirmTitle}
+                description={confirmDescription}
+                confirmLabel={confirmLabel}
+              >
+                <Button type="button" variant="outline" size="sm">
+                  {buttonLabel}
+                </Button>
+              </ConfirmSubmit>
+            </ActionForm>
+          ) : (
+            <Button type="button" variant="secondary" size="sm" disabled>
+              {emptyLabel}
+            </Button>
+          )}
+        </div>
       </DataTd>
     </DataTr>
   );

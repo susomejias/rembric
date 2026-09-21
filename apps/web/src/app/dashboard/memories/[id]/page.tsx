@@ -1,9 +1,18 @@
-import { annotationKindFor, compareAnnotations, deriveReviewState } from '@rembric/core';
+import {
+  annotationKindFor,
+  compareAnnotations,
+  deriveReviewState,
+  DomainError,
+} from '@rembric/core';
+import { projectScope } from '@rembric/db';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
-import { shortId, truncate } from '@/components/dashboard/support';
+import { shortId, singleParam, truncate } from '@/components/dashboard/support';
 import {
   BackLink,
   Chip,
@@ -26,6 +35,8 @@ import {
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
@@ -39,15 +50,77 @@ import { getServices } from '@/lib/services';
  * unpaginated judgment list — so the dashboard's per-memory view did not change
  * its meaning, only its surface.
  *
- * The Confirm and Archive verbs are still NOT ported: both are mutations, and
- * their Server Action boundary is a separate slice. The view renders their state
- * — review state, review-after date, confirmation count, lifecycle status — and
- * no dead control.
+ * The Archive and Confirm verbs are `apps/server/src/dashboard/memories.ts`'s
+ * `/:id/archive` and `/:id/confirm` POST handlers: guard first, then the row is
+ * read unscoped and its own project's scope is what the service call is pinned
+ * to, then the same redirect main landed on (`?confirmed=1` after a confirm).
  */
 export const dynamic = 'force-dynamic';
 
-export default async function MemoryDetailPage({ params }: { params: Promise<{ id: string }> }) {
+const ARCHIVE_FORM = 'memory.archive';
+const CONFIRM_FORM = 'memory.confirm';
+
+/** `dashboard/memories.ts`' refusal for a row that has no project to act in. */
+const NO_PROJECT_MESSAGE =
+  'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.';
+
+async function archiveMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, ARCHIVE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  // Scope resolution mirrors the retired handler: the row is read unscoped,
+  // then its own project's scope is what the service call is pinned to.
+  const row = guard.services.memory.unsafeGetById(id);
+  if (!row) redirect('/dashboard/memories');
+  if (!row.projectId) return { error: NO_PROJECT_MESSAGE };
+
+  try {
+    guard.services.memory.archive(id, projectScope(row.projectId));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/memories/${id}`);
+}
+
+async function confirmMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, CONFIRM_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  const row = guard.services.memory.unsafeGetById(id);
+  if (!row) redirect('/dashboard/memories');
+  if (!row.projectId) return { error: NO_PROJECT_MESSAGE };
+
+  try {
+    guard.services.memory.confirm(id, projectScope(row.projectId), {
+      source: { agent: 'dashboard-operator' },
+    });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/memories/${id}?confirmed=1`);
+}
+
+/** The trimmed string field `dashboard/memories.ts` reads; a repeated field takes its first value. */
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
+
+export default async function MemoryDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ confirmed?: string | string[] }>;
+}) {
   const { id } = await params;
+  const justConfirmed = singleParam((await searchParams).confirmed) !== '';
   const { memory: memoryService, repos } = getServices();
 
   const row = memoryService.unsafeGetById(id);
@@ -86,6 +159,33 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
   const projectLabel = project?.slug ?? '—';
   const markdown = `# ${row.title}\n\n${row.content}`;
 
+  const confirmForm = (
+    <ActionForm action={confirmMemory}>
+      <CsrfField form={CONFIRM_FORM} />
+      <input type="hidden" name="id" value={row.id} />
+      <Button type="submit" size="sm">
+        CONFIRM
+      </Button>
+    </ActionForm>
+  );
+
+  const archiveForm = (
+    <ActionForm action={archiveMemory}>
+      <CsrfField form={ARCHIVE_FORM} />
+      <input type="hidden" name="id" value={row.id} />
+      <ConfirmSubmit
+        tone="warn"
+        title="Archive this memory?"
+        description="It will stop appearing in active recall. You can re-save the topic later to bring it back."
+        confirmLabel="ARCHIVE"
+      >
+        <Button type="button" variant="outline" size="sm">
+          ARCHIVE
+        </Button>
+      </ConfirmSubmit>
+    </ActionForm>
+  );
+
   return (
     <Page>
       <ViewHead
@@ -103,10 +203,17 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
         <BackLink href="/dashboard/memories" label="BACK TO MEMORIES" />
       </div>
 
+      {justConfirmed ? (
+        <Flash tone="lime" label="CONFIRMED">
+          Review affirmed just now.
+        </Flash>
+      ) : null}
+
       {reviewState === 'needs_review' ? (
         <Flash tone="amber" label="NEEDS REVIEW">
           Not re-affirmed since <Time value={reviewAfter} />. Re-affirming it with{' '}
           <code className="font-mono">memory.confirm</code> moves it back to fresh.
+          <div className="mt-3">{confirmForm}</div>
         </Flash>
       ) : null}
 
@@ -259,6 +366,14 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
           </DataBody>
         </DataTable>
       )}
+
+      <div className="mt-6">
+        <SectionBar name="ACTIONS" />
+      </div>
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        {row.status === 'active' ? archiveForm : null}
+        {reviewState !== 'needs_review' ? confirmForm : null}
+      </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard k="CONFIRMATIONS" v={confirmCount} sub={<span>memory.confirm</span>} />
