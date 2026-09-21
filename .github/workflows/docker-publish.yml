@@ -13,6 +13,11 @@ name: Docker publish
 # tag exists; the merge job stitches the manifest list and promotes alias
 # tags only after every arch passes. A failed arch never mints a :version
 # tag — the untagged per-arch digests linger in the registry as forensics.
+#
+# The artifact published to the release channel is the Next web app
+# (apps/web/Dockerfile, `runner` stage), built through the same composite
+# action that CI's server-image checks use. The image name and tag scheme are
+# unchanged: an existing installation's `docker pull` path does not move.
 
 on:
   workflow_dispatch:
@@ -74,18 +79,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.gh_token || secrets.GITHUB_TOKEN }}
 
-      - name: Build runtime (push by digest, native — no QEMU)
+      - name: Build the published image (web runtime, push by digest — no QEMU)
         id: build
         uses: ./.github/actions/build-runtime-image
         with:
           image: ${{ env.IMAGE }}
           platform: ${{ matrix.platform }}
           mode: digest
-          # Shared with ci.yml's docker-build-check runtime build (same scope
-          # name): the merge-to-main that precedes a release already built this
-          # exact runtime image in CI, so the publish imports those builder
-          # layers (model bake, install, native compile) warm instead of cold.
-          cache-scope: runtime-${{ matrix.arch }}
+          # The action defaults to the server image's `runtime` stage; this
+          # override is what makes the published artifact the web app.
+          dockerfile: ./apps/web/Dockerfile
+          target: runner
+          # Shared with ci.yml's docker-build-check-web (same scope name): the
+          # merge-to-main that precedes a release already built this exact web
+          # image in CI, so the publish imports those builder layers warm
+          # (model bake, install, native compile) instead of cold.
+          cache-scope: web-runtime-${{ matrix.arch }}
           hf-token: ${{ secrets.hf_token }}
 
       - name: Smoke test this arch's digest (three independent signals)
@@ -122,8 +131,12 @@ jobs:
             echo "::error::Signal 1 FAILED: 'tsx watch' found in Cmd or Entrypoint." >&2
             fail=1
           fi
-          if ! echo "$ENT_JSON" | grep -q 'dist/server-entrypoint.js'; then
-            echo "::error::Signal 1 FAILED: Entrypoint does not include 'dist/server-entrypoint.js'." >&2
+          # The published artifact is the web image: apps/web/Dockerfile's
+          # `runner` stage starts /app/apps/web/server.js. A publish that fell
+          # back to the server image (or any other stage) fails here.
+          EXPECT_ENTRY='apps/web/server.js'
+          if ! echo "$ENT_JSON" | grep -q "$EXPECT_ENTRY"; then
+            echo "::error::Signal 1 FAILED: Entrypoint lacks $EXPECT_ENTRY." >&2
             fail=1
           fi
 
