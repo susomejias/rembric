@@ -59,19 +59,17 @@ export const viewport: Viewport = {
 };
 
 /**
- * `dark` is the document's *base* state, not an opt-in: the theme is dark-first,
- * so the class is server-rendered and the pre-paint script removes it for a
- * viewer who chose light. That ordering is also what makes the `dark:`
- * utilities of the generated `ui/*` primitives apply by default.
- * `suppressHydrationWarning` covers the one attribute the script rewrites before
- * React hydrates.
+ * `dark` is the document's *base* state and its only one: the class is
+ * server-rendered and nothing removes it, so every route — the dashboard, the
+ * login screen, the 404 — renders in the dark palette regardless of the OS or a
+ * previously stored preference. That is also what makes the `dark:` utilities of
+ * the generated `ui/*` primitives apply by default.
  */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
       className={`dark ${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`}
-      suppressHydrationWarning
     >
       <body className="antialiased">{children}</body>
     </html>

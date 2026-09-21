@@ -73,6 +73,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
           { k: 'STATUS', v: row.status.toUpperCase() },
           { k: 'AGENT', v: row.agent },
         ]}
+        titleVisible
       />
 
       <div className="mt-4 mb-5">

@@ -96,6 +96,7 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
           { k: 'STATUS', v: row.status.toUpperCase() },
           { k: 'PROJECT', v: projectLabel },
         ]}
+        titleVisible
       />
 
       <div className="mt-4 mb-5">
