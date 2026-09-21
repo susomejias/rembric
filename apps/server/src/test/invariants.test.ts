@@ -430,6 +430,20 @@ describe('install-time code-execution surface', () => {
 });
 
 describe('image packaging invariants', () => {
+  /**
+   * One `inputs.<name>` block of a composite action, from its key line to the
+   * next input key. Block-scoped on purpose: a `default:` belonging to a
+   * neighbouring input must not be able to satisfy an assertion about this one.
+   */
+  function compositeActionInput(action: string, name: string): string {
+    const lines = action.split('\n');
+    const start = lines.findIndex((line) => line === `  ${name}:`);
+    expect(start).toBeGreaterThan(-1);
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => /^ {2}[a-z][\w-]*:$/.test(line));
+    return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+  }
+
   it('Dockerfile: the LAST `FROM ... AS <name>` stage is `runtime`', () => {
     const dockerfile = readFileSync(join(repoRoot, 'apps/server/Dockerfile'), 'utf8');
     const stages = [...dockerfile.matchAll(/^FROM\s+\S+\s+AS\s+(\w+)/gim)].map((m) => m[1]);
@@ -460,17 +474,43 @@ describe('image packaging invariants', () => {
     expect(/LABEL\s+rembric\.stage=dev\b/.test(devBlock)).toBe(true);
   });
 
-  it('build-runtime-image action targets the runtime stage (shared by CI + publish)', () => {
-    // The runtime build moved into a composite action used by both
-    // docker-publish.yml (mode=digest) and ci.yml's docker-build-check
-    // (mode=load), so the `target: runtime` guard lives there now.
+  it('build-runtime-image action parameterizes file + target, defaulting to the server runtime', () => {
+    // The action serves two callers: ci.yml's docker-build-check builds the
+    // server image, and docker-publish.yml builds the web image. That is only
+    // true while BOTH build modes read `inputs.dockerfile`/`inputs.target`
+    // (a re-hard-coded `file:`/`target:` silently ignores the override) AND the
+    // defaults keep the caller that omits them on `apps/server/Dockerfile`.
     const action = readFileSync(
       join(repoRoot, '.github/actions/build-runtime-image/action.yml'),
       'utf8',
     );
-    expect(/target:\s*runtime\b/.test(action)).toBe(true);
+    // Two build steps (mode=load, mode=digest): each must consume the inputs,
+    // so one hard-coded leg cannot slip through.
+    expect(action.match(/file:\s*\$\{\{\s*inputs\.dockerfile\s*\}\}/g) ?? []).toHaveLength(2);
+    expect(action.match(/target:\s*\$\{\{\s*inputs\.target\s*\}\}/g) ?? []).toHaveLength(2);
+    // Anchored inside the input's own block, so a `default:` moved to another
+    // input — or a commented-out one — fails here.
+    expect(compositeActionInput(action, 'dockerfile')).toMatch(
+      /^ {4}default: \.\/apps\/server\/Dockerfile$/m,
+    );
+    expect(compositeActionInput(action, 'target')).toMatch(/^ {4}default: runtime$/m);
+  });
+
+  it('docker-publish.yml publishes the web image through the shared action', () => {
+    // The release channel ships apps/web/Dockerfile's `runner` stage. Both the
+    // override the publish passes and the entrypoint its smoke test asserts are
+    // named here: a publish that silently reverted to the server image would
+    // otherwise still build, still pass smoke, and still move the tags.
     const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
     expect(/uses:\s*\.\/\.github\/actions\/build-runtime-image\b/.test(publish)).toBe(true);
+    // Exactly one uncommented occurrence each: a stale second `target:` or a
+    // commented-out override must not satisfy these.
+    expect(publish.match(/^[ \t]*dockerfile: \.\/apps\/web\/Dockerfile$/gm) ?? []).toHaveLength(1);
+    expect(publish.match(/^[ \t]*target: runner$/gm) ?? []).toHaveLength(1);
+    // The smoke must fail on a missing web entrypoint, and must no longer wait
+    // for the server image's entrypoint, which the published image does not have.
+    expect(publish).toMatch(/EXPECT_ENTRY='apps\/web\/server\.js'/);
+    expect(/dist\/server-entrypoint\.js/.test(publish)).toBe(false);
   });
 
   it('docker-publish.yml: post-publish smoke test references all three signals', () => {

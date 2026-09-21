@@ -216,7 +216,10 @@ jobs:
       - uses: actions/checkout@v7
 
       # Same composite action the release publish uses (mode=load here vs
-      # mode=digest there) — one place defines how the runtime image is built.
+      # mode=digest there) — one place defines how an app image is built. This
+      # call omits the action's `dockerfile`/`target` inputs, so it keeps
+      # building the server image's `runtime` stage; the publish overrides them
+      # with the web image (apps/web/Dockerfile, `runner`).
       # Loaded as :latest so the e2e / boot smoke below bring it up without
       # pulling from GHCR (REMBRIC_NO_PULL).
       - name: Build runtime (prod) target
@@ -225,8 +228,10 @@ jobs:
           image: ghcr.io/susomejias/rembric
           platform: linux/${{ matrix.arch }}
           mode: load
-          # Shared scope with docker-publish.yml so a release build reuses the
-          # layers CI just built on the merge-to-main commit (warm publish).
+          # CI-local since the publish moved off the server image: the release
+          # now builds apps/web/Dockerfile under the `web-runtime-<arch>` scope
+          # that docker-build-check-web owns. Still per-arch, and still the
+          # scope the dev build below imports.
           cache-scope: runtime-${{ matrix.arch }}
           # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
           hf-token: ${{ secrets.HF_TOKEN }}
@@ -311,10 +316,11 @@ jobs:
           docker rm -f rembric-arm64-smoke
 
   docker-build-check-web:
-    # The Next.js image (apps/web/Dockerfile) is the transition-phase
-    # counterpart of the server image above: the Hono server keeps
-    # shipping from apps/server/Dockerfile until the port retires it, so
-    # both images are built and booted here.
+    # The published image is the Next.js one (apps/web/Dockerfile, `runner`):
+    # docker-publish.yml builds exactly this Dockerfile and stage through the
+    # shared composite action. The server image above is still built and booted
+    # here because the installer e2e exercises it, not because the channel
+    # publishes it.
     #
     # amd64 only, on purpose. The build is platform-independent apart from
     # the onnxruntime prebuilt, and the arch-specific part — the prune that
@@ -343,7 +349,9 @@ jobs:
           load: true
           tags: rembric-web:ci
           # Separate scope from the server image's: the two builds share the
-          # pnpm/native layers but not their builder stages.
+          # pnpm/native layers but not their builder stages. docker-publish.yml
+          # uses this same scope for the web image, so the merge-to-main that
+          # precedes a release leaves the publish warm.
           cache-from: type=gha,scope=web-runtime-amd64
           cache-to: type=gha,mode=max,scope=web-runtime-amd64
           # Empty on fork PRs (no secrets) -> anonymous model bake, retried.
