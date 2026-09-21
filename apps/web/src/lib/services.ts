@@ -12,7 +12,12 @@ import {
   UsageCounters,
   embeddingQueryInput,
   loadEmbedder,
+  undoOp as coreUndoOp,
+  undoRun as coreUndoRun,
+  type ConsolidationRunSummary,
   type Embedder,
+  type SkippedRow,
+  type UndoResult,
 } from '@rembric/core';
 import { createRepositories, type DbHandle, type Repositories } from '@rembric/db';
 
@@ -77,6 +82,15 @@ export interface Services {
   oauth: OAuthService | null;
   /** Fire-and-forget consolidation sweep; never affects a response. */
   sweep: (projectId: string | null) => void;
+  /**
+   * The forced sweep the dashboard's "Run sweep now" control drives —
+   * `bootstrap.ts`'s `triggerSweep: () => runner.runAll({ force: true })`,
+   * returning the summary so the action can flash the purged-session count.
+   */
+  forcedSweep: () => ConsolidationRunSummary;
+  /** `bootstrap.ts`'s bound undo lambdas, over the same repositories and transaction runner. */
+  undoRun: (runId: string) => { reverted: string[]; skipped: SkippedRow[] };
+  undoOp: (opId: string) => UndoResult;
 }
 
 const globalForServices = globalThis as typeof globalThis & { __rembricServices?: Services };
@@ -171,6 +185,9 @@ function buildServices(): Services {
     entityBackfillWorker,
     oauth: buildOAuthService(repos),
     sweep,
+    forcedSweep: () => runner.runAll({ force: true }),
+    undoRun: (runId) => coreUndoRun(repos, db.db, runId),
+    undoOp: (opId) => coreUndoOp(repos, db.db, opId),
   };
 }
 

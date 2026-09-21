@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,8 +18,18 @@ import {
   type DbHandle,
   type Scope,
 } from '@rembric/db';
+import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { GET as downloadBackup } from '../app/dashboard/maintenance/backup/download/[file]/route';
+import { GET as downloadLatestBackup } from '../app/dashboard/maintenance/backup/download/route';
+import {
+  createOnDemandBackup,
+  latestOnDemandBackup,
+  readMaintenanceState,
+  resolveBackupDownload,
+  ON_DEMAND_BACKUP_KEEP,
+} from '../app/dashboard/maintenance/data';
 import { guardAction } from '../lib/actions/guard';
 import { getServices } from '../lib/services';
 import type { SessionCookieSource } from '../lib/session';
@@ -557,5 +567,258 @@ describe('maintenance mutations', () => {
     expect(guard.services.prompts.findById(keep.id)).toBeDefined();
     expect(guard.services.prompts.findById(drop.id)).toBeUndefined();
     expect(guard.services.prompts.countPurgeableDeleted()).toBe(0);
+  });
+});
+
+describe('maintenance backup', () => {
+  // `apps/server/src/dashboard/maintenance.ts` POST `/backup` plus the two
+  // download routes. The writer, the retention rule and the filename gate all
+  // live in `maintenance/data.ts`; the routes are thin over them, so the tests
+  // drive the routes themselves — a handler-level assertion, not a mock of one.
+  const BACKUP_FORM = 'maintenance.backup';
+
+  /** `REMBRIC_DATA_DIR` is the fixture's temp dir, so this is where the writer writes. */
+  function backupsPath(): string {
+    return join(fixture.dataDir, 'backups');
+  }
+
+  function downloadRequest(cookie: string | null): NextRequest {
+    return new NextRequest('http://localhost/dashboard/maintenance/backup/download', {
+      headers: cookie === null ? {} : { cookie: `${SessionsService.cookieName()}=${cookie}` },
+    });
+  }
+
+  function fileRequest(file: string, cookie: string | null = fixture.admin.cookie): NextRequest {
+    return new NextRequest(
+      `http://localhost/dashboard/maintenance/backup/download/${encodeURIComponent(file)}`,
+      { headers: cookie === null ? {} : { cookie: `${SessionsService.cookieName()}=${cookie}` } },
+    );
+  }
+
+  it('writes an on-demand snapshot the page then lists as the latest', async () => {
+    rmSync(backupsPath(), { recursive: true, force: true });
+
+    const guard = await guardAction(submission(BACKUP_FORM), BACKUP_FORM, adminCookie);
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    // The zero state the page renders before any snapshot exists.
+    expect(latestOnDemandBackup()).toBeNull();
+
+    const created = createOnDemandBackup();
+    expect(created.file).toMatch(/^on-demand-\d+\.sqlite$/);
+    expect(created.kind).toBe('on-demand');
+    expect(existsSync(created.path)).toBe(true);
+    expect(created.sizeBytes).toBeGreaterThan(0);
+
+    // The read layer agrees with the writer, so the table and the flash cannot
+    // be two views of different files.
+    const state = readMaintenanceState(false);
+    expect(state.latestOnDemand?.file).toBe(created.file);
+    expect(state.backups.map((b) => b.file)).toContain(created.file);
+    expect(state.backupsDir).toBe(backupsPath());
+  });
+
+  it('keeps only the 3 newest on-demand snapshots', () => {
+    rmSync(backupsPath(), { recursive: true, force: true });
+    mkdirSync(backupsPath(), { recursive: true });
+    // Deterministic: the writer's own name is `Date.now()`, which sorts after
+    // every one of these three, so exactly the oldest is past the keep window.
+    for (const ms of [1_000, 2_000, 3_000]) {
+      writeFileSync(join(backupsPath(), `on-demand-${ms}.sqlite`), 'older snapshot');
+    }
+
+    const created = createOnDemandBackup();
+    const kept = readdirSync(backupsPath()).filter((f) => f.startsWith('on-demand-'));
+
+    expect(kept).toHaveLength(ON_DEMAND_BACKUP_KEEP);
+    expect(kept).toContain(created.file);
+    expect(kept).not.toContain('on-demand-1000.sqlite');
+  });
+
+  it('streams the latest snapshot as an attachment, and refuses without one', async () => {
+    rmSync(backupsPath(), { recursive: true, force: true });
+
+    const none = downloadLatestBackup(downloadRequest(fixture.admin.cookie));
+    expect(none.status).toBe(404);
+    expect(none.headers.get('content-disposition')).toBeNull();
+
+    const created = createOnDemandBackup();
+    const response = downloadLatestBackup(downloadRequest(fixture.admin.cookie));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    expect(response.headers.get('content-length')).toBe(String(created.sizeBytes));
+    expect(response.headers.get('content-disposition')).toBe(
+      `attachment; filename="${created.file}"`,
+    );
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.length).toBe(created.sizeBytes);
+  });
+
+  it('serves a named snapshot, including a pre-update one, and 404s a missing file', async () => {
+    rmSync(backupsPath(), { recursive: true, force: true });
+    mkdirSync(backupsPath(), { recursive: true });
+    // The pre-update snapshot the self-update flow takes before every upgrade:
+    // listable and downloadable, never written by this app.
+    const preUpdate = 'pre-update-v0.24.0-1700000000000.sqlite';
+    writeFileSync(join(backupsPath(), preUpdate), 'not a real sqlite file, just bytes');
+
+    const byName = await downloadBackup(fileRequest(preUpdate), {
+      params: Promise.resolve({ file: preUpdate }),
+    });
+    expect(byName.status).toBe(200);
+    expect(byName.headers.get('content-disposition')).toContain(preUpdate);
+
+    const missing = await downloadBackup(fileRequest('on-demand-9999999999999.sqlite'), {
+      params: Promise.resolve({ file: 'on-demand-9999999999999.sqlite' }),
+    });
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('content-disposition')).toBeNull();
+  });
+
+  it('rejects a filename outside the producer-generated shape before it touches the fs', async () => {
+    const traversal = '../../../../etc/passwd';
+    // The resolver is where the gate lives, so both the route and this direct
+    // call refuse: no `stat`, no `join` onto a traversed path.
+    expect(resolveBackupDownload(traversal)).toMatchObject({ ok: false, status: 400 });
+
+    const response = await downloadBackup(fileRequest(traversal), {
+      params: Promise.resolve({ file: traversal }),
+    });
+    expect(response.status).toBe(400);
+    expect(response.headers.get('content-disposition')).toBeNull();
+
+    // A shaped-but-absolute name is refused the same way, which is the point of
+    // pinning the shape rather than only stripping `..`.
+    expect(resolveBackupDownload('/etc/passwd')).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it('refuses a download without an admin session', () => {
+    const anonymous = downloadLatestBackup(downloadRequest(null));
+    expect(anonymous.status).toBe(302);
+    expect(anonymous.headers.get('location')).toContain('/dashboard/login');
+
+    const limited = downloadLatestBackup(downloadRequest(fixture.limited.cookie));
+    expect(limited.status).toBe(403);
+    expect(limited.headers.get('content-disposition')).toBeNull();
+  });
+});
+
+describe('consolidation sweep and undo', () => {
+  // `apps/server/src/dashboard/consolidation.ts`: the forced sweep and the two
+  // undo POSTs, bound in `lib/services.ts` exactly as `bootstrap.ts` binds them.
+  const SWEEP_FORM = 'sweep.run';
+  const RUN_UNDO_FORM = 'run.undo';
+  const OP_UNDO_FORM = 'op.undo';
+
+  /** A row DEFAULT_DECAY archives: `project`'s window is 180 days, and no affirmations exist. */
+  function decayCandidate(title: string): string {
+    const { memory } = getServices();
+    const row = memory.save(
+      { type: 'project', title, content: `${title} content` },
+      projectScope(fixture.projects.getDefault().id),
+    );
+    fixture.handle.raw
+      .prepare('UPDATE memory SET last_seen_at = ? WHERE id = ?')
+      .run(Date.now() - 200 * 86_400_000, row.id);
+    return row.id;
+  }
+
+  function defaultRunId(services: ReturnType<typeof getServices>): string {
+    const summary = services.forcedSweep();
+    const run = summary.runs.find((r) => r.scope.projectId === fixture.projects.getDefault().id);
+    if (run === undefined) throw new Error('fixture: the default project did not sweep');
+    return run.runId;
+  }
+
+  it('forces a sweep whose run undoes back to the pre-run status', async () => {
+    const guard = await guardAction(submission(SWEEP_FORM), SWEEP_FORM, adminCookie);
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    // Zero state: nothing is decay-eligible, so the default project's run
+    // journals no op — the `no-op` status the run table renders.
+    const idleRunId = defaultRunId(guard.services);
+    expect(guard.services.repos.consolidation.adminOpCounts(idleRunId)).toEqual({
+      total: 0,
+      reverted: 0,
+    });
+
+    const id = decayCandidate('slice-eight-decay');
+    const runId = defaultRunId(guard.services);
+    const ops = guard.services.repos.consolidation.adminListOps(runId);
+
+    expect(ops).toHaveLength(1);
+    expect(ops[0]?.opType).toBe('decay');
+    expect(guard.services.memory.unsafeGetById(id)?.status).toBe('archived');
+
+    const undo = await guardAction(
+      submission(RUN_UNDO_FORM, { runId }),
+      RUN_UNDO_FORM,
+      adminCookie,
+    );
+    expect(undo).toMatchObject({ ok: true });
+    if (!undo.ok) return;
+    const result = undo.services.undoRun(runId);
+
+    expect(result.reverted).toEqual([ops[0]?.id]);
+    expect(result.skipped).toEqual([]);
+    expect(undo.services.memory.unsafeGetById(id)?.status).toBe('active');
+    expect(
+      undo.services.repos.consolidation.adminGetOp(ops[0]?.id ?? '')?.revertedAt,
+    ).not.toBeNull();
+  });
+
+  it('undoes a single op, then reports the second undo as already reverted', async () => {
+    const id = decayCandidate('slice-eight-single');
+    const services = getServices();
+    const runId = defaultRunId(services);
+    const [op] = services.repos.consolidation.adminListOps(runId);
+    if (op === undefined) throw new Error('fixture: the sweep journaled no op');
+
+    const guard = await guardAction(
+      submission(OP_UNDO_FORM, { opId: op.id }),
+      OP_UNDO_FORM,
+      adminCookie,
+    );
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    expect(guard.services.undoOp(op.id)).toEqual({ reverted: op.id, skipped: [] });
+    expect(guard.services.memory.unsafeGetById(id)?.status).toBe('active');
+
+    // Main's second undo answered the 400 error page with this message; the
+    // action turns it into the form's error flash.
+    expect(() => guard.services.undoOp(op.id)).toThrow(/already reverted/);
+  });
+
+  it('refuses a run undo as a non-admin, leaving the op applied', async () => {
+    const id = decayCandidate('slice-eight-refused');
+    const runId = defaultRunId(getServices());
+
+    const refused = await guardAction(
+      form({
+        runId,
+        csrf: fixture.sessions.csrfToken(fixture.limited.session, RUN_UNDO_FORM),
+      }),
+      RUN_UNDO_FORM,
+      cookieSource(fixture.limited.cookie),
+    );
+    expect(refused).toMatchObject({ ok: false, error: 'admin_required' });
+
+    // The control for the refusal: the same run, undone by an admin, reactivates
+    // the row — so an unchanged status above is the guard stopping before the
+    // service, not a mutation that would have failed anyway.
+    const undo = await guardAction(
+      submission(RUN_UNDO_FORM, { runId }),
+      RUN_UNDO_FORM,
+      adminCookie,
+    );
+    expect(undo).toMatchObject({ ok: true });
+    if (!undo.ok) return;
+    expect(undo.services.memory.unsafeGetById(id)?.status).toBe('archived');
+    undo.services.undoRun(runId);
+    expect(undo.services.memory.unsafeGetById(id)?.status).toBe('active');
   });
 });

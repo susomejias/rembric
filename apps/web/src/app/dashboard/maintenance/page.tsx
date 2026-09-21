@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { formatBytes, readMaintenanceState } from './data';
-import { ON_DEMAND_BACKUP_KEEP } from './data';
+import { ON_DEMAND_BACKUP_KEEP, createOnDemandBackup } from './data';
 
 import { getUpdates } from '@/app/dashboard/update/update-service';
 import { ActionForm, type ActionState, type FormAction } from '@/components/dashboard/action-form';
@@ -41,13 +41,16 @@ import { getServices } from '@/lib/services';
  * The three purges are `apps/server/src/dashboard/maintenance.ts`'s POST
  * handlers: guarded first (admin scope + CSRF), then the journaled service call,
  * then a redirect carrying the deleted count the flash above reads. The
- * on-demand backup is still a later slice and stays unimplemented here.
+ * on-demand backup is its fourth POST, same shape, `?backed-up=<bytes>` in the
+ * flash instead; both downloads it points at are GET handlers in
+ * `backup/download/`.
  */
 export const dynamic = 'force-dynamic';
 
 const PURGE_SESSIONS_FORM = 'maintenance.purge-sessions';
 const PURGE_MEMORIES_FORM = 'maintenance.purge-archived-memories';
 const PURGE_PROMPTS_FORM = 'maintenance.purge-prompts';
+const BACKUP_FORM = 'maintenance.backup';
 
 async function purgeSessions(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -96,6 +99,19 @@ async function purgePrompts(_prev: ActionState, formData: FormData): Promise<Act
   redirect(`/dashboard/maintenance?purged-prompts=${purged}`);
 }
 
+/**
+ * `maintenance.ts`'s `POST /backup`: no `try`, exactly like the retired handler
+ * — a failed `VACUUM INTO` is a 500 the operator sees, never a silent "no-op".
+ */
+async function backupNow(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BACKUP_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const backup = createOnDemandBackup();
+  redirect(`/dashboard/maintenance?backed-up=${backup.sizeBytes}`);
+}
+
 export default async function MaintenancePage({
   searchParams,
 }: {
@@ -105,6 +121,7 @@ export default async function MaintenancePage({
   const purgedSessions = singleParam(params['purged-sessions']);
   const purgedMemories = singleParam(params['purged-memories']);
   const purgedPrompts = singleParam(params['purged-prompts']);
+  const backedUp = singleParam(params['backed-up']);
   const state = readMaintenanceState(true);
   const { breakdown } = state;
   const { repos } = getServices();
@@ -141,6 +158,12 @@ export default async function MaintenancePage({
         <div className="mt-6">
           <Flash tone="lime" label="PURGED">
             Removed {purgedPrompts} deleted prompt row(s).
+          </Flash>
+        </div>
+      ) : backedUp !== '' ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="BACKED UP">
+            Snapshot written ({backedUp} bytes).
           </Flash>
         </div>
       ) : null}
@@ -339,7 +362,42 @@ export default async function MaintenancePage({
           <SectionBar
             name="Available backups"
             meta={`${state.backups.length} KEPT · ON-DEMAND KEEPS ${ON_DEMAND_BACKUP_KEEP}`}
+            more={
+              <ActionForm action={backupNow}>
+                <CsrfField form={BACKUP_FORM} />
+                <ConfirmSubmit
+                  tone="warn"
+                  title="Write a fresh database snapshot now?"
+                  description="This is reversible — it only reads the live database and writes a new file; nothing existing is modified."
+                  confirmLabel="BACKUP NOW"
+                >
+                  <Button type="button" variant="outline" size="sm">
+                    BACKUP NOW
+                  </Button>
+                </ConfirmSubmit>
+              </ActionForm>
+            }
           />
+          <p className="mb-4 text-xs leading-5 text-muted-foreground">
+            A snapshot is a consistent, WAL-safe copy written with{' '}
+            <code className="font-mono">VACUUM INTO</code> — the same mechanism the self-update flow
+            uses before every upgrade.
+            {state.latestOnDemand ? (
+              <>
+                {' '}
+                Last backup: <Time value={state.latestOnDemand.createdAt} /> ·{' '}
+                <Link
+                  href="/dashboard/maintenance/backup/download"
+                  className="font-mono uppercase tracking-[.12em] text-primary hover:underline"
+                >
+                  Download latest
+                </Link>
+                .
+              </>
+            ) : (
+              ' No on-demand backup yet.'
+            )}
+          </p>
           {state.backups.length === 0 ? (
             <TableEmpty>NO SNAPSHOT EXISTS IN {state.backupsDir}</TableEmpty>
           ) : (
@@ -348,11 +406,12 @@ export default async function MaintenancePage({
                 <DataTh>file</DataTh>
                 <DataTh>created</DataTh>
                 <DataTh>size</DataTh>
+                <DataTh>download</DataTh>
               </DataHead>
               <DataBody>
                 {state.backups.map((backup) => (
                   <DataTr key={backup.file}>
-                    <DataTd className="max-w-[280px] truncate font-mono text-xs text-muted-foreground">
+                    <DataTd className="max-w-[240px] truncate font-mono text-xs text-muted-foreground">
                       {backup.file}
                     </DataTd>
                     <DataTd className="font-mono text-xs text-muted-foreground">
@@ -360,6 +419,14 @@ export default async function MaintenancePage({
                     </DataTd>
                     <DataTd className="text-muted-foreground">
                       {formatBytes(backup.sizeBytes)}
+                    </DataTd>
+                    <DataTd>
+                      <Link
+                        href={`/dashboard/maintenance/backup/download/${backup.file}`}
+                        className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
+                      >
+                        Download →
+                      </Link>
                     </DataTd>
                   </DataTr>
                 ))}
