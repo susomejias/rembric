@@ -1,4 +1,3 @@
-import { Download, Wrench } from 'lucide-react';
 import Link from 'next/link';
 
 import { formatBytes, readMaintenanceState } from './data';
@@ -7,23 +6,28 @@ import { ON_DEMAND_BACKUP_KEEP } from './data';
 import { getUpdates } from '@/app/dashboard/update/update-service';
 import {
   Bar,
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Notice,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
   Pill,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * Maintenance, in the v0 composition: the health counters, the update banner,
- * the two policy panels, the purge-candidate rows and the disk breakdown.
+ * Maintenance, in the production dashboard's composition: the numbered view head,
+ * the health counters, the update banner, the two policy cards, and the purge
+ * candidates, disk breakdown and snapshots as tables.
  *
  * No mutation lives here on purpose: the three purges and the on-demand backup
  * are journaled writes whose boundary (admin scope + the mutation protection) is
@@ -46,68 +50,62 @@ export default function MaintenancePage() {
 
   return (
     <Page>
-      <PageHead
-        icon={Wrench}
-        eyebrow="System care"
-        title="Maintenance"
-        description="Keep the local memory layer healthy with small, safe, and mostly automatic checks."
-        aside={<span className="text-[11px] text-muted-foreground">admin scope · *</span>}
+      <ViewHead
+        num="08"
+        title="Rembric Maintenance."
+        hl="Rembric"
+        meta={[{ k: 'ADMIN ONLY', v: '*' }]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile
-          label="System health"
-          value={breakdown.source === 'dbstat' ? 'Good' : 'Partial'}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="SYSTEM HEALTH"
+          v={breakdown.source === 'dbstat' ? 'Good' : 'Partial'}
           tone="lime"
-          hint={`breakdown read from ${breakdown.source}`}
+          sub={<span>BREAKDOWN READ FROM {breakdown.source.toUpperCase()}</span>}
         />
-        <StatTile
-          label="Database size"
-          value={formatBytes(breakdown.totalBytes)}
-          hint={`${formatBytes(breakdown.freelistBytes)} reclaimable`}
+        <StatCard
+          k="DATABASE SIZE"
+          v={formatBytes(breakdown.totalBytes)}
+          sub={<span>{formatBytes(breakdown.freelistBytes)} RECLAIMABLE</span>}
         />
-        <StatTile
-          label="Queued work"
-          value={orphanedPendings}
+        <StatCard
+          k="QUEUED WORK"
+          v={orphanedPendings}
           tone={orphanedPendings > 0 ? 'amber' : 'dim'}
-          hint="orphaned judgments"
+          sub={<span>ORPHANED JUDGMENTS</span>}
         />
-      </section>
+      </StatGrid>
 
       {release ? (
-        <section className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-5 md:p-6">
+        <section className="mt-6 border border-primary/40 bg-primary/5 p-5 md:p-6">
           <div className="flex flex-wrap items-start justify-between gap-5">
-            <div className="flex items-start gap-3">
-              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Download className="size-4" />
-              </div>
-              <div>
-                <p className="text-[10px] tracking-[.14em] text-primary uppercase">
-                  Update available
-                </p>
-                <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">
-                  Rembric v{release.latestVersion} is published
-                </h2>
-                <p className="mt-2 max-w-xl text-xs leading-5 text-muted-foreground">
-                  The release check found a newer version. Upgrading is done on the host that runs
-                  this deployment — this dashboard never replaces its own image.
-                </p>
-              </div>
+            <div>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                UPDATE AVAILABLE
+              </p>
+              <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
+                Rembric v{release.latestVersion} is published
+              </h2>
+              <p className="mt-2 max-w-xl text-xs leading-5 text-muted-foreground">
+                The release check found a newer version. Upgrading is done on the host that runs
+                this deployment — this dashboard never replaces its own image.
+              </p>
             </div>
             <Pill tone="lime">pending restart</Pill>
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-            <p className="text-[11px] text-muted-foreground">
+            <p className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
               {release.publishedAt ? (
                 <Time value={release.publishedAt} />
               ) : (
-                'Publication date unknown'
+                'PUBLICATION DATE UNKNOWN'
               )}{' '}
-              · backup before updating
+              · BACKUP BEFORE UPDATING
             </p>
             <Link
               href="/dashboard/update"
-              className="rounded-lg bg-primary px-3 py-2 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              className="bg-primary px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[.12em] text-primary-foreground transition-colors hover:bg-primary/90"
             >
               Open the release
             </Link>
@@ -115,14 +113,16 @@ export default function MaintenancePage() {
         </section>
       ) : null}
 
-      <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-border bg-muted p-5">
+      <div className="mt-6 grid gap-3 md:grid-cols-2">
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                CONTEXT
+              </p>
               <h2 className="mt-2 text-base font-medium">Safe purges</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               journaled
             </span>
           </div>
@@ -130,17 +130,19 @@ export default function MaintenancePage() {
             Physical deletion is reserved for empty sessions, disconnected archived memories, and
             deleted prompts. Every purge is journaled and reversible.
           </p>
-          <p className="mt-5 text-[11px] text-muted-foreground">
-            Dry run only — the purge boundary is a separate slice.
+          <p className="mt-5 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+            DRY RUN ONLY — THE PURGE BOUNDARY IS A SEPARATE SLICE
           </p>
-        </article>
-        <article className="rounded-2xl border border-border bg-muted p-5">
+        </div>
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                CONTEXT
+              </p>
               <h2 className="mt-2 text-base font-medium">Disk recovery</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               freelist
             </span>
           </div>
@@ -155,16 +157,19 @@ export default function MaintenancePage() {
             </div>
             <Bar percent={freelistShare} tone="amber" />
           </div>
-        </article>
-      </section>
+        </div>
+      </div>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Purge candidates"
-          title="What a purge would touch"
-          action="state only, no control is wired"
-        />
-        <Rows>
+      <div className="mt-8">
+        <SectionBar name="Purge candidates" meta="STATE ONLY · NO CONTROL IS WIRED" />
+      </div>
+      <DataTable>
+        <DataHead>
+          <DataTh>candidate</DataTh>
+          <DataTh>count</DataTh>
+          <DataTh>actions</DataTh>
+        </DataHead>
+        <DataBody>
           <PurgeRow label="Empty sessions" count={state.emptySessions} href="/dashboard/sessions" />
           <PurgeRow
             label="Disconnected archived memories"
@@ -176,58 +181,78 @@ export default function MaintenancePage() {
             count={state.deletedPrompts}
             href="/dashboard/prompts?include_deleted=1"
           />
-        </Rows>
-      </Panel>
+        </DataBody>
+      </DataTable>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
-        <Panel>
-          <PanelHead eyebrow="Storage" title="Per-table breakdown" action={breakdown.source} />
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
+        <div>
+          <SectionBar name="Per-table breakdown" meta={breakdown.source.toUpperCase()} />
           {breakdown.perTable.length === 0 ? (
-            <EmptyNote>No table exceeded the reporting threshold.</EmptyNote>
+            <TableEmpty>NO TABLE EXCEEDED THE REPORTING THRESHOLD</TableEmpty>
           ) : (
-            <Rows>
-              {breakdown.perTable.map((table) => (
-                <Row key={table.name} columns="md:grid-cols-[1.4fr_1fr_auto]">
-                  <code className="text-xs text-muted-foreground">{table.name}</code>
-                  <div className="max-w-[220px]">
-                    <Bar
-                      percent={Math.round((table.bytes / Math.max(1, breakdown.totalBytes)) * 100)}
-                    />
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    {formatBytes(table.bytes)}
-                    {table.rowCount === null ? '' : ` · ${table.rowCount} rows`}
-                  </span>
-                </Row>
-              ))}
-            </Rows>
+            <DataTable>
+              <DataHead>
+                <DataTh>table</DataTh>
+                <DataTh>share</DataTh>
+                <DataTh>size</DataTh>
+                <DataTh>rows</DataTh>
+              </DataHead>
+              <DataBody>
+                {breakdown.perTable.map((table) => (
+                  <DataTr key={table.name}>
+                    <DataTd className="font-mono text-xs text-muted-foreground">
+                      {table.name}
+                    </DataTd>
+                    <DataTd className="min-w-[160px]">
+                      <Bar
+                        percent={Math.round(
+                          (table.bytes / Math.max(1, breakdown.totalBytes)) * 100,
+                        )}
+                      />
+                    </DataTd>
+                    <DataTd className="text-muted-foreground">{formatBytes(table.bytes)}</DataTd>
+                    <DataTd className="font-mono text-xs text-muted-foreground">
+                      {table.rowCount ?? '—'}
+                    </DataTd>
+                  </DataTr>
+                ))}
+              </DataBody>
+            </DataTable>
           )}
-        </Panel>
+        </div>
 
-        <Panel>
-          <PanelHead
-            eyebrow="Snapshots"
-            title="Available backups"
-            action={`${state.backups.length} kept · on-demand keeps ${ON_DEMAND_BACKUP_KEEP}`}
+        <div>
+          <SectionBar
+            name="Available backups"
+            meta={`${state.backups.length} KEPT · ON-DEMAND KEEPS ${ON_DEMAND_BACKUP_KEEP}`}
           />
           {state.backups.length === 0 ? (
-            <EmptyNote>No snapshot exists in {state.backupsDir} yet.</EmptyNote>
+            <TableEmpty>NO SNAPSHOT EXISTS IN {state.backupsDir}</TableEmpty>
           ) : (
-            <Rows>
-              {state.backups.map((backup) => (
-                <Row key={backup.file} columns="md:grid-cols-[1.6fr_1fr_auto]">
-                  <code className="truncate text-xs text-muted-foreground">{backup.file}</code>
-                  <span className="text-[11px] text-muted-foreground">
-                    <Time value={backup.createdAt} />
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {formatBytes(backup.sizeBytes)}
-                  </span>
-                </Row>
-              ))}
-            </Rows>
+            <DataTable>
+              <DataHead>
+                <DataTh>file</DataTh>
+                <DataTh>created</DataTh>
+                <DataTh>size</DataTh>
+              </DataHead>
+              <DataBody>
+                {state.backups.map((backup) => (
+                  <DataTr key={backup.file}>
+                    <DataTd className="max-w-[280px] truncate font-mono text-xs text-muted-foreground">
+                      {backup.file}
+                    </DataTd>
+                    <DataTd className="font-mono text-xs text-muted-foreground">
+                      <Time value={backup.createdAt} />
+                    </DataTd>
+                    <DataTd className="text-muted-foreground">
+                      {formatBytes(backup.sizeBytes)}
+                    </DataTd>
+                  </DataTr>
+                ))}
+              </DataBody>
+            </DataTable>
           )}
-        </Panel>
+        </div>
       </div>
 
       <Notice badge="Operator step" className="mt-6">
@@ -240,12 +265,19 @@ export default function MaintenancePage() {
 
 function PurgeRow({ label, count, href }: { label: string; count: number; href: string }) {
   return (
-    <Row columns="md:grid-cols-[1.4fr_1fr_auto]">
-      <p className="text-sm text-foreground">{label}</p>
-      <Link href={href} className="text-[11px] text-muted-foreground hover:text-primary">
-        Inspect candidates →
-      </Link>
-      <Pill tone={count > 0 ? 'amber' : 'dim'}>{count}</Pill>
-    </Row>
+    <DataTr>
+      <DataTd>{label}</DataTd>
+      <DataTd>
+        <Pill tone={count > 0 ? 'amber' : 'dim'}>{count}</Pill>
+      </DataTd>
+      <DataTd>
+        <Link
+          href={href}
+          className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
+        >
+          Inspect candidates →
+        </Link>
+      </DataTd>
+    </DataTr>
   );
 }

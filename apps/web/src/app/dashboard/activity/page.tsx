@@ -1,30 +1,32 @@
-import { Activity, BrainCircuit, Gavel, ListChecks, Radio } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import Link from 'next/link';
 
 import { relativeTime } from '@/components/dashboard/support';
 import {
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
   Pill,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * Activity — the v0 "signal log" view, derived from the corpus rather than from
- * an event stream. Rembric keeps no event table on purpose: this page composes
- * the four records that *are* durable — memory writes, judged relations, session
+ * Activity — the signal-log view, derived from the corpus rather than from an
+ * event stream. Rembric keeps no event table on purpose: this page composes the
+ * four records that *are* durable — memory writes, judged relations, session
  * starts and consolidation runs — into one chronological reading.
  *
- * The mockup's Activity view is a static list with the same shape; what changed
- * here is only where the rows come from. It needed no new repository method: the
- * four reads are the same admin* queries the other views already run.
+ * The four reads are the same admin* queries the other views already run.
  */
 export const dynamic = 'force-dynamic';
 
@@ -101,32 +103,39 @@ export default function ActivityPage() {
 
   return (
     <Page>
-      <PageHead
-        icon={Activity}
-        eyebrow="System signals"
-        title="Activity"
-        description="A lightweight view of meaningful changes without storing a full event stream."
+      <ViewHead
+        num="11"
+        title="Rembric Activity."
+        hl="Rembric"
+        meta={[{ k: 'SIGNALS', v: signals.length }]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile
-          label="Recent writes"
-          value={memoryWrites}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="RECENT WRITES"
+          v={memoryWrites}
           tone="lime"
-          hint="active memories sampled"
+          sub={<span>ACTIVE MEMORIES SAMPLED</span>}
         />
-        <StatTile label="Judged in 24h" value={judgedToday} hint={`${pending} still pending`} />
-        <StatTile label="Live sessions" value={liveSessions} hint="open right now" />
-      </section>
+        <StatCard k="JUDGED IN 24H" v={judgedToday} sub={<span>{pending} STILL PENDING</span>} />
+        <StatCard
+          k="LIVE SESSIONS"
+          v={liveSessions}
+          tone={liveSessions > 0 ? 'lime' : 'dim'}
+          sub={<span>OPEN RIGHT NOW</span>}
+        />
+      </StatGrid>
 
-      <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-border bg-muted p-5">
+      <div className="mt-6 grid gap-3 md:grid-cols-2">
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Signal policy</p>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                SIGNAL POLICY
+              </p>
               <h2 className="mt-2 text-base font-medium">Meaningful changes only</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               no event table
             </span>
           </div>
@@ -134,14 +143,16 @@ export default function ActivityPage() {
             Activity is composed at read time from memory writes, judged relations, session starts
             and consolidation runs — not from a stream Rembric would have to retain and prune.
           </p>
-        </article>
-        <article className="rounded-2xl border border-border bg-muted p-5">
+        </div>
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Storage model</p>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                STORAGE MODEL
+              </p>
               <h2 className="mt-2 text-base font-medium">The audit trail is the data</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               SQLite
             </span>
           </div>
@@ -149,52 +160,48 @@ export default function ActivityPage() {
             Every row this page shows is the record itself: append-only memories, the
             `consolidation_ops` journal, and the session rows.
           </p>
-        </article>
-      </section>
+        </div>
+      </div>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Signal log"
-          title="Recent changes"
-          action={`${signals.length} signals in this window`}
-        />
-        {signals.length === 0 ? (
-          <EmptyNote>
-            Nothing has happened yet. Save a memory from a connected client and it appears here.
-          </EmptyNote>
-        ) : (
-          <Rows>
+      <div className="mt-8">
+        <SectionBar name="Signal log" meta={`${signals.length} SIGNALS IN THIS WINDOW`} />
+      </div>
+      {signals.length === 0 ? (
+        <TableEmpty>
+          NOTHING HAS HAPPENED YET — save a memory from a connected client and it appears here
+        </TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>kind</DataTh>
+            <DataTh>signal</DataTh>
+            <DataTh>when</DataTh>
+          </DataHead>
+          <DataBody>
             {signals.slice(0, 40).map((signal) => (
-              <Row key={signal.id} columns="md:grid-cols-[auto_1.5fr_1fr_auto]">
-                <span className="grid size-7 place-items-center rounded-lg bg-accent text-muted-foreground">
-                  <SignalIcon kind={signal.kind} />
-                </span>
-                <div className="min-w-0">
-                  <Link href={signal.href} className="text-sm text-foreground hover:text-primary">
+              <DataTr key={signal.id}>
+                <DataTd>
+                  <Pill tone={signal.tone}>{signal.kind}</Pill>
+                </DataTd>
+                <DataTd className="max-w-[560px] whitespace-normal">
+                  <Link href={signal.href} className="transition-colors hover:text-primary">
                     {signal.title}
                   </Link>
-                  <p className="mt-1 text-[10px] text-muted-foreground">{signal.detail}</p>
-                </div>
-                <span className="text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-[11px] text-muted-foreground">{signal.detail}</p>
+                </DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
                   {relativeTime(signal.at, nowMs)}
-                </span>
-                <Pill tone={signal.tone}>{signal.kind}</Pill>
-              </Row>
+                </DataTd>
+              </DataTr>
             ))}
-          </Rows>
-        )}
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
 
-      <p className="mt-4 text-[11px] text-muted-foreground">
-        Newest signal in this reading: {signals[0] ? <Time value={signals[0].at} /> : '—'}
+      <p className="mt-4 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+        <Activity className="size-3" aria-hidden />
+        NEWEST SIGNAL IN THIS READING: {signals[0] ? <Time value={signals[0].at} /> : '—'}
       </p>
     </Page>
   );
-}
-
-function SignalIcon({ kind }: { kind: Signal['kind'] }) {
-  if (kind === 'memory') return <BrainCircuit className="size-3.5" />;
-  if (kind === 'judgment') return <Gavel className="size-3.5" />;
-  if (kind === 'session') return <Radio className="size-3.5" />;
-  return <ListChecks className="size-3.5" />;
 }

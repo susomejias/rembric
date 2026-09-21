@@ -5,12 +5,21 @@ import { getUpdates } from './update-service';
 
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { singleParam } from '@/components/dashboard/support';
-import { Notice, Page, PageHead, Panel, Pill, Time } from '@/components/dashboard/ui';
+import {
+  Flash,
+  Page,
+  Pill,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  Time,
+  ViewHead,
+} from '@/components/dashboard/ui';
 import { REMBRIC_VERSION } from '@/lib/version';
 
 /**
- * The update view, in the v0 composition: the version line, the release card and
- * the disabled manual check.
+ * The update view, in the production dashboard's composition: the numbered view
+ * head, the version line and the release card.
  *
  * `apps/server`'s view had two faces: this one, and the in-process self-upgrade
  * (Docker pull, restart, progress polling). The retired second face is not part
@@ -40,45 +49,38 @@ export default async function UpdatePage({
 
   return (
     <Page>
-      <PageHead
-        icon={RefreshCw}
-        eyebrow="Release channel"
-        title="Updates"
-        description="Check whether a newer Rembric release is available and control how often the local updater checks."
-        aside={
-          <span className="text-[11px] tracking-[.16em] text-muted-foreground uppercase">
-            Rembric v{REMBRIC_VERSION}
-          </span>
-        }
+      <ViewHead
+        num="09"
+        title="Rembric Updates."
+        hl="Rembric"
+        meta={[{ k: 'RUNNING', v: `v${REMBRIC_VERSION}` }]}
       />
 
       {notice ? (
-        <Notice
-          tone={notice.tone === 'error' ? 'danger' : 'lime'}
-          badge={notice.label}
-          className="mt-6"
-        >
-          {notice.body}
-        </Notice>
+        <div className="mt-5">
+          <Flash tone={notice.tone === 'error' ? 'danger' : 'lime'} label={notice.label}>
+            {notice.body}
+          </Flash>
+        </div>
       ) : null}
 
-      <section className="mt-7 max-w-[900px] rounded-2xl border border-border bg-card p-6 md:p-8">
-        <p className="text-[10px] tracking-[.18em] text-primary uppercase">
+      <section className="mt-6 max-w-[900px] border border-border bg-card p-6 md:p-8">
+        <p className="font-mono text-[11px] uppercase tracking-[.16em] text-primary">
           {!enabled
-            ? 'Check disabled'
+            ? 'CHECK DISABLED'
             : info
-              ? `Update available · v${info.latestVersion}`
-              : 'Up to date'}
+              ? `UPDATE AVAILABLE · v${info.latestVersion}`
+              : 'UP TO DATE'}
         </p>
         <p className="mt-4 max-w-3xl text-base leading-7 text-muted-foreground">
           {!enabled ? (
             <>
               This deployment sets{' '}
-              <code className="border border-primary/30 bg-primary/10 px-2 py-1 text-primary">
+              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
                 REMBRIC_UPDATE_CHECK=off
               </code>
               , so Rembric never contacts GitHub and cannot know whether{' '}
-              <code className="border border-primary/30 bg-primary/10 px-2 py-1 text-primary">
+              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
                 v{REMBRIC_VERSION}
               </code>{' '}
               is the latest release. Remove the variable and restart to re-enable the check.
@@ -86,7 +88,7 @@ export default async function UpdatePage({
           ) : info ? (
             <>
               You are running{' '}
-              <code className="border border-primary/30 bg-primary/10 px-2 py-1 text-primary">
+              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
                 v{REMBRIC_VERSION}
               </code>{' '}
               and <b className="font-medium text-primary">v{info.latestVersion}</b> is published.
@@ -95,22 +97,22 @@ export default async function UpdatePage({
           ) : (
             <>
               You are running{' '}
-              <code className="border border-primary/30 bg-primary/10 px-2 py-1 text-primary">
+              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
                 v{REMBRIC_VERSION}
               </code>{' '}
               — no newer release is known. The check runs automatically at most once a day and can
               be disabled with{' '}
-              <code className="border border-primary/30 bg-primary/10 px-2 py-1 text-primary">
+              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
                 REMBRIC_UPDATE_CHECK=off
               </code>
               .
             </>
           )}
         </p>
-        <p className="mt-7 text-xs tracking-[.16em] text-muted-foreground uppercase">
-          Last checked{' '}
-          <span className="ml-2 text-muted-foreground normal-case">
-            {lastChecked ? <Time value={lastChecked} /> : 'Not checked yet in this process'}
+        <p className="mt-7 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
+          LAST CHECKED{' '}
+          <span className="ml-2 font-sans text-sm tracking-normal normal-case">
+            {lastChecked ? <Time value={lastChecked} /> : 'not checked yet in this process'}
           </span>
         </p>
       </section>
@@ -119,25 +121,22 @@ export default async function UpdatePage({
         type="button"
         disabled
         title="The manual check is wired in a later slice"
-        className="mt-5 flex items-center gap-3 border border-border px-5 py-4 text-[11px] font-medium tracking-[.16em] text-muted-foreground uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-5 flex items-center gap-3 border border-border px-5 py-4 font-mono text-[11px] font-semibold uppercase tracking-[.16em] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
       >
         <RefreshCw className="size-3.5" />
         Check now <span aria-hidden="true">→</span>
       </button>
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <Panel padded>
-          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
-            Current version
-          </p>
-          <p className="mt-2 text-2xl font-medium tracking-[-.05em]">v{REMBRIC_VERSION}</p>
-          <p className="mt-1 text-[10px] text-muted-foreground">as reported by this build</p>
-        </Panel>
-        <Panel padded>
-          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
-            Release status
-          </p>
-          <div className="mt-2">
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="CURRENT VERSION"
+          v={`v${REMBRIC_VERSION}`}
+          tone="lime"
+          sub={<span>AS REPORTED BY THIS BUILD</span>}
+        />
+        <StatCard
+          k="RELEASE STATUS"
+          v={
             <Pill tone={!enabled ? 'dim' : info ? 'amber' : 'lime'}>
               {!enabled
                 ? 'Check disabled'
@@ -145,22 +144,19 @@ export default async function UpdatePage({
                   ? `v${info.latestVersion} available`
                   : 'Up to date'}
             </Pill>
-          </div>
-          <p className="mt-2 text-[10px] text-muted-foreground">cached result of the daily check</p>
-        </Panel>
-        <Panel padded>
-          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
-            Manual check
-          </p>
-          <p className="mt-2 text-sm text-muted-foreground">Not wired</p>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            the Server Action boundary is a separate slice
-          </p>
-        </Panel>
-      </section>
+          }
+          sub={<span>CACHED RESULT OF THE DAILY CHECK</span>}
+        />
+        <StatCard
+          k="MANUAL CHECK"
+          v="Not wired"
+          sub={<span>THE SERVER ACTION BOUNDARY IS A SEPARATE SLICE</span>}
+        />
+      </StatGrid>
 
       {info ? (
-        <>
+        <div className="mt-8">
+          <SectionBar name={`Release v${info.latestVersion}`} meta="RELEASE NOTES" />
           <MarkdownPanel
             eyebrow={`Release v${info.latestVersion}`}
             title="Release notes"
@@ -174,7 +170,7 @@ export default async function UpdatePage({
               info.releaseUrl ? (
                 <Link
                   href={info.releaseUrl}
-                  className="rounded-lg border border-border bg-accent px-3 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="border border-border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
                 >
                   Open on GitHub
                 </Link>
@@ -182,11 +178,11 @@ export default async function UpdatePage({
             }
           />
           {info.publishedAt ? (
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              Published <Time value={info.publishedAt} />
+            <p className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+              PUBLISHED <Time value={info.publishedAt} />
             </p>
           ) : null}
-        </>
+        </div>
       ) : null}
     </Page>
   );

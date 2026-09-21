@@ -1,21 +1,27 @@
-import type { LucideIcon } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { utcStamp } from './support';
 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
 /**
- * The dashboard's presentation vocabulary, in one file: the shared frame for a
- * panel, the metric tile, the state pill, the row grid. Every class here is a
- * default shadcn semantic token (`bg-card`, `text-muted-foreground`,
- * `border-border`, `text-primary`) or a stock Tailwind palette entry for the
- * warning tone, which the shadcn theme does not declare.
- *
- * The yellow/amber tone is the one role shadcn has no token for: the theme
- * declares `--destructive` and nothing between it and the accent. Warning
- * states use Tailwind's stock amber, with a `dark:` pair because the same ink
- * cannot clear contrast on both canvases.
+ * The dashboard's presentation vocabulary, in one file, mirroring the
+ * production dashboard's component helpers (`apps/server/src/dashboard/
+ * components.ts` + `styles/core/patterns.css`) as React: the numbered view
+ * head, the stat card, the section bar, the data table, the key/value grid,
+ * the state pill, the flash. Every colour is a stock shadcn semantic token
+ * (`bg-card`, `text-muted-foreground`, `border-border`, `text-primary`) or
+ * Tailwind's stock amber for the warning tone the theme does not declare.
  *
  * Nothing here reads the request or the database.
  */
@@ -29,69 +35,242 @@ const TONE_TEXT: Record<Tone, string> = {
   danger: 'text-destructive',
 };
 
-const TONE_PILL: Record<Tone, string> = {
-  lime: 'bg-primary/10 text-primary',
-  amber: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
-  dim: 'bg-muted text-muted-foreground',
-  danger: 'bg-destructive/10 text-destructive',
+const TONE_DOT: Record<Tone, string> = {
+  lime: 'bg-primary',
+  amber: 'bg-amber-500',
+  dim: 'bg-muted-foreground',
+  danger: 'bg-destructive',
 };
 
-const TONE_TILE: Record<Tone, string> = {
-  lime: 'border-primary/30 bg-primary/5',
-  amber: 'border-amber-500/30 bg-amber-500/5',
-  dim: 'border-border bg-card',
-  danger: 'border-destructive/30 bg-destructive/5',
+const TONE_BORDER: Record<Tone, string> = {
+  lime: 'border-primary/40 text-primary',
+  amber: 'border-amber-500/40 text-amber-600 dark:text-amber-400',
+  dim: 'border-border text-muted-foreground',
+  danger: 'border-destructive/40 text-destructive',
 };
 
-/** The eyebrow label every page and panel carries: uppercase, tracked, muted. */
-export const EYEBROW = 'text-[10px] tracking-[.14em] uppercase';
+/** The square bullet that precedes a label, sized to the current text. */
+function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn('inline-block size-[0.55em] shrink-0', TONE_DOT[tone], className)}
+    />
+  );
+}
+
+/** The mono, tracked, uppercase label every page, panel and stat carries. */
+export const LABEL = 'font-mono text-[11px] uppercase tracking-[.14em]';
 
 /** The page column: one max width, one padding rhythm, for every view. */
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('mx-auto max-w-[1320px] px-5 py-5 md:px-8 md:py-6', className)}>
-      {children}
-    </div>
+    <div className={cn('mx-auto max-w-[1320px] px-5 py-6 md:px-8', className)}>{children}</div>
   );
 }
 
-export function Eyebrow({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
-  return (
-    <div className={cn('flex items-center gap-2 text-primary', EYEBROW)}>
-      <Icon className="size-3" />
-      {children}
-    </div>
-  );
-}
-
-export function PageHead({
-  icon,
-  eyebrow,
+export function ViewHead({
+  num,
   title,
-  description,
-  aside,
+  hl,
+  meta,
 }: {
-  icon: LucideIcon;
-  eyebrow: string;
+  num: string;
   title: string;
-  description?: ReactNode;
-  aside?: ReactNode;
+  hl?: string;
+  meta?: ReadonlyArray<{ k: string; v: ReactNode }>;
+}) {
+  const parts = hl && title.includes(hl) ? title.split(hl) : null;
+  return (
+    <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3 border-b border-border pb-4">
+      <div className="flex items-baseline gap-3">
+        <span className={cn('text-muted-foreground', LABEL)}>{num}</span>
+        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] md:text-3xl">
+          {parts ? (
+            <>
+              {parts[0]}
+              <span className="text-primary">{hl}</span>
+              {parts[1]}
+            </>
+          ) : (
+            title
+          )}
+        </h1>
+      </div>
+      {meta && meta.length > 0 ? (
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+          {meta.map((m) => (
+            <span key={m.k} className={cn('text-muted-foreground', LABEL)}>
+              <b className="font-semibold text-foreground">{m.k}</b> {m.v}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </header>
+  );
+}
+
+/** Back link rendered as the first element of a detail view's content. */
+export function BackLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'inline-flex w-fit items-center gap-2 text-muted-foreground transition-colors hover:text-primary',
+        LABEL,
+      )}
+    >
+      <ArrowLeft className="size-3.5" />
+      {label}
+    </Link>
+  );
+}
+
+/** A section divider: a lime square, an uppercase name, and optional meta/action. */
+export function SectionBar({
+  name,
+  meta,
+  more,
+}: {
+  name: string;
+  meta?: ReactNode;
+  more?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <Eyebrow icon={icon}>{eyebrow}</Eyebrow>
-        <h1 className="mt-2 text-2xl font-medium tracking-[-.06em] md:text-3xl">{title}</h1>
-        {description ? (
-          <p className="mt-2 max-w-2xl text-xs leading-5 text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      {aside}
+    <div className="mb-4 flex flex-wrap items-baseline gap-3 border-b border-border pb-3">
+      <span className={cn('flex items-center gap-2 font-semibold text-foreground', LABEL)}>
+        <Bullet />
+        {name}
+      </span>
+      {meta ? <span className={cn('text-muted-foreground', LABEL)}>{meta}</span> : null}
+      {more ? <span className="ml-auto">{more}</span> : null}
     </div>
   );
 }
 
-/** The header row of a panel: an uppercase eyebrow over a title, plus an action slot. */
+/* ── stat cards ─────────────────────────────────────────────────────── */
+
+export interface StatOpts {
+  k: string;
+  v: ReactNode;
+  tone?: Tone;
+  sub?: ReactNode;
+  href?: string;
+  className?: string;
+}
+
+/**
+ * One metric: a labelled value with a mono sub line, the production
+ * dashboard's `statCard` hierarchy. Renders as a link when `href` is set.
+ */
+export function StatCard({ k, v, tone = 'dim', sub, href, className }: StatOpts) {
+  const inner = (
+    <>
+      <div className={cn('flex items-center gap-2 text-muted-foreground', LABEL)}>
+        <Bullet tone={tone} />
+        {k}
+      </div>
+      <div
+        className={cn(
+          'font-display text-4xl leading-none font-bold tracking-[-.025em]',
+          TONE_TEXT[tone],
+        )}
+      >
+        {v}
+      </div>
+      {sub ? (
+        <div className={cn('mt-auto flex items-center justify-between gap-3', LABEL)}>{sub}</div>
+      ) : null}
+    </>
+  );
+  const box = cn(
+    'flex min-h-[132px] flex-col gap-3 border border-border bg-card p-5 transition-colors',
+    href && 'hover:border-primary',
+    className,
+  );
+  return href ? (
+    <Link href={href} className={box}>
+      {inner}
+    </Link>
+  ) : (
+    <div className={box}>{inner}</div>
+  );
+}
+
+/** The stat strip: six columns at desktop, two at mobile, hairline separators. */
+export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn('grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6', className)}>
+      {children}
+    </div>
+  );
+}
+
+/* ── key/value grid (detail views) ──────────────────────────────────── */
+
+export function Kv({
+  k,
+  v,
+  tone = 'dim',
+  mono = false,
+}: {
+  k: string;
+  v: ReactNode;
+  tone?: Tone;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2 border-b border-r border-border px-5 py-4 md:min-h-[96px]">
+      <div className={cn('flex items-center gap-2 text-muted-foreground', LABEL)}>
+        <Bullet tone={tone} />
+        {k}
+      </div>
+      <div
+        className={cn(
+          'min-w-0 break-words',
+          mono
+            ? 'font-mono text-sm font-medium'
+            : cn('font-display text-xl font-bold tracking-[-.015em]', TONE_TEXT[tone]),
+        )}
+      >
+        {v}
+      </div>
+    </div>
+  );
+}
+
+/** A bordered grid of `Kv` cells; pass the cells as children. */
+export function KvGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        'mb-5 grid border-t border-l border-border sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ── panels ─────────────────────────────────────────────────────────── */
+
+export function Panel({
+  children,
+  className,
+  padded = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  padded?: boolean;
+}) {
+  return (
+    <section className={cn('border border-border bg-card', padded && 'p-5 md:p-6', className)}>
+      {children}
+    </section>
+  );
+}
+
 export function PanelHead({
   eyebrow,
   title,
@@ -111,11 +290,14 @@ export function PanelHead({
       )}
     >
       <div>
-        <p className={cn('text-muted-foreground', EYEBROW)}>{eyebrow}</p>
+        <p className={cn('flex items-center gap-2 text-muted-foreground', LABEL)}>
+          <Bullet />
+          {eyebrow}
+        </p>
         <h2 className="mt-1 text-base font-medium">{title}</h2>
       </div>
       {typeof action === 'string' ? (
-        <span className="text-[11px] text-muted-foreground">{action}</span>
+        <span className={cn('text-muted-foreground', LABEL)}>{action}</span>
       ) : (
         action
       )}
@@ -123,49 +305,65 @@ export function PanelHead({
   );
 }
 
-/** A panel — the one frame every view stacks its content in. */
-export function Panel({
-  children,
-  className,
-  padded = false,
-}: {
-  children: ReactNode;
-  className?: string;
-  padded?: boolean;
-}) {
+/* ── data table (the production `tbl-host` shape) ───────────────────── */
+
+/**
+ * The one table frame every list view uses. The wrapper scrolls horizontally
+ * on narrow screens; the header cells carry the mono, uppercase column labels
+ * the production dashboard's `.tbl thead th` set.
+ */
+export function DataTable({ children }: { children: ReactNode }) {
   return (
-    <section
+    <div className="w-full overflow-x-auto border border-border bg-card">
+      <Table className="min-w-[720px]">{children}</Table>
+    </div>
+  );
+}
+
+export function DataHead({ children }: { children: ReactNode }) {
+  return (
+    <TableHeader>
+      <TableRow className="hover:bg-transparent">{children}</TableRow>
+    </TableHeader>
+  );
+}
+
+export function DataTh({ children, className }: { children?: ReactNode; className?: string }) {
+  return (
+    <TableHead
       className={cn(
-        'overflow-hidden rounded-xl border border-border bg-card',
-        padded && 'p-5 md:p-6',
+        'h-auto bg-background px-4 py-3 font-mono text-[11px] font-medium uppercase tracking-[.14em] text-muted-foreground',
         className,
       )}
     >
       {children}
-    </section>
+    </TableHead>
   );
 }
 
-/** A row container with the default theme's hairline separators. */
-export function Rows({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('divide-y divide-border', className)}>{children}</div>;
+export function DataBody({ children }: { children: ReactNode }) {
+  return <TableBody>{children}</TableBody>;
 }
 
-export function Row({
-  children,
-  className,
-  columns = 'md:grid-cols-[minmax(260px,1.5fr)_1fr_auto_auto]',
-}: {
-  children: ReactNode;
-  className?: string;
-  columns?: string;
-}) {
+export function DataTr({ children, className }: { children: ReactNode; className?: string }) {
+  return <TableRow className={cn('hover:bg-muted/50', className)}>{children}</TableRow>;
+}
+
+export function DataTd({ children, className }: { children?: ReactNode; className?: string }) {
+  return (
+    <TableCell className={cn('px-4 py-3 align-middle whitespace-nowrap', className)}>
+      {children}
+    </TableCell>
+  );
+}
+
+/** The empty state that sits where a table would be. */
+export function TableEmpty({ children }: { children: ReactNode }) {
   return (
     <div
       className={cn(
-        'grid w-full gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/50 md:items-center md:px-6',
-        columns,
-        className,
+        'border border-dashed border-border px-5 py-14 text-center text-muted-foreground',
+        LABEL,
       )}
     >
       {children}
@@ -173,66 +371,84 @@ export function Row({
   );
 }
 
-export function StatTile({
-  label,
-  value,
-  hint,
-  tone = 'dim',
-  className,
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  tone?: Tone;
-  className?: string;
-}) {
-  return (
-    <div className={cn('rounded-xl border px-4 py-4', TONE_TILE[tone], className)}>
-      <p className={cn('text-muted-foreground', EYEBROW)}>{label}</p>
-      <p className={cn('mt-2 text-2xl font-medium tracking-[-.05em]', TONE_TEXT[tone])}>{value}</p>
-      {hint ? <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p> : null}
-    </div>
-  );
-}
+/* ── pills ──────────────────────────────────────────────────────────── */
 
+/** The square bordered pill: an optional tone dot plus an uppercase label. */
 export function Pill({ children, tone = 'dim' }: { children: ReactNode; tone?: Tone }) {
   return (
-    <span className={cn('w-fit rounded-full px-2 py-1 text-[10px]', TONE_PILL[tone])}>
+    <span
+      className={cn(
+        'inline-flex w-fit items-center gap-2 border bg-transparent px-2 py-0.5 font-mono text-[10px] whitespace-nowrap uppercase tracking-[.12em]',
+        TONE_BORDER[tone],
+      )}
+    >
+      <Bullet tone={tone} className="size-[7px]" />
       {children}
     </span>
   );
 }
 
-/** The square bordered chip — the shape for a scope. */
+const STATUS_TONE: Record<string, Tone> = {
+  active: 'lime',
+  superseded: 'amber',
+  archived: 'dim',
+  pending: 'dim',
+  orphaned: 'danger',
+  judged: 'lime',
+  deleted: 'danger',
+};
+
+export function StatusPill({ status }: { status: string }) {
+  return <Pill tone={STATUS_TONE[status] ?? 'dim'}>{status}</Pill>;
+}
+
+export function ReviewPill() {
+  return <Pill tone="amber">needs review</Pill>;
+}
+
+/** The square bordered chip — the shape for a scope or a tag. */
 export function Chip({ children, tone = 'lime' }: { children: ReactNode; tone?: Tone }) {
-  const border =
-    tone === 'lime'
-      ? 'border-primary/40 text-primary'
-      : tone === 'danger'
-        ? 'border-destructive/40 text-destructive'
-        : 'border-border text-muted-foreground';
   return (
-    <span className={cn('w-fit border px-2 py-1 text-[10px] tracking-[.12em] uppercase', border)}>
+    <span
+      className={cn(
+        'inline-flex w-fit items-center border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[.12em]',
+        TONE_BORDER[tone],
+      )}
+    >
       {children}
     </span>
   );
 }
 
-export function Fact({ label, value }: { label: string; value: ReactNode }) {
+export function Tag({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3">
-      <p className={cn('text-muted-foreground', EYEBROW)}>{label}</p>
-      <p className="mt-2 text-sm">{value}</p>
-    </div>
+    <span className="inline-flex w-fit items-center border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+      {children}
+    </span>
   );
 }
 
-export function Bar({ percent, tone = 'lime' }: { percent: number; tone?: 'lime' | 'amber' }) {
+/* ── bars, notices, flash, timestamps ──────────────────────────────── */
+
+export function Bar({
+  percent,
+  tone = 'lime',
+}: {
+  percent: number;
+  tone?: 'lime' | 'amber' | 'dim';
+}) {
   const clamped = Math.min(100, Math.max(0, percent));
   return (
-    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+    <div className="mt-2 h-1.5 overflow-hidden bg-muted">
       <div
-        className={cn('h-full rounded-full', tone === 'lime' ? 'bg-primary' : 'bg-amber-500')}
+        className={cn(
+          'h-full',
+          tone === 'lime'
+            ? 'bg-primary'
+            : tone === 'amber'
+              ? 'bg-amber-500'
+              : 'bg-muted-foreground',
+        )}
         style={{ width: `${clamped}%` }}
       />
     </div>
@@ -250,36 +466,53 @@ export function Notice({
   children: ReactNode;
   className?: string;
 }) {
-  const accent =
-    tone === 'amber'
-      ? 'border-amber-500/30 bg-amber-500/5'
-      : tone === 'danger'
-        ? 'border-destructive/30 bg-destructive/5'
-        : 'border-primary/30 bg-primary/5';
   return (
-    <div className={cn('rounded-xl border px-4 py-3 text-sm', accent, className)}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={cn(TONE_TEXT[tone], EYEBROW)}>{badge}</span>
-        <span className="text-xs text-muted-foreground">{children}</span>
-      </div>
+    <div
+      className={cn(
+        'flex flex-wrap items-center gap-3 border bg-card px-4 py-3',
+        tone === 'amber'
+          ? 'border-amber-500/40'
+          : tone === 'danger'
+            ? 'border-destructive/40'
+            : 'border-primary/40',
+        className,
+      )}
+    >
+      <span className={cn('flex items-center gap-2 font-semibold', LABEL, TONE_TEXT[tone])}>
+        <Bullet tone={tone} />
+        {badge}
+      </span>
+      <span className="text-xs text-muted-foreground">{children}</span>
     </div>
   );
 }
 
-export function EmptyNote({ children }: { children: ReactNode }) {
+/** The flash banner the production `flash()` renders: a tone label + body. */
+export function Flash({
+  tone = 'lime',
+  label,
+  children,
+}: {
+  tone?: Tone;
+  label: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="px-5 py-10 text-center md:px-6">
-      <p className="text-xs text-muted-foreground">{children}</p>
+    <div
+      className={cn(
+        'mb-5 flex flex-wrap items-center gap-4 border bg-card px-5 py-4',
+        TONE_BORDER[tone],
+      )}
+    >
+      <span className={cn('flex items-center gap-2 font-semibold', LABEL, TONE_TEXT[tone])}>
+        <Bullet tone={tone} />
+        {label}
+      </span>
+      <span className="text-sm">{children}</span>
     </div>
   );
 }
 
-/**
- * The dashboard's single timestamp renderer. The UTC string is the fallback,
- * not the contract: `data-rembric-ts` is what the layout's inline script
- * upgrades to the viewer's timezone, so a server render and a hydrated render
- * never disagree about the text node before that upgrade runs.
- */
 export function Time({
   value,
   className,

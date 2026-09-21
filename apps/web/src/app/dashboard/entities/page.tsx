@@ -1,5 +1,4 @@
 import { ENTITY_KINDS, type EntityKind } from '@rembric/db';
-import { FileText } from 'lucide-react';
 import Link from 'next/link';
 
 import { entitiesQuery, readEntitiesFilters, type SearchParams } from './filters';
@@ -14,19 +13,25 @@ import {
 import { PAGE_SIZE, shortId } from '@/components/dashboard/support';
 import {
   Chip,
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  TableEmpty,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The entities list, in the v0 composition.
+ * The entities list, in the production dashboard's composition: the numbered
+ * view head, the corpus stats, the kind/single-reference filter bar, and the
+ * entities as a table with the kind/value/project/links columns.
  *
  * The read is the ported view's own — `adminListEntities` paginates in SQL, so
  * the page index and the filters are the only state and both live in the URL.
@@ -36,10 +41,6 @@ import { getServices } from '@/lib/services';
  * The retired view's Rebuild form is still NOT ported: it is a mutation whose
  * Server Action boundary is a separate slice, so the backlog stays visible as a
  * fact and no control is offered.
- *
- * The route is not in the sidebar: entities are derived data (the
- * `memory_entity_links` table), so their one affordance is the link into the
- * memories view, and the rail lists the durable aggregates only.
  */
 export const dynamic = 'force-dynamic';
 
@@ -75,39 +76,41 @@ export default async function EntitiesPage({
 
   return (
     <Page>
-      <PageHead
-        icon={FileText}
-        eyebrow="Derived data"
-        title="Entities"
-        description="Names, paths and identifiers extracted from memory content. Entities are derived, never authored: they exist to make memory searchable by the things it mentions."
-        aside={
-          <div className="text-right text-[11px] text-muted-foreground">
-            <p>{total} entities</p>
-            <p>{backlog} awaiting scan</p>
-          </div>
-        }
+      <ViewHead
+        num="05b"
+        title="Rembric Entities."
+        hl="Rembric"
+        meta={[
+          { k: 'TOTAL ENTITIES', v: total },
+          { k: 'BACKFILL BACKLOG', v: backlog },
+        ]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile label="Entities matched" value={total} tone="lime" hint="whole corpus count" />
-        <StatTile
-          label="Backfill backlog"
-          value={backlog}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="ENTITIES MATCHED"
+          v={total}
+          tone="lime"
+          sub={<span>WHOLE CORPUS COUNT</span>}
+        />
+        <StatCard
+          k="BACKFILL BACKLOG"
+          v={backlog}
           tone={backlog > 0 ? 'amber' : 'dim'}
-          hint="memories not scanned yet"
+          sub={<span>MEMORIES NOT SCANNED YET</span>}
         />
-        <StatTile
-          label="Kinds"
-          value={counts.length}
-          hint={counts.map((c) => c.kind).join(', ') || '—'}
+        <StatCard
+          k="KINDS"
+          v={counts.length}
+          sub={<span>{counts.map((c) => c.kind).join(', ') || '—'}</span>}
         />
-      </section>
+      </StatGrid>
 
       <FilterForm action="/dashboard/entities" className="mt-6">
-        <FilterField label="Kind" htmlFor="e-kind" className="w-44">
+        <FilterField label="KIND" htmlFor="e-kind">
           <FilterSelect id="e-kind" name="kind" value={filters.kind} options={KIND_OPTIONS} />
         </FilterField>
-        <FilterField label="Reference count" htmlFor="e-single" className="w-44">
+        <FilterField label="REFERENCES" htmlFor="e-single">
           <FilterSelect
             id="e-single"
             name="single_ref"
@@ -121,58 +124,60 @@ export default async function EntitiesPage({
         <FilterActions clearHref="/dashboard/entities" />
       </FilterForm>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Extracted graph"
-          title="Entities by reference count"
-          action={`${rows.length} of ${total}`}
-        />
-        {rows.length === 0 ? (
-          <EmptyNote>
-            {isFiltered
-              ? 'No entity matches this filter set.'
-              : 'No entity has been extracted yet. The backfill scans memories as they are written.'}
-          </EmptyNote>
-        ) : (
-          <Rows>
+      <SectionBar name="Extracted graph" meta={`${rows.length} OF ${total}`} />
+      {rows.length === 0 ? (
+        <TableEmpty>
+          {isFiltered ? 'NO ENTITY MATCHES THIS FILTER' : 'NO ENTITY HAS BEEN EXTRACTED YET'}
+        </TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>kind</DataTh>
+            <DataTh>value</DataTh>
+            <DataTh>project</DataTh>
+            <DataTh>links</DataTh>
+            <DataTh>actions</DataTh>
+          </DataHead>
+          <DataBody>
             {rows.map((entity) => (
-              <Row key={entity.id} columns="md:grid-cols-[1.6fr_1fr_1fr_auto]">
-                <div className="flex items-start gap-3">
-                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/10" />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-foreground">{entity.value}</p>
-                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                      {shortId(entity.id)}
-                    </p>
-                  </div>
-                </div>
-                <Chip tone={entity.kind === 'path' ? 'lime' : 'dim'}>{entity.kind}</Chip>
-                <span className="text-[11px] text-muted-foreground">
-                  {entity.projectId
-                    ? (projectById.get(entity.projectId) ?? 'project')
-                    : 'global scope'}
-                </span>
-                <Link
-                  href={`/dashboard/memories?review=&q=${encodeURIComponent(entity.value)}`}
-                  className="text-[11px] text-muted-foreground hover:text-primary"
-                >
-                  {entity.linkCount} linked →
-                </Link>
-              </Row>
+              <DataTr key={entity.id}>
+                <DataTd>
+                  <Chip tone={entity.kind === 'path' ? 'lime' : 'dim'}>{entity.kind}</Chip>
+                </DataTd>
+                <DataTd className="max-w-[420px] truncate">
+                  <span className="text-foreground">{entity.value}</span>
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    {shortId(entity.id)}
+                  </span>
+                </DataTd>
+                <DataTd className="text-muted-foreground">
+                  {entity.projectId ? (projectById.get(entity.projectId) ?? 'project') : '—'}
+                </DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
+                  {entity.linkCount}
+                </DataTd>
+                <DataTd>
+                  <Link
+                    href={`/dashboard/memories?review=&q=${encodeURIComponent(entity.value)}`}
+                    className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
+                  >
+                    Linked →
+                  </Link>
+                </DataTd>
+              </DataTr>
             ))}
-          </Rows>
-        )}
-        <div className="px-5 pb-5 md:px-6">
-          <Pager
-            page={filters.page}
-            hasMore={hasMore}
-            total={total}
-            totalLabel={`${rows.length} rows`}
-            path="/dashboard/entities"
-            query={roundTripQuery}
-          />
-        </div>
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
+
+      <Pager
+        page={filters.page}
+        hasMore={hasMore}
+        total={total}
+        totalLabel={`${rows.length} ROWS`}
+        path="/dashboard/entities"
+        query={roundTripQuery}
+      />
     </Page>
   );
 }

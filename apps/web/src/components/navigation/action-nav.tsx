@@ -9,21 +9,14 @@ import {
   ExpandableActionBar,
   type ExpandableActionBarItem,
 } from '@/components/motion/expandable-action-bar';
-import { NAV, navEntryForPath } from '@/lib/nav';
+import { NAV, navEntryForPath, type NavEntry } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
 /** Counts the bar paints as a badge, each keyed to the one nav entry that resolves it. */
 export interface NavBadges {
-  readonly liveSessions?: number;
   readonly needsReview?: number;
   readonly pendingJudgments?: number;
 }
-
-const BADGE_SOURCE: Record<string, keyof NavBadges> = {
-  sessions: 'liveSessions',
-  memories: 'needsReview',
-  judgments: 'pendingJudgments',
-};
 
 const NAV_BY_KEY = new Map(NAV.map((entry) => [entry.key, entry]));
 
@@ -70,7 +63,7 @@ export function ActionNav({
         id: entry.key,
         label: entry.label,
         icon: <entry.icon className="size-4" />,
-        badge: badgeCount(entry.key, badges),
+        badge: badgeCount(entry, badges),
       })),
     [badges],
   );
@@ -91,10 +84,7 @@ export function ActionNav({
   return (
     <>
       <header
-        className={cn(
-          BAR_BOX,
-          'fixed inset-x-0 top-0 z-30 border-b border-border bg-background/95 backdrop-blur',
-        )}
+        className={cn(BAR_BOX, 'fixed inset-x-0 top-0 z-30 border-b border-border bg-background')}
       >
         <div className="mx-auto flex h-full w-full max-w-[1320px] items-center gap-3 px-5">
           <Link
@@ -131,9 +121,8 @@ export function ActionNav({
   );
 }
 
-function badgeCount(key: string, badges: NavBadges): string | undefined {
-  const source = BADGE_SOURCE[key];
-  const count = source ? badges[source] : undefined;
+function badgeCount(entry: NavEntry, badges: NavBadges): string | undefined {
+  const count = entry.badgeKey ? badges[entry.badgeKey] : undefined;
   return count === undefined || count <= 0 ? undefined : String(count);
 }
 

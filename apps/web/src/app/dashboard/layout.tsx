@@ -1,3 +1,5 @@
+import { REVIEW_TTL_MS } from '@rembric/core';
+import type { MemoryType } from '@rembric/db';
 import type { ReactNode } from 'react';
 
 import { ActionNav } from '@/components/navigation/action-nav';
@@ -8,8 +10,8 @@ import { REMBRIC_VERSION } from '@/lib/version';
  * The dashboard shell. Two things live here rather than in the navigation
  * component, because both are server-side facts:
  *
- * - **The nav's live-session count.** It comes from the service graph, so the
- *   client component is handed a value and never the repositories. Every
+ * - **The nav's two badge counts.** They come from the service graph, so the
+ *   client component is handed values and never the repositories. Every
  *   `/dashboard` page is `force-dynamic`, so this runs per request and never
  *   during `next build`.
  * - **The theme bootstrap.** It runs during HTML parsing, before the body
@@ -27,9 +29,17 @@ export const dynamic = 'force-dynamic';
 
 const THEME_STORAGE_KEY = 'rembric-theme';
 
+const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
+  (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
+);
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const { agentSessions } = getServices();
-  const liveSessions = agentSessions.adminCountByStatus().active;
+  const { repos } = getServices();
+  const needsReview = repos.memory.adminCountNeedsReview({
+    nowMs: Date.now(),
+    ttlByType: TTL_BY_TYPE,
+  });
+  const pendingJudgments = repos.relations.adminCountByStatus('pending');
 
   return (
     <>
@@ -38,7 +48,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <ActionNav
           version={REMBRIC_VERSION}
           themeStorageKey={THEME_STORAGE_KEY}
-          badges={{ liveSessions }}
+          badges={{ needsReview, pendingJudgments }}
         >
           {children}
         </ActionNav>

@@ -1,44 +1,37 @@
-import { REVIEW_TTL_MS } from '@rembric/core';
-import type { MemoryType } from '@rembric/db';
-import {
-  BrainCircuit,
-  CheckCircle2,
-  Gavel,
-  LayoutDashboard,
-  ShieldCheck,
-  Sparkles,
-} from 'lucide-react';
 import Link from 'next/link';
 
-import { formatBytes, relativeTime } from '@/components/dashboard/support';
+import { resolveDataDir } from '@/app/dashboard/maintenance/data';
+import { formatBytes, relativeTime, shortId } from '@/components/dashboard/support';
 import {
-  Rows,
-  Row,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
   Pill,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  StatusPill,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The overview — the operator's whole-corpus view, in the v0 composition: the
- * live-session band, the four metric tiles, the memory-health and attention
- * panels, and the closing policy strip.
+ * The overview — the operator's whole-corpus view, in the production
+ * dashboard's composition: the six stat cards, the recent-judgments and
+ * recent-sessions tiles, the consolidation-health strip, and the activity and
+ * system cards.
  *
  * Every read is the retired Hono home's own (`apps/server/src/server/dashboard-
  * router.ts`'s `GET /`): the same repository methods, the same limits, the same
- * unfiltered scope. `page.tsx` in the ported dashboard read them too; what
- * changed here is only the surface.
+ * unfiltered scope.
  */
 export const dynamic = 'force-dynamic';
-
-const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
-  (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
-);
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
 const DAY_MS = 86_400_000;
@@ -51,15 +44,12 @@ export default function DashboardOverviewPage() {
   const memoriesByStatus = repos.memory.countRowsByStatus();
   const totalMemories = memoriesByStatus.reduce((acc, row) => acc + row.count, 0);
   const activeMemories = memoriesByStatus.find((row) => row.status === 'active')?.count ?? 0;
+  const archivedMemories = memoriesByStatus.find((row) => row.status === 'archived')?.count ?? 0;
+  const supersededMemories = Math.max(0, totalMemories - activeMemories - archivedMemories);
+
   const projects = repos.projects.count();
   const archivedProjects = repos.projects.adminCountArchived();
   const activeSessions = agentSessions.adminCountByStatus().active;
-  const totalSessions = repos.agentSessions.adminCount({ deleted: false });
-  const needsReview = repos.memory.adminCountNeedsReview({
-    nowMs,
-    ttlByType: TTL_BY_TYPE,
-  });
-  const pendingJudgments = repos.relations.adminCountByStatus('pending');
   const orphanedPendings = repos.relations.adminCountByStatus('orphaned');
 
   // The same seven-day window the ported overview charted, rebuilt from the
@@ -68,311 +58,325 @@ export default function DashboardOverviewPage() {
     repos.memory.adminCountCreatedByDay(new Date(nowMs - 6 * DAY_MS)),
   );
 
-  const liveSessions = repos.agentSessions.adminList({
-    deleted: false,
-    status: 'active',
-    activeFirst: true,
-    limit: 3,
-    offset: 0,
-  });
+  const recentJudgments = repos.relations.adminRecentJudged(4);
+  const recentSessions = repos.agentSessions.adminRecent(5);
 
   const lastRun = repos.consolidation.adminListRuns(1, 0).at(0) ?? null;
-  const lastRunOps = lastRun ? repos.consolidation.adminOpCounts(lastRun.id) : null;
-  const searchableShare =
-    totalMemories > 0 ? Math.round((activeMemories / totalMemories) * 100) : 0;
+  const lastRunOps = lastRun ? repos.consolidation.adminListOps(lastRun.id) : [];
+  const lastRunReverted = lastRunOps.filter((op) => op.revertedAt !== null).length;
 
   const pageCount = db.raw.pragma('page_count', { simple: true }) as number;
   const pageSize = db.raw.pragma('page_size', { simple: true }) as number;
+  const dbSize = formatBytes(pageCount * pageSize);
+  const dbPath = `${resolveDataDir()}/data.db`;
+  const host = `${process.env.REMBRIC_HOST ?? '127.0.0.1'}:${process.env.REMBRIC_PORT ?? '8787'}`;
 
   return (
     <Page>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <PageHead
-          icon={LayoutDashboard}
-          eyebrow="Workspace home"
-          title="Your memory layer, at a glance."
+      <ViewHead num="01" title="Rembric Overview." hl="Rembric" />
+
+      <StatGrid className="mt-6">
+        <StatCard
+          k="TOTAL MEMORIES"
+          v={totalMemories}
+          sub={<span>LAST 7 DAYS</span>}
+          href="/dashboard/memories"
         />
-        <p className="max-w-md text-xs leading-5 text-muted-foreground">
-          Context between sessions, memory health, and what is running now.
-        </p>
+        <StatCard
+          k="ACTIVE MEMORIES"
+          v={activeMemories}
+          tone="lime"
+          sub={<span>{pctOfTotal(activeMemories, totalMemories)} RECALLABLE</span>}
+          href="/dashboard/memories?status=active"
+        />
+        <StatCard
+          k="SUPERSEDED MEMORIES"
+          v={supersededMemories}
+          tone={supersededMemories > 0 ? 'amber' : 'lime'}
+          sub={<span>SAFE TO ARCHIVE</span>}
+          href="/dashboard/memories?status=superseded"
+        />
+        <StatCard
+          k="ARCHIVED MEMORIES"
+          v={archivedMemories}
+          tone="dim"
+          sub={<span>DECAYED</span>}
+          href="/dashboard/memories?status=archived"
+        />
+        <StatCard
+          k="PROJECTS"
+          v={projects}
+          tone="lime"
+          sub={<span>{archivedProjects} ARCHIVED</span>}
+          href="/dashboard/projects"
+        />
+        <StatCard
+          k="ACTIVE SESSIONS"
+          v={activeSessions}
+          tone={activeSessions > 0 ? 'lime' : 'dim'}
+          sub={<span>CONNECTED NOW</span>}
+          href="/dashboard/sessions"
+        />
+      </StatGrid>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <div>
+          <SectionBar
+            name="Recent judgments"
+            meta="NEWEST FIRST"
+            more={<OpenAll href="/dashboard/judgments" />}
+          />
+          {recentJudgments.length === 0 ? (
+            <TableEmpty>NO JUDGMENTS YET</TableEmpty>
+          ) : (
+            <DataTable>
+              <DataHead>
+                <DataTh>verdict</DataTh>
+                <DataTh>source → target</DataTh>
+                <DataTh>judged</DataTh>
+                <DataTh>actions</DataTh>
+              </DataHead>
+              <DataBody>
+                {recentJudgments.map((relation) => (
+                  <DataTr key={relation.id}>
+                    <DataTd>
+                      <Pill tone={relation.relation === null ? 'dim' : 'lime'}>
+                        {relation.relation ?? 'pending'}
+                      </Pill>
+                    </DataTd>
+                    <DataTd className="max-w-[360px] truncate">
+                      <Link
+                        href={`/dashboard/memories/${relation.sourceId}`}
+                        className="transition-colors hover:text-primary"
+                      >
+                        {relation.sourceTitle}
+                      </Link>
+                      <span className="mx-2 text-muted-foreground">→</span>
+                      <Link
+                        href={`/dashboard/memories/${relation.targetId}`}
+                        className="transition-colors hover:text-primary"
+                      >
+                        {relation.targetTitle}
+                      </Link>
+                    </DataTd>
+                    <DataTd className="font-mono text-xs text-muted-foreground">
+                      <Time value={relation.judgedAt ?? relation.createdAt} />
+                    </DataTd>
+                    <DataTd>
+                      <Link
+                        href={`/dashboard/judgments/${relation.id}`}
+                        className="font-mono text-[11px] uppercase tracking-[.14em] hover:text-primary"
+                      >
+                        View →
+                      </Link>
+                    </DataTd>
+                  </DataTr>
+                ))}
+              </DataBody>
+            </DataTable>
+          )}
+        </div>
+
+        <div>
+          <SectionBar
+            name="Recent sessions"
+            meta="NEWEST FIRST"
+            more={<OpenAll href="/dashboard/sessions" />}
+          />
+          {recentSessions.length === 0 ? (
+            <TableEmpty>NO SESSIONS YET</TableEmpty>
+          ) : (
+            <DataTable>
+              <DataHead>
+                <DataTh>when</DataTh>
+                <DataTh>agent</DataTh>
+                <DataTh>project</DataTh>
+                <DataTh>memories</DataTh>
+                <DataTh>status</DataTh>
+              </DataHead>
+              <DataBody>
+                {recentSessions.map((session) => (
+                  <DataTr key={session.id}>
+                    <DataTd className="font-mono text-xs text-muted-foreground">
+                      <Time value={session.startedAt} />
+                    </DataTd>
+                    <DataTd>
+                      <Link
+                        href={`/dashboard/sessions/${session.id}`}
+                        className="transition-colors hover:text-primary"
+                      >
+                        {session.agent}
+                      </Link>
+                    </DataTd>
+                    <DataTd className="text-muted-foreground">{session.projectSlug ?? '—'}</DataTd>
+                    <DataTd className="font-mono text-xs text-muted-foreground">
+                      {session.memCount}
+                    </DataTd>
+                    <DataTd>
+                      <StatusPill status={session.status} />
+                    </DataTd>
+                  </DataTr>
+                ))}
+              </DataBody>
+            </DataTable>
+          )}
+        </div>
       </div>
 
-      <section className="mt-5 rounded-xl border border-primary/30 bg-card">
-        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border px-5 py-5 md:px-6">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="size-2 rounded-full bg-primary" />
-              <p className={`text-primary text-[10px] tracking-[.14em] uppercase`}>Live now</p>
-            </div>
-            <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">Sessions in progress</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Context currently being created across your workspace.
-            </p>
-          </div>
-          <span className="text-3xl font-medium tracking-[-.08em] text-primary">
-            {activeSessions}
-            <span className="ml-1 text-xs font-normal tracking-normal text-muted-foreground">
-              active
-            </span>
-          </span>
-        </div>
-        {liveSessions.length === 0 ? (
-          <p className="px-5 py-5 text-xs text-muted-foreground md:px-6">
-            No session is open right now. Start one from any connected client and its context
-            appears here.
-          </p>
-        ) : (
-          <div className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
-            {liveSessions.map((session) => (
+      <div className="mt-8">
+        <SectionBar
+          name="Consolidation health"
+          meta={lastRun ? `LAST RUN · ${shortId(lastRun.id)}` : 'NO RUN YET'}
+          more={
+            lastRun ? (
               <Link
-                key={session.id}
-                href={`/dashboard/sessions/${session.id}`}
-                className="flex items-center gap-3 px-5 py-5 text-left transition-colors hover:bg-primary/10 md:px-6"
+                href={`/dashboard/consolidation/${lastRun.id}`}
+                className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
               >
-                <span className="size-2 shrink-0 rounded-full bg-primary" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">
-                    {session.projectSlug ?? session.title ?? 'Global scope'}
-                  </p>
-                  <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                    {session.description ?? 'Session in progress'}
-                  </p>
-                  <p className={`mt-3 text-primary text-[10px]`}>{session.agent}</p>
-                </div>
-                <span className="self-start text-[10px] text-muted-foreground/70">
-                  {relativeTime(session.startedAt, nowMs)}
-                </span>
+                Open run →
               </Link>
+            ) : undefined
+          }
+        />
+        <div className="grid border-t border-l border-border sm:grid-cols-2 xl:grid-cols-4">
+          <HealthCell
+            label="Last run"
+            value={lastRun ? 'OK' : '—'}
+            tone={lastRun ? 'lime' : 'dim'}
+            sub={
+              lastRun ? `${relativeTime(lastRun.finishedAt ?? lastRun.startedAt, nowMs)}` : 'NEVER'
+            }
+          />
+          <HealthCell
+            label="Ops applied"
+            value={lastRunOps.length}
+            sub={`${lastRunReverted} REVERTED`}
+          />
+          <HealthCell
+            label="Orphaned pendings"
+            value={orphanedPendings}
+            tone={orphanedPendings > 0 ? 'amber' : 'lime'}
+            sub="ORPHANED BY THE SWEEP"
+          />
+          <HealthCell label="Trigger" value="ON SESSION START" sub="THROTTLED PER SCOPE" mono />
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <div>
+          <SectionBar name="Activity · 7 days" meta="MEMORIES CREATED · PER DAY" />
+          <div
+            className="flex items-end gap-2 border border-border bg-card p-5"
+            aria-label="Memories created per day, last seven days"
+          >
+            {activity.days.map((day, index) => (
+              <div key={day.day} className="flex flex-1 flex-col items-center gap-2">
+                <div className="flex h-24 w-full items-end bg-muted">
+                  <div
+                    className="w-full bg-primary"
+                    style={{
+                      height: `${Math.max(4, Math.round((day.count / activity.peak) * 100))}%`,
+                    }}
+                    title={`${day.count} memories`}
+                  />
+                </div>
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {WEEKDAYS[index]}
+                </span>
+              </div>
             ))}
           </div>
-        )}
-      </section>
+        </div>
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-4">
-        <StatTile
-          label="Memories"
-          value={totalMemories.toLocaleString('en-US')}
-          hint={`${needsReview} to review`}
-          tone={needsReview > 0 ? 'amber' : 'dim'}
-          className="bg-muted"
-        />
-        <StatTile
-          label="Sessions"
-          value={totalSessions.toLocaleString('en-US')}
-          hint={`${activeSessions} live`}
-          className="bg-muted"
-        />
-        <StatTile
-          label="Projects"
-          value={projects}
-          hint={`${archivedProjects} archived`}
-          className="bg-muted"
-        />
-        <StatTile
-          label="Storage"
-          value={
-            <>
-              {formatBytes(pageCount * pageSize).replace(/ (B|KB|MB|GB|TB)$/, '')}
-              <span className="ml-1 text-xs text-muted-foreground">
-                {formatBytes(pageCount * pageSize).replace(/^[\d.]+ /, '')}
-              </span>
-            </>
-          }
-          hint="local SQLite file"
-          className="bg-muted"
-        />
-      </section>
-
-      <section className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
-        <Panel padded>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className={`text-muted-foreground text-[10px] tracking-[.14em] uppercase`}>
-                Memory health
-              </p>
-              <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">A clean context base</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {activeMemories.toLocaleString('en-US')} active · {needsReview} awaiting review
-              </p>
-            </div>
-            <BrainCircuit className="size-5 text-primary" />
-          </div>
-          <div className="mt-7 flex flex-wrap items-center gap-7">
-            <div
-              className="relative grid size-28 shrink-0 place-items-center rounded-full"
-              style={{
-                background: `conic-gradient(var(--primary) 0 ${searchableShare}%, var(--muted) ${searchableShare}% 100%)`,
-              }}
-            >
-              <div className="grid size-20 place-items-center rounded-full bg-card">
-                <p className="text-xl font-medium">{searchableShare}%</p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-3 text-xs">
-              <div>
-                <p className="text-muted-foreground">Last consolidation</p>
-                <p className="mt-1 text-sm">
-                  {lastRun ? <Time value={lastRun.startedAt} /> : 'Never run'}
-                </p>
-                {lastRunOps ? (
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    {lastRunOps.total} operation{lastRunOps.total === 1 ? '' : 's'} journaled
-                  </p>
-                ) : null}
-              </div>
-              <div>
-                <p className="text-muted-foreground">Database</p>
-                <p className="mt-1 text-sm">Healthy · SQLite</p>
-              </div>
-            </div>
-          </div>
-        </Panel>
-
-        <Panel padded>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className={`text-muted-foreground text-[10px] tracking-[.14em] uppercase`}>
-                Attention
-              </p>
-              <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">Worth a look</h2>
-            </div>
-            <ShieldCheck className="size-5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div className="mt-6 flex flex-col gap-3">
-            <AttentionRow
-              href="/dashboard/memories?review=needs_review"
-              count={needsReview}
-              label="Memories need review"
-              detail="Past their review TTL — re-affirm with memory.confirm"
-              tone="amber"
-            />
-            <AttentionRow
-              href="/dashboard/judgments?status=pending"
-              count={pendingJudgments}
-              label="Judgments pending"
-              detail="Candidate pairs waiting for a verdict"
-              tone="lime"
-            />
-            <AttentionRow
-              href="/dashboard/judgments?status=orphaned"
-              count={orphanedPendings}
-              label="Judgments orphaned"
-              detail="Endpoints archived or superseded before a verdict"
-              tone="dim"
-            />
-          </div>
-          <div className="mt-5 flex items-center gap-3 text-xs text-muted-foreground">
-            <CheckCircle2 className="size-4 text-primary" />
-            Append-only storage — nothing was deleted to reach this state
-          </div>
-        </Panel>
-      </section>
-
-      <Panel className="mt-6" padded>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Sparkles className="size-4 text-primary" />
-            <p className="text-xs text-muted-foreground">
-              Seven-day memory activity, by UTC day. Rembric organizes memory as you work.
-            </p>
-          </div>
-          <div className="flex items-center gap-5 text-[11px] text-muted-foreground">
-            <span>Local-first</span>
-            <span>Reversible</span>
-            <span>Project-scoped</span>
+        <div>
+          <SectionBar name="System" meta="SQLITE · NODE · MCP" />
+          <div className="flex flex-col gap-3 border border-border bg-card p-5">
+            <SystemRow label="DB FILE" value={dbPath} tone="lime" />
+            <SystemRow label="DB SIZE" value={dbSize} />
+            <SystemRow label="FTS INDEX" value="memory_fts · contentless" />
+            <SystemRow label="MCP SERVER" value={host} tone="lime" />
+            <SystemRow label="NODE" value={process.versions.node} />
           </div>
         </div>
-        <div
-          className="mt-5 flex items-end gap-2"
-          aria-label="Memories created per day, last seven days"
-        >
-          {activity.days.map((day, index) => (
-            <div key={day.day} className="flex flex-1 flex-col items-center gap-2">
-              <div className="flex h-16 w-full items-end rounded-md bg-muted">
-                <div
-                  className="w-full rounded-md bg-primary/10"
-                  style={{
-                    height: `${Math.max(4, Math.round((day.count / activity.peak) * 100))}%`,
-                  }}
-                  title={`${day.count} memories`}
-                />
-              </div>
-              <span className="text-[10px] text-muted-foreground/70">{WEEKDAYS[index]}</span>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Recent signals"
-          title="What changed lately"
-          action={
-            <Link
-              href="/dashboard/activity"
-              className="text-[11px] text-primary hover:text-primary"
-            >
-              Open activity →
-            </Link>
-          }
-        />
-        <Rows>
-          {repos.relations.adminRecentJudged(4).map((relation) => (
-            <Row key={relation.id} columns="md:grid-cols-[auto_1.4fr_1fr_auto]">
-              <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
-                <Gavel className="size-3.5" />
-              </span>
-              <div>
-                <p className="text-sm text-foreground">{relation.sourceTitle}</p>
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  {relation.relation ?? 'pending'} → {relation.targetTitle}
-                </p>
-              </div>
-              <span className="text-[11px] text-muted-foreground">
-                <Time value={relation.judgedAt ?? relation.createdAt} />
-              </span>
-              <Pill tone="lime">{relation.status}</Pill>
-            </Row>
-          ))}
-        </Rows>
-      </Panel>
+      </div>
     </Page>
   );
 }
 
-function AttentionRow({
-  href,
-  count,
-  label,
-  detail,
-  tone,
-}: {
-  href: string;
-  count: number;
-  label: string;
-  detail: string;
-  tone: 'lime' | 'amber' | 'dim';
-}) {
-  const fill =
-    tone === 'amber'
-      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-      : tone === 'lime'
-        ? 'bg-primary/10 text-primary'
-        : 'bg-accent text-muted-foreground';
+function OpenAll({ href }: { href: string }) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 rounded-xl bg-accent p-3 transition-colors hover:bg-accent"
+      className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
     >
-      <span className={`grid size-8 shrink-0 place-items-center rounded-lg text-xs ${fill}`}>
-        {count}
-      </span>
-      <div>
-        <p className="text-xs">{label}</p>
-        <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p>
-      </div>
+      OPEN ALL ›
     </Link>
   );
+}
+
+function HealthCell({
+  label,
+  value,
+  tone,
+  sub,
+  mono = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: 'lime' | 'amber' | 'dim';
+  sub: string;
+  mono?: boolean;
+}) {
+  const toneClass =
+    tone === 'lime' ? 'text-primary' : tone === 'amber' ? 'text-amber-600 dark:text-amber-400' : '';
+  return (
+    <div className="flex flex-col gap-2 border-r border-b border-border px-5 py-4">
+      <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+        <span aria-hidden="true" className="inline-block size-[0.55em] bg-primary" />
+        {label}
+      </span>
+      <span
+        className={
+          mono
+            ? 'font-mono text-sm'
+            : `font-display text-2xl font-bold tracking-[-.02em] ${toneClass}`
+        }
+      >
+        {value}
+      </span>
+      <span className="font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
+        {sub}
+      </span>
+    </div>
+  );
+}
+
+function SystemRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: 'lime' | 'dim';
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-border pb-3 last:border-0 last:pb-0 text-xs">
+      <span className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={`max-w-[60%] truncate font-mono ${tone === 'lime' ? 'text-primary' : 'text-muted-foreground'}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function pctOfTotal(part: number, total: number): string {
+  if (total <= 0) return '0%';
+  return `${Math.round((part / total) * 100)}%`;
 }
 
 function sevenDayActivity(rows: readonly { readonly day: number; readonly n: number }[]): {

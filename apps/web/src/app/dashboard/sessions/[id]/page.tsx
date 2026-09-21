@@ -1,28 +1,35 @@
-import { ArrowLeft, Database, Radio } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
-import { durationBetween, shortId } from '@/components/dashboard/support';
+import { durationBetween, shortId, truncate } from '@/components/dashboard/support';
 import {
-  Fact,
-  Notice,
+  BackLink,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
+  Flash,
+  Kv,
+  KvGrid,
   Page,
-  Panel,
-  PanelHead,
-  Pill,
-  Row,
-  Rows,
+  SectionBar,
+  StatusPill,
+  TableEmpty,
+  Tag,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The session detail, in the v0 composition: the title block, the facts grid,
- * the session summary as rendered markdown with a copy control, the memories and
- * prompts the run produced, and the metadata aside.
+ * The session detail, in the production dashboard's composition: the head with
+ * the status meta, the key/value grid, the session summary as rendered markdown
+ * with a copy control, and the memories and prompts the run produced as tables.
  *
- * The reads are the retired `session-detail.tsx` loader's own — the same
+ * The reads are the retired `sessions.ts` `/:id` handler's own — the same
  * `adminGetDetail`, the same per-session memory and prompt lists.
  */
 export const dynamic = 'force-dynamic';
@@ -57,48 +64,47 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
     .join('\n');
 
   return (
-    <Page className="max-w-[1100px]">
-      <Link
-        href="/dashboard/sessions"
-        className="mb-6 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-primary"
-      >
-        <ArrowLeft className="size-3.5" />
-        Back to sessions
-      </Link>
+    <Page>
+      <ViewHead
+        num="03"
+        title={title}
+        meta={[
+          { k: 'ID', v: shortId(row.id) },
+          { k: 'STATUS', v: row.status.toUpperCase() },
+          { k: 'AGENT', v: row.agent },
+        ]}
+      />
 
-      <div className="flex flex-wrap items-start justify-between gap-5">
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-2 text-[10px] tracking-[.15em] text-primary uppercase">
-            <Radio className="size-3" />
-            Session · {row.agent}
-          </div>
-          <h1 className="mt-3 text-2xl font-medium tracking-[-.06em] md:text-4xl">{title}</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            {row.description ?? 'No description was reported for this run.'}
-          </p>
-        </div>
-        <Pill tone={row.status === 'active' ? 'lime' : 'dim'}>{row.status}</Pill>
+      <div className="mt-4 mb-5">
+        <BackLink href="/dashboard/sessions" label="BACK TO SESSIONS" />
       </div>
 
       {row.deletedAt ? (
-        <Notice tone="danger" badge="Soft-deleted" className="mt-6">
+        <Flash tone="danger" label="SOFT-DELETED">
           Removed from the active list on <Time value={row.deletedAt} />. Memories that reference it
           keep their <code className="font-mono">session_id</code> pointer intact.
-        </Notice>
+        </Flash>
       ) : null}
 
-      <section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Fact label="Agent" value={row.agent} />
-        <Fact label="Project" value={row.projectSlug ?? 'global'} />
-        <Fact
-          label={row.endedAt ? 'Duration' : 'Running for'}
-          value={durationBetween(row.startedAt, row.endedAt, nowMs)}
+      <KvGrid>
+        <Kv k="Status" v={<StatusPill status={row.status} />} />
+        <Kv k="Agent" v={row.agent} />
+        <Kv k="Project" v={row.projectSlug ?? '—'} />
+        <Kv
+          k="Token"
+          v={row.tokenName ? `${row.tokenName}${row.tokenRevokedAt ? ' (revoked)' : ''}` : '—'}
+          mono
         />
-        <Fact
-          label="Token"
-          value={row.tokenName ? `${row.tokenName}${row.tokenRevokedAt ? ' (revoked)' : ''}` : '—'}
+        <Kv k="Started" v={<Time value={row.startedAt} />} mono />
+        <Kv k="Ended" v={<Time value={row.endedAt} />} mono />
+        <Kv
+          k={row.endedAt ? 'Duration' : 'Running for'}
+          v={durationBetween(row.startedAt, row.endedAt, nowMs)}
+          mono
         />
-      </section>
+        <Kv k="Memories" v={memories.length} />
+        <Kv k="Prompts" v={prompts.length} />
+      </KvGrid>
 
       <MarkdownPanel
         eyebrow="Session summary"
@@ -107,89 +113,78 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         copyLabel="Copy markdown"
       />
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_.75fr]">
-        <Panel>
-          <PanelHead
-            eyebrow="Produced context"
-            title="Memories written during this session"
-            action={`${memories.length} row${memories.length === 1 ? '' : 's'}`}
-          />
-          {memories.length === 0 ? (
-            <p className="px-5 py-5 text-sm text-muted-foreground md:px-6">
-              This run wrote no memory. Prompts and session activity are still recorded.
-            </p>
-          ) : (
-            <Rows>
-              {memories.map((memory) => (
-                <Row key={memory.id} columns="md:grid-cols-[minmax(220px,1.4fr)_1fr_auto]">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/10" />
-                    <Link
-                      href={`/dashboard/memories/${memory.id}`}
-                      className="text-sm text-foreground hover:text-primary"
-                    >
-                      {memory.title}
-                    </Link>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">{memory.type}</span>
-                  <Pill tone={memory.status === 'active' ? 'lime' : 'dim'}>{memory.status}</Pill>
-                </Row>
-              ))}
-            </Rows>
-          )}
-        </Panel>
+      <SectionBar name={`MEMORIES (${memories.length})`} />
+      {memories.length === 0 ? (
+        <TableEmpty>NO MEMORY WAS WRITTEN DURING THIS RUN</TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>type</DataTh>
+            <DataTh>title</DataTh>
+            <DataTh>status</DataTh>
+            <DataTh>created</DataTh>
+          </DataHead>
+          <DataBody>
+            {memories.map((memory) => (
+              <DataTr key={memory.id}>
+                <DataTd>{memory.type}</DataTd>
+                <DataTd className="max-w-[420px] truncate">
+                  <Link
+                    href={`/dashboard/memories/${memory.id}`}
+                    className="transition-colors hover:text-primary"
+                  >
+                    {memory.title}
+                  </Link>
+                </DataTd>
+                <DataTd>
+                  <StatusPill status={memory.status} />
+                </DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
+                  <Time value={memory.createdAt} />
+                </DataTd>
+              </DataTr>
+            ))}
+          </DataBody>
+        </DataTable>
+      )}
 
-        <Panel>
-          <PanelHead
-            eyebrow="Prompts"
-            title="Captured in this session"
-            action={`${prompts.length} row${prompts.length === 1 ? '' : 's'}`}
-          />
-          {prompts.length === 0 ? (
-            <p className="px-5 py-5 text-sm text-muted-foreground md:px-6">
-              No prompt was captured.
-            </p>
-          ) : (
-            <Rows>
-              {prompts.map((prompt) => (
-                <div key={prompt.id} className="px-5 py-4 md:px-6">
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {prompt.content.slice(0, 220)}
-                  </p>
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    <Time value={prompt.createdAt} /> · {prompt.deletedAt ? 'deleted' : 'active'}
-                  </p>
-                </div>
-              ))}
-            </Rows>
-          )}
-        </Panel>
+      <div className="mt-8">
+        <SectionBar name={`PROMPTS (${prompts.length})`} />
       </div>
-
-      <aside className="mt-6 rounded-2xl border border-border bg-card p-5">
-        <p className="flex items-center gap-2 text-[10px] tracking-[.14em] text-muted-foreground uppercase">
-          <Database className="size-3" />
-          Metadata
-        </p>
-        <div className="mt-5 grid gap-4 text-xs sm:grid-cols-2">
-          <Metadata
-            label="Session id"
-            value={<code className="font-mono">{shortId(row.id)}</code>}
-          />
-          <Metadata label="Started" value={<Time value={row.startedAt} />} />
-          <Metadata label="Ended" value={<Time value={row.endedAt} />} />
-          <Metadata label="Local, append-only storage" value="no row was deleted" />
-        </div>
-      </aside>
+      {prompts.length === 0 ? (
+        <TableEmpty>NO PROMPT WAS CAPTURED</TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>title</DataTh>
+            <DataTh>content</DataTh>
+            <DataTh>tags</DataTh>
+            <DataTh>created</DataTh>
+          </DataHead>
+          <DataBody>
+            {prompts.map((prompt) => (
+              <DataTr key={prompt.id} className={prompt.deletedAt ? 'opacity-60' : undefined}>
+                <DataTd>{truncate(prompt.title, 60)}</DataTd>
+                <DataTd className="max-w-[420px] truncate text-muted-foreground">
+                  {truncate(prompt.content, 160)}
+                </DataTd>
+                <DataTd>
+                  <div className="flex flex-wrap gap-1">
+                    {(prompt.tags ?? []).length === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      (prompt.tags ?? []).map((tag) => <Tag key={tag}>{tag}</Tag>)
+                    )}
+                  </div>
+                </DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
+                  <Time value={prompt.createdAt} />
+                </DataTd>
+              </DataTr>
+            ))}
+          </DataBody>
+        </DataTable>
+      )}
     </Page>
-  );
-}
-
-function Metadata({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-muted-foreground">{value}</span>
-    </div>
   );
 }

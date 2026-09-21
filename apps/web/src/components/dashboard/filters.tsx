@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 
-import { queryWithPage } from './support';
+import { PAGE_SIZE, queryWithPage } from './support';
+import { LABEL } from './ui';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -16,16 +17,15 @@ import {
 import { cn } from '@/lib/utils';
 
 /**
- * The URL-driven filter bar and pager. Both are plain `<form>`/`<a>` surfaces:
- * the server does the filtering and the paginating, and the browser's back
- * button is the filter's undo. `FilterSelect` holds the one piece of state the
- * shadcn `Select` needs to drive — everything else reads what the page passed
- * in and nothing here owns a filter.
+ * The URL-driven filter bar and pager, mirroring the production dashboard's
+ * `.filters` pattern: each control is `LABEL · <input>` on one wrapping row,
+ * with FILTER/CLEAR pinned to the end. The server does the filtering and the
+ * paginating, and the browser's back button is the filter's undo.
  */
 
-/** The default shadcn control skin, for the native inputs that are not a `Select`. */
+/** The bottom-ruled "ink" control the production filter bar uses for native inputs. */
 export const FIELD_INK =
-  'w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
+  'min-h-7 min-w-24 border-b border-border bg-transparent px-0 pr-4 font-mono text-xs uppercase tracking-[.08em] text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:text-[.72rem] focus:border-primary disabled:cursor-not-allowed disabled:opacity-50';
 
 /**
  * `Select` refuses an empty-string item value, and this vocabulary spells
@@ -49,7 +49,7 @@ export function FilterForm({
       method="get"
       action={action}
       className={cn(
-        'flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-5',
+        'mb-5 flex flex-wrap items-center gap-x-4 gap-y-3 border border-border bg-card px-4 py-3',
         className,
       )}
     >
@@ -70,10 +70,12 @@ export function FilterField({
   children: ReactNode;
 }) {
   return (
-    <label htmlFor={htmlFor} className={cn('flex flex-col gap-2', className)}>
-      <span className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">{label}</span>
+    <div className={cn('flex items-center gap-2', className)}>
+      <label htmlFor={htmlFor} className={cn('whitespace-nowrap text-muted-foreground', LABEL)}>
+        {label}
+      </label>
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -95,7 +97,7 @@ export function FilterInput({
       type="search"
       defaultValue={value}
       placeholder={placeholder}
-      className={FIELD_INK}
+      className={cn(FIELD_INK, 'flex-1')}
     />
   );
 }
@@ -121,7 +123,10 @@ export function FilterSelect({
           setSelected(next === UNSET ? '' : next);
         }}
       >
-        <SelectTrigger id={id} className="w-full">
+        <SelectTrigger
+          id={id}
+          className="h-7 min-w-24 border-0 border-b border-border bg-transparent px-0 font-mono text-xs uppercase tracking-[.08em] shadow-none focus-visible:ring-0 dark:bg-transparent"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -143,11 +148,16 @@ export function FilterSelect({
 
 export function FilterActions({ clearHref }: { clearHref: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <Button type="submit">Filter</Button>
-      <Button variant="outline" asChild>
-        <Link href={clearHref}>Clear</Link>
+    <div className="ml-auto flex items-center gap-2">
+      <Button type="submit" className="h-8 font-mono text-[10px] uppercase tracking-[.14em]">
+        Filter
       </Button>
+      <Link
+        href={clearHref}
+        className={cn('px-2 text-muted-foreground transition-colors hover:text-primary', LABEL)}
+      >
+        Clear
+      </Link>
     </div>
   );
 }
@@ -172,34 +182,23 @@ export function Pager({
   path: string;
   query: Readonly<Record<string, string>>;
 }) {
-  if (page === 0 && !hasMore) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
-        <span>{totalLabel}</span>
-      </div>
-    );
-  }
+  const label =
+    `PAGE ${page + 1}` +
+    (total !== undefined ? ` OF ${Math.max(1, Math.ceil(total / PAGE_SIZE))}` : '') +
+    ` · ${totalLabel}`;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
-      <span>
-        {totalLabel}
-        {total !== undefined ? (
-          <span className="text-muted-foreground/70"> · {total} total</span>
-        ) : (
-          <span className="text-muted-foreground/70"> · more available</span>
-        )}
-      </span>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-4">
+      <span className={cn('text-muted-foreground', LABEL)}>{label}</span>
       <div className="flex items-center gap-2">
         {page > 0 ? (
           <Button variant="outline" size="sm" asChild>
-            <Link href={`${path}${queryWithPage(query, page - 1)}`}>← Previous</Link>
+            <Link href={`${path}${queryWithPage(query, page - 1)}`}>‹ Prev</Link>
           </Button>
         ) : null}
-        <span className="text-muted-foreground/70">Page {page + 1}</span>
         {hasMore ? (
           <Button variant="outline" size="sm" asChild>
-            <Link href={`${path}${queryWithPage(query, page + 1)}`}>Next →</Link>
+            <Link href={`${path}${queryWithPage(query, page + 1)}`}>Next ›</Link>
           </Button>
         ) : null}
       </div>

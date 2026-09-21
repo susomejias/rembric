@@ -4,7 +4,7 @@ import { Check, Copy } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-import { EYEBROW } from './ui';
+import { LABEL } from './ui';
 
 /**
  * A markdown body inside the shared panel frame, with the mockup's copy control.
@@ -45,10 +45,13 @@ export function MarkdownPanel({
   };
 
   return (
-    <section className="mt-6 overflow-hidden rounded-2xl border border-primary/30 bg-card">
+    <section className="mb-5 border border-primary/40 bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 md:px-6">
         <div>
-          <p className={`text-primary ${EYEBROW}`}>{eyebrow}</p>
+          <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
+            <span aria-hidden="true" className="inline-block size-[0.55em] shrink-0 bg-primary" />
+            {eyebrow}
+          </p>
           <h2 className="mt-1 text-base font-medium">{title}</h2>
         </div>
         <div className="flex items-center gap-2">
@@ -57,7 +60,7 @@ export function MarkdownPanel({
             type="button"
             onClick={copy}
             aria-label={copyLabel}
-            className="flex items-center gap-2 rounded-lg border border-border bg-accent px-3 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className={`flex items-center gap-2 border border-border px-3 py-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary ${LABEL}`}
           >
             {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
             {copied ? 'Copied' : copyLabel}
@@ -76,7 +79,7 @@ const MARKDOWN_COMPONENTS = {
     <h3 className="mb-3 text-lg font-medium tracking-[-.03em] text-foreground">{children}</h3>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <h3 className={`mt-5 mb-3 text-primary ${EYEBROW}`}>{children}</h3>
+    <h3 className={`mt-5 mb-3 text-primary ${LABEL}`}>{children}</h3>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
     <h4 className="mt-4 mb-2 text-sm font-medium text-foreground">{children}</h4>
@@ -105,12 +108,12 @@ const MARKDOWN_COMPONENTS = {
     </a>
   ),
   code: ({ children }: { children?: ReactNode }) => (
-    <code className="rounded border border-border bg-accent px-1.5 py-0.5 font-mono text-[.8em] text-foreground">
+    <code className="border border-border bg-muted px-1.5 py-0.5 font-mono text-[.8em] text-foreground">
       {children}
     </code>
   ),
   pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="mb-3 overflow-x-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs leading-5">
+    <pre className="mb-3 overflow-x-auto border border-border bg-muted p-3 font-mono text-xs leading-5">
       {children}
     </pre>
   ),

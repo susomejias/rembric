@@ -1,5 +1,4 @@
 import { AGENT_SESSION_STATUSES } from '@rembric/db';
-import { Radio } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -18,24 +17,30 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, durationBetween, formatBytes } from '@/components/dashboard/support';
+import { PAGE_SIZE, formatBytes } from '@/components/dashboard/support';
 import {
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
   Panel,
-  PanelHead,
-  Pill,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  StatusPill,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The sessions list, in the v0 composition: the live band, the filtered table
- * rows, the activity chart and the footprint panel.
+ * The sessions list, in the production dashboard's composition: the numbered
+ * view head, the scope/agent/status filter bar, and the runs as a table with
+ * the title/agent/project/token/started/ended/status/memories/prompts columns.
  *
  * The reads and the filter model are the ported view's own — the same
  * `AdminSessionFilters`, the same `deleted: false` address for the filtered
@@ -123,70 +128,46 @@ export default async function SessionsPage({
   const averageDurationMs = averageDuration(visibleRows, nowMs);
   const contextCaptured = visibleRows.reduce((acc, row) => acc + (row.description?.length ?? 0), 0);
 
-  const liveRows = visibleRows.filter((row) => row.status === 'active');
-
   return (
     <Page>
-      <PageHead
-        icon={Radio}
-        eyebrow="Session monitor"
-        title="Sessions"
-        description="A focused view of the context being created right now, with recent runs kept close at hand."
-        aside={
-          <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] text-primary">
-            <span className="size-1.5 rounded-full bg-primary" />
-            {statusCounts.active} live session{statusCounts.active === 1 ? '' : 's'}
-          </div>
-        }
-      />
+      <ViewHead num="03" title="Rembric Sessions." hl="Rembric" meta={[{ k: 'TOTAL', v: total }]} />
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Live now"
-          title="Working context"
-          action={liveRows.length > 0 ? 'Started and still open' : 'No open run in this page'}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="ACTIVE"
+          v={statusCounts.active}
+          tone={statusCounts.active > 0 ? 'lime' : 'dim'}
+          sub={<span>OPEN RIGHT NOW</span>}
         />
-        {liveRows.length === 0 ? (
-          <EmptyNote>Nothing is running in this slice of the list.</EmptyNote>
-        ) : (
-          <Rows>
-            {liveRows.map((session, index) => (
-              <Link key={session.id} href={`/dashboard/sessions/${session.id}`} className="block">
-                <Row columns="md:grid-cols-[minmax(210px,1fr)_1.5fr_auto_auto]">
-                  <div className="flex items-center gap-3">
-                    <span className="size-2 rounded-full bg-primary" />
-                    <div>
-                      <p className="text-sm font-medium">{sessionTitle(session)}</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        Session {String(index + 1).padStart(2, '0')} · {session.agent}
-                      </p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">
-                      {session.description ?? 'No description reported by the client'}
-                    </p>
-                    <p className="mt-2 text-[10px] text-muted-foreground">
-                      {memoryCounts[session.id] ?? 0} memories · {promptCounts[session.id] ?? 0}{' '}
-                      prompts
-                    </p>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    {durationBetween(session.startedAt, session.endedAt, nowMs)}
-                  </span>
-                  <span className="w-fit text-[11px] text-muted-foreground">View context</span>
-                </Row>
-              </Link>
-            ))}
-          </Rows>
-        )}
-      </Panel>
+        <StatCard
+          k="ABANDONED"
+          v={statusCounts.abandoned}
+          sub={<span>SWEPT AFTER INACTIVITY</span>}
+        />
+        <StatCard k="ENDED" v={statusCounts.ended} sub={<span>CLOSED BY THE CLIENT</span>} />
+      </StatGrid>
 
       <FilterForm action="/dashboard/sessions" className="mt-6">
-        <FilterField label="Agent" htmlFor="s-agent" className="w-40">
-          <FilterInput id="s-agent" name="agent" value={filters.agent} placeholder="claude-code" />
+        <FilterField label="SCOPE" htmlFor="s-project">
+          <FilterSelect
+            id="s-project"
+            name="project"
+            value={filters.project}
+            options={[
+              { value: '', label: 'all scopes' },
+              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
+            ]}
+          />
         </FilterField>
-        <FilterField label="Status" htmlFor="s-status" className="w-36">
+        <FilterField label="AGENT" htmlFor="s-agent">
+          <FilterInput
+            id="s-agent"
+            name="agent"
+            value={filters.agent}
+            placeholder="e.g. claude-code"
+          />
+        </FilterField>
+        <FilterField label="STATUS" htmlFor="s-status">
           <FilterSelect
             id="s-status"
             name="status"
@@ -194,108 +175,127 @@ export default async function SessionsPage({
             options={STATUS_OPTIONS}
           />
         </FilterField>
-        <FilterField label="Deleted" htmlFor="s-deleted" className="w-32">
-          <FilterSelect
-            id="s-deleted"
-            name="include_deleted"
-            value={filters.includeDeleted ? '1' : ''}
-            options={[
-              { value: '', label: 'hidden' },
-              { value: '1', label: 'shown' },
-            ]}
-          />
-        </FilterField>
-        <FilterActions clearHref="/dashboard/sessions" />
+        {filters.includeDeleted ? <input type="hidden" name="include_deleted" value="1" /> : null}
+        <FilterActions
+          clearHref={`/dashboard/sessions${filters.includeDeleted ? '?include_deleted=1' : ''}`}
+        />
       </FilterForm>
 
-      <Panel className="mt-6">
-        <PanelHead eyebrow="Runs" title="Session history" action={`${total} matching`} />
-        {visibleRows.length === 0 ? (
-          <EmptyNote>
-            {isFiltered
-              ? 'No session matches this filter set.'
-              : 'No session has been recorded yet.'}
-          </EmptyNote>
+      <p className="mb-4 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
+        {filters.includeDeleted ? (
+          <Link href="/dashboard/sessions" className="hover:text-primary">
+            Hide deleted
+          </Link>
         ) : (
-          <Rows>
-            {visibleRows.map((session) => (
-              <Link key={session.id} href={`/dashboard/sessions/${session.id}`} className="block">
-                <Row columns="md:grid-cols-[minmax(220px,1.3fr)_1fr_1fr_auto_auto]">
-                  <div>
-                    <p className="truncate text-sm text-foreground">{sessionTitle(session)}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {session.agent} · {session.tokenName ?? 'no token'}
-                    </p>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    {session.projectSlug ?? 'global scope'}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    <Time value={session.startedAt} />
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {memoryCounts[session.id] ?? 0} mem · {promptCounts[session.id] ?? 0} prompts
-                  </span>
-                  <Pill tone={session.status === 'active' ? 'lime' : 'dim'}>{session.status}</Pill>
-                </Row>
-              </Link>
-            ))}
-          </Rows>
+          <Link href="/dashboard/sessions?include_deleted=1" className="hover:text-primary">
+            Show deleted
+          </Link>
         )}
-        <div className="px-5 pb-5 md:px-6">
-          <Pager
-            page={filters.page}
-            hasMore={visibleHasMore}
-            total={total}
-            totalLabel={`${visibleRows.length} rows`}
-            path="/dashboard/sessions"
-            query={roundTripQuery}
-          />
-        </div>
-      </Panel>
+      </p>
 
-      {filters.includeDeleted ? (
-        <Panel className="mt-6">
-          <PanelHead
-            eyebrow="Soft-deleted"
-            title="Removed from the active list"
-            action={deletedHasMore ? 'more rows on this page set' : 'complete slice'}
-          />
-          {deletedRows.length === 0 ? (
-            <EmptyNote>No soft-deleted session in this slice.</EmptyNote>
-          ) : (
-            <Rows>
+      <SectionBar name="Sessions" meta={`${visibleRows.length} ROWS`} />
+      {visibleRows.length === 0 ? (
+        <TableEmpty>
+          {isFiltered ? 'NO SESSION MATCHES THIS FILTER' : 'NO SESSION HAS BEEN RECORDED YET'}
+        </TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>title</DataTh>
+            <DataTh>agent</DataTh>
+            <DataTh>project</DataTh>
+            <DataTh>token</DataTh>
+            <DataTh>started</DataTh>
+            <DataTh>ended</DataTh>
+            <DataTh>status</DataTh>
+            <DataTh>memories</DataTh>
+            <DataTh>prompts</DataTh>
+            <DataTh>actions</DataTh>
+          </DataHead>
+          <DataBody>
+            {visibleRows.map((session) => (
+              <SessionRow
+                key={session.id}
+                href={`/dashboard/sessions/${session.id}`}
+                title={sessionTitle(session)}
+                agent={session.agent}
+                project={session.projectSlug ?? '—'}
+                token={session.tokenName ?? '—'}
+                startedAt={session.startedAt}
+                endedAt={session.endedAt}
+                status={session.status}
+                memories={memoryCounts[session.id] ?? 0}
+                prompts={promptCounts[session.id] ?? 0}
+              />
+            ))}
+          </DataBody>
+        </DataTable>
+      )}
+
+      <Pager
+        page={filters.page}
+        hasMore={visibleHasMore || (filters.includeDeleted && deletedHasMore)}
+        total={total}
+        totalLabel={`${visibleRows.length} ROWS`}
+        path="/dashboard/sessions"
+        query={roundTripQuery}
+      />
+
+      {filters.includeDeleted && deletedRows.length > 0 ? (
+        <>
+          <div className="mt-8">
+            <SectionBar name="Deleted" meta={`${deletedRows.length} ROWS`} />
+          </div>
+          <DataTable>
+            <DataHead>
+              <DataTh>title</DataTh>
+              <DataTh>agent</DataTh>
+              <DataTh>project</DataTh>
+              <DataTh>token</DataTh>
+              <DataTh>started</DataTh>
+              <DataTh>ended</DataTh>
+              <DataTh>status</DataTh>
+              <DataTh>memories</DataTh>
+              <DataTh>prompts</DataTh>
+              <DataTh>actions</DataTh>
+            </DataHead>
+            <DataBody>
               {deletedRows.map((session) => (
-                <Link key={session.id} href={`/dashboard/sessions/${session.id}`} className="block">
-                  <Row columns="md:grid-cols-[1.4fr_1fr_auto_auto]">
-                    <p className="truncate text-sm text-muted-foreground">
-                      {sessionTitle(session)}
-                    </p>
-                    <span className="text-[11px] text-muted-foreground">{session.agent}</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      <Time value={session.deletedAt} />
-                    </span>
-                    <Pill tone="danger">deleted</Pill>
-                  </Row>
-                </Link>
+                <SessionRow
+                  key={session.id}
+                  href={`/dashboard/sessions/${session.id}`}
+                  title={sessionTitle(session)}
+                  agent={session.agent}
+                  project={session.projectSlug ?? '—'}
+                  token={session.tokenName ?? '—'}
+                  startedAt={session.startedAt}
+                  endedAt={session.endedAt}
+                  status={session.status}
+                  memories={memoryCounts[session.id] ?? 0}
+                  prompts={promptCounts[session.id] ?? 0}
+                  dim
+                />
               ))}
-            </Rows>
-          )}
-        </Panel>
+            </DataBody>
+          </DataTable>
+        </>
       ) : null}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
         <Panel padded>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
-                Recent activity
+              <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+                <span aria-hidden="true" className="inline-block size-[0.55em] bg-primary" />
+                RECENT ACTIVITY
               </p>
-              <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">
+              <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
                 {allSessions} total runs
               </h2>
             </div>
-            <span className="text-[11px] text-muted-foreground">Memory writes, 7 days</span>
+            <span className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+              MEMORY WRITES · 7 DAYS
+            </span>
           </div>
           <div
             className="mt-6 flex items-end gap-2"
@@ -303,25 +303,30 @@ export default async function SessionsPage({
           >
             {activity.days.map((day, index) => (
               <div key={day.day} className="flex flex-1 flex-col items-center gap-2">
-                <div className="flex h-28 w-full items-end rounded-md bg-muted">
+                <div className="flex h-28 w-full items-end bg-muted">
                   <div
-                    className="w-full rounded-md bg-primary/10"
+                    className="w-full bg-primary"
                     style={{
                       height: `${Math.max(4, Math.round((day.count / activity.peak) * 100))}%`,
                     }}
                     title={`${day.count} memories`}
                   />
                 </div>
-                <span className="text-[10px] text-muted-foreground/70">{WEEKDAYS[index]}</span>
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {WEEKDAYS[index]}
+                </span>
               </div>
             ))}
           </div>
         </Panel>
         <Panel padded>
-          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
-            Session footprint
+          <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+            <span aria-hidden="true" className="inline-block size-[0.55em] bg-primary" />
+            SESSION FOOTPRINT
           </p>
-          <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">Lightweight by design</h2>
+          <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
+            Lightweight by design
+          </h2>
           <div className="mt-6 flex flex-col gap-4 text-xs">
             <FootprintRow label="Rows on this page" value={visibleRows.length} />
             <FootprintRow
@@ -333,13 +338,65 @@ export default async function SessionsPage({
           </div>
         </Panel>
       </div>
-
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile label="Active" value={statusCounts.active} tone="lime" hint="open right now" />
-        <StatTile label="Abandoned" value={statusCounts.abandoned} hint="swept after inactivity" />
-        <StatTile label="Ended" value={statusCounts.ended} hint="closed by the client" />
-      </section>
     </Page>
+  );
+}
+
+function SessionRow({
+  href,
+  title,
+  agent,
+  project,
+  token,
+  startedAt,
+  endedAt,
+  status,
+  memories,
+  prompts,
+  dim = false,
+}: {
+  href: string;
+  title: string;
+  agent: string;
+  project: string;
+  token: string;
+  startedAt: Date;
+  endedAt: Date | null;
+  status: string;
+  memories: number;
+  prompts: number;
+  dim?: boolean;
+}) {
+  return (
+    <DataTr className={dim ? 'opacity-60' : undefined}>
+      <DataTd className="max-w-[280px] truncate">
+        <Link href={href} className="transition-colors hover:text-primary">
+          {title}
+        </Link>
+      </DataTd>
+      <DataTd>{agent}</DataTd>
+      <DataTd className="text-muted-foreground">{project}</DataTd>
+      <DataTd className="text-muted-foreground">{token}</DataTd>
+      <DataTd className="font-mono text-xs text-muted-foreground">
+        <Time value={startedAt} />
+      </DataTd>
+      <DataTd className="font-mono text-xs text-muted-foreground">
+        <Time value={endedAt} />
+      </DataTd>
+      <DataTd>
+        <StatusPill status={status} />
+      </DataTd>
+      <DataTd>{memories}</DataTd>
+      <DataTd>{prompts}</DataTd>
+      <DataTd>
+        <Link
+          href={href}
+          className="font-mono text-[11px] uppercase tracking-[.14em] hover:text-primary"
+        >
+          View →
+        </Link>
+      </DataTd>
+    </DataTr>
   );
 }
 
