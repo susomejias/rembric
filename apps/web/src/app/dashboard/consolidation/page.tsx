@@ -96,7 +96,7 @@ export default async function ConsolidationPage({
         eyebrow="Memory maintenance"
         title="Consolidation"
         description="A quiet queue for turning repeated context into durable, searchable memory."
-        aside={<span className="text-[11px] text-(--ink)/45)">{total} runs journaled</span>}
+        aside={<span className="text-[11px] text-muted-foreground)">{total} runs journaled</span>}
       />
 
       <section className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -129,47 +129,43 @@ export default async function ConsolidationPage({
       </section>
 
       <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
-                Context
-              </p>
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
               <h2 className="mt-2 text-base font-medium">Sweep behavior</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               deterministic
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             The sweep applies decay and deadline orphaning. It does not call an LLM and needs no
             cron job: it runs throttled on session start, and from the `/mcp` and `/api` routes.
           </p>
-          <p className="mt-5 text-[11px] text-(--ink)/38">
+          <p className="mt-5 text-[11px] text-muted-foreground">
             Orphan after {formatWindow(thresholds.afterMs)} · deadline{' '}
             {formatWindow(thresholds.deadlineMs)}
           </p>
         </article>
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
-                Context
-              </p>
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
               <h2 className="mt-2 text-base font-medium">Undoable work</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               journaled
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Every consolidation operation is recorded with its affected memory ids, the id it
             created and the reasoning attached by the sweep, so a change can be inspected and
             reversed.
           </p>
           <Link
             href="/dashboard/maintenance"
-            className="mt-5 inline-block text-[11px] text-(--accent-ink)/75 hover:text-(--accent-ink)"
+            className="mt-5 inline-block text-[11px] text-primary hover:text-primary"
           >
             Database maintenance →
           </Link>
@@ -190,19 +186,19 @@ export default async function ConsolidationPage({
               const counts = repos.consolidation.adminOpCounts(run.id);
               return (
                 <Row key={run.id} columns="md:grid-cols-[auto_1.3fr_1fr_auto_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-(--accent-ink)/[8%] text-[10px] text-(--accent-ink)/70">
+                  <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-[10px] text-primary">
                     <ListChecks className="size-3.5" />
                   </span>
                   <div>
-                    <p className="text-sm text-(--ink)/80">{scopeLabel(repos, run.scope)}</p>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="text-sm text-foreground">{scopeLabel(repos, run.scope)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       {truncate(run.summary, 120) || 'no summary'}
                     </p>
                   </div>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <span className="text-[11px] text-muted-foreground">
                     <Time value={run.startedAt} />
                   </span>
-                  <span className="text-[11px] text-(--ink)/38">
+                  <span className="text-[11px] text-muted-foreground">
                     {counts.total} ops · {counts.reverted} reverted
                   </span>
                   <Pill tone={run.finishedAt ? 'lime' : 'amber'}>
@@ -214,11 +210,11 @@ export default async function ConsolidationPage({
           </Rows>
         )}
         {hasMore || page > 0 ? (
-          <div className="flex items-center justify-between gap-3 px-5 py-4 text-[11px] text-(--ink)/45 md:px-6">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 text-[11px] text-muted-foreground md:px-6">
             {page > 0 ? (
               <Link
                 href={`/dashboard/consolidation?page=${page - 1}`}
-                className="rounded-lg border border-(--ink)/[10%] px-3 py-2 transition-colors hover:bg-(--ink)/[6%] hover:text-(--ink)"
+                className="rounded-lg border border-border px-3 py-2 transition-colors hover:bg-accent hover:text-foreground"
               >
                 ← Previous
               </Link>
@@ -229,7 +225,7 @@ export default async function ConsolidationPage({
             {hasMore ? (
               <Link
                 href={`/dashboard/consolidation?page=${page + 1}`}
-                className="rounded-lg border border-(--ink)/[10%] px-3 py-2 transition-colors hover:bg-(--ink)/[6%] hover:text-(--ink)"
+                className="rounded-lg border border-border px-3 py-2 transition-colors hover:bg-accent hover:text-foreground"
               >
                 Next →
               </Link>
@@ -257,13 +253,15 @@ export default async function ConsolidationPage({
             {lastRunOps.map((op) => (
               <Row key={op.id} columns="md:grid-cols-[1fr_1.4fr_auto_auto]">
                 <div>
-                  <p className="text-sm text-(--ink)/80">{op.opType}</p>
-                  <p className="mt-1 font-mono text-[10px] text-(--ink)/38">{shortId(op.id)}</p>
+                  <p className="text-sm text-foreground">{op.opType}</p>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                    {shortId(op.id)}
+                  </p>
                 </div>
-                <p className="text-[11px] leading-5 text-(--ink)/45">
+                <p className="text-[11px] leading-5 text-muted-foreground">
                   {truncate(op.reasoning, 140) || `${op.affectedIds.length} affected`}
                 </p>
-                <span className="text-[11px] text-(--ink)/38">
+                <span className="text-[11px] text-muted-foreground">
                   {relativeTime(op.appliedAt, nowMs)}
                 </span>
                 <Pill tone={op.revertedAt ? 'amber' : 'lime'}>

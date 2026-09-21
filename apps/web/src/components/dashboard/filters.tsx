@@ -1,22 +1,39 @@
+'use client';
+
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { queryWithPage } from './support';
 
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 /**
- * The URL-driven filter bar and pager, in the v0 vocabulary. Both are plain
- * `<form>`/`<a>` surfaces with no client JavaScript: the server does the
- * filtering and the paginating, and the browser's back button is the filter's
- * undo. The page reads the values it round-trips; nothing here owns state.
+ * The URL-driven filter bar and pager. Both are plain `<form>`/`<a>` surfaces:
+ * the server does the filtering and the paginating, and the browser's back
+ * button is the filter's undo. `FilterSelect` holds the one piece of state the
+ * shadcn `Select` needs to drive — everything else reads what the page passed
+ * in and nothing here owns a filter.
  */
 
+/** The default shadcn control skin, for the native inputs that are not a `Select`. */
 export const FIELD_INK =
-  'w-full border border-(--ink)/[10%] bg-(--surface-input) px-3 py-2 text-xs text-(--ink) outline-none transition-colors focus:border-(--accent-ink)/50';
+  'w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
 
-export const LIME_FILL =
-  'rounded-lg bg-lime-300 px-4 py-2.5 text-[11px] font-medium text-[#111614] transition-colors hover:bg-lime-200 disabled:pointer-events-none disabled:opacity-50';
+/**
+ * `Select` refuses an empty-string item value, and this vocabulary spells
+ * "unset" as exactly that. The sentinel is the display value only: the hidden
+ * input below submits the real one, so the URL keeps the contract the pages
+ * read (`status=` absent, `type=` empty) instead of gaining a new spelling.
+ */
+const UNSET = '__unset__';
 
 export function FilterForm({
   action,
@@ -32,7 +49,7 @@ export function FilterForm({
       method="get"
       action={action}
       className={cn(
-        'flex flex-wrap items-end gap-3 rounded-2xl border border-(--ink)/[7.5%] bg-(--surface-panel) p-5',
+        'flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-5',
         className,
       )}
     >
@@ -54,7 +71,7 @@ export function FilterField({
 }) {
   return (
     <label htmlFor={htmlFor} className={cn('flex flex-col gap-2', className)}>
-      <span className="text-[10px] tracking-[.14em] text-(--ink)/45 uppercase">{label}</span>
+      <span className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">{label}</span>
       {children}
     </label>
   );
@@ -94,29 +111,43 @@ export function FilterSelect({
   value: string;
   options: readonly { readonly value: string; readonly label: string }[];
 }) {
+  const [selected, setSelected] = useState(value);
+
   return (
-    <select id={id} name={name} defaultValue={value} className={FIELD_INK}>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <>
+      <Select
+        value={selected === '' ? UNSET : selected}
+        onValueChange={(next) => {
+          setSelected(next === UNSET ? '' : next);
+        }}
+      >
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem
+              key={option.value === '' ? UNSET : option.value}
+              value={option.value === '' ? UNSET : option.value}
+            >
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {/* The submitted value, so an unset filter still round-trips as `''`. */}
+      <input type="hidden" name={name} value={selected} />
+    </>
   );
 }
 
 export function FilterActions({ clearHref }: { clearHref: string }) {
   return (
     <div className="flex items-center gap-2">
-      <button type="submit" className={LIME_FILL}>
-        Filter
-      </button>
-      <Link
-        href={clearHref}
-        className="rounded-lg border border-(--ink)/[10%] px-4 py-2.5 text-[11px] text-(--ink)/55 transition-colors hover:bg-(--ink)/[6%] hover:text-(--ink)"
-      >
-        Clear
-      </Link>
+      <Button type="submit">Filter</Button>
+      <Button variant="outline" asChild>
+        <Link href={clearHref}>Clear</Link>
+      </Button>
     </div>
   );
 }
@@ -143,39 +174,33 @@ export function Pager({
 }) {
   if (page === 0 && !hasMore) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] text-(--ink)/38">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
         <span>{totalLabel}</span>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] text-(--ink)/45">
+    <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground">
       <span>
         {totalLabel}
         {total !== undefined ? (
-          <span className="text-(--ink)/38"> · {total === undefined ? '' : total} total</span>
+          <span className="text-muted-foreground/70"> · {total} total</span>
         ) : (
-          <span className="text-(--ink)/38"> · more available</span>
+          <span className="text-muted-foreground/70"> · more available</span>
         )}
       </span>
       <div className="flex items-center gap-2">
         {page > 0 ? (
-          <Link
-            href={`${path}${queryWithPage(query, page - 1)}`}
-            className="rounded-lg border border-(--ink)/[10%] px-3 py-2 transition-colors hover:bg-(--ink)/[6%] hover:text-(--ink)"
-          >
-            ← Previous
-          </Link>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`${path}${queryWithPage(query, page - 1)}`}>← Previous</Link>
+          </Button>
         ) : null}
-        <span className="text-(--ink)/38">Page {page + 1}</span>
+        <span className="text-muted-foreground/70">Page {page + 1}</span>
         {hasMore ? (
-          <Link
-            href={`${path}${queryWithPage(query, page + 1)}`}
-            className="rounded-lg border border-(--ink)/[10%] px-3 py-2 transition-colors hover:bg-(--ink)/[6%] hover:text-(--ink)"
-          >
-            Next →
-          </Link>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`${path}${queryWithPage(query, page + 1)}`}>Next →</Link>
+          </Button>
         ) : null}
       </div>
     </div>

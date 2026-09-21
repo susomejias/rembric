@@ -81,7 +81,7 @@ export default async function EntitiesPage({
         title="Entities"
         description="Names, paths and identifiers extracted from memory content. Entities are derived, never authored: they exist to make memory searchable by the things it mentions."
         aside={
-          <div className="text-right text-[11px] text-(--ink)/45">
+          <div className="text-right text-[11px] text-muted-foreground">
             <p>{total} entities</p>
             <p>{backlog} awaiting scan</p>
           </div>
@@ -138,23 +138,23 @@ export default async function EntitiesPage({
             {rows.map((entity) => (
               <Row key={entity.id} columns="md:grid-cols-[1.6fr_1fr_1fr_auto]">
                 <div className="flex items-start gap-3">
-                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-(--accent-ink)/80" />
+                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/10" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm text-(--ink)/80">{entity.value}</p>
-                    <p className="mt-1 font-mono text-[10px] text-(--ink)/38">
+                    <p className="truncate text-sm text-foreground">{entity.value}</p>
+                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
                       {shortId(entity.id)}
                     </p>
                   </div>
                 </div>
                 <Chip tone={entity.kind === 'path' ? 'lime' : 'dim'}>{entity.kind}</Chip>
-                <span className="text-[11px] text-(--ink)/45">
+                <span className="text-[11px] text-muted-foreground">
                   {entity.projectId
                     ? (projectById.get(entity.projectId) ?? 'project')
                     : 'global scope'}
                 </span>
                 <Link
                   href={`/dashboard/memories?review=&q=${encodeURIComponent(entity.value)}`}
-                  className="text-[11px] text-(--ink)/45 hover:text-(--accent-ink)"
+                  className="text-[11px] text-muted-foreground hover:text-primary"
                 >
                   {entity.linkCount} linked →
                 </Link>

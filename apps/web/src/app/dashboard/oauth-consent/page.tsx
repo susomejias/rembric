@@ -102,7 +102,7 @@ export default async function OAuthConsentPage({
           Granted access
         </span>
         <span className="text-sm">
-          <span className="text-brand-accent">{access}</span> · scope{' '}
+          <span className="text-primary">{access}</span> · scope{' '}
           <code className="font-mono">{grantedScope}</code>
         </span>
       </div>
@@ -113,7 +113,7 @@ export default async function OAuthConsentPage({
       </p>
 
       {csrf === null ? (
-        <p className="text-xs text-warn">
+        <p className="text-xs text-amber-600 dark:text-amber-400">
           No dashboard session was resolved for this request, so the approval will be refused at the
           endpoint&apos;s CSRF check. Sign in to the dashboard and open the authorization link
           again.
@@ -168,8 +168,8 @@ function ConsentShell({
           Rembric · Authorize
         </span>
       </div>
-      <h1 className="font-display text-2xl font-semibold tracking-tight">
-        <span className="text-brand-accent">{hl}</span> {rest}
+      <h1 className="text-2xl font-semibold tracking-tight">
+        <span className="text-primary">{hl}</span> {rest}
       </h1>
       <Card>
         <CardContent className="flex flex-col gap-3">{children}</CardContent>

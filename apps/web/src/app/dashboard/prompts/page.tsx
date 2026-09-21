@@ -119,7 +119,7 @@ export default async function PromptsPage({
             href={
               filters.includeDeleted ? '/dashboard/prompts' : '/dashboard/prompts?include_deleted=1'
             }
-            className="text-[11px] text-(--ink)/45 transition-colors hover:text-(--accent-ink)"
+            className="text-[11px] text-muted-foreground transition-colors hover:text-primary"
           >
             {filters.includeDeleted ? 'Hide soft-deleted rows' : 'Show soft-deleted rows'}
           </Link>
@@ -142,17 +142,6 @@ export default async function PromptsPage({
       </section>
 
       <FilterForm action="/dashboard/prompts" className="mt-6">
-        <FilterField label="Scope" htmlFor="p-project" className="w-44">
-          <FilterSelect
-            id="p-project"
-            name="project"
-            value={filters.project}
-            options={[
-              { value: '', label: 'all scopes' },
-              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
-            ]}
-          />
-        </FilterField>
         <FilterField label="Agent" htmlFor="p-agent" className="w-40">
           <FilterInput id="p-agent" name="agent" value={filters.agent} placeholder="claude-code" />
         </FilterField>
@@ -202,20 +191,22 @@ export default async function PromptsPage({
                   <span
                     className={`grid size-7 place-items-center rounded-lg ${
                       state === 'deleted'
-                        ? 'bg-(--ink)/[5%] text-(--ink)/45'
-                        : 'bg-(--accent-ink)/[8%] text-(--accent-ink)/70'
+                        ? 'bg-accent text-muted-foreground'
+                        : 'bg-primary/10 text-primary'
                     }`}
                   >
                     <FileText className="size-3.5" />
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm text-(--ink)/80">{truncate(prompt.content, 160)}</p>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="text-sm text-foreground">{truncate(prompt.content, 160)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       {prompt.agent} · {prompt.sessionId ? shortId(prompt.sessionId) : 'no session'}{' '}
                       · {relativeTime(prompt.createdAt, nowMs)}
                     </p>
                   </div>
-                  <span className="text-[11px] text-(--ink)/45">{project?.slug ?? 'global'}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {project?.slug ?? 'global'}
+                  </span>
                   <Pill tone={state === 'active' ? 'lime' : state === 'refined' ? 'lime' : 'dim'}>
                     {state}
                   </Pill>

@@ -133,8 +133,8 @@ export default async function SessionsPage({
         title="Sessions"
         description="A focused view of the context being created right now, with recent runs kept close at hand."
         aside={
-          <div className="flex items-center gap-2 rounded-full border border-(--accent-ink)/20 bg-(--accent-ink)/[6%] px-3 py-1.5 text-[11px] text-(--accent-ink)">
-            <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_#c4f23f]" />
+          <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] text-primary">
+            <span className="size-1.5 rounded-full bg-primary" />
             {statusCounts.active} live session{statusCounts.active === 1 ? '' : 's'}
           </div>
         }
@@ -154,27 +154,27 @@ export default async function SessionsPage({
               <Link key={session.id} href={`/dashboard/sessions/${session.id}`} className="block">
                 <Row columns="md:grid-cols-[minmax(210px,1fr)_1.5fr_auto_auto]">
                   <div className="flex items-center gap-3">
-                    <span className="size-2 rounded-full bg-lime-300 shadow-[0_0_10px_#c4f23f]" />
+                    <span className="size-2 rounded-full bg-primary" />
                     <div>
                       <p className="text-sm font-medium">{sessionTitle(session)}</p>
-                      <p className="mt-1 text-[11px] text-(--ink)/38">
+                      <p className="mt-1 text-[11px] text-muted-foreground">
                         Session {String(index + 1).padStart(2, '0')} · {session.agent}
                       </p>
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-(--ink)/65">
+                    <p className="text-xs text-muted-foreground">
                       {session.description ?? 'No description reported by the client'}
                     </p>
-                    <p className="mt-2 text-[10px] text-(--ink)/38">
+                    <p className="mt-2 text-[10px] text-muted-foreground">
                       {memoryCounts[session.id] ?? 0} memories · {promptCounts[session.id] ?? 0}{' '}
                       prompts
                     </p>
                   </div>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <span className="text-[11px] text-muted-foreground">
                     {durationBetween(session.startedAt, session.endedAt, nowMs)}
                   </span>
-                  <span className="w-fit text-[11px] text-(--ink)/38">View context</span>
+                  <span className="w-fit text-[11px] text-muted-foreground">View context</span>
                 </Row>
               </Link>
             ))}
@@ -183,17 +183,6 @@ export default async function SessionsPage({
       </Panel>
 
       <FilterForm action="/dashboard/sessions" className="mt-6">
-        <FilterField label="Scope" htmlFor="s-project" className="w-44">
-          <FilterSelect
-            id="s-project"
-            name="project"
-            value={filters.project}
-            options={[
-              { value: '', label: 'all scopes' },
-              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
-            ]}
-          />
-        </FilterField>
         <FilterField label="Agent" htmlFor="s-agent" className="w-40">
           <FilterInput id="s-agent" name="agent" value={filters.agent} placeholder="claude-code" />
         </FilterField>
@@ -233,18 +222,18 @@ export default async function SessionsPage({
               <Link key={session.id} href={`/dashboard/sessions/${session.id}`} className="block">
                 <Row columns="md:grid-cols-[minmax(220px,1.3fr)_1fr_1fr_auto_auto]">
                   <div>
-                    <p className="truncate text-sm text-(--ink)/80">{sessionTitle(session)}</p>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="truncate text-sm text-foreground">{sessionTitle(session)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       {session.agent} · {session.tokenName ?? 'no token'}
                     </p>
                   </div>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <span className="text-[11px] text-muted-foreground">
                     {session.projectSlug ?? 'global scope'}
                   </span>
-                  <span className="text-[11px] text-(--ink)/45">
+                  <span className="text-[11px] text-muted-foreground">
                     <Time value={session.startedAt} />
                   </span>
-                  <span className="text-[11px] text-(--ink)/38">
+                  <span className="text-[11px] text-muted-foreground">
                     {memoryCounts[session.id] ?? 0} mem · {promptCounts[session.id] ?? 0} prompts
                   </span>
                   <Pill tone={session.status === 'active' ? 'lime' : 'dim'}>{session.status}</Pill>
@@ -279,9 +268,11 @@ export default async function SessionsPage({
               {deletedRows.map((session) => (
                 <Link key={session.id} href={`/dashboard/sessions/${session.id}`} className="block">
                   <Row columns="md:grid-cols-[1.4fr_1fr_auto_auto]">
-                    <p className="truncate text-sm text-(--ink)/70">{sessionTitle(session)}</p>
-                    <span className="text-[11px] text-(--ink)/45">{session.agent}</span>
-                    <span className="text-[11px] text-(--ink)/38">
+                    <p className="truncate text-sm text-muted-foreground">
+                      {sessionTitle(session)}
+                    </p>
+                    <span className="text-[11px] text-muted-foreground">{session.agent}</span>
+                    <span className="text-[11px] text-muted-foreground">
                       <Time value={session.deletedAt} />
                     </span>
                     <Pill tone="danger">deleted</Pill>
@@ -297,14 +288,14 @@ export default async function SessionsPage({
         <Panel padded>
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">
+              <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
                 Recent activity
               </p>
               <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">
                 {allSessions} total runs
               </h2>
             </div>
-            <span className="text-[11px] text-(--ink)/38">Memory writes, 7 days</span>
+            <span className="text-[11px] text-muted-foreground">Memory writes, 7 days</span>
           </div>
           <div
             className="mt-6 flex items-end gap-2"
@@ -312,22 +303,22 @@ export default async function SessionsPage({
           >
             {activity.days.map((day, index) => (
               <div key={day.day} className="flex flex-1 flex-col items-center gap-2">
-                <div className="flex h-28 w-full items-end rounded-md bg-(--surface-tile)">
+                <div className="flex h-28 w-full items-end rounded-md bg-muted">
                   <div
-                    className="w-full rounded-md bg-(--accent-ink)/60"
+                    className="w-full rounded-md bg-primary/10"
                     style={{
                       height: `${Math.max(4, Math.round((day.count / activity.peak) * 100))}%`,
                     }}
                     title={`${day.count} memories`}
                   />
                 </div>
-                <span className="text-[10px] text-(--ink)/25">{WEEKDAYS[index]}</span>
+                <span className="text-[10px] text-muted-foreground/70">{WEEKDAYS[index]}</span>
               </div>
             ))}
           </div>
         </Panel>
         <Panel padded>
-          <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">
+          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
             Session footprint
           </p>
           <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">Lightweight by design</h2>
@@ -362,9 +353,9 @@ function FootprintRow({
   accent?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-(--ink)/[6%] pb-3 last:border-0 last:pb-0">
-      <span className="text-(--ink)/45">{label}</span>
-      <span className={accent ? 'text-(--accent-ink)' : undefined}>{value}</span>
+    <div className="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={accent ? 'text-primary' : undefined}>{value}</span>
     </div>
   );
 }

@@ -15,14 +15,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#0b100e',
+  themeColor: '#0a0a0a',
 };
 
 /**
- * `dark` is the document's *base* state, not an opt-in: the v0 palette is
- * dark-first, so the class is server-rendered and the light variant is the
- * class the pre-paint script swaps in. That ordering is also what makes the
- * `dark:` utilities of the generated `ui/*` primitives apply by default.
+ * `dark` is the document's *base* state, not an opt-in: the theme is dark-first,
+ * so the class is server-rendered and the pre-paint script removes it for a
+ * viewer who chose light. That ordering is also what makes the `dark:`
+ * utilities of the generated `ui/*` primitives apply by default.
  * `suppressHydrationWarning` covers the one attribute the script rewrites before
  * React hydrates.
  */

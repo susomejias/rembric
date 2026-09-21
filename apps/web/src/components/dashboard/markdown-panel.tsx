@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import { EYEBROW } from './ui';
 
 /**
- * A markdown body inside the v0 panel frame, with the mockup's copy control.
+ * A markdown body inside the shared panel frame, with the mockup's copy control.
  *
  * `react-markdown` is safe by construction for this boundary — raw HTML in a
  * memory's content is never rendered as markup, every text node is escaped, and
@@ -45,10 +45,10 @@ export function MarkdownPanel({
   };
 
   return (
-    <section className="mt-6 overflow-hidden rounded-2xl border border-(--accent-ink)/15 bg-(--surface-panel)">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-(--ink)/[7%] px-5 py-4 md:px-6">
+    <section className="mt-6 overflow-hidden rounded-2xl border border-primary/30 bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 md:px-6">
         <div>
-          <p className={`text-(--accent-ink)/60 ${EYEBROW}`}>{eyebrow}</p>
+          <p className={`text-primary ${EYEBROW}`}>{eyebrow}</p>
           <h2 className="mt-1 text-base font-medium">{title}</h2>
         </div>
         <div className="flex items-center gap-2">
@@ -57,18 +57,14 @@ export function MarkdownPanel({
             type="button"
             onClick={copy}
             aria-label={copyLabel}
-            className="flex items-center gap-2 rounded-lg border border-(--ink)/[7.5%] bg-(--ink)/[3%] px-3 py-2 text-[11px] text-(--ink)/55 transition-colors hover:bg-(--ink)/[7%] hover:text-(--ink)/85"
+            className="flex items-center gap-2 rounded-lg border border-border bg-accent px-3 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            {copied ? (
-              <Check className="size-3.5 text-(--accent-ink-strong)" />
-            ) : (
-              <Copy className="size-3.5" />
-            )}
+            {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
             {copied ? 'Copied' : copyLabel}
           </button>
         </div>
       </div>
-      <div className="px-5 py-5 text-sm leading-7 text-(--ink)/60 md:px-6">
+      <div className="px-5 py-5 text-sm leading-7 text-muted-foreground md:px-6">
         <ReactMarkdown components={MARKDOWN_COMPONENTS}>{markdown}</ReactMarkdown>
       </div>
     </section>
@@ -77,13 +73,13 @@ export function MarkdownPanel({
 
 const MARKDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <h3 className="mb-3 text-lg font-medium tracking-[-.03em] text-(--ink)/90">{children}</h3>
+    <h3 className="mb-3 text-lg font-medium tracking-[-.03em] text-foreground">{children}</h3>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <h3 className={`mt-5 mb-3 text-(--accent-ink)/70 ${EYEBROW}`}>{children}</h3>
+    <h3 className={`mt-5 mb-3 text-primary ${EYEBROW}`}>{children}</h3>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <h4 className="mt-4 mb-2 text-sm font-medium text-(--ink)/85">{children}</h4>
+    <h4 className="mt-4 mb-2 text-sm font-medium text-foreground">{children}</h4>
   ),
   p: ({ children }: { children?: ReactNode }) => (
     <p className="mb-3 leading-7 last:mb-0">{children}</p>
@@ -96,31 +92,31 @@ const MARKDOWN_COMPONENTS = {
   ),
   li: ({ children }: { children?: ReactNode }) => <li className="leading-6">{children}</li>,
   strong: ({ children }: { children?: ReactNode }) => (
-    <strong className="font-medium text-(--accent-ink)">{children}</strong>
+    <strong className="font-medium text-primary">{children}</strong>
   ),
   em: ({ children }: { children?: ReactNode }) => <em className="italic">{children}</em>,
   a: ({ children, href }: { children?: ReactNode; href?: string }) => (
     <a
       href={href}
-      className="text-(--accent-ink) underline-offset-4 hover:underline"
+      className="text-primary underline-offset-4 hover:underline"
       rel="noreferrer noopener"
     >
       {children}
     </a>
   ),
   code: ({ children }: { children?: ReactNode }) => (
-    <code className="rounded border border-(--ink)/[10%] bg-(--ink)/[4%] px-1.5 py-0.5 font-mono text-[.8em] text-(--ink)/85">
+    <code className="rounded border border-border bg-accent px-1.5 py-0.5 font-mono text-[.8em] text-foreground">
       {children}
     </code>
   ),
   pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="mb-3 overflow-x-auto rounded-lg border border-(--ink)/[7.5%] bg-(--surface-tile) p-3 font-mono text-xs leading-5">
+    <pre className="mb-3 overflow-x-auto rounded-lg border border-border bg-muted p-3 font-mono text-xs leading-5">
       {children}
     </pre>
   ),
-  hr: () => <hr className="my-4 border-(--ink)/[7%]" />,
+  hr: () => <hr className="my-4 border-border" />,
   blockquote: ({ children }: { children?: ReactNode }) => (
-    <blockquote className="mb-3 border-l-2 border-(--accent-ink)/40 pl-4 text-(--ink)/55">
+    <blockquote className="mb-3 border-l-2 border-primary/30 pl-4 text-muted-foreground">
       {children}
     </blockquote>
   ),

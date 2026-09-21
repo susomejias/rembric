@@ -120,36 +120,32 @@ export default function ActivityPage() {
       </section>
 
       <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
-                Signal policy
-              </p>
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Signal policy</p>
               <h2 className="mt-2 text-base font-medium">Meaningful changes only</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               no event table
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Activity is composed at read time from memory writes, judged relations, session starts
             and consolidation runs — not from a stream Rembric would have to retain and prune.
           </p>
         </article>
-        <article className="rounded-2xl border border-(--ink)/[6.5%] bg-(--surface-nested) p-5">
+        <article className="rounded-2xl border border-border bg-muted p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-(--accent-ink)/55 uppercase">
-                Storage model
-              </p>
+              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Storage model</p>
               <h2 className="mt-2 text-base font-medium">The audit trail is the data</h2>
             </div>
-            <span className="rounded-md border border-(--ink)/[6.5%] px-2 py-1 text-[10px] text-(--ink)/45">
+            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
               SQLite
             </span>
           </div>
-          <p className="mt-3 max-w-lg text-xs leading-5 text-(--ink)/45">
+          <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Every row this page shows is the record itself: append-only memories, the
             `consolidation_ops` journal, and the session rows.
           </p>
@@ -170,19 +166,16 @@ export default function ActivityPage() {
           <Rows>
             {signals.slice(0, 40).map((signal) => (
               <Row key={signal.id} columns="md:grid-cols-[auto_1.5fr_1fr_auto]">
-                <span className="grid size-7 place-items-center rounded-lg bg-(--ink)/[5%] text-(--ink)/55">
+                <span className="grid size-7 place-items-center rounded-lg bg-accent text-muted-foreground">
                   <SignalIcon kind={signal.kind} />
                 </span>
                 <div className="min-w-0">
-                  <Link
-                    href={signal.href}
-                    className="text-sm text-(--ink)/80 hover:text-(--accent-ink)"
-                  >
+                  <Link href={signal.href} className="text-sm text-foreground hover:text-primary">
                     {signal.title}
                   </Link>
-                  <p className="mt-1 text-[10px] text-(--ink)/38">{signal.detail}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">{signal.detail}</p>
                 </div>
-                <span className="text-[11px] text-(--ink)/45">
+                <span className="text-[11px] text-muted-foreground">
                   {relativeTime(signal.at, nowMs)}
                 </span>
                 <Pill tone={signal.tone}>{signal.kind}</Pill>
@@ -192,7 +185,7 @@ export default function ActivityPage() {
         )}
       </Panel>
 
-      <p className="mt-4 text-[11px] text-(--ink)/38">
+      <p className="mt-4 text-[11px] text-muted-foreground">
         Newest signal in this reading: {signals[0] ? <Time value={signals[0].at} /> : '—'}
       </p>
     </Page>

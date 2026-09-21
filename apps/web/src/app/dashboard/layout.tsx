@@ -8,19 +8,15 @@ import { REMBRIC_VERSION } from '@/lib/version';
  * The dashboard shell. Two things live here rather than in the navigation
  * component, because both are server-side facts:
  *
- * - **The nav's live-session count and its project list.** Both come from the
- *   service graph, so the client component is handed values and never the
- *   repositories. Every `/dashboard` page is `force-dynamic`, so this runs per
- *   request and never during `next build`.
+ * - **The nav's live-session count.** It comes from the service graph, so the
+ *   client component is handed a value and never the repositories. Every
+ *   `/dashboard` page is `force-dynamic`, so this runs per request and never
+ *   during `next build`.
  * - **The theme bootstrap.** It runs during HTML parsing, before the body
  *   paints, because the class it sets is the difference between loading in the
  *   stored theme and flashing dark first. `.dark` is server-rendered on
- *   `<html>` (`app/layout.tsx`), so the script only has to *replace* it for an
+ *   `<html>` (`app/layout.tsx`), so the script only has to *remove* it for an
  *   operator who chose light; an absent key leaves the document as rendered.
- *
- * The canvas stays on this element: it carries the `--surface-page` /
- * `--body-ink` pair the retired rail painted, so the palette the views are
- * written against is unchanged now that the rail is gone.
  *
  * `THEME_STORAGE_KEY` is declared here, in the server component that renders the
  * script, and threaded down to the toggle as a prop rather than exported from
@@ -32,23 +28,14 @@ export const dynamic = 'force-dynamic';
 const THEME_STORAGE_KEY = 'rembric-theme';
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const { repos, agentSessions } = getServices();
-
-  // Archived projects are listed on purpose: the selector is a filter over what
-  // memory already exists, and an archived project's memories are still readable
-  // through the memories view.
-  const projects = repos.projects.adminListAll().map((project) => ({
-    slug: project.slug,
-    name: project.displayName ?? project.slug,
-  }));
+  const { agentSessions } = getServices();
   const liveSessions = agentSessions.adminCountByStatus().active;
 
   return (
     <>
       <script>{themeScript()}</script>
-      <div className="min-h-screen bg-(--surface-page) text-(--body-ink)">
+      <div className="min-h-screen bg-background text-foreground">
         <ActionNav
-          projects={projects}
           version={REMBRIC_VERSION}
           themeStorageKey={THEME_STORAGE_KEY}
           badges={{ liveSessions }}
@@ -62,7 +49,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 }
 
 function themeScript(): string {
-  return `(function(){try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');var r=document.documentElement;if(t==='light'){r.classList.remove('dark');r.classList.add('light')}else if(t==='dark'){r.classList.remove('light');r.classList.add('dark')}}catch(e){}})()`;
+  return `(function(){try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');var r=document.documentElement;if(t==='light'){r.classList.remove('dark')}else if(t==='dark'){r.classList.add('dark')}}catch(e){}})()`;
 }
 
 /**

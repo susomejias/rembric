@@ -28,7 +28,6 @@ import {
 import { PAGE_SIZE, relativeTime, shortId } from '@/components/dashboard/support';
 import {
   EmptyNote,
-  Notice,
   Page,
   PageHead,
   Panel,
@@ -196,8 +195,8 @@ export default async function MemoriesPage({
         title="Memories"
         description="The durable context Rembric has kept across your projects, ready to be recalled when it matters."
         aside={
-          <div className="flex items-center gap-2 rounded-full border border-(--ink)/[7.5%] bg-(--ink)/[3%] px-3 py-1.5 text-[11px] text-(--ink)/55">
-            <span className="size-1.5 rounded-full bg-lime-300" />
+          <div className="flex items-center gap-2 rounded-full border border-border bg-accent px-3 py-1.5 text-[11px] text-muted-foreground">
+            <span className="size-1.5 rounded-full bg-primary" />
             {totalMemories.toLocaleString('en-US')} stored
           </div>
         }
@@ -218,23 +217,7 @@ export default async function MemoriesPage({
         />
       </section>
 
-      <Notice badge="Append-only" className="mt-6">
-        Memories are never deleted or edited. Lifecycle is <b>active</b> · supersede via new save ·{' '}
-        <b>archive</b>.
-      </Notice>
-
       <FilterForm action="/dashboard/memories" className="mt-6">
-        <FilterField label="Scope" htmlFor="f-project" className="w-44">
-          <FilterSelect
-            id="f-project"
-            name="project"
-            value={filters.project}
-            options={[
-              { value: '', label: 'all scopes' },
-              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
-            ]}
-          />
-        </FilterField>
         <FilterField label="Status" htmlFor="f-status" className="w-36">
           <FilterSelect
             id="f-status"
@@ -286,7 +269,7 @@ export default async function MemoriesPage({
             {isFiltered ? (
               <>
                 No memory matches this filter set.{' '}
-                <Link href="/dashboard/memories" className="text-(--accent-ink) hover:underline">
+                <Link href="/dashboard/memories" className="text-primary hover:underline">
                   Clear the filters
                 </Link>
                 .
@@ -313,20 +296,20 @@ export default async function MemoriesPage({
                 <Link key={memory.id} href={`/dashboard/memories/${memory.id}`} className="block">
                   <Row columns="md:grid-cols-[minmax(260px,1.5fr)_1fr_auto_auto]">
                     <div className="flex items-start gap-3">
-                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-(--accent-ink)/80" />
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/10" />
                       <div>
-                        <p className="text-sm leading-5 text-(--ink)/80">{memory.title}</p>
-                        <p className="mt-1 text-[10px] text-(--ink)/38">
+                        <p className="text-sm leading-5 text-foreground">{memory.title}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
                           {memory.type} · {shortId(memory.id)}
                         </p>
                       </div>
                     </div>
-                    <span className="text-[11px] text-(--ink)/45">
+                    <span className="text-[11px] text-muted-foreground">
                       {memory.projectId
                         ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
                         : 'global'}
                     </span>
-                    <span className="text-[11px] text-(--ink)/38">
+                    <span className="text-[11px] text-muted-foreground">
                       {relativeTime(memory.createdAt, nowMs)}
                     </span>
                     <Pill tone={tone}>

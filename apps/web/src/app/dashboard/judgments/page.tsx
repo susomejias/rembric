@@ -94,22 +94,22 @@ export default async function JudgmentsPage({
         <StatTile label="Orphaned" value={orphaned} hint="endpoints no longer active" />
       </section>
 
-      <section className="mt-6 rounded-2xl border border-(--warn-ink)/15 bg-[linear-gradient(120deg,color-mix(in_oklab,var(--warn-ink)_10%,transparent),color-mix(in_oklab,var(--surface-panel)_92%,transparent)_52%)] p-5 md:p-6">
+      <section className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-xl">
-            <p className="text-[10px] tracking-[.14em] text-(--warn-ink)/55 uppercase">
+            <p className="text-[10px] tracking-[.14em] text-amber-600 dark:text-amber-400 uppercase">
               Decision context
             </p>
             <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">What deserves a decision</h2>
-            <p className="mt-2 text-xs leading-5 text-(--ink)/45">
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
               Judgments are the quality gate between temporary session signals and durable memory.
               Review the reason, scope, and confidence before anything is kept long term.
             </p>
           </div>
-          <div className="rounded-lg border border-(--ink)/[10%] bg-(--ink)/[3%] px-3 py-2 text-right">
-            <p className="text-[10px] text-(--ink)/45">Review queue</p>
-            <p className="mt-1 text-lg font-medium text-(--warn-ink)">
-              {pending} <span className="text-xs font-normal text-(--ink)/45">pairs</span>
+          <div className="rounded-lg border border-border bg-accent px-3 py-2 text-right">
+            <p className="text-[10px] text-muted-foreground">Review queue</p>
+            <p className="mt-1 text-lg font-medium text-amber-600 dark:text-amber-400">
+              {pending} <span className="text-xs font-normal text-muted-foreground">pairs</span>
             </p>
           </div>
         </div>
@@ -118,7 +118,7 @@ export default async function JudgmentsPage({
             {adjudicable.slice(0, 6).map((row) => (
               <span
                 key={row.projectId ?? 'global'}
-                className="rounded-full border border-(--ink)/[7%] bg-(--ink)/[3%] px-3 py-1 text-[10px] text-(--ink)/55"
+                className="rounded-full border border-border bg-accent px-3 py-1 text-[10px] text-muted-foreground"
               >
                 {projectLabel(repos, row.projectId)} · {row.count}
               </span>
@@ -162,8 +162,8 @@ export default async function JudgmentsPage({
                   <span
                     className={`grid size-7 place-items-center rounded-lg text-[10px] ${
                       relation.status === 'pending' || relation.status === 'orphaned'
-                        ? 'bg-(--warn-ink)/[10%] text-(--warn-ink)'
-                        : 'bg-(--accent-ink)/[8%] text-(--accent-ink)/70'
+                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                        : 'bg-primary/10 text-primary'
                     }`}
                   >
                     {String(index + 1).padStart(2, '0')}
@@ -171,23 +171,23 @@ export default async function JudgmentsPage({
                   <div className="min-w-0">
                     <Link
                       href={`/dashboard/memories/${relation.sourceId}`}
-                      className="text-sm text-(--ink)/80 hover:text-(--accent-ink)"
+                      className="text-sm text-foreground hover:text-primary"
                     >
                       {relation.sourceTitle}
                     </Link>
-                    <p className="mt-1 text-[10px] text-(--ink)/38">
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       {relation.relation ?? 'pending'} →{' '}
                       <Link
                         href={`/dashboard/memories/${relation.targetId}`}
-                        className="hover:text-(--accent-ink)"
+                        className="hover:text-primary"
                       >
                         {relation.targetTitle}
                       </Link>
                     </p>
                   </div>
-                  <div className="text-[11px] text-(--ink)/45">
+                  <div className="text-[11px] text-muted-foreground">
                     <p>confidence {relation.confidence ?? '—'}</p>
-                    <p className="mt-1 text-(--ink)/38">
+                    <p className="mt-1 text-muted-foreground">
                       {relation.judgmentId !== ''
                         ? `judgment ${shortId(relation.judgmentId)}`
                         : 'no judgment id'}
@@ -197,7 +197,7 @@ export default async function JudgmentsPage({
                     <Pill tone={relation.status === 'judged' ? 'lime' : 'amber'}>
                       {relation.status}
                     </Pill>
-                    <span className="text-[10px] text-(--ink)/38">
+                    <span className="text-[10px] text-muted-foreground">
                       {relativeTime(relation.judgedAt ?? relation.createdAt, nowMs)}
                     </span>
                   </div>
@@ -217,31 +217,31 @@ export default async function JudgmentsPage({
           </div>
         </Panel>
 
-        <aside className="rounded-2xl border border-(--ink)/[7.5%] bg-(--surface-panel) p-5 md:p-6">
-          <p className="text-[10px] tracking-[.14em] text-(--ink)/38 uppercase">
+        <aside className="rounded-2xl border border-border bg-card p-5 md:p-6">
+          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">
             How decisions work
           </p>
           <h2 className="mt-2 text-xl font-medium tracking-[-.04em]">Only durable context wins</h2>
-          <p className="mt-4 text-xs leading-5 text-(--ink)/40">
+          <p className="mt-4 text-xs leading-5 text-muted-foreground">
             Rembric keeps proposed memories separate until they are accepted. Nothing is silently
             promoted. A verdict keeps its source, target, confidence, reason, and evidence.
           </p>
-          <div className="mt-6 border-t border-(--ink)/[6%] pt-4 text-xs text-(--ink)/45">
+          <div className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">
             <div className="flex items-center justify-between">
               <span>Closure</span>
-              <span className="text-(--accent-ink)">memory.judge</span>
+              <span className="text-primary">memory.judge</span>
             </div>
             <div className="mt-3 flex items-center justify-between">
               <span>Re-surfacing</span>
               <span>memory.context.pendingJudgments</span>
             </div>
           </div>
-          <p className="mt-6 border-t border-(--ink)/[6%] pt-4 text-[11px] text-(--ink)/40">
+          <p className="mt-6 border-t border-border pt-4 text-[11px] text-muted-foreground">
             Aging pendings are orphaned by the deterministic sweep, not by a cron job.
           </p>
           <Link
             href="/dashboard/consolidation"
-            className="mt-4 inline-block text-[11px] text-(--accent-ink)/75 hover:text-(--accent-ink)"
+            className="mt-4 inline-block text-[11px] text-primary hover:text-primary"
           >
             Inspect the journal →
           </Link>
