@@ -10,7 +10,14 @@ import {
   SessionsService,
   TokensService,
 } from '@rembric/core';
-import { createDb, createRepositories, type DashboardSession, type DbHandle } from '@rembric/db';
+import {
+  createDb,
+  createRepositories,
+  projectScope,
+  type DashboardSession,
+  type DbHandle,
+  type Scope,
+} from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { guardAction } from '../lib/actions/guard';
@@ -347,5 +354,208 @@ describe('tokens mutations', () => {
     expect(row?.scope).toBe(
       'read:project:' + (guard.services.projects.findBySlug('slice-three-project')?.id ?? ''),
     );
+  });
+});
+
+describe('memories mutations', () => {
+  // `apps/server/src/dashboard/memories.ts` `/:id/archive` and `/:id/confirm`:
+  // the row is read unscoped and the scope the service call is pinned to comes
+  // from that row's own project. Confirm records the operator's event, which is
+  // what bumps the confirmation count the detail hub renders.
+  const ARCHIVE_FORM = 'memory.archive';
+  const CONFIRM_FORM = 'memory.confirm';
+
+  function saveMemory(title: string): string {
+    const { memory } = getServices();
+    const row = memory.save(
+      { type: 'feedback', title, content: `${title} content` },
+      projectScope(fixture.projects.getDefault().id),
+    );
+    return row.id;
+  }
+
+  /** The retired handler's scope resolution: read the row, then scope to its project. */
+  function resolveScope(id: string): Scope {
+    const row = getServices().memory.unsafeGetById(id);
+    if (!row?.projectId) throw new Error('fixture: memory has no project to scope to');
+    return projectScope(row.projectId);
+  }
+
+  it('archives then re-affirms a memory, resolving scope from the row itself', async () => {
+    const id = saveMemory('slice-four-marker');
+
+    const archive = await guardAction(submission(ARCHIVE_FORM, { id }), ARCHIVE_FORM, adminCookie);
+    expect(archive).toMatchObject({ ok: true });
+    if (!archive.ok) return;
+    archive.services.memory.archive(id, resolveScope(id));
+
+    expect(archive.services.memory.unsafeGetById(id)?.status).toBe('archived');
+    expect(archive.services.repos.memory.adminCountConfirmations(id)).toBe(0);
+
+    const confirm = await guardAction(submission(CONFIRM_FORM, { id }), CONFIRM_FORM, adminCookie);
+    expect(confirm).toMatchObject({ ok: true });
+    if (!confirm.ok) return;
+    confirm.services.memory.confirm(id, resolveScope(id), {
+      source: { agent: 'dashboard-operator' },
+    });
+
+    expect(confirm.services.repos.memory.adminCountConfirmations(id)).toBe(1);
+  });
+
+  it('refuses a non-admin session before the service call, leaving the row untouched', async () => {
+    const id = saveMemory('slice-four-refused');
+
+    const result = await guardAction(
+      form({ id, csrf: fixture.sessions.csrfToken(fixture.limited.session, ARCHIVE_FORM) }),
+      ARCHIVE_FORM,
+      cookieSource(fixture.limited.cookie),
+    );
+    expect(result).toMatchObject({ ok: false, error: 'admin_required' });
+    // The control for the refusal: an admin session would archive this same row,
+    // so an unchanged status is evidence the guard stopped before the service.
+    expect(getServices().memory.unsafeGetById(id)?.status).toBe('active');
+  });
+
+  it('refuses another project scope, proving the row-scoped resolution is load-bearing', () => {
+    const id = saveMemory('slice-four-scope');
+    const other = fixture.projects.create({ slug: 'slice-four-other', displayName: null });
+
+    // The positive control is the round-trip above: the same kind of row, scoped
+    // from its own project, archives. Here the wrong project's scope must refuse
+    // and leave the row untouched.
+    expect(() => getServices().memory.archive(id, projectScope(other.id))).toThrow(DomainError);
+    expect(getServices().memory.unsafeGetById(id)?.status).toBe('active');
+  });
+});
+
+describe('judgments mutations', () => {
+  // `apps/server/src/dashboard/judgments.ts` `/:judgmentId/orphan`: the operator
+  // closes a pending judgment once; the second call is the "already closed"
+  // answer the row's form surfaces as an error.
+  const ORPHAN_FORM = 'judgment.orphan';
+
+  function pendingJudgment(): string {
+    const { memory, repos } = getServices();
+    const scope = projectScope(fixture.projects.getDefault().id);
+    const source = memory.save(
+      { type: 'feedback', title: 'orphan-source', content: 'source' },
+      scope,
+    );
+    const target = memory.save(
+      { type: 'feedback', title: 'orphan-target', content: 'target' },
+      scope,
+    );
+    const judgmentId = `jdg-${source.id}`;
+    repos.relations.insert({
+      id: `rel-${source.id}`,
+      judgmentId,
+      sourceId: source.id,
+      targetId: target.id,
+      relation: null,
+      status: 'pending',
+      createdAt: new Date(),
+    });
+    return judgmentId;
+  }
+
+  it('orphans a pending judgment once, then reports the already-closed one', async () => {
+    const judgmentId = pendingJudgment();
+
+    const guard = await guardAction(
+      submission(ORPHAN_FORM, { judgmentId }),
+      ORPHAN_FORM,
+      adminCookie,
+    );
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    expect(guard.services.relations.orphanByOperator(judgmentId)).toBe(true);
+    expect(getServices().repos.relations.findByJudgmentId(judgmentId)?.status).toBe('orphaned');
+
+    // `false` is the missing-or-closed branch the action turns into its error.
+    expect(guard.services.relations.orphanByOperator(judgmentId)).toBe(false);
+  });
+});
+
+describe('maintenance mutations', () => {
+  // `apps/server/src/dashboard/maintenance.ts`'s three purge POSTs. Each covers
+  // the zero-count branch main renders as a disabled control and the non-zero
+  // branch it renders as a danger-confirmed form.
+  const PURGE_SESSIONS = 'maintenance.purge-sessions';
+  const PURGE_MEMORIES = 'maintenance.purge-archived-memories';
+  const PURGE_PROMPTS = 'maintenance.purge-prompts';
+
+  /** End a run and backdate `ended_at` past the one-hour purge grace. */
+  function endAndBackdate(sessionId: string): void {
+    getServices().agentSessions.end(sessionId, { tokenId: fixture.admin.id });
+    fixture.handle.raw
+      .prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
+      .run(Date.now() - 2 * 60 * 60 * 1000, sessionId);
+  }
+
+  it('purges empty sessions: zero is a no-op, then a backdated ended run is removed', async () => {
+    const guard = await guardAction(submission(PURGE_SESSIONS), PURGE_SESSIONS, adminCookie);
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    expect(guard.services.agentSessions.countPurgeableEmpty()).toBe(0);
+    expect(guard.services.agentSessions.purgeEmpty({ adminBypass: true }).deletedIds).toEqual([]);
+
+    const started = guard.services.agentSessions.start({
+      tokenId: fixture.admin.id,
+      projectId: fixture.projects.getDefault().id,
+      agent: 'purge-fixture',
+    });
+    endAndBackdate(started.id);
+
+    expect(guard.services.agentSessions.countPurgeableEmpty()).toBe(1);
+    const purged = guard.services.agentSessions.purgeEmpty({ adminBypass: true });
+    expect(purged.deletedIds).toContain(started.id);
+    expect(guard.services.agentSessions.countPurgeableEmpty()).toBe(0);
+  });
+
+  it('purges archived memories: zero is a no-op, then a disconnected row is removed', async () => {
+    const guard = await guardAction(submission(PURGE_MEMORIES), PURGE_MEMORIES, adminCookie);
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    expect(guard.services.memory.countPurgeableDisconnectedArchived()).toBe(0);
+    expect(
+      guard.services.memory.purgeDisconnectedArchived({ adminBypass: true }).deletedIds,
+    ).toEqual([]);
+
+    const scope = projectScope(fixture.projects.getDefault().id);
+    const saved = guard.services.memory.save(
+      { type: 'feedback', title: 'slice-six-archived', content: 'slice-six-archived' },
+      scope,
+    );
+    guard.services.memory.archive(saved.id, scope);
+
+    expect(guard.services.memory.countPurgeableDisconnectedArchived()).toBe(1);
+    const purged = guard.services.memory.purgeDisconnectedArchived({ adminBypass: true });
+    expect(purged.deletedIds).toContain(saved.id);
+    expect(guard.services.memory.unsafeGetById(saved.id)).toBeUndefined();
+    expect(guard.services.memory.countPurgeableDisconnectedArchived()).toBe(0);
+  });
+
+  it('purges deleted prompts: zero is a no-op, then a soft-deleted prompt is removed', async () => {
+    const guard = await guardAction(submission(PURGE_PROMPTS), PURGE_PROMPTS, adminCookie);
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    expect(guard.services.prompts.countPurgeableDeleted()).toBe(0);
+    expect(guard.services.prompts.purgeDeleted({ adminBypass: true }).deletedIds).toEqual([]);
+
+    const projectId = fixture.projects.getDefault().id;
+    const keep = guard.services.prompts.save({ content: 'keep', title: 'keep', projectId });
+    const drop = guard.services.prompts.save({ content: 'drop', title: 'drop', projectId });
+    guard.services.prompts.softDelete(drop.id);
+
+    expect(guard.services.prompts.countPurgeableDeleted()).toBe(1);
+    const purged = guard.services.prompts.purgeDeleted({ adminBypass: true });
+    expect(purged.deletedIds).toEqual([drop.id]);
+    expect(guard.services.prompts.findById(keep.id)).toBeDefined();
+    expect(guard.services.prompts.findById(drop.id)).toBeUndefined();
+    expect(guard.services.prompts.countPurgeableDeleted()).toBe(0);
   });
 });

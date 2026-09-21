@@ -6,6 +6,7 @@ import {
   MemoryService,
   OAuthService,
   ProjectsService,
+  PromptsService,
   RelationsService,
   TokensService,
   UsageCounters,
@@ -40,6 +41,17 @@ export interface Services {
   projects: ProjectsService;
   agentSessions: AgentSessionsService;
   memory: MemoryService;
+  /**
+   * The judgment graph (`memory_relations`). The maintenance sweep already
+   * needed this instance; the dashboard's orphan verb is why it is exposed.
+   */
+  relations: RelationsService;
+  /**
+   * Prompt rows and their purge. `maintenance/data.ts` builds its own
+   * stateless instance over the same repositories because these reads predate
+   * this graph; the mutations read the counts and purge through this one.
+   */
+  prompts: PromptsService;
   usageCounters: UsageCounters;
   authLockout: AuthLockout;
   /**
@@ -85,6 +97,7 @@ function buildServices(): Services {
   const projects = new ProjectsService(repos);
   const agentSessions = new AgentSessionsService(repos, db.db);
   const relations = new RelationsService(repos, db.db);
+  const prompts = new PromptsService(repos, db.db);
   const usageCounters = new UsageCounters();
 
   // Memoized on the Services object, so the transformer model is loaded once
@@ -141,6 +154,8 @@ function buildServices(): Services {
     projects,
     agentSessions,
     memory,
+    relations,
+    prompts,
     usageCounters,
     authLockout: new AuthLockout({
       maxFailures: envInt('AUTH_LOCKOUT_MAX_FAILURES', 10, { min: 1, max: 10_000 }),
