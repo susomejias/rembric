@@ -1,11 +1,23 @@
+import {
+  NotUndoableError,
+  PurgedRowMissingError,
+  TERMINAL_OP_TYPES,
+  type SkippedRow,
+  type UndoResult,
+} from '@rembric/core';
 import type { Repositories } from '@rembric/db';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import {
   PAGE_SIZE,
   pageParam,
   relativeTime,
   shortId,
+  singleParam,
   truncate,
 } from '@/components/dashboard/support';
 import {
@@ -15,6 +27,7 @@ import {
   DataTd,
   DataTh,
   DataTr,
+  Flash,
   Page,
   Pill,
   SectionBar,
@@ -24,19 +37,112 @@ import {
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
  * The consolidation journal, in the production dashboard's composition: the
- * numbered view head, the run and queue stats, the sweep context, and the run
- * history and latest-run journal as tables.
+ * numbered view head, the run and queue stats, the sweep context, the run
+ * history, and the latest run's journal as tables.
  *
- * Everything here is state, never a control: the sweep runs on session start and
- * from `/mcp` + `/api`, and reverting an op is a mutation whose Server Action
- * boundary is a separate slice. The view therefore renders the run history, the
- * op counts and the latest run's journal entries, and offers no dead button.
+ * The two mutations are `apps/server/src/dashboard/consolidation.ts`'s POST
+ * handlers: the forced sweep (danger-confirmed, because it also purges empty
+ * sessions) and the per-op / whole-run undos (warn / danger). Main rendered the
+ * undos on the run-detail page, which this app does not serve yet, so they hang
+ * off the latest run's section — same form names, same service calls, same
+ * confirm copy.
  */
 export const dynamic = 'force-dynamic';
+
+const SWEEP_FORM = 'sweep.run';
+const RUN_UNDO_FORM = 'run.undo';
+const OP_UNDO_FORM = 'op.undo';
+
+async function runSweep(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, SWEEP_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const summary = guard.services.forcedSweep();
+  const purged = summary.purgedSessionIds?.length ?? 0;
+  redirect(
+    purged > 0 ? `/dashboard/consolidation?purged-sessions=${purged}` : '/dashboard/consolidation',
+  );
+}
+
+/**
+ * `consolidation.ts`'s `renderUndoError` and `renderPartialUndo`, as action
+ * values: the retired handlers answered a 409/400 page with this copy, and a
+ * Server Action cannot set a status — the message the operator reads is what
+ * has to survive.
+ */
+function undoFailure(err: unknown): ActionState {
+  if (err instanceof PurgedRowMissingError) {
+    return {
+      error:
+        `Undo blocked. ${err.missing.length} memory row(s) referenced by this op have been ` +
+        `purged after the op ran; their state cannot be reconstructed. Missing ids: ` +
+        `${err.missing.join(', ')}.`,
+    };
+  }
+  if (err instanceof NotUndoableError) {
+    return {
+      error:
+        'Not undoable. Purge operations are terminal — the rows they removed cannot be ' +
+        'reconstructed.',
+    };
+  }
+  return { error: err instanceof Error ? err.message : String(err) };
+}
+
+function partialUndo(skipped: SkippedRow[]): ActionState {
+  const rows = skipped
+    .map((s) => `${shortId(s.id)} (topic ${s.topicKey} now held by ${shortId(s.occupiedBy)})`)
+    .join('; ');
+  return {
+    error:
+      `${skipped.length} row(s) were not reactivated — a newer memory now owns their topic ` +
+      `slot. The rest of the undo was applied. ${rows}`,
+  };
+}
+
+async function undoRun(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, RUN_UNDO_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const runId = readField(formData, 'runId');
+  let result: { reverted: string[]; skipped: SkippedRow[] };
+  try {
+    result = guard.services.undoRun(runId);
+  } catch (err) {
+    return undoFailure(err);
+  }
+  if (result.skipped.length > 0) return partialUndo(result.skipped);
+  redirect(`/dashboard/consolidation?undone=${result.reverted.length}`);
+}
+
+async function undoOp(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, OP_UNDO_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const opId = readField(formData, 'opId');
+  let result: UndoResult;
+  try {
+    result = guard.services.undoOp(opId);
+  } catch (err) {
+    return undoFailure(err);
+  }
+  if (result.skipped.length > 0) return partialUndo(result.skipped);
+  redirect('/dashboard/consolidation?undone=1');
+}
+
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -76,6 +182,8 @@ export default async function ConsolidationPage({
   const params = await searchParams;
   const page = pageParam(params['page']);
   const offset = page * PAGE_SIZE;
+  const purgedSessions = singleParam(params['purged-sessions']);
+  const undone = singleParam(params['undone']);
 
   const { repos } = getServices();
   const nowMs = Date.now();
@@ -102,6 +210,20 @@ export default async function ConsolidationPage({
         hl="Rembric"
         meta={[{ k: 'TOTAL', v: total }]}
       />
+
+      {undone !== '' ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="UNDONE">
+            Reverted {undone} consolidation op(s).
+          </Flash>
+        </div>
+      ) : purgedSessions !== '' ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="PURGED">
+            Removed {purgedSessions} empty session row(s) as part of this sweep.
+          </Flash>
+        </div>
+      ) : null}
 
       <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
         <StatCard
@@ -153,6 +275,21 @@ export default async function ConsolidationPage({
             ORPHAN AFTER {formatWindow(thresholds.afterMs)} · DEADLINE{' '}
             {formatWindow(thresholds.deadlineMs)}
           </p>
+          <div className="mt-5">
+            <ActionForm action={runSweep}>
+              <CsrfField form={SWEEP_FORM} />
+              <ConfirmSubmit
+                tone="danger"
+                title="Force a consolidation sweep across all scopes now?"
+                description="Decay and orphan ops are journaled and reversible, but this also purges empty sessions — that purge is irreversible."
+                confirmLabel="RUN SWEEP"
+              >
+                <Button type="button" variant="outline" size="sm">
+                  RUN SWEEP NOW
+                </Button>
+              </ConfirmSubmit>
+            </ActionForm>
+          </div>
         </div>
         <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
@@ -268,6 +405,28 @@ export default async function ConsolidationPage({
         <SectionBar
           name={lastRun ? `Operations in the latest run` : 'Operations'}
           meta={lastRun ? scopeLabel(repos, lastRun.scope) : 'NO RUN YET'}
+          more={
+            lastRun === null ? undefined : lastRunOps.some((op) => op.revertedAt === null) ? (
+              <ActionForm action={undoRun}>
+                <CsrfField form={RUN_UNDO_FORM} />
+                <input type="hidden" name="runId" value={lastRun.id} />
+                <ConfirmSubmit
+                  tone="danger"
+                  title="Revert every op in this run?"
+                  description="All affected memories will return to their pre-run status."
+                  confirmLabel="UNDO ENTIRE RUN"
+                >
+                  <Button type="button" variant="outline" size="sm">
+                    UNDO ENTIRE RUN
+                  </Button>
+                </ConfirmSubmit>
+              </ActionForm>
+            ) : (
+              <span className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+                all ops reverted
+              </span>
+            )
+          }
         />
       </div>
       {lastRunOps.length === 0 ? (
@@ -280,6 +439,7 @@ export default async function ConsolidationPage({
             <DataTh>created</DataTh>
             <DataTh>reasoning</DataTh>
             <DataTh>applied</DataTh>
+            <DataTh>action</DataTh>
           </DataHead>
           <DataBody>
             {lastRunOps.map((op) => (
@@ -299,6 +459,32 @@ export default async function ConsolidationPage({
                   <Pill tone={op.revertedAt ? 'amber' : 'lime'}>
                     {op.revertedAt ? 'reverted' : 'applied'}
                   </Pill>
+                </DataTd>
+                <DataTd>
+                  {op.revertedAt !== null ? (
+                    <span className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+                      reverted
+                    </span>
+                  ) : TERMINAL_OP_TYPES.has(op.opType) ? (
+                    <span className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+                      terminal (not undoable)
+                    </span>
+                  ) : (
+                    <ActionForm action={undoOp}>
+                      <CsrfField form={OP_UNDO_FORM} />
+                      <input type="hidden" name="opId" value={op.id} />
+                      <ConfirmSubmit
+                        tone="warn"
+                        title="Revert this consolidation op?"
+                        description="Affected memories will return to their pre-op status. This is journaled and itself reversible."
+                        confirmLabel="UNDO OP"
+                      >
+                        <Button type="button" variant="outline" size="sm">
+                          UNDO OP
+                        </Button>
+                      </ConfirmSubmit>
+                    </ActionForm>
+                  )}
                 </DataTd>
               </DataTr>
             ))}

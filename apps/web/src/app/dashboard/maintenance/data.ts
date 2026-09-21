@@ -1,21 +1,27 @@
-import { readdirSync, statSync } from 'node:fs';
+import { createReadStream, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 
-import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX, PromptsService } from '@rembric/core';
+import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX } from '@rembric/core';
 import { createDiagnostics, type DbDiagnostics } from '@rembric/db';
 
-import { getServices } from '@/lib/services';
+// Relative, not the `@/` alias the dashboard pages use: this module is reached
+// by `apps/web` tests (the download routes' contract lives in it) and the test
+// project has no `@` alias. The `src/app/api/**` handlers import the same way.
+import { getServices } from '../../../lib/services';
+import { getSession, type SessionCookieSource } from '../../../lib/session';
 
 /**
- * The read layer of the maintenance view — every fs/PRAGMA read
- * `apps/server/src/dashboard/maintenance.ts` performed before rendering, and
- * nothing else. Ported rather than imported because `apps/server` is not a
- * dependency of this workspace.
+ * The maintenance view's read layer — every fs/PRAGMA read
+ * `apps/server/src/dashboard/maintenance.ts` performed before rendering — plus
+ * the on-demand snapshot writer and the two download handlers it streamed.
+ * Ported rather than imported because `apps/server` is not a dependency of this
+ * workspace.
  *
- * No mutation lives here on purpose: the three purges and the on-demand backup
- * are journaled writes whose boundary (admin scope + the mutation protection) is
- * a later slice, so this view renders their *state* and their disabled controls.
+ * The three purges live in the page's Server Actions; the snapshot and the
+ * downloads live here because both are pure fs work over `backupsDir()`, with
+ * no service graph beyond `Services.prompts` (the count the page renders).
  */
 
 /** On-demand snapshot prefix; the sweep shares the `backups/` directory. */
@@ -34,6 +40,20 @@ export interface Backup {
   sizeBytes: number;
   kind: 'on-demand' | 'pre-update';
 }
+
+/** The same row with the path on disk — what the two download handlers stream from. */
+export interface BackupFile extends Backup {
+  path: string;
+}
+
+/**
+ * The outcome of resolving a download request. `invalid` is the
+ * `BACKUP_FILENAME_RE` refusal (the path-traversal gate) and `missing` the
+ * `statSync` miss; both keep the caller's message and status in one place.
+ */
+export type BackupDownload =
+  | { ok: true; backup: BackupFile }
+  | { ok: false; status: 400 | 404; message: string };
 
 export interface DbBreakdown {
   totalBytes: number;
@@ -70,11 +90,6 @@ const BREAKDOWN_TABLES = [
 export function readMaintenanceState(withBytes: boolean): MaintenanceState {
   const services = getServices();
   const diagnostics = createDiagnostics(services.db);
-  // `PromptsService` is not on the shared `Services` graph (only the `/api`
-  // handlers this app serves so far need the others); it is stateless over
-  // repositories, so building it here reads exactly the rows the retired view
-  // read. Its permanent home is `lib/services.ts`.
-  const prompts = new PromptsService(services.repos, services.db.db);
 
   const dir = backupsDir();
   const backups = listAllBackupsDesc(dir);
@@ -82,7 +97,7 @@ export function readMaintenanceState(withBytes: boolean): MaintenanceState {
   return {
     emptySessions: services.agentSessions.countPurgeableEmpty(),
     archivedMemories: services.memory.countPurgeableDisconnectedArchived(),
-    deletedPrompts: prompts.countPurgeableDeleted(),
+    deletedPrompts: services.prompts.countPurgeableDeleted(),
     breakdown: readBreakdown(diagnostics, withBytes),
     backups,
     latestOnDemand: backups.find((b) => b.kind === 'on-demand') ?? null,
@@ -103,7 +118,7 @@ function backupsDir(): string {
   return join(resolveDataDir(), 'backups');
 }
 
-function listAllBackupsDesc(dir: string): Backup[] {
+function listAllBackupsDesc(dir: string): BackupFile[] {
   let files: string[];
   try {
     files = readdirSync(dir);
@@ -113,16 +128,131 @@ function listAllBackupsDesc(dir: string): Backup[] {
   }
   return files
     .filter((f) => BACKUP_FILENAME_RE.test(f))
-    .map((f): Backup => {
-      const stat = statSync(join(dir, f));
+    .map((f): BackupFile => {
+      const path = join(dir, f);
+      const stat = statSync(path);
       return {
         file: f,
+        path,
         createdAt: stat.mtime,
         sizeBytes: stat.size,
         kind: f.startsWith(PRE_UPDATE_BACKUP_PREFIX) ? 'pre-update' : 'on-demand',
       };
     })
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+/** On-demand filenames newest-first — the `on-demand-<ms>` name sorts chronologically. */
+function listOnDemandBackupsDesc(dir: string): string[] {
+  let files: string[];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return files
+    .filter((f) => f.startsWith(ON_DEMAND_BACKUP_PREFIX) && f.endsWith('.sqlite'))
+    .sort()
+    .reverse();
+}
+
+/** The newest on-demand snapshot, or `null` when none exists — the `/download` target. */
+export function latestOnDemandBackup(): BackupFile | null {
+  return listAllBackupsDesc(backupsDir()).find((b) => b.kind === 'on-demand') ?? null;
+}
+
+/**
+ * Snapshot the live DB via `VACUUM INTO` and prune older on-demand backups —
+ * `maintenance.ts::createOnDemandBackup`. Retention is best-effort: a file that
+ * cannot be unlinked never fails the backup that was already written.
+ */
+export function createOnDemandBackup(): BackupFile {
+  const dir = backupsDir();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = `${ON_DEMAND_BACKUP_PREFIX}${Date.now()}.sqlite`;
+  const path = join(dir, file);
+  createDiagnostics(getServices().db).vacuumInto(path);
+
+  for (const older of listOnDemandBackupsDesc(dir).slice(ON_DEMAND_BACKUP_KEEP)) {
+    try {
+      unlinkSync(join(dir, older));
+    } catch {
+      // Retention is best-effort; never fail the backup over it.
+    }
+  }
+
+  const stat = statSync(path);
+  return { file, path, createdAt: stat.mtime, sizeBytes: stat.size, kind: 'on-demand' };
+}
+
+/**
+ * Resolve one download request. `file === null` is the latest-on-demand route
+ * (`POST`-written snapshots only). `BACKUP_FILENAME_RE` is the ONLY gate on the
+ * by-name route: it pins the exact producer-generated shape — no `/`, no `..` —
+ * so a filename taken straight from the URL has no path-traversal surface.
+ */
+export function resolveBackupDownload(file: string | null): BackupDownload {
+  if (file === null) {
+    const latest = latestOnDemandBackup();
+    if (latest === null)
+      return { ok: false, status: 404, message: 'No on-demand backup exists yet.' };
+    return { ok: true, backup: latest };
+  }
+  if (!BACKUP_FILENAME_RE.test(file)) {
+    return { ok: false, status: 400, message: 'Not a valid backup filename.' };
+  }
+  const path = join(backupsDir(), file);
+  let stat: ReturnType<typeof statSync>;
+  try {
+    stat = statSync(path);
+  } catch {
+    return { ok: false, status: 404, message: 'That backup no longer exists.' };
+  }
+  return {
+    ok: true,
+    backup: {
+      file,
+      path,
+      createdAt: stat.mtime,
+      sizeBytes: stat.size,
+      kind: file.startsWith(PRE_UPDATE_BACKUP_PREFIX) ? 'pre-update' : 'on-demand',
+    },
+  };
+}
+
+/**
+ * The admin gate both download handlers run first — `requireAdmin` from the
+ * retired router, minus the Hono context: a missing session is the login
+ * redirect `dashboard-router.ts` answered with, and a non-admin session the 403
+ * its forbidden page carried. `null` means admitted.
+ */
+export function backupDownloadDenial(request: {
+  url: string;
+  cookies: SessionCookieSource;
+}): Response | null {
+  const session = getSession(request.cookies);
+  if (session === null) return Response.redirect(new URL('/dashboard/login', request.url), 302);
+  if (session.scope !== '*') {
+    return new Response('This view requires an admin-scoped token.', { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * Stream a snapshot as an attachment. Streamed, never `readFileSync`: the file
+ * scales with the whole memory corpus, so a full read would spike memory on
+ * large installs — `maintenance.ts::streamBackup`.
+ */
+export function streamBackup(backup: BackupFile): Response {
+  const body = Readable.toWeb(createReadStream(backup.path)) as ReadableStream<Uint8Array>;
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(backup.sizeBytes),
+      'Content-Disposition': `attachment; filename="${backup.file}"`,
+    },
+  });
 }
 
 /** `withBytes` runs `dbstat`, which walks every page — opt-in, not per render. */
