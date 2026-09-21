@@ -21,5 +21,6 @@ export * from './repositories/scope-clause.js';
 export type { QueryTermFrequencies } from './repositories/term-statistics-repository.js';
 export * from './diagnostics.js';
 export * as diagnostics from './diagnostics.js';
+export * from './data-loss-guard.js';
 export * from './query-tokenizer.js';
 export * from './scope.js';

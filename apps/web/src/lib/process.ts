@@ -2,6 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 
 import { ensureEntityExtractor, entityMarkerPath } from '@rembric/core';
+import {
+  assertDataLossGuard,
+  createDiagnostics,
+  DataLossGuardError,
+  queryCounts,
+  writeStateMarker,
+} from '@rembric/db';
 
 import type { Services } from './services';
 import { getServices } from './services';
@@ -34,6 +41,9 @@ const ENTITY_DRAIN_DELAY_MS = 500;
 const ENTITY_IDLE_DELAY_MS = 30_000;
 const ENTITY_FALLBACK_MS = 60 * 60_000;
 
+/** `bootstrap.ts`: refresh the data-loss state marker every 60 s. */
+const MARKER_REFRESH_MS = 60_000;
+
 /**
  * `register()` is documented as once per server instance, but Next re-evaluates
  * modules on an HMR edit, so a module-level flag alone lets a reload start a
@@ -58,6 +68,40 @@ export function startProcess(): void {
   // this returns. Called lazily on the first request instead, that line moves
   // past the point where a mistyped `REMBRIC_DATA_DIR` could still be caught.
   const services = getServices();
+
+  // Both the guard and the marker read the path this process actually opened,
+  // never `REMBRIC_DATA_DIR` — the same choice `startEntityBackfill` makes
+  // (data-safety DS1).
+  const dataDir = dirname(services.db.raw.name);
+  const diagnostics = createDiagnostics(services.db);
+
+  // The server's refusal, ported: `register()` may not throw, so a tripped
+  // guard terminates the process here (EX_CONFIG) rather than degrading.
+  try {
+    assertDataLossGuard({ dataDir, diagnostics, env: process.env });
+  } catch (err) {
+    if (err instanceof DataLossGuardError) {
+      console.error('[process] data-loss guard refused startup');
+      process.exit(78);
+    }
+    throw err;
+  }
+
+  // The persistence spec's boot banner, `[bootstrap]`-prefixed so operators can
+  // grep the startup summary out of the container logs.
+  const counts = queryCounts(diagnostics);
+  console.error(
+    `[bootstrap] counts: memory=${counts.memory} projects=${counts.projects} sessions=${counts.sessions} tokens=${counts.tokens} prompts=${counts.prompts}`,
+  );
+
+  const markerTimer = setInterval(() => {
+    try {
+      writeStateMarker(dataDir, queryCounts(diagnostics));
+    } catch (err) {
+      console.error('[process] state marker refresh failed', message(err));
+    }
+  }, MARKER_REFRESH_MS);
+  markerTimer.unref?.();
 
   bootstrapAdminToken(services);
   startSessionReaper(services);

@@ -544,16 +544,16 @@ describe('image packaging invariants', () => {
     expect(/MAX_MB|800/.test(yml)).toBe(true);
   });
 
-  it('bootstrap.ts calls assertDataLossGuard before startHttpServer', () => {
-    // No apps/web equivalent exists: the port's boot path has no data-loss guard
-    // (and `data-loss-guard.ts` itself still lives in apps/server), so the rule
-    // keeps its target rather than being dropped. It retires with apps/server.
-    const src = readFileSync(join(serverRoot, 'server/bootstrap.ts'), 'utf8');
+  it('lib/process.ts calls assertDataLossGuard before the first timer', () => {
+    // The port must refuse a shrunk database before any background timer can
+    // touch it; the refusal itself (exit 78) is `bootstrap.ts`'s contract, now
+    // owned by `lib/process.ts`.
+    const src = readFileSync(join(srcRoot, 'lib/process.ts'), 'utf8');
     const guardIdx = src.search(/\bassertDataLossGuard\s*\(/);
-    const startIdx = src.search(/\bstartHttpServer\s*\(/);
+    const timerIdx = src.search(/\bset(?:Interval|Timeout)\s*\(/);
     expect(guardIdx).toBeGreaterThan(-1);
-    expect(startIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeLessThan(startIdx);
+    expect(timerIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(timerIdx);
   });
 });
 
