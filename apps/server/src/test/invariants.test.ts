@@ -1331,6 +1331,7 @@ const LEGACY_URL_ALLOW_LIST = new Set([
   'openspec/specs/open-source-distribution/spec.md', // 404-contract documentation
   'openspec/specs/hermes-agent-plugin/spec.md', // 404-contract documentation
   'apps/server/src/test/invariants.test.ts', // self-reference: this test owns the rule
+  'apps/web/src/test/invariants.test.ts', // transitional: the moved copy shares this token list until the originals are deleted
 ]);
 
 const LEGACY_URL_BINARY_EXTENSIONS = new Set([
