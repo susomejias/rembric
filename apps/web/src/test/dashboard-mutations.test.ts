@@ -2,12 +2,17 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+vi.mock('@/lib/version', () => ({ REMBRIC_VERSION: '9.9.9' }));
+
 import {
   AgentSessionsService,
+  deriveOAuthAreqKey,
   deriveSessionKey,
   DomainError,
+  EntityBackfillWorker,
   ProjectsService,
   SessionsService,
+  signAuthRequest,
   TokensService,
 } from '@rembric/core';
 import {
@@ -19,8 +24,9 @@ import {
   type Scope,
 } from '@rembric/db';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { runEntityRebuild } from '../app/dashboard/entities/page';
 import { GET as downloadBackup } from '../app/dashboard/maintenance/backup/download/[file]/route';
 import { GET as downloadLatestBackup } from '../app/dashboard/maintenance/backup/download/route';
 import {
@@ -30,9 +36,45 @@ import {
   resolveBackupDownload,
   ON_DEMAND_BACKUP_KEEP,
 } from '../app/dashboard/maintenance/data';
+import { POST as consentPost } from '../app/dashboard/oauth/consent/route';
+import { checkForUpdates } from '../app/dashboard/update/actions';
+import { getUpdates } from '../app/dashboard/update/update-service';
 import { guardAction } from '../lib/actions/guard';
 import { getServices } from '../lib/services';
 import type { SessionCookieSource } from '../lib/session';
+
+/**
+ * The `@/` alias bridge for the modules under test that live in the dashboard
+ * tree.
+ *
+ * The test project has no `@` alias (see `maintenance/data.ts`) and the shared
+ * modules it tests import relatively. `entities/page.tsx` is a Server Component
+ * and `update/actions.ts` is a Server Action module, so importing them pulls in
+ * the view layer's alias specifiers. Only the render-time components — which a
+ * node test never renders — are stubbed; the guard and the service graph are
+ * proxied to the real modules, so the tested path is the production path.
+ */
+vi.mock('@/components/dashboard/action-form', () => ({}));
+vi.mock('@/components/dashboard/confirm-submit', () => ({}));
+vi.mock('@/components/dashboard/csrf-field', () => ({}));
+vi.mock('@/components/dashboard/filters', () => ({}));
+vi.mock('@/components/dashboard/support', () => ({}));
+vi.mock('@/components/dashboard/ui', () => ({}));
+vi.mock('@/components/ui/button', () => ({}));
+vi.mock('@/lib/actions/guard', async () => await import('../lib/actions/guard'));
+vi.mock('@/lib/services', async () => await import('../lib/services'));
+// `update-service.ts` reads the running version from the app's manifest; the
+// test pins it so the release comparison is deterministic.
+vi.mock('@/lib/version', () => ({ REMBRIC_VERSION: '0.0.1' }));
+
+/**
+ * `lib/session.ts` reaches `next/headers` only when a caller injects no cookie
+ * source. A Server Action has no injection point, so driving one through the
+ * real guard means supplying that store here — the same fixture cookie the
+ * direct `guardAction` tests inject.
+ */
+const requestCookies = vi.hoisted(() => ({ current: null as SessionCookieSource | null }));
+vi.mock('next/headers', () => ({ cookies: () => requestCookies.current }));
 
 /**
  * The mutation layer's contract, against a real migrated SQLite file.
@@ -144,6 +186,12 @@ beforeAll(() => {
   // mutation runs; these are the two variables it resolves that from.
   process.env['REMBRIC_DATA_DIR'] = fixture.dataDir;
   process.env['REMBRIC_ADMIN_TOKEN'] = ADMIN_TOKEN;
+  // `getServices().oauth` is present iff REMBRIC_PUBLIC_URL is set — the same
+  // gate `bootstrap.ts` uses — and the consent endpoint mints codes through it.
+  process.env['REMBRIC_PUBLIC_URL'] = 'http://127.0.0.1:3100';
+  // `areqKey()`/`sessionSecretBase()` fall through to the admin token; an
+  // inherited secret would derive a different key than the fixture signs with.
+  delete process.env['REMBRIC_SESSION_SECRET'];
   adminCookie = cookieSource(fixture.admin.cookie);
 });
 
@@ -151,6 +199,14 @@ afterAll(() => {
   fixture.cleanup();
   delete process.env['REMBRIC_DATA_DIR'];
   delete process.env['REMBRIC_ADMIN_TOKEN'];
+  delete process.env['REMBRIC_PUBLIC_URL'];
+});
+
+describe('alias probe', () => {
+  it('loads update-service through a mocked @/lib/version', async () => {
+    const mod = await import('../app/dashboard/update/update-service');
+    expect(mod.getUpdates()).toBeDefined();
+  });
 });
 
 describe('guardAction', () => {
@@ -820,5 +876,211 @@ describe('consolidation sweep and undo', () => {
     expect(undo.services.memory.unsafeGetById(id)?.status).toBe('archived');
     undo.services.undoRun(runId);
     expect(undo.services.memory.unsafeGetById(id)?.status).toBe('active');
+  });
+});
+
+describe('entities rebuild', () => {
+  // `apps/server/src/dashboard/entities.ts`'s `POST /rebuild`: the guard first,
+  // then `resetIndex()` plus up to `REBUILD_MAX_BATCHES` forced batches over the
+  // live worker, then the processed count carried back on the redirect.
+  const FORM = 'entities.rebuild';
+
+  it('re-scans the whole backlog across batches and reports the processed count', async () => {
+    const guard = await guardAction(submission(FORM), FORM, adminCookie);
+    expect(guard).toMatchObject({ ok: true });
+    if (!guard.ok) return;
+
+    // More than one worker batch (the default batchSize is 100), so a cap that
+    // stopped after a single batch would leave the count short.
+    const seeded = 150;
+    const scope = projectScope(fixture.projects.getDefault().id);
+    for (let i = 0; i < seeded; i++) {
+      guard.services.memory.save(
+        { type: 'project', title: `rebuild-${i}`, content: `apps/rebuild/file-${i}.ts` },
+        scope,
+      );
+    }
+
+    const processed = runEntityRebuild(guard.services.entityBackfillWorker);
+
+    expect(processed).toBeGreaterThanOrEqual(seeded);
+    expect(guard.services.repos.entities.adminBacklogCount()).toBe(0);
+  });
+
+  it('stops on the first empty batch when there is nothing to scan', () => {
+    // The zero-backlog branch: `resetIndex()` re-pends every memory, so an empty
+    // corpus is the only state where the first forced batch processes nothing.
+    const dataDir = mkdtempSync(join(tmpdir(), 'rembric-entities-empty-'));
+    const handle = createDb({ dataDir, onMigrationProgress: () => {}, onStartupLog: () => {} });
+    try {
+      const worker = new EntityBackfillWorker({
+        repos: createRepositories(handle.db),
+        tx: handle.db,
+      });
+      expect(runEntityRebuild(worker)).toBe(0);
+    } finally {
+      handle.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('update manual check', () => {
+  // `apps/server/src/dashboard/update.ts`'s `POST /check`, driven through the
+  // real guard and the process singleton `update-service.ts` builds.
+  const FORM = 'update.check';
+  const RELEASES_URL = 'http://updates.test/releases';
+
+  /** The singleton is cached on `globalThis`; each case needs its own env. */
+  function resetUpdatesSingleton(): void {
+    delete (globalThis as Record<string, unknown>)['__rembricUpdates'];
+  }
+
+  /** The path `redirect()` threw toward. */
+  async function redirectTarget(run: () => Promise<unknown>): Promise<string> {
+    try {
+      await run();
+    } catch (err) {
+      const digest = (err as { digest?: unknown }).digest;
+      return typeof digest === 'string' ? digest : '';
+    }
+    throw new Error('expected redirect() to throw');
+  }
+
+  /** The `REMBRIC_UPDATE_CHECK_URL` seam, answered by a stubbed global fetch. */
+  function stubReleases(releases: unknown): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(releases), {
+            status: 200,
+            headers: { etag: 'test-etag' },
+          }),
+        ),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env['REMBRIC_UPDATE_CHECK_URL'];
+    delete process.env['REMBRIC_UPDATE_CHECK'];
+    resetUpdatesSingleton();
+  });
+
+  it('drives the singleton and redirects with no flash when a release is found', async () => {
+    process.env['REMBRIC_UPDATE_CHECK_URL'] = RELEASES_URL;
+    stubReleases([
+      {
+        tag_name: 'server-v9.9.9',
+        body: 'notes',
+        html_url: 'http://example.test/release',
+        published_at: '2024-01-01T00:00:00.000Z',
+      },
+    ]);
+    resetUpdatesSingleton();
+    requestCookies.current = cookieSource(fixture.admin.cookie);
+
+    const digest = await redirectTarget(() => checkForUpdates({ error: null }, submission(FORM)));
+
+    // A found update needs no flash; the refreshed cache is what the page reads.
+    expect(digest).toContain('/dashboard/update');
+    expect(digest).not.toContain('checked=');
+    // The same singleton the page peeks now carries the found release.
+    expect(getUpdates().peek()?.latestVersion).toBe('9.9.9');
+  });
+
+  it('flashes the honest outcome when no newer release is known', async () => {
+    process.env['REMBRIC_UPDATE_CHECK_URL'] = RELEASES_URL;
+    stubReleases([]);
+    resetUpdatesSingleton();
+    requestCookies.current = cookieSource(fixture.admin.cookie);
+
+    const digest = await redirectTarget(() => checkForUpdates({ error: null }, submission(FORM)));
+
+    expect(digest).toContain('/dashboard/update?checked=none');
+  });
+
+  it('returns to the page with no flash when the check is disabled', async () => {
+    process.env['REMBRIC_UPDATE_CHECK'] = 'off';
+    resetUpdatesSingleton();
+    requestCookies.current = cookieSource(fixture.admin.cookie);
+
+    const digest = await redirectTarget(() => checkForUpdates({ error: null }, submission(FORM)));
+
+    expect(digest).toContain('/dashboard/update');
+    expect(digest).not.toContain('checked=');
+  });
+});
+
+describe('oauth consent endpoint', () => {
+  // `apps/server/src/dashboard/oauth-consent.ts` at the provider's redirect
+  // path. GET delegates to the consent page; POST is the protocol decision.
+  const FORM = 'oauth.consent';
+  const REDIRECT_URI = 'https://client.example/callback';
+
+  function signedAreq(overrides: Partial<Parameters<typeof signAuthRequest>[0]> = {}): string {
+    return signAuthRequest(
+      {
+        clientId: 'web-mutation-client',
+        redirectUri: REDIRECT_URI,
+        codeChallenge: 'pkce-challenge',
+        scope: 'mcp',
+        state: 'state-abc',
+        exp: Math.floor(Date.now() / 1000) + 600,
+        ...overrides,
+      },
+      deriveOAuthAreqKey(ADMIN_TOKEN),
+    );
+  }
+
+  function consentRequest(fields: Record<string, string>): NextRequest {
+    return new NextRequest('http://localhost/dashboard/oauth/consent', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: `${SessionsService.cookieName()}=${fixture.admin.cookie}`,
+      },
+      body: new URLSearchParams(fields),
+    });
+  }
+
+  function approveFields(): Record<string, string> {
+    return {
+      csrf: fixture.sessions.csrfToken(fixture.admin.session, FORM),
+      areq: signedAreq(),
+      decision: 'approve',
+    };
+  }
+
+  it('mints a code and redirects to the registered redirect_uri with the state', async () => {
+    const response = await consentPost(consentRequest(approveFields()));
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(`${location.origin}${location.pathname}`).toBe(REDIRECT_URI);
+    expect(location.searchParams.get('code')).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(location.searchParams.get('state')).toBe('state-abc');
+  });
+
+  it('redirects access_denied back to the client without minting a code', async () => {
+    const response = await consentPost(consentRequest({ ...approveFields(), decision: 'deny' }));
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(location.searchParams.get('error')).toBe('access_denied');
+    expect(location.searchParams.get('code')).toBeNull();
+    expect(location.searchParams.get('state')).toBe('state-abc');
+  });
+
+  it('refuses a wrong token and a missing token with the retired handler 403', async () => {
+    const wrong = await consentPost(consentRequest({ ...approveFields(), csrf: 'not-the-token' }));
+    expect(wrong.status).toBe(403);
+    expect(await wrong.json()).toMatchObject({ ok: false, code: 'csrf_invalid' });
+
+    const missing = await consentPost(consentRequest({ areq: signedAreq(), decision: 'approve' }));
+    expect(missing.status).toBe(403);
+    expect(await missing.json()).toMatchObject({ ok: false, code: 'csrf_invalid' });
   });
 });
