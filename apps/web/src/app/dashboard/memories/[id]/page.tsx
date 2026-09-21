@@ -39,28 +39,11 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The memory detail hub, in the production dashboard's composition: the head
- * with the id/status/project meta, the review flash, the key/value grid, the
- * content as rendered markdown with a copy control, and the lineage and
- * judgment tables.
- *
- * The reads are the retired `memories.ts` `/:id` handler's own — the same
- * repository methods, the same derived review state, the uncapped and
- * unpaginated judgment list — so the dashboard's per-memory view did not change
- * its meaning, only its surface.
- *
- * The Archive and Confirm verbs are `apps/server/src/dashboard/memories.ts`'s
- * `/:id/archive` and `/:id/confirm` POST handlers: guard first, then the row is
- * read unscoped and its own project's scope is what the service call is pinned
- * to, then the same redirect main landed on (`?confirmed=1` after a confirm).
- */
 export const dynamic = 'force-dynamic';
 
 const ARCHIVE_FORM = 'memory.archive';
 const CONFIRM_FORM = 'memory.confirm';
 
-/** `dashboard/memories.ts`' refusal for a row that has no project to act in. */
 const NO_PROJECT_MESSAGE =
   'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.';
 
@@ -70,8 +53,8 @@ async function archiveMemory(_prev: ActionState, formData: FormData): Promise<Ac
   if (!guard.ok) return guardFailure(guard);
 
   const id = readField(formData, 'id');
-  // Scope resolution mirrors the retired handler: the row is read unscoped,
-  // then its own project's scope is what the service call is pinned to.
+  // The row is read unscoped, then its own project's scope is what the service
+  // call is pinned to.
   const row = guard.services.memory.unsafeGetById(id);
   if (!row) redirect('/dashboard/memories');
   if (!row.projectId) return { error: NO_PROJECT_MESSAGE };
@@ -106,7 +89,6 @@ async function confirmMemory(_prev: ActionState, formData: FormData): Promise<Ac
   redirect(`/dashboard/memories/${id}?confirmed=1`);
 }
 
-/** The trimmed string field `dashboard/memories.ts` reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -145,8 +127,7 @@ export default async function MemoryDetailPage({
   );
   const successorId =
     row.status === 'superseded' ? repos.memory.findSuccessorId(row.id) : undefined;
-  // `findSuccessorId` returns the id alone; the row behind it is the title this
-  // view has to show, so it is read here rather than linked blind.
+  // `findSuccessorId` returns only the id; the row behind it is what this view shows.
   const successor = successorId ? repos.memory.adminGetByIds([successorId]).at(0) : undefined;
 
   const touching = repos.relations

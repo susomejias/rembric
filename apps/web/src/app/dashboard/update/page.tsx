@@ -21,19 +21,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { REMBRIC_VERSION } from '@/lib/version';
 
-/**
- * The update view, in the production dashboard's composition: the numbered view
- * head, the version line and the release card.
- *
- * `apps/server`'s view had two faces: this one, and the in-process self-upgrade
- * (Docker pull, restart, progress polling). The retired second face is not part
- * of this port — the orchestrator leaves the served application (design D7), so
- * there is no `update.start` anywhere on this page. The manual check
- * (`POST /dashboard/update/check`) is wired as a Server Action and shows only
- * while the deployment is up to date, exactly as main's up-to-date quadrant did;
- * when a release is available the capability-appropriate block is main's
- * `MANUAL UPDATE` note, whose command the operator runs on the host.
- */
 export const dynamic = 'force-dynamic';
 
 const MANUAL_UPDATE_COMMAND = 'docker compose pull && docker compose up -d';
@@ -123,9 +110,7 @@ export default async function UpdatePage({
         </p>
       </section>
 
-      {/* Main rendered the manual check only in the up-to-date quadrant; once a
-          release is known the check has nothing new to say, and the manual path
-          below is the actionable one. */}
+      {/* The check has nothing new to say once a release is known. */}
       {enabled && info === null ? (
         <ActionForm action={checkForUpdates} className="mt-5">
           <CsrfField form={UPDATE_CHECK_FORM} />
@@ -191,8 +176,6 @@ export default async function UpdatePage({
             </p>
           ) : null}
 
-          {/* Main's `MANUAL UPDATE` block (`update-modal.ts`), which is the only
-              capability state left once the in-process orchestrator retires. */}
           <div className="mt-6 max-w-[900px] border border-border bg-card p-5 md:p-6">
             <p className="font-mono text-[11px] uppercase tracking-[.16em] text-primary">
               MANUAL UPDATE
@@ -219,11 +202,8 @@ export default async function UpdatePage({
 }
 
 /**
- * The three outcomes of a manual check. The `err` codes the retired start action
- * could redirect with are still mapped: only `none` can occur now that the
- * orchestrator is retired, but an old bookmark or a lagging redirect renders a
- * sentence instead of a raw code. An unrecognised `checked` value flashes
- * nothing, exactly as before.
+ * `err` codes are still mapped for an old bookmark or a lagging redirect; only
+ * `none` can occur now.
  */
 function noticeFrom(
   params: SearchParams,

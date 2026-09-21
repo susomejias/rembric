@@ -35,42 +35,18 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The entities list, in the production dashboard's composition: the corpus
- * stats, the kind/single-reference filter bar, and the entities as a table with
- * the kind/value/project/links columns.
- *
- * The read is the ported view's own — `adminListEntities` paginates in SQL, so
- * the page index and the filters are the only state and both live in the URL.
- * `kind` is untrusted text, not the enum: the cast makes a bogus value match no
- * row instead of falling back to the unfiltered list.
- *
- * The kind cards count the whole corpus (`adminCountsByKind`), not the filtered
- * page, so they stay stable while filtering and double as the kind filter links.
- *
- * The rebuild is `apps/server/src/dashboard/entities.ts`'s `POST /rebuild`:
- * guarded first (admin scope + a token bound to `entities.rebuild`), the live
- * worker's index truncated, then its batches drained under the same
- * `REBUILD_MAX_BATCHES` bound, and the processed count flashed on the redirect.
- */
 export const dynamic = 'force-dynamic';
 
 const REBUILD_FORM = 'entities.rebuild';
 
 /**
- * Bounds a manual "rebuild" click to a single request/response cycle instead of
- * an unbounded loop. A corpus larger than this drains the rest on the next
- * periodic backfill tick — genuinely soon, because the rebuild reuses the SAME
- * live worker instance, so its `possiblyPending` flag reflects any backlog left
- * over from hitting this cap.
+ * Bounds a manual "rebuild" click to a single request/response cycle. A corpus
+ * larger than this drains the rest on the next periodic backfill tick — which is
+ * soon, because the rebuild reuses the SAME live worker instance.
  */
 const REBUILD_MAX_BATCHES = 200;
 
-/**
- * Truncate the derived index and drain it, returning the memories re-scanned.
- * Exported so the regression test can drive the same production loop — the page
- * itself is a Server Component the node test project cannot import.
- */
+/** Exported so the regression test can drive the same production loop. */
 export function runEntityRebuild(worker: EntityBackfillWorker): number {
   worker.resetIndex();
   let processed = 0;
@@ -104,7 +80,6 @@ export default async function EntitiesPage({
   const params = await searchParams;
   const filters = readEntitiesFilters(params);
   const roundTripQuery = entitiesQuery(params);
-  // Main's rebuild flash: present for any non-empty `rebuilt`, including `0`.
   const rebuilt = singleParam(params['rebuilt']);
 
   const { repos } = getServices();
@@ -118,8 +93,7 @@ export default async function EntitiesPage({
   const backlog = repos.entities.adminBacklogCount();
   const projectById = new Map(repos.projects.adminListAll().map((p) => [p.id, p.slug]));
   const counts = repos.entities.adminCountsByKind();
-  // Whole-corpus, filter-independent — main's "ALL KINDS" card does not shrink
-  // as the table filters.
+  // Whole-corpus: the "ALL KINDS" card does not shrink as the table filters.
   const corpusTotal = counts.reduce((sum, c) => sum + c.count, 0);
 
   const hasMore = offset + rows.length < total;

@@ -5,26 +5,13 @@ import { getUpdates } from './update-service';
 import type { ActionState } from '@/components/dashboard/action-form';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 
-/**
- * `apps/server/src/dashboard/update.ts`'s `UPDATE_CHECK_FORM`: the form name the
- * CSRF token is bound to.
- */
 export const UPDATE_CHECK_FORM = 'update.check';
 
 /**
- * `POST /dashboard/update/check`, as a Server Action.
- *
- * The guard runs first (admin scope, then the token bound to this form name), so
- * a refused submission never reaches the release check. The check itself is the
- * process's own singleton (`update-service.ts`) — the same instance the page and
- * the sidebar badge peek — so a manual check refreshes the cache the next render
- * reads instead of a throwaway service's.
- *
- * The two redirects are main's, verbatim: a found update needs no flash (the
- * refreshed cache re-renders the page as the "update available" state), while
- * `none`/`error` come back as the `checked` flash the page reads. `redirect()`
- * is called outside any `try` — it signals by throwing, and a `catch` would
- * swallow it.
+ * The guard runs first, so a refused submission never reaches the release check;
+ * the check is the process's own singleton, so a manual run refreshes the cache
+ * the next render reads. `redirect()` sits outside any `try`, which would swallow
+ * its control-flow throw.
  */
 export async function checkForUpdates(
   _prev: ActionState,

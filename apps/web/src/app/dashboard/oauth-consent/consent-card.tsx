@@ -8,24 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
-/**
- * The consent screen's markup, extracted from the page so the protocol shape
- * (form action, the `areq`/`decision` fields, the granted scope block) lives in
- * one place. `/dashboard/oauth/consent` serves this same card: its GET delegates
- * to the page below, because a Route Handler cannot return JSX and cannot
- * rewrite (Next throws on `NextResponse.rewrite()` in an app route handler), and
- * a standalone `renderToStaticMarkup` document would drop the app's stylesheet
- * at an authentication boundary.
- *
- * The decision control stays a plain form `POST` to the authorization endpoint —
- * deliberately NOT a Server Action: the endpoint that verifies the CSRF token,
- * mints the code and redirects to the client's registered `redirect_uri` is the
- * one that owns the protocol, and splitting the decision from it would move the
- * code mint into the view layer. `CsrfField` mints the token bound to this form
- * name and session, so the token the endpoint verifies is the one rendered here.
- */
 export interface ConsentCardProps {
-  /** The signed authorization request, round-tripped as the form's `areq`. */
   blob: string;
   clientName: string;
   redirectHost: string;
@@ -82,7 +65,7 @@ export function ConsentShell({
   rest,
   children,
 }: {
-  /** The accented first word of the heading — the retired `hl-lime` span. */
+  /** The accented first word of the heading. */
   hl: string;
   rest: string;
   children: ReactNode;
