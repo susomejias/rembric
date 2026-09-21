@@ -1,0 +1,163 @@
+import {
+  AgentSessionsService,
+  MemoryService,
+  ProjectsService,
+  PromptsService,
+  RelationsService,
+} from '@rembric/core';
+import { createRepositories, type DbHandle } from '@rembric/db';
+import { createElement } from 'react';
+import { renderToReadableStream } from 'react-dom/server';
+import { vi } from 'vitest';
+
+/**
+ * The service graph a dashboard page reads through `getServices()`. The pages
+ * take only what they need from it; each test file swaps the graph per fixture.
+ */
+export const servicesRef: { current: unknown } = { current: undefined };
+
+export function buildDashboardServices(handle: DbHandle): Record<string, unknown> {
+  const repos = createRepositories(handle.db);
+  return {
+    repos,
+    memory: new MemoryService(repos, handle.db),
+    projects: new ProjectsService(repos),
+    agentSessions: new AgentSessionsService(repos, handle.db),
+    relations: new RelationsService(repos, handle.db),
+    prompts: new PromptsService(repos, handle.db),
+  };
+}
+
+/**
+ * The `@/` alias is deliberately absent from the test project (see
+ * `dashboard-mutations.test.ts`); each dashboard module reaches its neighbours
+ * through `@/…`, so its specifiers are stubbed here and proxied to the real
+ * relative files. Only the three request-scoped modules are replaced outright —
+ * the service graph, the CSRF session and the mutation guard — because a RSC
+ * render has no request context.
+ */
+export function installViewMocks(pathname = '/dashboard'): void {
+  vi.mock('next/link', () => ({
+    default: ({ href, children, ...rest }: { href?: string; children?: unknown }) =>
+      createElement('a', { href, ...rest }, children as never),
+  }));
+  vi.mock('next/navigation', () => ({
+    usePathname: () => pathname,
+    notFound: () => {
+      throw new Error('NEXT_NOT_FOUND');
+    },
+    redirect: (url: string) => {
+      throw new Error(`NEXT_REDIRECT:${url}`);
+    },
+  }));
+  vi.mock('@/lib/services', () => ({ getServices: () => servicesRef.current }));
+  vi.mock('@/lib/session', () => ({ dashboardCsrfToken: () => 'test-csrf-token' }));
+  vi.mock('@/lib/actions/guard', () => ({
+    guardAction: () => ({ ok: false, error: 'not exercised' }),
+    guardFailure: () => ({ error: null }),
+  }));
+
+  vi.mock(
+    '@/components/dashboard/action-form',
+    async () => await import('../../components/dashboard/action-form'),
+  );
+  vi.mock(
+    '@/components/dashboard/confirm-submit',
+    async () => await import('../../components/dashboard/confirm-submit'),
+  );
+  vi.mock(
+    '@/components/dashboard/csrf-field',
+    async () => await import('../../components/dashboard/csrf-field'),
+  );
+  vi.mock(
+    '@/components/dashboard/filters',
+    async () => await import('../../components/dashboard/filters'),
+  );
+  vi.mock(
+    '@/components/dashboard/markdown-panel',
+    async () => await import('../../components/dashboard/markdown-panel'),
+  );
+  vi.mock(
+    '@/components/dashboard/support',
+    async () => await import('../../components/dashboard/support'),
+  );
+  vi.mock('@/components/dashboard/ui', async () => await import('../../components/dashboard/ui'));
+  // The sidebar shell is stubbed at its boundary: `dashboard/layout.tsx`'s real
+  // `badgeCounters()` and `lib/nav`'s real `badgeTooltip` are what the badge
+  // tests target, not shadcn's sidebar primitive graph.
+  vi.mock('@/components/dashboard/app-sidebar', async () => {
+    const { badgeTooltip } = await import('../../lib/nav');
+    type Breakdown = { total: number; byProject: { label: string; count: number }[] };
+    return {
+      SidebarFrame: ({
+        children,
+        counters = {},
+      }: {
+        children?: unknown;
+        counters?: Record<string, Breakdown>;
+      }) =>
+        createElement(
+          'div',
+          { 'data-shell': 'true' },
+          (['pendingJudgments', 'needsReview'] as const).map((key) =>
+            createElement('span', {
+              key,
+              'data-badge': key,
+              title: counters[key] ? badgeTooltip(key, counters[key]) : undefined,
+            }),
+          ),
+          children as never,
+        ),
+    };
+  });
+  vi.mock('@/lib/version', async () => await import('../../lib/version'));
+  vi.mock('@/lib/nav', async () => await import('../../lib/nav'));
+  vi.mock(
+    '@/components/motion/number-ticker',
+    async () => await import('../../components/motion/number-ticker'),
+  );
+  vi.mock(
+    '@/components/ui/alert-dialog',
+    async () => await import('../../components/ui/alert-dialog'),
+  );
+  vi.mock('@/components/ui/button', async () => await import('../../components/ui/button'));
+  vi.mock('@/components/ui/input', async () => await import('../../components/ui/input'));
+  vi.mock('@/components/ui/label', async () => await import('../../components/ui/label'));
+  vi.mock('@/components/ui/select', async () => await import('../../components/ui/select'));
+  vi.mock('@/components/ui/table', async () => await import('../../components/ui/table'));
+  vi.mock('@/lib/utils', async () => await import('../../lib/utils'));
+  vi.mock('@/lib/ease', async () => await import('../../lib/ease'));
+}
+
+/** Renders a React element (an RSC page's return value) to its static HTML. */
+export async function renderToHtml(element: unknown): Promise<string> {
+  const stream = (await renderToReadableStream(element as never)) as ReadableStream<Uint8Array> & {
+    allReady?: Promise<unknown>;
+  };
+  if (stream.allReady !== undefined) await stream.allReady;
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let html = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value !== undefined) html += decoder.decode(value, { stream: true });
+  }
+  return html;
+}
+
+/** The slice of `html` starting at `marker`, bounded to `length` characters. */
+export function after(html: string, marker: string, length = 400): string {
+  const at = html.indexOf(marker);
+  if (at === -1) throw new Error(`marker not found: ${marker}`);
+  return html.slice(at, at + length);
+}
+
+/** Rendered judgment-link ids in document order. */
+export function judgmentLinkOrder(html: string): string[] {
+  const out: string[] = [];
+  const re = /href="\/dashboard\/judgments\/([^"]+)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) out.push(match[1]!);
+  return out;
+}
