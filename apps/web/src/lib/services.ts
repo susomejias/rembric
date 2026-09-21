@@ -207,8 +207,9 @@ function envInt(name: string, fallback: number, bounds: { min: number; max: numb
 
 /**
  * `OAuthService` construction mirrors the server's gate exactly: the feature is
- * enabled iff `REMBRIC_PUBLIC_URL` is set. Only the access-token *lookup* is
- * reachable from `/api`; the authorization-server endpoints are a later slice.
+ * enabled iff `REMBRIC_PUBLIC_URL` is set. This one instance backs both surfaces
+ * — the `/api` access-token lookup, and the authorization server itself
+ * (`lib/oauth.ts`, which builds the SDK's router and the provider over it).
  */
 function buildOAuthService(repos: Repositories): OAuthService | null {
   const issuer = process.env['REMBRIC_PUBLIC_URL'];
