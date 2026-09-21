@@ -1,14 +1,14 @@
 import type { ReactNode } from 'react';
 
-import { DashboardChrome } from '@/components/dashboard/chrome';
+import { ActionNav } from '@/components/navigation/action-nav';
 import { getServices } from '@/lib/services';
 import { REMBRIC_VERSION } from '@/lib/version';
 
 /**
- * The dashboard shell. Two design lines live here rather than in the chrome
+ * The dashboard shell. Two things live here rather than in the navigation
  * component, because both are server-side facts:
  *
- * - **The rail's live-session count and its project list.** Both come from the
+ * - **The nav's live-session count and its project list.** Both come from the
  *   service graph, so the client component is handed values and never the
  *   repositories. Every `/dashboard` page is `force-dynamic`, so this runs per
  *   request and never during `next build`.
@@ -18,10 +18,14 @@ import { REMBRIC_VERSION } from '@/lib/version';
  *   `<html>` (`app/layout.tsx`), so the script only has to *replace* it for an
  *   operator who chose light; an absent key leaves the document as rendered.
  *
+ * The canvas stays on this element: it carries the `--surface-page` /
+ * `--body-ink` pair the retired rail painted, so the palette the views are
+ * written against is unchanged now that the rail is gone.
+ *
  * `THEME_STORAGE_KEY` is declared here, in the server component that renders the
  * script, and threaded down to the toggle as a prop rather than exported from
- * `chrome.tsx`: an export of a `'use client'` module is a client reference, so
- * reading it during the server render throws instead of returning the string.
+ * `action-nav.tsx`: an export of a `'use client'` module is a client reference,
+ * so reading it during the server render throws instead of returning the string.
  */
 export const dynamic = 'force-dynamic';
 
@@ -42,14 +46,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <script>{themeScript()}</script>
-      <DashboardChrome
-        projects={projects}
-        liveSessions={liveSessions}
-        version={REMBRIC_VERSION}
-        themeStorageKey={THEME_STORAGE_KEY}
-      >
-        {children}
-      </DashboardChrome>
+      <div className="min-h-screen bg-(--surface-page) text-(--body-ink)">
+        <ActionNav
+          projects={projects}
+          version={REMBRIC_VERSION}
+          themeStorageKey={THEME_STORAGE_KEY}
+          badges={{ liveSessions }}
+        >
+          {children}
+        </ActionNav>
+      </div>
       <script>{timezoneScript()}</script>
     </>
   );
