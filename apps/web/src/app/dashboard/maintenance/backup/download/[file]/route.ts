@@ -3,14 +3,8 @@ import type { NextRequest } from 'next/server';
 import { backupDownloadDenial, resolveBackupDownload, streamBackup } from '../../../data';
 
 /**
- * `GET /dashboard/maintenance/backup/download/:file` — any snapshot in
- * `backups/` by name, including the pre-update snapshot the self-update flow
- * takes before every upgrade. `maintenance.ts`'s `/backup/download/:file` route.
- *
  * The filename is the only untrusted input, and `resolveBackupDownload` refuses
- * anything outside `BACKUP_FILENAME_RE` — the exact producer-generated shape, so
- * no `/` and no `..` reaches `join`. A name that passes the shape but is not on
- * disk is a 404, never a second stat-and-serve path.
+ * anything outside `BACKUP_FILENAME_RE` — no `/` and no `..` reaches `join`.
  */
 
 export const runtime = 'nodejs';

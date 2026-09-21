@@ -27,24 +27,6 @@ import { Label } from '@/components/ui/label';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The project registry, in the production dashboard's composition: the view
- * head, the slug explanation, the create form, and the active and archived
- * projects as two tables with the name/slug/created/actions columns.
- *
- * The reads are the ported view's own — `projects.list()` for the active table
- * and `projects.listArchived()` for the archived one — and so is the legacy
- * slug rule (`SLUG_REGEX`) and the default-project exception to archiving.
- *
- * The four mutations are `apps/server/src/dashboard/projects.ts`'s POST
- * handlers: the same service calls, in the same order (guard first, service
- * second) and landing on the same query string. Two divergences, both forced by
- * the surface — a refusal renders as a `Flash` above its own form instead of a
- * redirect to `?error=`, and the archive confirmation is the ported dialog
- * rather than the retired scripted one. Main's archive form is the only one of
- * the four carrying a confirmation; rename and unarchive submit directly, and
- * this page keeps that split.
- */
 export const dynamic = 'force-dynamic';
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -119,7 +101,6 @@ async function renameProject(_prev: ActionState, formData: FormData): Promise<Ac
   redirect('/dashboard/projects');
 }
 
-/** The trimmed string field `dashboard/projects.ts` reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();

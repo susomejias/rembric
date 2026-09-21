@@ -40,15 +40,6 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The judgment queue, in the production dashboard's composition: the numbered
- * view head, the status/kind filter bar, and the candidates as a table with the
- * status/verdict/source → target/actor/created columns.
- *
- * The filter model is the ported view's own (`RelationKindFilter` includes the
- * repository's `pending` pseudo-kind), and so is the read: `adminListWithContent`
- * joined against both endpoints, `adminCountWithFilters` for the total.
- */
 export const dynamic = 'force-dynamic';
 
 const ORPHAN_FORM = 'judgment.orphan';
@@ -58,16 +49,14 @@ async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<A
   const guard = await guardAction(formData, ORPHAN_FORM);
   if (!guard.ok) return guardFailure(guard);
 
-  // `false` is the service's "missing or already closed" answer, which main
-  // rendered as a 404 body; a Server Action has no status, so it is the error
-  // the row's form shows.
+  // `false` is the service's "missing or already closed" answer, which has no
+  // status a Server Action could carry.
   if (!guard.services.relations.orphanByOperator(readField(formData, 'judgmentId'))) {
     return { error: 'Judgment not found or already closed.' };
   }
   redirect('/dashboard/judgments');
 }
 
-/** The trimmed string field `dashboard/judgments.ts` reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();

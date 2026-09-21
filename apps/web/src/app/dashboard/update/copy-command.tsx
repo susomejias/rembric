@@ -5,14 +5,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 /**
- * The manual-update command with its copy control — `update-modal.ts`'s
- * `[data-upd-copy]` behaviour: write the command to the clipboard and relabel
- * the button `COPIED`.
- *
- * A client component because the clipboard is a browser API, and one that is not
- * always present (a non-secure origin): main guarded on `navigator.clipboard`
- * and so does this, so the button stays `COPY` rather than claiming a copy that
- * did not happen. The command is a prop, so the string has one definition.
+ * The clipboard API is absent on a non-secure origin, so the button stays `COPY`
+ * rather than claiming a copy that did not happen.
  */
 export function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);

@@ -30,18 +30,6 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The session detail, in the production dashboard's composition: the head with
- * the status meta, the key/value grid, the run's own action bar, the summary as
- * rendered markdown, and the memories and prompts the run produced as tables.
- *
- * The reads are the retired `sessions.ts` `/:id` handler's own — the same
- * `adminGetDetail`, the same per-session memory and prompt lists — and so are
- * the three mutations in the action bar (see `../page.tsx` for the list's copy):
- * a soft-deleted run offers only Undelete, a live one offers Abandon while it is
- * active plus Delete, and each redirects to the list with the flash param main
- * used.
- */
 export const dynamic = 'force-dynamic';
 
 const ABANDON_FORM = 'session.abandon';
@@ -93,7 +81,6 @@ async function undeleteSession(_prev: ActionState, formData: FormData): Promise<
   redirect(`/dashboard/sessions?restored=${encodeURIComponent(id)}`);
 }
 
-/** The trimmed string field `dashboard/sessions.ts` reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();

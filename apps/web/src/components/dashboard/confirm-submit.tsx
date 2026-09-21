@@ -16,21 +16,11 @@ import {
 } from '@/components/ui/alert-dialog';
 
 /**
- * Confirm-before-submit, the port of the dashboard's `form[data-confirm]`
- * interception (`apps/server/src/dashboard/templates.ts`): the trigger opens a
- * dialog, and only the dialog's confirm button submits.
- *
- * The submit crosses a portal: Radix renders `AlertDialogContent` into
+ * The submit crosses a Radix portal: `AlertDialogContent` renders into
  * `document.body`, so the confirm button is no longer inside the form element.
- * Committing it by `form={id}` — the form's id discovered through
- * `ActionForm`'s context — is what re-associates the two; the browser then treats
- * it exactly like a submit button that never left the form. `type="submit"` is
- * what makes the native submit happen at all, since Radix defaults it to
- * `type="button"`.
- *
- * `title`/`description` carry main's single `data-confirm` string split at its
- * question mark, so the copy is verbatim and the dialog still has the accessible
- * title Radix requires.
+ * Committing it by `form={id}` — the form's id discovered through `ActionForm`'s
+ * context — re-associates the two. `type="submit"` is required because Radix
+ * defaults the action to `type="button"`.
  */
 export function ConfirmSubmit({
   tone,
@@ -39,7 +29,6 @@ export function ConfirmSubmit({
   confirmLabel,
   children,
 }: {
-  /** `warn` is main's amber tone for a reversible action; `danger` is its red. */
   tone: 'warn' | 'danger';
   title: ReactNode;
   description: ReactNode;

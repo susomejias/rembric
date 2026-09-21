@@ -5,11 +5,8 @@ import { getServices, type Services } from '../services';
 import { resolveDashboardSession, type SessionCookieSource } from '../session';
 
 /**
- * The three preconditions every dashboard mutation checks before it touches a
- * service — the same three the Hono handlers ran in
- * `apps/server/src/dashboard/{projects,sessions,tokens}.ts`.
- *
- * The order is the contract, not an implementation detail:
+ * The three preconditions every dashboard mutation checks. The order is the
+ * contract, not an implementation detail:
  *
  *  1. the session is resolved first, so an anonymous submission is refused
  *     before any authorization decision is even reachable;
@@ -19,12 +16,8 @@ import { resolveDashboardSession, type SessionCookieSource } from '../session';
  *     the form name whose handler is running, so a token harvested from one form
  *     cannot drive another.
  *
- * `dashboard-router.ts` answered the second and third refusals with a 403. A
- * Server Action cannot set a response status, so the refusal is a value the
- * caller renders instead; the boundary it preserves is the one that matters —
- * the service call is never reached. `apps/web/src/middleware.ts` already
- * redirects an unauthenticated `/dashboard` request, so `session_required` is
- * the defence-in-depth case of a cookie that expired mid-form.
+ * A Server Action cannot set a response status, so a refusal is a value the
+ * caller renders; the service call is never reached either way.
  */
 
 export type GuardError = 'session_required' | 'admin_required' | 'csrf_invalid';
@@ -33,7 +26,6 @@ export type GuardResult =
   | { ok: true; session: SessionContext; sessions: SessionsService; services: Services }
   | { ok: false; error: GuardError; message: string };
 
-/** `apps/server/src/dashboard/csrf.ts`'s field name; `CsrfField` writes it. */
 const CSRF_FIELD = 'csrf';
 
 const MESSAGES: Record<GuardError, string> = {
@@ -46,12 +38,7 @@ function refuse(error: GuardError): GuardResult {
   return { ok: false, error, message: MESSAGES[error] };
 }
 
-/**
- * `cookieSource` is optional and exists for the test suite: a real request falls
- * through to `next/headers`, a test injects a cookie store it built from a real
- * `dashboard_sessions` row. Nothing else about the check is injectable, so the
- * tested path is the production path.
- */
+/** `cookieSource` is for the test suite: a real request falls through to `next/headers`, so the tested path is the production path. */
 export async function guardAction(
   formData: FormData,
   formName: string,
@@ -65,9 +52,8 @@ export async function guardAction(
 
   const submitted = formData.get(CSRF_FIELD);
   const candidate = typeof submitted === 'string' ? submitted : '';
-  // `verifyCsrf` compares the candidate against a 43-character HMAC, so an
-  // absent or non-string field is refused on length alone; a separate
-  // empty-candidate arm would be a condition no submission can distinguish.
+  // `verifyCsrf` refuses on the 43-character HMAC length alone, so a separate
+  // empty-candidate arm would be unreachable.
   if (!resolved.sessions.verifyCsrf(resolved.session.session, formName, candidate)) {
     return refuse('csrf_invalid');
   }
@@ -76,14 +62,9 @@ export async function guardAction(
 }
 
 /**
- * What a refused mutation returns to its `ActionForm`, or the sign-in redirect
- * `dashboard-router.ts` answered an absent session with.
- *
  * `redirect` throws the framework's own control-flow error, so it must be called
- * from a frame that no `try` encloses — calling it inside the mutation's
- * `try`/`catch` would turn the redirect into a caught, discarded value. Every
- * action therefore resolves the guard *before* it opens that block, and the
- * redirect leaves from here.
+ * from a frame that no `try` encloses — called inside a mutation's
+ * `try`/`catch` it would turn into a caught, discarded value.
  */
 export function guardFailure(result: Extract<GuardResult, { ok: false }>): { error: string } {
   if (result.error === 'session_required') redirect('/dashboard/login');

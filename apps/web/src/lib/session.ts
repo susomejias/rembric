@@ -3,39 +3,20 @@ import { deriveSessionKey, SessionsService, type SessionContext } from '@rembric
 import { getServices } from './services';
 
 /**
- * Cookie sessions for `/dashboard` — the authentication half of
- * `apps/server/src/server/dashboard-router.ts`, re-expressed for an app that has
- * no Hono context.
- *
  * The cookie is `SessionsService`'s signed `<sessionId>.<hmac>` naming a row in
- * `dashboard_sessions`, NOT the token plaintext. Two independent reasons:
- *
- *  - `openspec/specs/dashboard` fixes the format ("set an httpOnly, SameSite=Lax,
- *    signed cookie referencing a row in `dashboard_sessions`"), and logout's
- *    contract is the row's deletion — a plaintext cookie would have no row to
- *    delete.
- *  - Both servers share the cookie while the port is in flight: the OAuth
- *    authorization endpoint the consent card POSTs to verifies this exact cookie
- *    through this exact service (`app/dashboard/oauth-consent/session.ts`). A
- *    plaintext value would read as "no session" there.
- *
- * The signing key is `bootstrap.ts`'s resolution — `REMBRIC_SESSION_SECRET`, else
- * the admin token — so a session minted here resolves there, and vice versa.
- * Only the *key derivation* is shared that way; each process holds its own
- * `SessionsService` over its own connection to the same SQLite file.
+ * `dashboard_sessions`, never the token plaintext: logout deletes that row, and
+ * the OAuth consent endpoint verifies the same cookie through the same service.
  */
 
-/** `sessions.ts::SESSION_TTL_MS`, in the unit `Set-Cookie`'s `Max-Age` takes. */
+/** `sessions.ts::SESSION_TTL_MS`, converted to the seconds `Max-Age` takes. */
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-/** `dashboard-router.ts`: `path: '/dashboard'`, so `/mcp` and `/api` never receive this cookie. */
+/** Scoped to `/dashboard`, so `/mcp` and `/api` never receive this cookie. */
 const COOKIE_PATH = '/dashboard';
 
 /**
- * Anything that can hand a cookie back by name: `NextRequest['cookies']`,
- * `cookies()` from `next/headers`, or a `Map`. Deliberately structural, because
- * the middleware's request store and a server component's store are different
- * classes with the same `get`.
+ * Structural: the middleware's request store and a server component's store are
+ * different classes with the same `get`.
  */
 export interface SessionCookieSource {
   get(name: string): { value: string } | undefined;
@@ -48,7 +29,6 @@ export interface SessionCookie {
     httpOnly: true;
     sameSite: 'lax';
     path: string;
-    /** `bootstrap.ts`: `REMBRIC_PUBLIC_URL` starting with `https:`, else false. */
     secure: boolean;
     maxAge: number;
   };
@@ -59,12 +39,9 @@ const globalForSessions = globalThis as typeof globalThis & {
 };
 
 /**
- * `bootstrap.ts` throws when neither variable is set, because that process is
- * allowed to refuse to boot; this one is not (Next turns a throwing
- * `register()` into a fatal boot error), and `lib/process.ts` already mints an
- * admin token when the variable is absent. The `null` is the fail-closed answer
- * rather than a missing feature: with no key nothing can be signed or verified,
- * so every caller below refuses instead of admitting an unverifiable cookie.
+ * `null` is fail-closed, not a missing feature: with no key nothing can be signed
+ * or verified, so every caller refuses instead of admitting an unverifiable
+ * cookie. This process may not fail to boot the way `bootstrap.ts` may.
  */
 function sessionSecretBase(): string | null {
   const configured = process.env['REMBRIC_SESSION_SECRET'] ?? process.env['REMBRIC_ADMIN_TOKEN'];
@@ -72,11 +49,10 @@ function sessionSecretBase(): string | null {
 }
 
 /**
- * One service per process, cached on `globalThis` — the same reason `lib/db.ts`
- * caches the handle: Next re-evaluates modules on an HMR edit, and a second
- * service over the same rows would mint a second view of the same sessions.
- * Caching the `null` too is intentional (a misconfiguration is not retried on
- * every request; the operator restarts after setting the variable).
+ * Cached on `globalThis` — the same reason `lib/db.ts` caches its handle: Next
+ * re-evaluates modules on an HMR edit, and a second service over the same rows
+ * would mint a second view of the same sessions. The `null` is cached too, so a
+ * misconfiguration is not retried on every request.
  */
 function sessionsService(): SessionsService | null {
   const cached = globalForSessions.__rembricDashboardSessions;
@@ -89,13 +65,6 @@ function sessionsService(): SessionsService | null {
   return built;
 }
 
-/**
- * The live session this request's cookie names, or `null` when it is absent,
- * unsigned, tampered with, expired or already logged out. `null` is the only
- * refusal a caller has to handle — the store's own failure modes are not
- * distinguished, exactly as `dashboard-router.ts`'s middleware does not
- * distinguish them.
- */
 export function getSession(source: SessionCookieSource): SessionContext | null {
   const sessions = sessionsService();
   if (sessions === null) return null;
@@ -103,16 +72,10 @@ export function getSession(source: SessionCookieSource): SessionContext | null {
 }
 
 /**
- * The resolved session together with the service that verified it — the pair a
- * dashboard mutation needs, because the same service owns the CSRF check the
- * resolved row's `csrfSecret` feeds. A second `SessionsService` over the same
- * rows would be a second view of the same sessions, which is why this hands the
- * cached one back instead of letting the caller construct its own.
- *
- * `source` is optional so a Server Action can pass the test-injected cookies and
- * a real request can fall through to `next/headers`; the import is deferred to
- * that fallback because `next/headers` is a request-scoped module this file's
- * node-environment tests never reach.
+ * Returns the session with the cached service that verified it, because the same
+ * service owns the CSRF check the row's `csrfSecret` feeds. `source` is the
+ * test-injected cookie store; the `next/headers` import is deferred to the
+ * fallback because it is request-scoped.
  */
 export async function resolveDashboardSession(
   source?: SessionCookieSource,
@@ -125,13 +88,6 @@ export async function resolveDashboardSession(
   return { session: resolved, sessions };
 }
 
-/**
- * The CSRF token for one form name, bound to the session this request carries.
- * `null` is not a permissive state: `dashboardCsrfToken` in the page and
- * `guardAction` on the submission derive the same value from the same session
- * row and the same form name, so a `null` on either side is a submission the
- * guard refuses.
- */
 export async function dashboardCsrfToken(
   formName: string,
   source?: SessionCookieSource,
@@ -141,17 +97,11 @@ export async function dashboardCsrfToken(
   return resolved.sessions.csrfToken(resolved.session.session, formName);
 }
 
-/** The request's own cookie store, reached without a static `next/headers` import. */
 async function requestCookieSource(): Promise<SessionCookieSource> {
   const { cookies } = await import('next/headers');
   return cookies();
 }
 
-/**
- * The `Set-Cookie` a successful login writes, or `null` when this process has no
- * signing key. A `null` is not a silent success: the login route answers it with
- * the `unavailable` error rather than a cookie no later request could verify.
- */
 export function createSessionCookie(tokenId: string): SessionCookie | null {
   const sessions = sessionsService();
   if (sessions === null) return null;
@@ -163,11 +113,7 @@ export function createSessionCookie(tokenId: string): SessionCookie | null {
   };
 }
 
-/**
- * The `Set-Cookie` that clears the session: same name, same path, same
- * attributes, empty value and `Max-Age=0`. Path and `SameSite` are not optional
- * here — a browser only replaces a cookie whose name AND path match.
- */
+/** Path and `SameSite` are not optional: a browser only replaces a cookie whose name AND path match. */
 export function clearSessionCookie(): SessionCookie {
   return {
     name: SessionsService.cookieName(),
@@ -176,13 +122,7 @@ export function clearSessionCookie(): SessionCookie {
   };
 }
 
-/**
- * `dashboard-router.ts`'s logout half: delete the row, so the cookie value
- * cannot be replayed even if it is copied out of the browser. The Hono handler
- * takes the session id from the cookie without checking its signature; here the
- * caller passes the id it already resolved, so only a signature this process
- * issued can reach the delete.
- */
+/** Deletes the row so a copied cookie value cannot be replayed; the caller passes the id it already resolved. */
 export function destroySession(sessionId: string): void {
   sessionsService()?.destroy(sessionId);
 }

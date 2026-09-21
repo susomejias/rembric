@@ -37,23 +37,6 @@ import {
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The tokens list, in the production dashboard's composition: the view head, the
- * one-shot plaintext panel the create redirect lands on, the credential table,
- * and the mint form with its project set, access verb and expiry.
- *
- * The reads are the ported view's own (`TokensService.list`, the project set
- * tables, the archived-inclusive project list) and so is the state derivation —
- * revoked, expired, inert (pinned to a deleted project), no projects, active.
- *
- * Create and Revoke are `apps/server/src/dashboard/tokens.ts`'s two POST
- * handlers: the same validation in the same order (retired `scope` field first,
- * then name, then access, then expiry), the same `create` / `createForSlugs`
- * split — one selected slug is the single-project arm, not a one-member set —
- * and the same `?created=<plaintext>&name=<name>` redirect that is the one place
- * the plaintext is ever readable. The refusal that main rendered as an error page
- * renders as a `Flash` above the mint form instead.
- */
 export const dynamic = 'force-dynamic';
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -67,8 +50,7 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
   if (!guard.ok) return guardFailure(guard);
 
   const name = readField(formData, 'name');
-  // Deduplicated: the composite primary key of `token_projects` answers a
-  // repeated slug with a constraint failure, and a crafted POST can repeat one.
+  // Deduplicated: a repeated slug would fail `token_projects`' composite primary key.
   const projectInputs = [
     ...new Set(
       formData
@@ -91,9 +73,8 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
 
   if (!name) return { error: 'Name is required.' };
 
-  // Refused rather than defaulted: an omitted `access` resolving to `write`
-  // silently picks the more privileged verb, and with no project that is `*`,
-  // the only scope the dashboard login accepts.
+  // Refused, not defaulted: an omitted `access` would otherwise resolve to the
+  // more privileged `write`.
   if (accessInput !== 'read' && accessInput !== 'write') {
     return { error: "Access must be 'write' or 'read'." };
   }
@@ -108,8 +89,6 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
     expiresAt = parsed;
   }
 
-  // Destructured rather than length-checked: the set arm is typed non-empty,
-  // and this is what tells the compiler which branch supplies it.
   const [firstSlug, ...restSlugs] = projectInputs;
 
   let secret: { plaintext: string };
@@ -147,7 +126,6 @@ async function revokeToken(_prev: ActionState, formData: FormData): Promise<Acti
   redirect('/dashboard/tokens');
 }
 
-/** The trimmed string field `dashboard/tokens.ts` reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -167,12 +145,10 @@ export default async function TokensPage({
 
   const tokens = tokensService.list();
 
-  // Archived included: a token pinned to an archived project keeps
-  // authorizing, so hiding the slug would misreport what it reaches.
+  // Archived included: a token pinned to an archived project keeps authorizing.
   const projectRows = projects.list(true);
   const slugById = new Map(projectRows.map((p) => [p.id, p.slug]));
 
-  // Slug-ascending per token: the repository orders by (token_id, slug).
   const memberSlugs = new Map<string, string[]>();
   for (const member of repos.tokens.adminListProjectSlugs()) {
     const found = memberSlugs.get(member.tokenId);
@@ -194,8 +170,8 @@ export default async function TokensPage({
 
   const selectable = projectRows.filter((p) => p.archivedAt === null);
 
-  // Read back off the persisted row, not off the query string: the panel
-  // states what was minted, not what the caller asked for.
+  // Read back off the persisted row, not the query string: the panel states what
+  // was minted.
   const minted = tokens.find((t) => t.name === mintedName);
   const mintedSlug = minted?.projectId == null ? null : (slugById.get(minted.projectId) ?? null);
   const mintedMembers = minted ? (memberSlugs.get(minted.id) ?? []) : [];

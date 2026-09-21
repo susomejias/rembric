@@ -41,18 +41,6 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The consolidation journal, in the production dashboard's composition: the
- * numbered view head, the run and queue stats, the sweep context, the run
- * history, and the latest run's journal as tables.
- *
- * The two mutations are `apps/server/src/dashboard/consolidation.ts`'s POST
- * handlers: the forced sweep (danger-confirmed, because it also purges empty
- * sessions) and the per-op / whole-run undos (warn / danger). Main rendered the
- * undos on the run-detail page, which this app does not serve yet, so they hang
- * off the latest run's section — same form names, same service calls, same
- * confirm copy.
- */
 export const dynamic = 'force-dynamic';
 
 const SWEEP_FORM = 'sweep.run';
@@ -72,10 +60,8 @@ async function runSweep(_prev: ActionState, formData: FormData): Promise<ActionS
 }
 
 /**
- * `consolidation.ts`'s `renderUndoError` and `renderPartialUndo`, as action
- * values: the retired handlers answered a 409/400 page with this copy, and a
- * Server Action cannot set a status — the message the operator reads is what
- * has to survive.
+ * A Server Action cannot set a status, so the 409/400 page copy the service
+ * errors used to produce survives as the message the operator reads.
  */
 function undoFailure(err: unknown): ActionState {
   if (err instanceof PurgedRowMissingError) {
@@ -162,13 +148,11 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
   return Math.min(Math.max(parsed, min), max);
 }
 
-/** `global`, `maintenance`, or the slug behind a `project:<id>` tuple. */
 function scopeLabel(repos: Repositories, scope: string): string {
   if (!scope.startsWith('project:')) return scope;
   return repos.projects.adminFindById(scope.slice('project:'.length))?.slug ?? scope;
 }
 
-/** The journal's own clock: `H` below two days, `D` above. */
 function formatWindow(ms: number): string {
   const hours = Math.round(ms / 3_600_000);
   return hours >= 48 ? `${Math.round(hours / 24)}D` : `${hours}H`;

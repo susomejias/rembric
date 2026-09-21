@@ -33,18 +33,6 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * Maintenance, in the production dashboard's composition: the numbered view head,
- * the health counters, the update banner, the two policy cards, and the purge
- * candidates, disk breakdown and snapshots as tables.
- *
- * The three purges are `apps/server/src/dashboard/maintenance.ts`'s POST
- * handlers: guarded first (admin scope + CSRF), then the journaled service call,
- * then a redirect carrying the deleted count the flash above reads. The
- * on-demand backup is its fourth POST, same shape, `?backed-up=<bytes>` in the
- * flash instead; both downloads it points at are GET handlers in
- * `backup/download/`.
- */
 export const dynamic = 'force-dynamic';
 
 const PURGE_SESSIONS_FORM = 'maintenance.purge-sessions';
@@ -100,8 +88,8 @@ async function purgePrompts(_prev: ActionState, formData: FormData): Promise<Act
 }
 
 /**
- * `maintenance.ts`'s `POST /backup`: no `try`, exactly like the retired handler
- * — a failed `VACUUM INTO` is a 500 the operator sees, never a silent "no-op".
+ * No `try`: a failed `VACUUM INTO` must surface, never be swallowed as a silent
+ * "no-op".
  */
 async function backupNow(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -318,9 +306,9 @@ export default async function MaintenancePage({
       </DataTable>
 
       {/* `min-w-0` on both columns is load-bearing: a grid item's default
-          `min-width: auto` floors its track at its min-content width, and this
-          min-content is the tables' own 720px. Without it the grid — not the
-          tables — overflows the viewport. */}
+          `min-width: auto` floors its track at its min-content width — the
+          tables' own 720px — so without it the grid, not the tables, overflows
+          the viewport. */}
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
         <div className="min-w-0">
           <SectionBar name="Per-table breakdown" meta={breakdown.source.toUpperCase()} />
@@ -481,8 +469,6 @@ function PurgeRow({
           >
             Inspect candidates →
           </Link>
-          {/* Main's zero-count swap: a real form when there is something to
-              purge, an inert labelled button when there is not. */}
           {count > 0 ? (
             <ActionForm action={action}>
               <CsrfField form={formName} />

@@ -6,26 +6,11 @@ import { Readable } from 'node:stream';
 import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX } from '@rembric/core';
 import { createDiagnostics, type DbDiagnostics } from '@rembric/db';
 
-// Relative, not the `@/` alias the dashboard pages use: this module is reached
-// by `apps/web` tests (the download routes' contract lives in it) and the test
-// project has no `@` alias. The `src/app/api/**` handlers import the same way.
 import { getServices } from '../../../lib/services';
 import { getSession, type SessionCookieSource } from '../../../lib/session';
 
-/**
- * The maintenance view's read layer — every fs/PRAGMA read
- * `apps/server/src/dashboard/maintenance.ts` performed before rendering — plus
- * the on-demand snapshot writer and the two download handlers it streamed.
- * Ported rather than imported because `apps/server` is not a dependency of this
- * workspace.
- *
- * The three purges live in the page's Server Actions; the snapshot and the
- * downloads live here because both are pure fs work over `backupsDir()`, with
- * no service graph beyond `Services.prompts` (the count the page renders).
- */
-
-/** On-demand snapshot prefix; the sweep shares the `backups/` directory. */
 const ON_DEMAND_BACKUP_PREFIX = 'on-demand-';
+
 /** On-demand snapshots kept by the writer — the number the card's copy states. */
 export const ON_DEMAND_BACKUP_KEEP = 3;
 
@@ -41,16 +26,10 @@ export interface Backup {
   kind: 'on-demand' | 'pre-update';
 }
 
-/** The same row with the path on disk — what the two download handlers stream from. */
 export interface BackupFile extends Backup {
   path: string;
 }
 
-/**
- * The outcome of resolving a download request. `invalid` is the
- * `BACKUP_FILENAME_RE` refusal (the path-traversal gate) and `missing` the
- * `statSync` miss; both keep the caller's message and status in one place.
- */
 export type BackupDownload =
   | { ok: true; backup: BackupFile }
   | { ok: false; status: 400 | 404; message: string };
@@ -67,7 +46,6 @@ export interface MaintenanceState {
   archivedMemories: number;
   deletedPrompts: number;
   breakdown: DbBreakdown;
-  /** Every downloadable snapshot, newest first. */
   backups: Backup[];
   latestOnDemand: Backup | null;
   backupsDir: string;
@@ -105,11 +83,7 @@ export function readMaintenanceState(withBytes: boolean): MaintenanceState {
   };
 }
 
-/**
- * Same resolution as `lib/db.ts` and `apps/server/src/config.ts`:
- * `REMBRIC_DATA_DIR`, default `~/.rembric`. Read per call, never at module
- * scope, so a build-time import can neither bake nor create a data directory.
- */
+/** Read per call, never at module scope, so a build-time import can neither bake nor create a data directory. */
 export function resolveDataDir(): string {
   return process.env['REMBRIC_DATA_DIR'] ?? join(homedir(), '.rembric');
 }
@@ -142,7 +116,7 @@ function listAllBackupsDesc(dir: string): BackupFile[] {
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
-/** On-demand filenames newest-first — the `on-demand-<ms>` name sorts chronologically. */
+/** The `on-demand-<ms>` name sorts chronologically, so newest-first is a reverse sort. */
 function listOnDemandBackupsDesc(dir: string): string[] {
   let files: string[];
   try {
@@ -156,16 +130,11 @@ function listOnDemandBackupsDesc(dir: string): string[] {
     .reverse();
 }
 
-/** The newest on-demand snapshot, or `null` when none exists — the `/download` target. */
 export function latestOnDemandBackup(): BackupFile | null {
   return listAllBackupsDesc(backupsDir()).find((b) => b.kind === 'on-demand') ?? null;
 }
 
-/**
- * Snapshot the live DB via `VACUUM INTO` and prune older on-demand backups —
- * `maintenance.ts::createOnDemandBackup`. Retention is best-effort: a file that
- * cannot be unlinked never fails the backup that was already written.
- */
+/** Snapshots the live DB via `VACUUM INTO` and prunes older on-demand backups. */
 export function createOnDemandBackup(): BackupFile {
   const dir = backupsDir();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -180,16 +149,14 @@ export function createOnDemandBackup(): BackupFile {
       // Retention is best-effort; never fail the backup over it.
     }
   }
-
   const stat = statSync(path);
   return { file, path, createdAt: stat.mtime, sizeBytes: stat.size, kind: 'on-demand' };
 }
 
 /**
- * Resolve one download request. `file === null` is the latest-on-demand route
- * (`POST`-written snapshots only). `BACKUP_FILENAME_RE` is the ONLY gate on the
- * by-name route: it pins the exact producer-generated shape — no `/`, no `..` —
- * so a filename taken straight from the URL has no path-traversal surface.
+ * `BACKUP_FILENAME_RE` is the ONLY gate on the by-name route: it pins the exact
+ * producer-generated shape — no `/`, no `..` — so a filename taken straight from
+ * the URL has no path-traversal surface.
  */
 export function resolveBackupDownload(file: string | null): BackupDownload {
   if (file === null) {
@@ -220,12 +187,6 @@ export function resolveBackupDownload(file: string | null): BackupDownload {
   };
 }
 
-/**
- * The admin gate both download handlers run first — `requireAdmin` from the
- * retired router, minus the Hono context: a missing session is the login
- * redirect `dashboard-router.ts` answered with, and a non-admin session the 403
- * its forbidden page carried. `null` means admitted.
- */
 export function backupDownloadDenial(request: {
   url: string;
   cookies: SessionCookieSource;
@@ -238,11 +199,7 @@ export function backupDownloadDenial(request: {
   return null;
 }
 
-/**
- * Stream a snapshot as an attachment. Streamed, never `readFileSync`: the file
- * scales with the whole memory corpus, so a full read would spike memory on
- * large installs — `maintenance.ts::streamBackup`.
- */
+/** Streams the file rather than `readFileSync`: it scales with the whole memory corpus. */
 export function streamBackup(backup: BackupFile): Response {
   const body = Readable.toWeb(createReadStream(backup.path)) as ReadableStream<Uint8Array>;
   return new Response(body, {
