@@ -19,6 +19,7 @@ import {
   Kv,
   KvGrid,
   Page,
+  Pill,
   SectionBar,
   StatusPill,
   TableEmpty,
@@ -97,13 +98,13 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
   const memories = repos.memory.adminListBySession(id);
   const prompts = repos.prompts.adminListBySession(id);
   const nowMs = Date.now();
-  const summary = row.summary ?? row.summaryFinal;
+  const summary = row.summary;
 
   const markdown = [
     `# ${title}`,
     '',
     row.description ? `${row.description}\n` : '',
-    summary ? `## Summary\n\n${summary}` : '',
+    summary && row.summaryFinal ? `## Summary\n\n${summary}` : '',
     `## Run\n\nAgent \`${row.agent}\` · started ${row.startedAt.toISOString()} · status ${row.status}.`,
     memories.length > 0
       ? `## Memories written\n\n${memories.map((m) => `- **${m.title}** — ${m.type}`).join('\n')}`
@@ -202,8 +203,17 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         )}
       </div>
 
+      {summary && !row.summaryFinal ? (
+        <>
+          <SectionBar name="Summary" more={<Pill tone="dim">RAW</Pill>} />
+          <pre className="mb-5 overflow-x-auto border border-border bg-muted p-3 font-mono text-xs leading-5">
+            {summary}
+          </pre>
+        </>
+      ) : null}
+
       <MarkdownPanel
-        eyebrow="Session summary"
+        eyebrow="Session log"
         title="What happened in this run"
         markdown={markdown}
         copyLabel="Copy markdown"
