@@ -1,5 +1,4 @@
 import type { Repositories } from '@rembric/db';
-import { ListChecks } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -10,21 +9,27 @@ import {
   truncate,
 } from '@/components/dashboard/support';
 import {
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
   Pill,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The consolidation journal, in the v0 composition.
+ * The consolidation journal, in the production dashboard's composition: the
+ * numbered view head, the run and queue stats, the sweep context, and the run
+ * history and latest-run journal as tables.
  *
  * Everything here is state, never a control: the sweep runs on session start and
  * from `/mcp` + `/api`, and reverting an op is a mutation whose Server Action
@@ -91,51 +96,52 @@ export default async function ConsolidationPage({
 
   return (
     <Page>
-      <PageHead
-        icon={ListChecks}
-        eyebrow="Memory maintenance"
-        title="Consolidation"
-        description="A quiet queue for turning repeated context into durable, searchable memory."
-        aside={<span className="text-[11px] text-muted-foreground)">{total} runs journaled</span>}
+      <ViewHead
+        num="05"
+        title="Rembric Consolidation."
+        hl="Rembric"
+        meta={[{ k: 'TOTAL', v: total }]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile
-          label="Last run"
-          value={lastRun ? 'OK' : '—'}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="LAST RUN"
+          v={lastRun ? 'OK' : '—'}
           tone={lastRun ? 'lime' : 'dim'}
-          hint={
+          sub={
             lastRun ? (
-              <>
+              <span>
                 <Time value={lastRun.finishedAt ?? lastRun.startedAt} /> ·{' '}
                 {scopeLabel(repos, lastRun.scope)}
-              </>
+              </span>
             ) : (
-              'Never run'
+              <span>NEVER RUN</span>
             )
           }
         />
-        <StatTile
-          label="Processed"
-          value={lastRunCounts.total}
-          hint={`${lastRunCounts.reverted} reverted`}
+        <StatCard
+          k="OPS APPLIED"
+          v={lastRunCounts.total}
+          sub={<span>{lastRunCounts.reverted} REVERTED</span>}
         />
-        <StatTile
-          label="Queued"
-          value={pendingJudgments}
-          tone={pendingJudgments > 0 ? 'amber' : 'dim'}
-          hint={`${orphanedPendings} orphaned`}
+        <StatCard
+          k="ORPHANED PENDINGS"
+          v={orphanedPendings}
+          tone={orphanedPendings > 0 ? 'amber' : 'dim'}
+          sub={<span>{pendingJudgments} STILL QUEUED</span>}
         />
-      </section>
+      </StatGrid>
 
-      <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-border bg-muted p-5">
+      <div className="mt-6 grid gap-3 md:grid-cols-2">
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                CONTEXT
+              </p>
               <h2 className="mt-2 text-base font-medium">Sweep behavior</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               deterministic
             </span>
           </div>
@@ -143,18 +149,20 @@ export default async function ConsolidationPage({
             The sweep applies decay and deadline orphaning. It does not call an LLM and needs no
             cron job: it runs throttled on session start, and from the `/mcp` and `/api` routes.
           </p>
-          <p className="mt-5 text-[11px] text-muted-foreground">
-            Orphan after {formatWindow(thresholds.afterMs)} · deadline{' '}
+          <p className="mt-5 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+            ORPHAN AFTER {formatWindow(thresholds.afterMs)} · DEADLINE{' '}
             {formatWindow(thresholds.deadlineMs)}
           </p>
-        </article>
-        <article className="rounded-2xl border border-border bg-muted p-5">
+        </div>
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">Context</p>
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                CONTEXT
+              </p>
               <h2 className="mt-2 text-base font-medium">Undoable work</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               journaled
             </span>
           </div>
@@ -165,113 +173,138 @@ export default async function ConsolidationPage({
           </p>
           <Link
             href="/dashboard/maintenance"
-            className="mt-5 inline-block text-[11px] text-primary hover:text-primary"
+            className="mt-5 inline-block font-mono text-[11px] uppercase tracking-[.12em] text-primary hover:underline"
           >
-            Database maintenance →
+            DATABASE MAINTENANCE →
           </Link>
-        </article>
-      </section>
+        </div>
+      </div>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Pipeline"
-          title="Recent maintenance"
-          action={`${runs.length} of ${total}`}
-        />
-        {runs.length === 0 ? (
-          <EmptyNote>No consolidation run has been recorded yet.</EmptyNote>
-        ) : (
-          <Rows>
+      <div className="mt-8">
+        <SectionBar name="Pipeline" meta={`${runs.length} OF ${total}`} />
+      </div>
+      {runs.length === 0 ? (
+        <TableEmpty>NO CONSOLIDATION RUN HAS BEEN RECORDED YET</TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>started</DataTh>
+            <DataTh>finished</DataTh>
+            <DataTh>scope</DataTh>
+            <DataTh>status</DataTh>
+          </DataHead>
+          <DataBody>
             {runs.map((run) => {
               const counts = repos.consolidation.adminOpCounts(run.id);
               return (
-                <Row key={run.id} columns="md:grid-cols-[auto_1.3fr_1fr_auto_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-[10px] text-primary">
-                    <ListChecks className="size-3.5" />
-                  </span>
-                  <div>
-                    <p className="text-sm text-foreground">{scopeLabel(repos, run.scope)}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {truncate(run.summary, 120) || 'no summary'}
-                    </p>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    <Time value={run.startedAt} />
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {counts.total} ops · {counts.reverted} reverted
-                  </span>
-                  <Pill tone={run.finishedAt ? 'lime' : 'amber'}>
-                    {run.finishedAt ? 'complete' : 'running'}
-                  </Pill>
-                </Row>
+                <DataTr key={run.id}>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    <Link
+                      href={`/dashboard/consolidation/${run.id}`}
+                      className="hover:text-primary"
+                    >
+                      <Time value={run.startedAt} />
+                    </Link>
+                  </DataTd>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    <Time value={run.finishedAt} />
+                  </DataTd>
+                  <DataTd>{scopeLabel(repos, run.scope)}</DataTd>
+                  <DataTd>
+                    <Pill
+                      tone={
+                        counts.total === 0
+                          ? 'dim'
+                          : counts.reverted === counts.total
+                            ? 'dim'
+                            : counts.reverted > 0
+                              ? 'amber'
+                              : 'lime'
+                      }
+                    >
+                      {counts.total === 0
+                        ? 'no-op'
+                        : counts.reverted === counts.total
+                          ? 'fully reverted'
+                          : counts.reverted > 0
+                            ? `${counts.reverted}/${counts.total} reverted`
+                            : `${counts.total} ops`}
+                    </Pill>
+                  </DataTd>
+                </DataTr>
               );
             })}
-          </Rows>
-        )}
-        {hasMore || page > 0 ? (
-          <div className="flex items-center justify-between gap-3 px-5 py-4 text-[11px] text-muted-foreground md:px-6">
-            {page > 0 ? (
-              <Link
-                href={`/dashboard/consolidation?page=${page - 1}`}
-                className="rounded-lg border border-border px-3 py-2 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                ← Previous
-              </Link>
-            ) : (
-              <span />
-            )}
-            <span>Page {page + 1}</span>
-            {hasMore ? (
-              <Link
-                href={`/dashboard/consolidation?page=${page + 1}`}
-                className="rounded-lg border border-border px-3 py-2 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                Next →
-              </Link>
-            ) : (
-              <span />
-            )}
-          </div>
-        ) : null}
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Journal"
-          title={
-            lastRun
-              ? `Operations in the latest run (${scopeLabel(repos, lastRun.scope)})`
-              : 'Operations'
-          }
-          action={lastRun ? <Time value={lastRun.startedAt} /> : 'no run yet'}
+      {hasMore || page > 0 ? (
+        <div className="flex items-center justify-between gap-3 border-t border-border py-4 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
+          {page > 0 ? (
+            <Link
+              href={`/dashboard/consolidation?page=${page - 1}`}
+              className="border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
+            >
+              ‹ PREV
+            </Link>
+          ) : (
+            <span />
+          )}
+          <span>PAGE {page + 1}</span>
+          {hasMore ? (
+            <Link
+              href={`/dashboard/consolidation?page=${page + 1}`}
+              className="border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
+            >
+              NEXT ›
+            </Link>
+          ) : (
+            <span />
+          )}
+        </div>
+      ) : null}
+
+      <div className="mt-8">
+        <SectionBar
+          name={lastRun ? `Operations in the latest run` : 'Operations'}
+          meta={lastRun ? scopeLabel(repos, lastRun.scope) : 'NO RUN YET'}
         />
-        {lastRunOps.length === 0 ? (
-          <EmptyNote>No operation was journaled in the latest run.</EmptyNote>
-        ) : (
-          <Rows>
+      </div>
+      {lastRunOps.length === 0 ? (
+        <TableEmpty>NO OPERATION WAS JOURNALED IN THE LATEST RUN</TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>type</DataTh>
+            <DataTh>affected</DataTh>
+            <DataTh>created</DataTh>
+            <DataTh>reasoning</DataTh>
+            <DataTh>applied</DataTh>
+          </DataHead>
+          <DataBody>
             {lastRunOps.map((op) => (
-              <Row key={op.id} columns="md:grid-cols-[1fr_1.4fr_auto_auto]">
-                <div>
-                  <p className="text-sm text-foreground">{op.opType}</p>
-                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                    {shortId(op.id)}
-                  </p>
-                </div>
-                <p className="text-[11px] leading-5 text-muted-foreground">
-                  {truncate(op.reasoning, 140) || `${op.affectedIds.length} affected`}
-                </p>
-                <span className="text-[11px] text-muted-foreground">
+              <DataTr key={op.id}>
+                <DataTd>{op.opType}</DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
+                  {op.affectedIds.length}
+                </DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
                   {relativeTime(op.appliedAt, nowMs)}
-                </span>
-                <Pill tone={op.revertedAt ? 'amber' : 'lime'}>
-                  {op.revertedAt ? 'reverted' : 'applied'}
-                </Pill>
-              </Row>
+                </DataTd>
+                <DataTd className="max-w-[420px] truncate text-muted-foreground">
+                  {truncate(op.reasoning, 140) || `${op.affectedIds.length} affected`}
+                  <span className="ml-2 font-mono text-[10px]">{shortId(op.id)}</span>
+                </DataTd>
+                <DataTd>
+                  <Pill tone={op.revertedAt ? 'amber' : 'lime'}>
+                    {op.revertedAt ? 'reverted' : 'applied'}
+                  </Pill>
+                </DataTd>
+              </DataTr>
             ))}
-          </Rows>
-        )}
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
     </Page>
   );
 }

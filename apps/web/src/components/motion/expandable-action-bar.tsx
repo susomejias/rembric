@@ -244,7 +244,7 @@ export function ExpandableActionBar({
             // Labelled actions can outgrow the space the bar sits in — the pill
             // stays inside it and scrolls its rail rather than running off the
             // edge, where the last action is unreachable.
-            'scrollbar-hide relative inline-flex max-w-full items-center overflow-x-auto overflow-y-hidden rounded-full border border-border bg-card/90 shadow-2xl backdrop-blur-xl',
+            'scrollbar-hide relative inline-flex max-w-full items-center overflow-x-auto overflow-y-hidden rounded-full border border-border bg-card',
             SIZE_CLASS[size],
             classNames?.track,
           )}

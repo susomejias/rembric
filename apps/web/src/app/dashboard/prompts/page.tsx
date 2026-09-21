@@ -1,6 +1,5 @@
 import { sanitizeFtsQuery } from '@rembric/core';
 import type { Prompt } from '@rembric/db';
-import { FileText } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -19,22 +18,31 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, relativeTime, shortId, truncate } from '@/components/dashboard/support';
+import { PAGE_SIZE, shortId, truncate } from '@/components/dashboard/support';
 import {
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
   Pill,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  TableEmpty,
+  Tag,
+  Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The prompt library, in the v0 composition.
+ * The prompt library, in the production dashboard's composition: the numbered
+ * view head, the scope/agent/session/search filter bar, and the prompts as a
+ * table with the title/project/session/agent/tags/status/created/content
+ * columns.
  *
  * The filter model and the read are the ported view's own: the FTS branch
  * searches the whole corpus post-pagination, so the URL's other filters are
@@ -56,7 +64,6 @@ export default async function PromptsPage({
     filters.project !== '' || filters.session !== '' || filters.agent !== '' || filters.q !== '';
 
   const { repos } = getServices();
-  const nowMs = Date.now();
 
   const offset = filters.page * PAGE_SIZE;
   const projectRows = repos.projects.adminListAll();
@@ -109,49 +116,59 @@ export default async function PromptsPage({
 
   return (
     <Page>
-      <PageHead
-        icon={FileText}
-        eyebrow="Prompt library"
-        title="Prompts"
-        description="Reusable instructions that guide agents when they read and write context."
-        aside={
-          <Link
-            href={
-              filters.includeDeleted ? '/dashboard/prompts' : '/dashboard/prompts?include_deleted=1'
-            }
-            className="text-[11px] text-muted-foreground transition-colors hover:text-primary"
-          >
-            {filters.includeDeleted ? 'Hide soft-deleted rows' : 'Show soft-deleted rows'}
-          </Link>
-        }
+      <ViewHead
+        num="03b"
+        title="Rembric Prompts."
+        hl="Rembric"
+        meta={[
+          { k: 'TOTAL', v: totalCount === undefined ? `${visible.length}+` : totalCount },
+          { k: 'SHOWING', v: `${visible.length} ROWS` },
+        ]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile label="Live prompts" value={activeCount} tone="lime" hint="visible to agents" />
-        <StatTile
-          label="Soft-deleted"
-          value={deletedCount}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard
+          k="LIVE PROMPTS"
+          v={activeCount}
+          tone="lime"
+          sub={<span>VISIBLE TO AGENTS</span>}
+        />
+        <StatCard
+          k="SOFT-DELETED"
+          v={deletedCount}
           tone={deletedCount > 0 ? 'amber' : 'dim'}
-          hint="hidden unless shown"
+          sub={<span>HIDDEN UNLESS SHOWN</span>}
         />
-        <StatTile
-          label="Rows on this page"
-          value={visible.length}
-          hint={`page ${filters.page + 1}`}
-        />
-      </section>
+        <StatCard k="SHOWING" v={visible.length} sub={<span>PAGE {filters.page + 1}</span>} />
+      </StatGrid>
 
       <FilterForm action="/dashboard/prompts" className="mt-6">
-        <FilterField label="Agent" htmlFor="p-agent" className="w-40">
-          <FilterInput id="p-agent" name="agent" value={filters.agent} placeholder="claude-code" />
+        <FilterField label="SCOPE" htmlFor="p-project">
+          <FilterSelect
+            id="p-project"
+            name="project"
+            value={filters.project}
+            options={[
+              { value: '', label: 'all scopes' },
+              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
+            ]}
+          />
         </FilterField>
-        <FilterField label="Session prefix" htmlFor="p-session" className="w-40">
+        <FilterField label="AGENT" htmlFor="p-agent">
+          <FilterInput
+            id="p-agent"
+            name="agent"
+            value={filters.agent}
+            placeholder="e.g. claude-code"
+          />
+        </FilterField>
+        <FilterField label="SESSION" htmlFor="p-session">
           <FilterInput id="p-session" name="session" value={filters.session} placeholder="01H…" />
         </FilterField>
-        <FilterField label="Search" htmlFor="p-q" className="min-w-56 flex-1">
+        <FilterField label="SEARCH" htmlFor="p-q" className="min-w-56 flex-1">
           <FilterInput id="p-q" name="q" value={filters.q} placeholder="FTS5 keyword" />
         </FilterField>
-        <FilterField label="Deleted" htmlFor="p-deleted" className="w-32">
+        <FilterField label="DELETED" htmlFor="p-deleted">
           <FilterSelect
             id="p-deleted"
             name="include_deleted"
@@ -165,20 +182,27 @@ export default async function PromptsPage({
         <FilterActions clearHref="/dashboard/prompts" />
       </FilterForm>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Library"
-          title="Instructions in use"
-          action={ftsQuery ? `${visible.length}+ matching` : `${totalCount ?? 0} matching`}
-        />
-        {visible.length === 0 ? (
-          <EmptyNote>
-            {isFiltered
-              ? 'No prompt matches this filter set.'
-              : 'No prompt has been captured yet. Prompts appear as agents report the instructions they run with.'}
-          </EmptyNote>
-        ) : (
-          <Rows>
+      <SectionBar
+        name="Library"
+        meta={ftsQuery ? `${visible.length}+ MATCHING` : `${totalCount ?? 0} MATCHING`}
+      />
+      {visible.length === 0 ? (
+        <TableEmpty>
+          {isFiltered ? 'NO PROMPT MATCHES THIS FILTER' : 'NO PROMPT HAS BEEN CAPTURED YET'}
+        </TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>title</DataTh>
+            <DataTh>project</DataTh>
+            <DataTh>session</DataTh>
+            <DataTh>agent</DataTh>
+            <DataTh>tags</DataTh>
+            <DataTh>status</DataTh>
+            <DataTh>created</DataTh>
+            <DataTh>content</DataTh>
+          </DataHead>
+          <DataBody>
             {visible.map((prompt) => {
               const project = prompt.projectId ? projectById.get(prompt.projectId) : undefined;
               const state = prompt.deletedAt
@@ -187,45 +211,55 @@ export default async function PromptsPage({
                   ? 'refined'
                   : 'active';
               return (
-                <Row key={prompt.id} columns="md:grid-cols-[auto_1.5fr_1fr_auto]">
-                  <span
-                    className={`grid size-7 place-items-center rounded-lg ${
-                      state === 'deleted'
-                        ? 'bg-accent text-muted-foreground'
-                        : 'bg-primary/10 text-primary'
-                    }`}
-                  >
-                    <FileText className="size-3.5" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm text-foreground">{truncate(prompt.content, 160)}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {prompt.agent} · {prompt.sessionId ? shortId(prompt.sessionId) : 'no session'}{' '}
-                      · {relativeTime(prompt.createdAt, nowMs)}
-                    </p>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    {project?.slug ?? 'global'}
-                  </span>
-                  <Pill tone={state === 'active' ? 'lime' : state === 'refined' ? 'lime' : 'dim'}>
-                    {state}
-                  </Pill>
-                </Row>
+                <DataTr key={prompt.id} className={prompt.deletedAt ? 'opacity-60' : undefined}>
+                  <DataTd className="max-w-[220px] truncate">{truncate(prompt.title, 60)}</DataTd>
+                  <DataTd className="text-muted-foreground">{project?.slug ?? '—'}</DataTd>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    {prompt.sessionId ? (
+                      <Link
+                        href={`/dashboard/sessions/${prompt.sessionId}`}
+                        className="hover:text-primary"
+                      >
+                        {shortId(prompt.sessionId)}
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
+                  </DataTd>
+                  <DataTd>{prompt.agent}</DataTd>
+                  <DataTd>
+                    <div className="flex flex-wrap gap-1">
+                      {(prompt.tags ?? []).length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        (prompt.tags ?? []).map((tag) => <Tag key={tag}>{tag}</Tag>)
+                      )}
+                    </div>
+                  </DataTd>
+                  <DataTd>
+                    <Pill tone={state === 'deleted' ? 'dim' : 'lime'}>{state}</Pill>
+                  </DataTd>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    <Time value={prompt.createdAt} />
+                  </DataTd>
+                  <DataTd className="max-w-[380px] truncate text-muted-foreground">
+                    {truncate(prompt.content, 160)}
+                  </DataTd>
+                </DataTr>
               );
             })}
-          </Rows>
-        )}
-        <div className="px-5 pb-5 md:px-6">
-          <Pager
-            page={filters.page}
-            hasMore={hasMore}
-            total={totalCount}
-            totalLabel={`${visible.length} rows`}
-            path="/dashboard/prompts"
-            query={roundTripQuery}
-          />
-        </div>
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
+
+      <Pager
+        page={filters.page}
+        hasMore={hasMore}
+        total={totalCount}
+        totalLabel={`${visible.length} ROWS`}
+        path="/dashboard/prompts"
+        query={roundTripQuery}
+      />
     </Page>
   );
 }

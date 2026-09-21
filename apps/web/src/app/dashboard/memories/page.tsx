@@ -6,7 +6,6 @@ import {
   type ReviewState,
 } from '@rembric/core';
 import { MEMORY_TYPES, type Memory, type MemoryStatus, type MemoryType } from '@rembric/db';
-import { BrainCircuit } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -27,21 +26,26 @@ import {
 } from '@/components/dashboard/filters';
 import { PAGE_SIZE, relativeTime, shortId } from '@/components/dashboard/support';
 import {
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
-  Pill,
-  Row,
-  Rows,
-  StatTile,
+  ReviewPill,
+  StatCard,
+  StatGrid,
+  StatusPill,
+  TableEmpty,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The memories list, in the v0 composition: the metric strip, the URL-driven
- * filter bar, and the memory rows as links into the detail page.
+ * The memories list, in the production dashboard's composition: the numbered
+ * view head, the URL-driven filter bar, and the memories as a table with the
+ * project/type/title/status/review/created columns.
  *
  * It stays a server component reading `@rembric/core`/`@rembric/db` directly: no
  * API call, no client-side fetching, no cache that could disagree with the
@@ -189,36 +193,50 @@ export default async function MemoriesPage({
 
   return (
     <Page>
-      <PageHead
-        icon={BrainCircuit}
-        eyebrow="Memory layer"
-        title="Memories"
-        description="The durable context Rembric has kept across your projects, ready to be recalled when it matters."
-        aside={
-          <div className="flex items-center gap-2 rounded-full border border-border bg-accent px-3 py-1.5 text-[11px] text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-primary" />
-            {totalMemories.toLocaleString('en-US')} stored
-          </div>
-        }
+      <ViewHead
+        num="02"
+        title="Rembric Memories."
+        hl="Rembric"
+        meta={[
+          { k: 'TOTAL', v: totalCount === undefined ? `${visible.length}+` : totalCount },
+          { k: 'SHOWING', v: `${visible.length} ROWS` },
+        ]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile
-          label="Total memories"
-          value={totalMemories.toLocaleString('en-US')}
-          hint={`${activeMemories.toLocaleString('en-US')} active`}
+      <StatGrid className="mt-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
+        <StatCard
+          k="TOTAL MEMORIES"
+          v={totalMemories.toLocaleString('en-US')}
+          tone="lime"
+          sub={<span>ALL TIME</span>}
         />
-        <StatTile label="Showing" value={visible.length} hint={`page ${filters.page + 1}`} />
-        <StatTile
-          label="Needs review"
-          value={totalNeedsReview}
-          hint="Past their review TTL"
+        <StatCard
+          k="ACTIVE MEMORIES"
+          v={activeMemories.toLocaleString('en-US')}
+          sub={<span>RECALLABLE</span>}
+        />
+        <StatCard k="SHOWING" v={visible.length} sub={<span>PAGE {filters.page + 1}</span>} />
+        <StatCard
+          k="NEEDS REVIEW"
+          v={totalNeedsReview}
           tone={totalNeedsReview > 0 ? 'amber' : 'dim'}
+          sub={<span>PAST THEIR TTL</span>}
         />
-      </section>
+      </StatGrid>
 
       <FilterForm action="/dashboard/memories" className="mt-6">
-        <FilterField label="Status" htmlFor="f-status" className="w-36">
+        <FilterField label="SCOPE" htmlFor="f-project">
+          <FilterSelect
+            id="f-project"
+            name="project"
+            value={filters.project}
+            options={[
+              { value: '', label: 'all scopes' },
+              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
+            ]}
+          />
+        </FilterField>
+        <FilterField label="STATUS" htmlFor="f-status">
           <FilterSelect
             id="f-status"
             name="status"
@@ -226,7 +244,7 @@ export default async function MemoriesPage({
             options={STATUS_OPTIONS}
           />
         </FilterField>
-        <FilterField label="Type" htmlFor="f-type" className="w-36">
+        <FilterField label="TYPE" htmlFor="f-type">
           <FilterSelect
             id="f-type"
             name="type"
@@ -237,7 +255,7 @@ export default async function MemoriesPage({
             ]}
           />
         </FilterField>
-        <FilterField label="Review" htmlFor="f-review" className="w-40">
+        <FilterField label="REVIEW" htmlFor="f-review">
           <FilterSelect
             id="f-review"
             name="review"
@@ -248,91 +266,86 @@ export default async function MemoriesPage({
             ]}
           />
         </FilterField>
-        <FilterField label="Search" htmlFor="f-q" className="min-w-56 flex-1">
+        <FilterField label="SEARCH" htmlFor="f-q" className="min-w-56 flex-1">
           <FilterInput id="f-q" name="q" value={filters.q} placeholder="FTS5 keyword, tag, topic" />
         </FilterField>
         <FilterActions clearHref="/dashboard/memories" />
       </FilterForm>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Recent context"
-          title="What Rembric knows"
-          action={
-            isFiltered
-              ? `filtered · ${roundTripQuery['q'] ? `q=${roundTripQuery['q']}` : 'by URL'}`
-              : 'Across all projects'
-          }
-        />
-        {visible.length === 0 ? (
-          <EmptyNote>
-            {isFiltered ? (
-              <>
-                No memory matches this filter set.{' '}
-                <Link href="/dashboard/memories" className="text-primary hover:underline">
-                  Clear the filters
-                </Link>
-                .
-              </>
-            ) : (
-              <>
-                Nothing has been saved in this scope. Save your first memory with the{' '}
-                <code className="font-mono">memory.save</code> MCP tool — it appears here
-                immediately, and it is never edited or deleted afterwards.
-              </>
-            )}
-          </EmptyNote>
-        ) : (
-          <Rows>
+      {visible.length === 0 ? (
+        <TableEmpty>
+          {isFiltered ? (
+            <>
+              No memories match this filter.{' '}
+              <Link href="/dashboard/memories" className="text-primary hover:underline">
+                Clear the filters
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              Nothing has been saved in this scope — save your first with the{' '}
+              <code className="font-mono">memory.save</code> MCP tool.
+            </>
+          )}
+        </TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>project</DataTh>
+            <DataTh>type</DataTh>
+            <DataTh>title</DataTh>
+            <DataTh>status</DataTh>
+            <DataTh>review</DataTh>
+            <DataTh>created</DataTh>
+          </DataHead>
+          <DataBody>
             {visible.map((memory) => {
               const reviewState = reviewById.get(memory.id) ?? null;
-              const tone =
-                reviewState === 'needs_review'
-                  ? 'amber'
-                  : memory.status === 'active'
-                    ? 'lime'
-                    : 'dim';
               return (
-                <Link key={memory.id} href={`/dashboard/memories/${memory.id}`} className="block">
-                  <Row columns="md:grid-cols-[minmax(260px,1.5fr)_1fr_auto_auto]">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/10" />
-                      <div>
-                        <p className="text-sm leading-5 text-foreground">{memory.title}</p>
-                        <p className="mt-1 text-[10px] text-muted-foreground">
-                          {memory.type} · {shortId(memory.id)}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground">
-                      {memory.projectId
-                        ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
-                        : 'global'}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {relativeTime(memory.createdAt, nowMs)}
-                    </span>
-                    <Pill tone={tone}>
-                      {reviewState === 'needs_review' ? 'Needs review' : memory.status}
-                    </Pill>
-                  </Row>
-                </Link>
+                <DataTr key={memory.id}>
+                  <DataTd className="text-muted-foreground">
+                    {memory.projectId
+                      ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
+                      : '—'}
+                  </DataTd>
+                  <DataTd>{memory.type}</DataTd>
+                  <DataTd className="max-w-[420px] truncate">
+                    <Link
+                      href={`/dashboard/memories/${memory.id}`}
+                      className="transition-colors hover:text-primary"
+                    >
+                      {memory.title}
+                    </Link>
+                  </DataTd>
+                  <DataTd>
+                    <StatusPill status={memory.status} />
+                  </DataTd>
+                  <DataTd>
+                    {reviewState === 'needs_review' ? (
+                      <ReviewPill />
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </DataTd>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    {relativeTime(memory.createdAt, nowMs)}
+                  </DataTd>
+                </DataTr>
               );
             })}
-          </Rows>
-        )}
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
 
-      <div className="mt-4">
-        <Pager
-          page={filters.page}
-          hasMore={hasMore}
-          total={totalCount}
-          totalLabel={`${visible.length} rows`}
-          path="/dashboard/memories"
-          query={roundTripQuery}
-        />
-      </div>
+      <Pager
+        page={filters.page}
+        hasMore={hasMore}
+        total={totalCount}
+        totalLabel={`${visible.length} ROWS`}
+        path="/dashboard/memories"
+        query={roundTripQuery}
+      />
     </Page>
   );
 }

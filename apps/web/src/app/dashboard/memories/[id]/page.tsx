@@ -1,30 +1,40 @@
 import { annotationKindFor, compareAnnotations, deriveReviewState } from '@rembric/core';
-import { ArrowLeft, Database, Tag } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import type { ReactNode } from 'react';
 
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId, truncate } from '@/components/dashboard/support';
 import {
-  Fact,
-  Notice,
+  BackLink,
+  Chip,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
+  Flash,
+  Kv,
+  KvGrid,
   Page,
-  Panel,
-  PanelHead,
   Pill,
-  Row,
-  Rows,
+  ReviewPill,
+  SectionBar,
+  StatCard,
+  StatusPill,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The memory detail hub, in the v0 composition: the title block, the facts grid,
- * the durable content as rendered markdown with a copy control, the lineage and
- * judgment context, and the metadata aside.
+ * The memory detail hub, in the production dashboard's composition: the head
+ * with the id/status/project meta, the review flash, the key/value grid, the
+ * content as rendered markdown with a copy control, and the lineage and
+ * judgment tables.
  *
- * The reads are the retired `memory-detail.tsx` loader's own — the same
+ * The reads are the retired `memories.ts` `/:id` handler's own — the same
  * repository methods, the same derived review state, the uncapped and
  * unpaginated judgment list — so the dashboard's per-memory view did not change
  * its meaning, only its surface.
@@ -73,148 +83,193 @@ export default async function MemoryDetailPage({ params }: { params: Promise<{ i
       compareAnnotations({ ...a.relation, kind: a.kind }, { ...b.relation, kind: b.kind }),
     );
 
+  const projectLabel = project?.slug ?? '—';
   const markdown = `# ${row.title}\n\n${row.content}`;
 
   return (
-    <Page className="max-w-[1100px]">
-      <Link
-        href="/dashboard/memories"
-        className="mb-6 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-primary"
-      >
-        <ArrowLeft className="size-3.5" />
-        Back to memories
-      </Link>
+    <Page>
+      <ViewHead
+        num="02"
+        title={row.title}
+        meta={[
+          { k: 'ID', v: shortId(row.id) },
+          { k: 'STATUS', v: row.status.toUpperCase() },
+          { k: 'PROJECT', v: projectLabel },
+        ]}
+      />
 
-      <div className="flex flex-wrap items-start justify-between gap-5">
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-2 text-[10px] tracking-[.15em] text-primary uppercase">
-            <Database className="size-3" />
-            Memory · {row.type} · {row.scope}
-          </div>
-          <h1 className="mt-3 text-2xl font-medium tracking-[-.06em] md:text-4xl">{row.title}</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            {truncate(row.content, 240)}
-          </p>
-        </div>
-        <Pill
-          tone={reviewState === 'needs_review' ? 'amber' : row.status === 'active' ? 'lime' : 'dim'}
-        >
-          {reviewState === 'needs_review' ? 'Needs review' : row.status}
-        </Pill>
+      <div className="mt-4 mb-5">
+        <BackLink href="/dashboard/memories" label="BACK TO MEMORIES" />
       </div>
 
       {reviewState === 'needs_review' ? (
-        <Notice tone="amber" badge="Needs review" className="mt-6">
+        <Flash tone="amber" label="NEEDS REVIEW">
           Not re-affirmed since <Time value={reviewAfter} />. Re-affirming it with{' '}
           <code className="font-mono">memory.confirm</code> moves it back to fresh.
-        </Notice>
+        </Flash>
       ) : null}
 
-      <section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Fact label="Project" value={project?.slug ?? 'global'} />
-        <Fact label="Created" value={<Time value={row.createdAt} />} />
-        <Fact label="Confirmations" value={confirmCount} />
-        <Fact label="Last seen" value={<Time value={row.lastSeenAt} />} />
-      </section>
+      <KvGrid>
+        <Kv k="Status" v={<StatusPill status={row.status} />} />
+        <Kv k="Project" v={projectLabel} />
+        <Kv k="Type" v={row.type} />
+        <Kv k="Confirms" v={confirmCount} />
+        <Kv k="Created" v={<Time value={row.createdAt} />} mono />
+        <Kv k="Last seen" v={<Time value={row.lastSeenAt} />} mono />
+        <Kv k="Scope" v={row.scope} mono />
+        <Kv k="Topic key" v={row.topicKey ?? '—'} mono />
+        <Kv k="Source" v={row.source?.agent ?? '—'} mono />
+        {successor ? (
+          <Kv
+            k="Superseded by"
+            v={
+              <Link
+                href={`/dashboard/memories/${successor.id}`}
+                className="text-primary hover:underline"
+              >
+                {shortId(successor.id)}
+              </Link>
+            }
+            mono
+          />
+        ) : null}
+        {reviewState !== null && reviewAfter !== null ? (
+          <>
+            <Kv
+              k="Review"
+              v={reviewState === 'needs_review' ? <ReviewPill /> : 'fresh'}
+              tone={reviewState === 'needs_review' ? 'amber' : 'lime'}
+            />
+            <Kv k="Review after" v={<Time value={reviewAfter} />} mono />
+          </>
+        ) : null}
+      </KvGrid>
 
       <MarkdownPanel eyebrow="Memory content" title="Durable context" markdown={markdown} />
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_.75fr]">
-        <Panel>
-          <PanelHead eyebrow="Lineage" title="What this memory replaced, and what replaced it" />
-          {predecessors.length === 0 && successor === undefined && touching.length === 0 ? (
-            <p className="px-5 py-5 text-sm text-muted-foreground md:px-6">
-              This memory stands alone: no predecessor, no successor, and no judgment recorded
-              against it.
-            </p>
-          ) : (
-            <Rows>
-              {predecessors.map((predecessor) => (
-                <Row key={predecessor.id} columns="md:grid-cols-[auto_1fr_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-accent text-muted-foreground">
-                    <Tag className="size-3.5" />
-                  </span>
-                  <Link href={`/dashboard/memories/${predecessor.id}`} className="group">
-                    <p className="text-sm text-foreground group-hover:text-primary">
-                      {predecessor.title}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      replaced · {predecessor.status}
-                    </p>
-                  </Link>
-                  <Pill tone="dim">Replaces</Pill>
-                </Row>
-              ))}
-              {successor ? (
-                <Row columns="md:grid-cols-[auto_1fr_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
-                    <Tag className="size-3.5" />
-                  </span>
-                  <Link href={`/dashboard/memories/${successor.id}`} className="group">
-                    <p className="text-sm text-foreground group-hover:text-primary">
-                      {successor.title}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      superseded this memory · {successor.status}
-                    </p>
-                  </Link>
-                  <Pill tone="lime">Superseded by</Pill>
-                </Row>
-              ) : null}
-              {touching.map(({ relation, kind }) => (
-                <Row key={relation.id} columns="md:grid-cols-[auto_1.3fr_1fr_auto]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-accent text-[10px] text-muted-foreground">
-                    {relation.judgmentId === '' ? '—' : relation.judgmentId.slice(0, 2)}
-                  </span>
-                  <Link
-                    href={`/dashboard/memories/${relation.sourceId === row.id ? relation.targetId : relation.sourceId}`}
-                    className="group"
-                  >
-                    <p className="text-sm text-foreground group-hover:text-primary">
-                      {relation.sourceId === row.id ? relation.targetTitle : relation.sourceTitle}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {relation.relation ?? 'pending'} · {relation.confidence ?? '—'} confidence
-                    </p>
-                  </Link>
-                  <span className="text-[11px] text-muted-foreground">
-                    <Time value={relation.judgedAt ?? relation.createdAt} />
-                  </span>
-                  <Pill tone={kind === 'pending_conflict' ? 'amber' : 'lime'}>{kind}</Pill>
-                </Row>
-              ))}
-            </Rows>
-          )}
-        </Panel>
+      <SectionBar name="TAGS" />
+      <div className="mb-6 flex flex-wrap gap-2">
+        {row.tags.length === 0 ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          row.tags.map((tag) => <Chip key={tag}>{tag}</Chip>)
+        )}
+      </div>
 
-        <aside className="rounded-2xl border border-border bg-card p-5">
-          <p className="text-[10px] tracking-[.14em] text-muted-foreground uppercase">Metadata</p>
-          <dl className="mt-5 flex flex-col gap-4 text-xs">
-            <MetadataRow
-              label="Memory id"
-              value={<code className="font-mono">{shortId(row.id)}</code>}
-            />
-            <MetadataRow label="Type" value={row.type} />
-            <MetadataRow label="Scope" value={row.scope} />
-            <MetadataRow label="Topic key" value={row.topicKey ?? '—'} />
-            <MetadataRow label="Tags" value={row.tags.length > 0 ? row.tags.join(', ') : '—'} />
-            <MetadataRow label="Source session" value={shortId(row.sessionId)} />
-            <MetadataRow label="Source agent" value={row.source?.agent ?? '—'} />
-          </dl>
-          <p className="mt-6 border-t border-border pt-4 text-[11px] text-muted-foreground">
-            Local, append-only storage. Nothing here was edited after it was written.
-          </p>
-        </aside>
+      <SectionBar name="REPLACES" />
+      <div className="mb-6 flex flex-wrap gap-3 font-mono text-xs">
+        {row.replaces.length === 0 ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          row.replaces.map((rid) => (
+            <Link
+              key={rid}
+              href={`/dashboard/memories/${rid}`}
+              className="text-primary hover:underline"
+            >
+              {rid}
+            </Link>
+          ))
+        )}
+      </div>
+
+      <SectionBar name={`PREDECESSORS (${predecessors.length})`} />
+      {predecessors.length === 0 ? (
+        <TableEmpty>NO PREDECESSORS</TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>status</DataTh>
+            <DataTh>title</DataTh>
+            <DataTh>content</DataTh>
+            <DataTh>created</DataTh>
+          </DataHead>
+          <DataBody>
+            {predecessors.map((predecessor) => (
+              <DataTr key={predecessor.id}>
+                <DataTd>
+                  <StatusPill status={predecessor.status} />
+                </DataTd>
+                <DataTd>
+                  <Link
+                    href={`/dashboard/memories/${predecessor.id}`}
+                    className="transition-colors hover:text-primary"
+                  >
+                    {truncate(predecessor.title, 120)}
+                  </Link>
+                </DataTd>
+                <DataTd className="max-w-[420px] truncate text-muted-foreground">
+                  {truncate(predecessor.content, 160)}
+                </DataTd>
+                <DataTd className="font-mono text-xs text-muted-foreground">
+                  <Time value={predecessor.createdAt} />
+                </DataTd>
+              </DataTr>
+            ))}
+          </DataBody>
+        </DataTable>
+      )}
+
+      <div className="mt-6">
+        <SectionBar name={`JUDGMENTS (${touching.length})`} />
+      </div>
+      {touching.length === 0 ? (
+        <TableEmpty>NO JUDGMENTS TOUCH THIS MEMORY</TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>kind</DataTh>
+            <DataTh>status</DataTh>
+            <DataTh>counterpart</DataTh>
+            <DataTh>timestamp</DataTh>
+          </DataHead>
+          <DataBody>
+            {touching.map(({ relation, kind }) => {
+              const isSource = relation.sourceId === row.id;
+              const counterpartId = isSource ? relation.targetId : relation.sourceId;
+              const counterpartTitle = isSource ? relation.targetTitle : relation.sourceTitle;
+              return (
+                <DataTr key={relation.id}>
+                  <DataTd>
+                    <Pill tone={kind === 'pending_conflict' ? 'amber' : 'lime'}>{kind}</Pill>
+                  </DataTd>
+                  <DataTd>
+                    <StatusPill status={relation.status} />
+                  </DataTd>
+                  <DataTd>
+                    <Link
+                      href={`/dashboard/memories/${counterpartId}`}
+                      className="transition-colors hover:text-primary"
+                    >
+                      {truncate(counterpartTitle, 80)}
+                    </Link>
+                  </DataTd>
+                  <DataTd className="text-muted-foreground">
+                    <Link
+                      href={`/dashboard/judgments/${relation.id}`}
+                      className="hover:text-primary"
+                    >
+                      <Time value={relation.judgedAt ?? relation.createdAt} />
+                    </Link>
+                  </DataTd>
+                </DataTr>
+              );
+            })}
+          </DataBody>
+        </DataTable>
+      )}
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard k="CONFIRMATIONS" v={confirmCount} sub={<span>memory.confirm</span>} />
+        <StatCard k="JUDGMENTS" v={touching.length} sub={<span>TOUCHING THIS ROW</span>} />
+        <StatCard k="PREDECESSORS" v={predecessors.length} sub={<span>REPLACED</span>} />
+        <StatCard
+          k="STATE"
+          v={reviewState === 'needs_review' ? 'REVIEW' : 'FRESH'}
+          tone={reviewState === 'needs_review' ? 'amber' : 'lime'}
+          sub={<span>{row.status.toUpperCase()}</span>}
+        />
       </div>
     </Page>
-  );
-}
-
-function MetadataRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="max-w-[60%] truncate text-right text-muted-foreground">{value}</dd>
-    </div>
   );
 }

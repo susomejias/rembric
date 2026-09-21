@@ -1,6 +1,5 @@
 import { SLUG_REGEX, REVIEW_TTL_MS } from '@rembric/core';
 import type { MemoryType } from '@rembric/db';
-import { FileText } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -20,21 +19,27 @@ import {
 import { PAGE_SIZE, relativeTime } from '@/components/dashboard/support';
 import {
   Chip,
-  EmptyNote,
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Notice,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  TableEmpty,
   Time,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * The project registry, in the v0 composition.
+ * The project registry, in the production dashboard's composition: the numbered
+ * view head, the corpus stats, the status filter bar, and the projects as a
+ * table with the name/slug/created/actions columns.
  *
  * The read is the ported view's own — one `projects.list(true)` for every status
  * — and so is the rule that an unrecognised `status` filters to NOTHING rather
@@ -102,43 +107,34 @@ export default async function ProjectsPage({
 
   return (
     <Page>
-      <PageHead
-        icon={FileText}
-        eyebrow="Workspace registry"
-        title="Projects"
-        description={
-          <>
-            Projects isolate sessions, memories, prompts, relations, and consolidation work behind a
-            stable slug — the value passed via <code className="font-mono">/mcp/&lt;slug&gt;</code>{' '}
-            or <code className="font-mono">project.use({'{slug}'})</code>.
-          </>
-        }
-        aside={
-          <div className="text-right text-[11px] text-muted-foreground">
-            <p>Active {activeCount}</p>
-            <p>Archived {archivedCount}</p>
-          </div>
-        }
+      <ViewHead
+        num="06"
+        title="Rembric Projects."
+        hl="Rembric"
+        meta={[
+          { k: 'ACTIVE', v: activeCount },
+          { k: 'ARCHIVED', v: archivedCount },
+        ]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile label="Projects" value={all.length} tone="lime" hint={`${activeCount} active`} />
-        <StatTile
-          label="Needs review"
-          value={totalNeedsReview}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard k="PROJECTS" v={all.length} tone="lime" sub={<span>{activeCount} ACTIVE</span>} />
+        <StatCard
+          k="NEEDS REVIEW"
+          v={totalNeedsReview}
           tone={totalNeedsReview > 0 ? 'amber' : 'dim'}
-          hint="across every project"
+          sub={<span>ACROSS EVERY PROJECT</span>}
         />
-        <StatTile label="Pending judgments" value={pendingJudgments} hint="candidate pairs" />
-      </section>
+        <StatCard k="PENDING JUDGMENTS" v={pendingJudgments} sub={<span>CANDIDATE PAIRS</span>} />
+      </StatGrid>
 
-      <Notice tone="amber" badge="Not connected" className="mt-6">
+      <Notice tone="amber" badge="Not connected" className="mt-6 mb-5">
         Create, rename, archive and the per-project access controls are not wired in this port: the
         mutation-protection probe has not landed yet, so this page renders lifecycle state only.
       </Notice>
 
-      <FilterForm action="/dashboard/projects" className="mt-6">
-        <FilterField label="Status" htmlFor="pr-status" className="w-44">
+      <FilterForm action="/dashboard/projects">
+        <FilterField label="STATUS" htmlFor="pr-status">
           <FilterSelect
             id="pr-status"
             name="status"
@@ -149,88 +145,98 @@ export default async function ProjectsPage({
         <FilterActions clearHref="/dashboard/projects" />
       </FilterForm>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Project registry"
-          title="Active and archived projects"
-          action={`${filtered.length} listed`}
-        />
-        {visible.length === 0 ? (
-          <EmptyNote>
-            {isFiltered ? (
-              <>
-                No project matches this status.{' '}
-                <Link href="/dashboard/projects" className="text-primary hover:underline">
-                  Show all
-                </Link>
-                .
-              </>
-            ) : (
-              <>
-                No project exists yet. A project is created the first time a client connects with a
-                slug that matches <code className="font-mono">{String(SLUG_REGEX)}</code>.
-              </>
-            )}
-          </EmptyNote>
-        ) : (
-          <Rows>
+      <SectionBar name="Project registry" meta={`${filtered.length} LISTED`} />
+      {visible.length === 0 ? (
+        <TableEmpty>
+          {isFiltered ? (
+            <>
+              NO PROJECT MATCHES THIS STATUS.{' '}
+              <Link href="/dashboard/projects" className="text-primary hover:underline">
+                Show all
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              NO PROJECT EXISTS YET — a project is created the first time a client connects with a
+              slug matching <code className="font-mono">{String(SLUG_REGEX)}</code>.
+            </>
+          )}
+        </TableEmpty>
+      ) : (
+        <DataTable>
+          <DataHead>
+            <DataTh>name</DataTh>
+            <DataTh>slug</DataTh>
+            <DataTh>created</DataTh>
+            <DataTh>actions</DataTh>
+          </DataHead>
+          <DataBody>
             {visible.map((project) => {
               const archived = project.archivedAt !== null;
               const needsReview = needsReviewByProject.get(project.id) ?? 0;
               return (
-                <Row key={project.id} columns="md:grid-cols-[1.4fr_1.1fr_1.1fr_auto_auto]">
-                  <div>
+                <DataTr key={project.id}>
+                  <DataTd>
                     <Link
                       href={`/dashboard/memories?project=${encodeURIComponent(project.slug)}`}
-                      className="text-sm text-foreground hover:text-primary"
+                      className="transition-colors hover:text-primary"
                     >
                       {project.displayName ?? project.slug}
                     </Link>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      created <Time value={project.createdAt} /> ·{' '}
-                      {relativeTime(project.createdAt, nowMs)}
-                    </p>
-                  </div>
-                  <code className="text-xs text-muted-foreground">{project.slug}</code>
-                  <span
-                    className={`text-[11px] ${needsReview > 0 && !archived ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
-                  >
-                    {archived ? (
-                      <Time value={project.archivedAt} />
-                    ) : (
-                      <>
-                        {needsReview} to review
-                        {project.isDefault ? ' · default' : ''}
-                      </>
-                    )}
-                  </span>
-                  <Chip tone={archived ? 'dim' : 'lime'}>{archived ? 'Archived' : 'Active'}</Chip>
-                  <div className="flex flex-wrap gap-2">
-                    <ProjectControl
-                      label="Edit"
-                      title="Editing the project lands with the projects Server Action"
-                    />
-                    <ProjectControl
-                      label="Access"
-                      title="Access management lands with the tokens Server Action"
-                    />
-                  </div>
-                </Row>
+                    <span className="ml-3">
+                      <Chip tone={archived ? 'dim' : 'lime'}>
+                        {archived ? 'Archived' : 'Active'}
+                      </Chip>
+                    </span>
+                  </DataTd>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    {project.slug}
+                  </DataTd>
+                  <DataTd className="font-mono text-xs text-muted-foreground">
+                    <Time value={project.createdAt} />
+                    <span className="ml-2">{relativeTime(project.createdAt, nowMs)}</span>
+                  </DataTd>
+                  <DataTd>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={
+                          needsReview > 0 && !archived
+                            ? 'font-mono text-[10px] uppercase tracking-[.12em] text-amber-600 dark:text-amber-400'
+                            : 'font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground'
+                        }
+                      >
+                        {archived ? (
+                          <Time value={project.archivedAt} />
+                        ) : (
+                          `${needsReview} to review`
+                        )}
+                      </span>
+                      <ProjectControl
+                        label="Edit"
+                        title="Editing the project lands with the projects Server Action"
+                      />
+                      <ProjectControl
+                        label="Access"
+                        title="Access management lands with the tokens Server Action"
+                      />
+                    </div>
+                  </DataTd>
+                </DataTr>
               );
             })}
-          </Rows>
-        )}
-        <div className="px-5 pb-5 md:px-6">
-          <Pager
-            page={filters.page}
-            hasMore={hasMore}
-            total={filtered.length}
-            totalLabel={`${visible.length} rows`}
-            path="/dashboard/projects"
-            query={roundTripQuery}
-          />
-        </div>
-      </Panel>
+          </DataBody>
+        </DataTable>
+      )}
+
+      <Pager
+        page={filters.page}
+        hasMore={hasMore}
+        total={filtered.length}
+        totalLabel={`${visible.length} ROWS`}
+        path="/dashboard/projects"
+        query={roundTripQuery}
+      />
     </Page>
   );
 }
@@ -246,7 +252,7 @@ function ProjectControl({ label, title }: { label: string; title: string }) {
       type="button"
       disabled
       title={title}
-      className="w-fit border border-border px-3 py-2 text-[10px] tracking-[.12em] text-muted-foreground uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+      className="w-fit border border-border px-3 py-2 font-mono text-[10px] tracking-[.12em] text-muted-foreground uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
     >
       {label}
     </button>

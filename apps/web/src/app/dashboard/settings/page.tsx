@@ -1,27 +1,30 @@
-import { Settings } from 'lucide-react';
 import Link from 'next/link';
 
 import { resolveDataDir } from '@/app/dashboard/maintenance/data';
 import { getUpdates } from '@/app/dashboard/update/update-service';
 import { formatBytes } from '@/components/dashboard/support';
 import {
+  DataBody,
+  DataHead,
+  DataTable,
+  DataTd,
+  DataTh,
+  DataTr,
   Page,
-  PageHead,
-  Panel,
-  PanelHead,
   Pill,
-  Row,
-  Rows,
-  StatTile,
+  SectionBar,
+  StatCard,
+  StatGrid,
+  ViewHead,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 /**
- * Settings — the v0 "workspace defaults" view, read from the runtime rather
- * than from a settings table: Rembric has none, and every default this page
- * shows is decided by an environment variable or by the service graph. Reading
- * them here is what makes the page honest; a form would be a control that cannot
- * write anything back.
+ * Settings — the workspace-defaults view, read from the runtime rather than from
+ * a settings table: Rembric has none, and every default this page shows is
+ * decided by an environment variable or by the service graph. Reading them here
+ * is what makes the page honest; a form would be a control that cannot write
+ * anything back.
  *
  * `REMBRIC_*` values are shown by name, never by secret value.
  */
@@ -41,34 +44,34 @@ export default function SettingsPage() {
 
   return (
     <Page>
-      <PageHead
-        icon={Settings}
-        eyebrow="Workspace defaults"
-        title="Settings"
-        description="Review the defaults that keep Rembric local and low-maintenance. Every value here is decided by the environment the server booted with."
+      <ViewHead
+        num="10"
+        title="Rembric Settings."
+        hl="Rembric"
+        meta={[{ k: 'READ ONLY', v: 'ENV' }]}
       />
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatTile label="Storage" value="SQLite" hint={resolveDataDir()} />
-        <StatTile label="Retention" value="Local" hint="no external service required" />
-        <StatTile
-          label="Automation"
-          value={updates.enabled ? 'On' : 'Check off'}
+      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
+        <StatCard k="STORAGE" v="SQLite" tone="lime" sub={<span>{resolveDataDir()}</span>} />
+        <StatCard k="RETENTION" v="Local" sub={<span>NO EXTERNAL SERVICE REQUIRED</span>} />
+        <StatCard
+          k="AUTOMATION"
+          v={updates.enabled ? 'On' : 'Check off'}
           tone={updates.enabled ? 'lime' : 'amber'}
-          hint="daily release check"
+          sub={<span>DAILY RELEASE CHECK</span>}
         />
-      </section>
+      </StatGrid>
 
-      <section className="mt-6 grid gap-3 md:grid-cols-2">
-        <article className="rounded-2xl border border-border bg-muted p-5">
+      <div className="mt-6 grid gap-3 md:grid-cols-2">
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">
-                Runtime defaults
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                RUNTIME DEFAULTS
               </p>
               <h2 className="mt-2 text-base font-medium">Local-first by construction</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               one process
             </span>
           </div>
@@ -76,16 +79,16 @@ export default function SettingsPage() {
             One Node process, one SQLite file, no external service and no API key required. The
             embedder runs in-process; the database is the only durable store.
           </p>
-        </article>
-        <article className="rounded-2xl border border-border bg-muted p-5">
+        </div>
+        <div className="border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] tracking-[.14em] text-primary uppercase">
-                Operator controls
+              <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+                OPERATOR CONTROLS
               </p>
               <h2 className="mt-2 text-base font-medium">Configured at the server boundary</h2>
             </div>
-            <span className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground">
+            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
               env
             </span>
           </div>
@@ -95,20 +98,23 @@ export default function SettingsPage() {
           </p>
           <Link
             href="/dashboard/tokens"
-            className="mt-5 inline-block text-[11px] text-primary hover:text-primary"
+            className="mt-5 inline-block font-mono text-[11px] uppercase tracking-[.12em] text-primary hover:underline"
           >
-            Manage access tokens →
+            MANAGE ACCESS TOKENS →
           </Link>
-        </article>
-      </section>
+        </div>
+      </div>
 
-      <Panel className="mt-6">
-        <PanelHead
-          eyebrow="Defaults"
-          title="What this deployment is running with"
-          action="read-only"
-        />
-        <Rows>
+      <div className="mt-8">
+        <SectionBar name="Defaults" meta="WHAT THIS DEPLOYMENT IS RUNNING WITH" />
+      </div>
+      <DataTable>
+        <DataHead>
+          <DataTh>setting</DataTh>
+          <DataTh>value</DataTh>
+          <DataTh>state</DataTh>
+        </DataHead>
+        <DataBody>
           <SettingRow
             name="Memory storage"
             value={`Local SQLite · ${formatBytes(pageCount * pageSize)}`}
@@ -167,8 +173,8 @@ export default function SettingsPage() {
             state="REMBRIC_DATA_DIR"
             tone="dim"
           />
-        </Rows>
-      </Panel>
+        </DataBody>
+      </DataTable>
     </Page>
   );
 }
@@ -185,11 +191,13 @@ function SettingRow({
   tone?: 'lime' | 'amber' | 'dim';
 }) {
   return (
-    <Row columns="md:grid-cols-[1fr_1.6fr_auto]">
-      <p className="text-sm text-foreground">{name}</p>
-      <p className="text-[11px] leading-5 text-muted-foreground">{value}</p>
-      <Pill tone={tone}>{state}</Pill>
-    </Row>
+    <DataTr>
+      <DataTd>{name}</DataTd>
+      <DataTd className="max-w-[520px] whitespace-normal text-muted-foreground">{value}</DataTd>
+      <DataTd>
+        <Pill tone={tone}>{state}</Pill>
+      </DataTd>
+    </DataTr>
   );
 }
 

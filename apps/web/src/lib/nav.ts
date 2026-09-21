@@ -5,8 +5,8 @@ import {
   KeyRound,
   LayoutDashboard,
   ListChecks,
+  Network,
   Radio,
-  RefreshCw,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -18,36 +18,37 @@ export interface NavEntry {
   readonly label: string;
   readonly href: string;
   readonly icon: LucideIcon;
+  /** The one badge counter this entry paints, if any. */
+  readonly badgeKey?: 'needsReview' | 'pendingJudgments';
 }
 
 /**
- * The navigation table is data, not markup: ordering, labels and icons are
- * pinned here so the bar and the topbar's page title read one source. The order
- * is the mockup's — Workspace above Admin.
- *
- * Activity and Settings are deliberately absent: neither carries a decision the
- * operator can act on here (Activity only restates what the other views show,
- * and Settings has nothing to configure yet), so listing them would be navigable
- * surface with no user value. Their routes still resolve for a bookmarked URL.
+ * The navigation table is data, not markup: ordering, labels, icons and badges
+ * are pinned here so the bar reads one source. The order and the two badge
+ * entries mirror the production dashboard's sidebar
+ * (`apps/server/src/dashboard/components.ts::NAV`) — Workspace above Admin,
+ * `needsReview` on memories and `pendingJudgments` on judgments.
  */
 export const NAV: readonly NavEntry[] = [
   { key: 'overview', group: 'main', label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
-  { key: 'sessions', group: 'main', label: 'Sessions', href: '/dashboard/sessions', icon: Radio },
   {
     key: 'memories',
     group: 'main',
     label: 'Memories',
     href: '/dashboard/memories',
     icon: BrainCircuit,
+    badgeKey: 'needsReview',
   },
+  { key: 'sessions', group: 'main', label: 'Sessions', href: '/dashboard/sessions', icon: Radio },
+  { key: 'prompts', group: 'main', label: 'Prompts', href: '/dashboard/prompts', icon: FileText },
   {
     key: 'judgments',
     group: 'main',
     label: 'Judgments',
     href: '/dashboard/judgments',
     icon: Gavel,
+    badgeKey: 'pendingJudgments',
   },
-  { key: 'prompts', group: 'main', label: 'Prompts', href: '/dashboard/prompts', icon: FileText },
   {
     key: 'consolidation',
     group: 'main',
@@ -55,14 +56,7 @@ export const NAV: readonly NavEntry[] = [
     href: '/dashboard/consolidation',
     icon: ListChecks,
   },
-  {
-    key: 'maintenance',
-    group: 'main',
-    label: 'Maintenance',
-    href: '/dashboard/maintenance',
-    icon: Wrench,
-  },
-  { key: 'updates', group: 'main', label: 'Updates', href: '/dashboard/update', icon: RefreshCw },
+  { key: 'entities', group: 'main', label: 'Entities', href: '/dashboard/entities', icon: Network },
   {
     key: 'projects',
     group: 'admin',
@@ -71,9 +65,16 @@ export const NAV: readonly NavEntry[] = [
     icon: FileText,
   },
   { key: 'tokens', group: 'admin', label: 'Tokens', href: '/dashboard/tokens', icon: KeyRound },
+  {
+    key: 'maintenance',
+    group: 'admin',
+    label: 'Maintenance',
+    href: '/dashboard/maintenance',
+    icon: Wrench,
+  },
 ];
 
-/** The two sections, in render order, each carrying the caption the sidebar paints above its items. */
+/** The two sections, in render order, each carrying the caption the bar paints above its items. */
 export const NAV_GROUPS = [
   { key: 'main', heading: 'Workspace' },
   { key: 'admin', heading: 'Admin' },
