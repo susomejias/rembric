@@ -166,16 +166,22 @@ The repo's CI workflows SHALL include a `docker-build-check` job that triggers o
 
 Failures on either architecture SHALL fail the workflow and block merge by default.
 
+The CI workflows SHALL additionally include a `docker-build-check-web` job that builds the **published artifact** — the `runner` stage of `apps/web/Dockerfile`, `linux/amd64`, `load: true` — and boots it on the host against a mounted `/data`, asserting `/healthz` → 200, that the boot opened the mounted data file rather than a fresh one inside the container layer, and that the boot applied the full migration set. This is the only PR-time gate that boots the artifact the release channel publishes.
+
 The `docker-publish.yml` workflow SHALL build the multi-arch image **without QEMU emulation**, by building each architecture on a native runner and merging the results. Specifically it SHALL:
 
 - Build `linux/amd64` and `linux/arm64` in a **matrix of two native build jobs** — `linux/amd64` on `ubuntu-latest` and `linux/arm64` on `ubuntu-24.04-arm`. The publish flow SHALL NOT use `docker/setup-qemu-action`.
-- In each build job, invoke `docker/build-push-action@v7` with `target: runtime`, `context: .`, `file: apps/server/Dockerfile`, the job's **single** platform, and `outputs: type=image,push-by-digest=true,name-canonical=true,push=true` (so the build pushes a digest-addressable single-platform image and creates **no tags**). Each job SHALL use a **per-architecture build-cache scope**.
+- In each build job, invoke the shared composite action `.github/actions/build-runtime-image` (mode `digest`), which SHALL forward its own `dockerfile` and `target` inputs to `docker/build-push-action@v7`. The publish SHALL pass `dockerfile: ./apps/web/Dockerfile` and `target: runner`, the job's **single** platform, and `outputs: type=image,push-by-digest=true,name-canonical=true,push=true` (so the build pushes a digest-addressable single-platform image and creates **no tags**). Each job SHALL use a **per-architecture build-cache scope**, and that scope SHALL be the one `docker-build-check-web` writes for the same image (`web-runtime-<arch>`), so the merge-to-main that precedes a release leaves the publish importing those builder layers warm instead of cold.
 - After its push, each build job SHALL pull **its own** just-pushed image **by digest** (natively, so the inspected image is that job's architecture) and run a smoke-test step that inspects the image config and applies **three independent assertions**, ANY of which fails that job:
-  - **Cmd/Entrypoint substring check**: fail if `Config.Cmd` or `Config.Entrypoint` contains the substring `seed-dev` or `tsx watch`. Fail if `Config.Entrypoint` does NOT include the substring `dist/server-entrypoint.js`.
+  - **Cmd/Entrypoint substring check**: fail if `Config.Cmd` or `Config.Entrypoint` contains the substring `seed-dev` or `tsx watch`. Fail if `Config.Entrypoint` does NOT include the substring `apps/web/server.js` — the entrypoint the `runner` stage of `apps/web/Dockerfile` starts. This is what makes a publish that fell back to the server image, or to any other stage, fail before any tag exists.
   - **Image label check**: fail if `Config.Labels."rembric.stage"` is missing OR not equal to the string `runtime`.
   - **Image size check**: fail if the inspected image size exceeds the configured ceiling (1500 MB), evaluated per-architecture.
 - Tags SHALL be created only in a **merge job** that `needs:` both build jobs (so it runs only if **every** architecture passed its smoke test). The merge job SHALL resolve the version, run the **refuse-to-overwrite** guard (fail if the immutable `:<version>` tag already exists), then create the `:<version>` and `:sha-<short>` **manifest list** from the two per-arch digests via `docker buildx imagetools create`, and only then promote the alias tags (`:latest`, major, minor).
 - If ANY architecture fails its smoke test, the merge job SHALL NOT run: no `:<version>`, `:sha-<short>`, `:latest`, or alias tag SHALL be created. The per-arch digests remain pushed (untagged) in the registry as forensic evidence of the failed build.
+
+The composite action `.github/actions/build-runtime-image/action.yml` SHALL declare `dockerfile` and `target` inputs, and BOTH of its build modes (`load` and `digest`) SHALL read them. Their defaults SHALL be the server image's `./apps/server/Dockerfile` and `runtime`, so a caller that omits them keeps building exactly what it built before. A build mode that re-hard-codes a Dockerfile path or a stage name SHALL NOT be accepted: it would silently ignore the caller's override, which is the failure mode the inputs exist to remove.
+
+The published artifact SHALL be the `runner` stage of `apps/web/Dockerfile`, and that stage SHALL be the **last** `FROM ... AS <name>` declaration in the file. It SHALL be built from a distroless glibc Node base, SHALL run as a numeric non-root user with an exec-form `HEALTHCHECK`, and SHALL declare `LABEL rembric.stage=runtime`. The last of those is load-bearing beyond this workflow: the updater prunes previous images by an exact-match filter on that label, so a published image without it leaks an image per update.
 
 The `apps/server/Dockerfile` SHALL be structured so that:
 
@@ -200,6 +206,13 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 - **THEN** the `arm64` leg (`ubuntu-24.04-arm`) SHALL fail at the runtime build or the boot smoke (`/healthz` never reaching 200, or the embedding model never loading)
 - **AND** the PR's overall status check SHALL be red — the break is caught at PR time, not at release publish
 
+#### Scenario: The published artifact is booted before merge
+
+- **GIVEN** a PR that changes `apps/web/Dockerfile` such that the image builds but cannot serve
+- **WHEN** the PR's CI workflow runs `docker-build-check-web`
+- **THEN** the job SHALL fail on the host boot smoke (`/healthz` never reaching 200, the mounted data file never being opened, or fewer than the full migration set being applied)
+- **AND** the PR's overall status check SHALL be red
+
 #### Scenario: PR that only modifies docs does not waste CI on a Docker build
 
 - **GIVEN** a PR that modifies only `docs/**/*` or `*.md` files
@@ -212,7 +225,41 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 - **WHEN** the build matrix runs
 - **THEN** the `linux/amd64` build SHALL run on `ubuntu-latest` and the `linux/arm64` build SHALL run on `ubuntu-24.04-arm`
 - **AND** neither build job SHALL invoke `docker/setup-qemu-action`
-- **AND** each job SHALL invoke `docker/build-push-action@v7` with `target: runtime`, its single platform, and `push-by-digest=true`
+- **AND** each job SHALL invoke the shared composite action in `digest` mode with the web image's `./apps/web/Dockerfile` and its `runner` stage, its single platform, and `push-by-digest=true`
+
+#### Scenario: Publish builds the web image through the shared action
+
+- **GIVEN** the release workflow has triggered `docker-publish.yml`
+- **WHEN** the per-arch build job runs
+- **THEN** the job SHALL build through `.github/actions/build-runtime-image` (not an inlined `docker/build-push-action`), passing `dockerfile: ./apps/web/Dockerfile` and `target: runner`
+- **AND** the action SHALL forward those inputs to its `file:` and `target:` fields rather than using the server defaults
+- **AND** the resulting image SHALL be published under the unchanged image name and tag scheme
+
+#### Scenario: A publish that falls back to the server image fails smoke before any tag exists
+
+- **GIVEN** a regression that makes `docker-publish.yml` build `apps/server/Dockerfile`'s `runtime` stage instead of the web image (e.g. the override inputs are dropped)
+- **WHEN** a build job runs its per-arch smoke test
+- **THEN** the Cmd/Entrypoint check SHALL fail because `Config.Entrypoint` does not include `apps/web/server.js`
+- **AND** that build job SHALL fail
+- **AND** the merge job SHALL NOT run, so no `:<version>`, `:sha-<short>`, `:latest` or alias tag SHALL be created
+
+#### Scenario: A build mode that ignores its inputs is caught (invariant test)
+
+- **GIVEN** a change to `.github/actions/build-runtime-image/action.yml` that re-hard-codes `file:` or `target:` in either build mode, or that moves the `default:` of `dockerfile`/`target` to another input
+- **WHEN** `apps/server/src/test/invariants.test.ts` runs the composite-action check
+- **THEN** the test SHALL fail: it asserts that both build modes consume `inputs.dockerfile` and `inputs.target`, and that each default sits inside its own input block
+
+#### Scenario: A publish override that reverts to the server image is caught (invariant test)
+
+- **GIVEN** a change to `docker-publish.yml` that removes the web override, or that restores the server entrypoint as the smoke's expected substring
+- **WHEN** `apps/server/src/test/invariants.test.ts` runs the publish check
+- **THEN** the test SHALL fail: it asserts exactly one uncommented `dockerfile: ./apps/web/Dockerfile`, exactly one uncommented `target: runner`, and that the smoke's expected entrypoint is `apps/web/server.js` and no longer `dist/server-entrypoint.js`
+
+#### Scenario: CI keeps building the server image from the action's defaults
+
+- **GIVEN** `ci.yml`'s `docker-build-check` calls the shared composite action without the `dockerfile`/`target` inputs
+- **WHEN** that job builds the image
+- **THEN** it SHALL build `apps/server/Dockerfile`'s `runtime` stage — the defaults — and the installer e2e SHALL keep exercising it
 
 #### Scenario: A single arch failing smoke blocks all tags
 
@@ -252,7 +299,7 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 #### Scenario: Runtime stage is built from a distroless glibc base
 
 - **GIVEN** the published `:<version>` image (either architecture)
-- **WHEN** its runtime stage is inspected
+- **WHEN** its `runner` stage is inspected
 - **THEN** it SHALL be based on a distroless glibc Node base, run as a non-root numeric user, and resolve its `HEALTHCHECK` via `node` exec form (no shell present)
 - **AND** the in-process embedding pipeline (`onnxruntime-node` + the baked model) SHALL function, confirming glibc compatibility
 

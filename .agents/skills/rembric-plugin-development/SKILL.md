@@ -14,7 +14,7 @@ Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,herm
 3. **End-to-end against `pnpm run dev:docker:up`** before reporting done — see [E2E discipline](#end-to-end-validation-discipline) below.
 4. **Docs sweep**: `README.md`, `docs/agents.md`, `apps/plugin/README.md`, the in-plugin `README.md`, `apps/plugin/CHANGELOG.md`. New-client checklist in [references/files-checklist.md](./references/files-checklist.md).
 
-> **No tool watches the per-client manifest dirs for you.** `eslint.config.js` ignores `apps/plugin/*/**`, which matches the dot-directories, and none of them match `pnpm-workspace.yaml::packages` (`apps/*`, `packages/*`) — so `pnpm -r` does not reach them, ESLint does not lint their TypeScript, and any `dependencies` they declare are not installed by the repo's own install (`.claude-plugin/package.json`'s `workspace:*` dep is dead letter today). Their tests run **only** because `apps/server/vitest.config.ts::include` lists a literal glob per client; a new client without its glob leaves a test file written and never executed, and the suite is green on nothing.
+> **No tool watches the per-client manifest dirs for you.** `eslint.config.js` ignores `apps/plugin/*/**`, which matches the dot-directories, and none of them match `pnpm-workspace.yaml::packages` (`apps/*`, `packages/*`) — so `pnpm -r` does not reach them, ESLint does not lint their TypeScript, and any `dependencies` they declare are not installed by the repo's own install (`.claude-plugin/package.json`'s `workspace:*` dep is dead letter today). Their tests run **only** because `apps/web/vitest.config.ts::include` lists a literal glob per client; a new client without its glob leaves a test file written and never executed, and the suite is green on nothing.
 
 ## The three single-source-of-truth rules
 
@@ -55,7 +55,7 @@ Sanity check: `git ls-files apps/plugin/` should show ONE copy of each shared re
 Before adding a handler that POSTs to an endpoint, verify the endpoint exists:
 
 ```bash
-grep -nE "app\\.(post|get)" apps/server/src/server/api-router.ts
+grep -rnE "export (async )?function (GET|POST)" apps/web/src/app/api/
 ```
 
 If it doesn't exist: either add the endpoint first (separate OpenSpec change) OR drop the handler from this scope (`tasks.md` says DEFERRED, change CHANGELOG documents it). Don't ship a handler that 404s.

@@ -8,7 +8,7 @@ Defines the server-rendered web dashboard that lets operators authenticate, brow
 
 ### Requirement: The dashboard MUST be served at `/dashboard`
 
-The server SHALL serve a server-side rendered web dashboard at the `/dashboard` path of the same process and port as the MCP endpoint. Static assets SHALL be served from `/dashboard/assets/` and SHALL be present inside the distributed package; **no CDN dependency at runtime**. The served static assets are the fonts and images committed under the dashboard's public tree, the content-hashed CSS bundles the build emits, and the third-party JavaScript files enumerated in the frontend-pipeline requirement — which is the single place that list is maintained, so it cannot go stale in two places at once.
+The server SHALL serve a server-side rendered dashboard at the `/dashboard` path of the same process and port as the MCP endpoint. The dashboard SHALL be an application surface of `apps/web` whose route components are React Server Components, and every asset it references SHALL be served from this same origin: the framework's content-hashed build output (stylesheets, scripts, fonts) under its own static-asset path, and the dashboard's images (logo, favicons) from the application's `public/` tree. **No CDN dependency at runtime.** The `/dashboard/assets/` path SHALL continue to resolve for the committed images, which are served from `public/dashboard/assets/**`; the hand-written CSS bundles, the enumerated third-party JavaScript files and the hand-written font URLs that path used to carry are retired with the stack that served them.
 
 #### Scenario: Dashboard home is reachable
 
@@ -18,7 +18,12 @@ The server SHALL serve a server-side rendered web dashboard at the `/dashboard` 
 #### Scenario: Every served asset comes from this origin
 
 - **WHEN** any dashboard page is loaded
-- **THEN** every stylesheet, script, font and image it references SHALL be served from the dashboard's own `/dashboard/assets/` path, and the page SHALL issue no request to any third-party host
+- **THEN** every stylesheet, script, font and image it references SHALL be served from this application's own origin, and the page SHALL issue no request to any third-party host
+
+#### Scenario: The committed images keep their published path
+
+- **WHEN** the login page renders the brand logo
+- **THEN** its `src` SHALL resolve to `/dashboard/assets/logo-transparent.png`, served from the application's public tree with no route handler in between
 
 ### Requirement: Dashboard access MUST require authentication
 
@@ -41,11 +46,11 @@ The dashboard SHALL require a valid signed session cookie to access any route ot
 
 ### Requirement: Memory browsing MUST support filters and pagination
 
-The `/dashboard/memories` view SHALL support filtering by project, type, status, **review state**, and free-text search, and SHALL paginate results. All filtering SHALL be performed server-side; the form SHALL be progressively enhanced with HTMX so it updates without a full page reload.
+The `/dashboard/memories` view SHALL support filtering by project, type, status, **review state**, and free-text search, and SHALL paginate results. All filtering SHALL be performed server-side; the filter form SHALL submit as a GET whose query string encodes every active filter, so a filtered page is a shareable URL and the browser's back button is correct. A client component MAY enhance the free-text control with debounced incremental search, but the server SHALL remain the only place where filtering, ordering, pagination and counting happen.
 
-The view SHALL render review state in a dedicated `review` column (separate from `status`, because review is an orthogonal axis — a freshness signal, not a lifecycle value): each `active` row whose derived `reviewState = 'needs_review'` (derivation per the `memory` capability) SHALL show a `needs_review` badge in that column; all other rows SHALL show a neutral placeholder. The badge SHALL use the existing `.pill` atom and the locked palette — no new design token is introduced. The filter form SHALL include a `review` control with values `(any)` (default) and `needs_review`; when `review = needs_review` the list SHALL show only `active` memories deriving `needs_review`, computed server-side with the per-type TTL pushed into SQL so pagination is correct, respecting the current project filter and preserving all active filters across HTMX swaps.
+The view SHALL render review state in a dedicated `review` column (separate from `status`, because review is an orthogonal axis — a freshness signal, not a lifecycle value): each `active` row whose derived `reviewState = 'needs_review'` (derivation per the `memory` capability) SHALL show a `needs_review` badge in that column; all other rows SHALL show a neutral placeholder. The badge SHALL be rendered by the dashboard's shared badge component using the theme's review-state tone — no ad-hoc colour value is introduced outside the theme tokens. The filter form SHALL include a `review` control with values `(any)` (default) and `needs_review`; when `review = needs_review` the list SHALL show only `active` memories deriving `needs_review`, computed server-side with the per-type TTL pushed into SQL so pagination is correct, respecting the current project filter and preserving all active filters across pagination and filter changes.
 
-The view header SHALL render a `TOTAL` meta chip whose value is the true count of rows matching the **current filter set** (the combined scope/status/type/review/search filters), independent of pagination — NOT the count of rows on the current page. The header SHALL also render a `SHOWING N ROWS` indicator carrying the page-slice count. The true count SHALL be computed by a dashboard-only, `admin*`-prefixed repository read so that no counting SQL leaves the `src/db/` layer. For the FTS-search branch the count SHALL be the number of rows matching the search expression **within the current scope/status/type filter** — mirroring the client-side filter the list applies to the FTS page — not the raw match count (which would over-report by including superseded/out-of-scope rows the list drops) and not the page slice; for the `needs_review`-only branch it SHALL be the number of active rows deriving `needs_review` for the active project filter.
+The view header SHALL render a `TOTAL` meta chip whose value is the true count of rows matching the **current filter set** (the combined scope/status/type/review/search filters), independent of pagination — NOT the count of rows on the current page. The header SHALL also render a `SHOWING N ROWS` indicator carrying the page-slice count. The true count SHALL be computed by a dashboard-only, `admin*`-prefixed repository read so that no counting SQL leaves the data layer. For the FTS-search branch the count SHALL be the number of rows matching the search expression **within the current scope/status/type filter** — mirroring the client-side filter the list applies to the FTS page — not the raw match count (which would over-report by including superseded/out-of-scope rows the list drops) and not the page slice; for the `needs_review`-only branch it SHALL be the number of active rows deriving `needs_review` for the active project filter.
 
 For the single combination of `review = needs_review` AND a non-empty free-text query — where review state is derived after the page slice rather than in SQL — the `TOTAL` chip SHALL render the page-slice count suffixed with `+` (a "at least N" lower bound) rather than an inexact exact-looking number.
 
@@ -375,89 +380,66 @@ Creating a token is not a destructive action and SHALL NOT require the confirmat
 
 ### Requirement: Mutating dashboard requests MUST be CSRF-protected
 
-Every mutating dashboard form or HTMX action SHALL include a CSRF token bound to the current session, and the server SHALL reject any mutating request missing a valid CSRF token.
+Every mutating dashboard interaction SHALL be protected against cross-site request forgery, and the server SHALL reject a mutating request whose protection check fails **before any service call**, leaving every row unchanged. The protection SHALL be the framework's own origin/host verification of Server Actions where that verification is demonstrated to refuse a cross-origin submission — and the dashboard's session-bound token checked inside the action boundary where it is not. Which of the two applies is a measured fact, not an assumption: this requirement describes the behaviour both must provide, and the implementation SHALL NOT claim the framework's protection until a probe has observed it refusing a cross-origin submission while a same-origin control succeeds. The retired mechanism is the string token minted into every form and checked by a route handler; a session-bound token kept inside the action boundary is a conforming implementation of this requirement.
 
 #### Scenario: Missing CSRF token
 
-- **WHEN** a `POST /dashboard/tokens` arrives without a valid CSRF token
-- **THEN** the server SHALL respond with `403 Forbidden` and SHALL NOT create a token
+- **WHEN** a `POST` reaches a dashboard mutation without the protection that applies to it — no valid session-bound token, or a request whose origin/host fails the framework's check
+- **THEN** the server SHALL refuse it with `403 Forbidden`, SHALL NOT invoke the service, and SHALL NOT create or change any row
+
+#### Scenario: A same-origin mutation still works
+
+- **GIVEN** an authenticated dashboard session
+- **WHEN** a same-origin form submission invokes a dashboard mutation with valid input
+- **THEN** the mutation SHALL execute and no `403` SHALL be returned
+
+#### Scenario: The protection is probed, not assumed
+
+- **WHEN** the mutation protection mechanism is changed or the framework it depends on is upgraded
+- **THEN** the suite SHALL contain a failing cross-origin case and a passing same-origin control, so a protection that has silently stopped protecting cannot pass
 
 ### Requirement: Destructive dashboard actions MUST gate submission with the confirmation modal
 
-Every dashboard `<form>` whose submit triggers a destructive or hard-to-reverse server action — soft-delete, hard-delete/purge, revoke, archive, undo of a journaled op — SHALL declare the three confirmation attributes (`data-confirm`, `data-confirm-label`, `data-confirm-tone`) on the FORM element itself (NOT on the submit `<button>`), so the inline modal handler implemented in `apps/server/src/dashboard/templates.ts::shell()::CONFIRM` intercepts the submit and prompts the operator.
+Every dashboard action whose submit triggers a destructive or hard-to-reverse server action — soft-delete, hard-delete/purge, revoke, archive, abandon, undo of a journaled op — SHALL be gated by the dashboard's confirmation dialog before its Server Action runs. The dialog SHALL be rendered once by the dashboard shell and opened by a client component; each call site SHALL declare three values to the action component:
 
-The handler binds with the selector `form[data-confirm]` and rebinds on `htmx:afterSwap`. Attributes on a child `<button>` are silently ignored — the form would submit unprompted.
+- A **tone**: `warn` — for destructive actions the operator can revert through an existing UI path (e.g. soft-delete + undelete, archive + re-save, undo-of-undo); `danger` — for actions that cannot be unwound through the UI (e.g. hard-delete via maintenance purge, token revoke, hard undo of an op when the affected rows still exist but no further undo path exists).
+- A **sentence**: a plain-language sentence ending in a question, naming the count (when applicable) and stating the consequence shape (reversible / irreversible / journaled).
+- A **label**: the uppercase VERB + COUNT + NOUN ("PURGE 12 SESSIONS", "REVOKE TOKEN", "UNDO ENTIRE RUN") matching the action being taken, NOT a generic "OK".
 
-The `data-confirm-tone` value SHALL be one of:
+The `data-confirm`, `data-confirm-label` and `data-confirm-tone` HTML attributes, the `form[data-confirm]` selector binding and the `htmx:afterSwap` rebind are retired with the stack that needed them; the three properties above are preserved as component props. A destructive control that declares no confirmation SHALL fail review.
 
-- `warn` — for destructive actions the operator can revert through an existing UI path (e.g. soft-delete + undelete, archive + re-save, undo-of-undo).
-- `danger` — for actions that cannot be unwound through the UI (e.g. hard-delete via maintenance purge, token revoke, hard undo of an op when the affected rows still exist but no further undo path exists).
-
-The `data-confirm` string SHALL be a plain-language sentence ending in a question, naming the count (when applicable) and stating the consequence shape (reversible / irreversible / journaled). The `data-confirm-label` SHALL be the uppercase VERB + COUNT + NOUN ("PURGE 12 SESSIONS", "REVOKE TOKEN", "UNDO ENTIRE RUN") matching the action being taken, NOT a generic "OK".
+The dialog is a client-side gate and SHALL NOT be the authorization boundary: the action SHALL remain safe when its form is submitted through the framework's no-JavaScript path, which means scope, admin gating, mutation protection and service-level preconditions SHALL be sufficient without it.
 
 #### Scenario: A destructive form with attributes on the form opens the modal
 
-- **GIVEN** a dashboard form `<form action="…" data-confirm="…" data-confirm-label="…" data-confirm-tone="…">…</form>`
-- **WHEN** the operator clicks its submit button
-- **THEN** the global `#rbr-confirm` dialog SHALL open with the supplied copy
-- **AND** the form SHALL submit only after the operator confirms via the dialog
+- **GIVEN** a dashboard control whose action component declares a tone, a sentence and a label — the three declarations that replace the retired `data-confirm*` form attributes
+- **WHEN** the operator triggers it
+- **THEN** the confirmation dialog SHALL open with that sentence and label, and the Server Action SHALL run only after the operator confirms
 
 #### Scenario: A destructive form with attributes only on the button submits without prompting (forbidden)
 
-- **GIVEN** a dashboard form whose `data-confirm*` attributes are on the submit button instead of the form
-- **WHEN** the operator clicks the submit button
-- **THEN** the modal SHALL NOT open and the form SHALL submit immediately — which is a defect
-- **AND** code review SHALL reject the pattern and move the attributes to the `<form>` element
-
-#### Scenario: A form-level rebind after an HTMX swap
-
-- **WHEN** an HTMX response replaces a dashboard subtree containing a new `<form data-confirm="…">`
-- **THEN** the binder SHALL re-run on `htmx:afterSwap` and the new form SHALL gain the same modal interception as forms present at initial render
+- **GIVEN** a destructive control that declares its confirmation somewhere no gate can read it — on the submit control rather than on the action — or that declares none at all
+- **WHEN** the operator triggers it
+- **THEN** the dialog SHALL NOT open and the action SHALL run immediately, which is a defect
+- **AND** code review SHALL reject the pattern and move the declaration onto the action
 
 #### Scenario: Tone selection matches undoability
 
 - **WHEN** the form action is destructive but reversible through the UI (e.g. soft-delete via `deleted_at`)
-- **THEN** `data-confirm-tone` SHALL be `warn`
+- **THEN** the declared tone SHALL be `warn`
 - **WHEN** the form action cannot be unwound through the UI (e.g. operator-purge via `/dashboard/maintenance`, token revoke)
-- **THEN** `data-confirm-tone` SHALL be `danger`
+- **THEN** the declared tone SHALL be `danger`
 
-### Requirement: No frontend build pipeline SHALL be required
+#### Scenario: A form-level rebind after an HTMX swap
 
-The dashboard SHALL be implemented with server-side template literals plus a small, enumerated set of browser libraries served from its own origin. The repository SHALL NOT contain a JavaScript bundler or transpiler applied to **first-party** source, and SHALL NOT contain a first-party JavaScript source file that requires compilation beyond what `tsc` produces for the server; every served JavaScript file SHALL be usable directly from a `<script>` tag. A CSS minifier (lightningcss) IS allowed and IS required to produce the per-page CSS bundles described in the design-system requirements; the CSS build step is invoked by `pnpm run build` and SHALL NOT require any additional install or configuration beyond `pnpm install`.
+- **WHEN** a destructive control is rendered after a client-side navigation or a partial re-render (the swap that used to inject new forms, and with them the re-binding step the retired attribute protocol needed)
+- **THEN** the shell's dialog SHALL serve it with no re-binding step, so no rendered form can escape the gate by arriving late
 
-The served third-party JavaScript SHALL be exactly one named, version-pinned file, with a single named purpose: **HTMX** — request and swap behaviour, on every page.
+#### Scenario: Authorization does not depend on the dialog
 
-No second served file SHALL be added without a new OpenSpec change, and none SHALL be a client-side application framework: no framework, no CDN reference, and no client-side router or component system SHALL be introduced.
-
-A served third-party file MAY be committed to the asset tree, or copied into it at build time from a dependency pinned in `package.json`. It SHALL be usable from a bare `<script>` tag as shipped by its package — no bundling, transpilation or module-format conversion of any kind SHALL be introduced, for third-party or first-party code. Every served file SHALL be asserted present by the build, so a missing library is a build failure rather than a blank page in a browser.
-
-First-party client-side JavaScript SHALL be hand-written and embedded inline in the rendered response — either by the SSR shell, for behaviour every page needs, or by a component module, for behaviour only that surface needs. The dashboard SHALL NOT serve a first-party JavaScript asset file. Each inline script SHALL be smaller than 2 KB; the limit exists so that every first-party script stays readable in one sitting and no framework can hide inside one.
-
-#### Scenario: Fresh contributor onboarding
-
-- **WHEN** a contributor clones the repo and runs `pnpm install`
-- **THEN** the dashboard SHALL be ready to develop and to build without any frontend-specific install step beyond what `pnpm install` already produces
-
-#### Scenario: Build emits per-page CSS bundles
-
-- **WHEN** a contributor runs `pnpm run build`
-- **THEN** the build SHALL produce `dist/dashboard/public/assets/styles/core.<contentHash>.css`, one `dist/dashboard/public/assets/styles/views/<view>.<contentHash>.css` per dashboard view, and a `dist/dashboard/public/assets/styles/manifest.json` mapping view keys to file names
-
-#### Scenario: Build emits every served library
-
-- **WHEN** a contributor runs `pnpm run build`
-- **THEN** every served third-party library SHALL be present under `dist/dashboard/public/assets/`, and a library that failed to be copied from its pinned dependency SHALL fail the build
-
-#### Scenario: No client-side JS framework is introduced
-
-- **WHEN** a contributor inspects the repository for client-side JS
-- **THEN** the JavaScript executing in the browser SHALL be exactly the one served file named above plus first-party inline scripts, each embedded by the SSR shell or by the single view or component whose behaviour it enhances
-- **AND** no first-party JavaScript file SHALL be served from the dashboard's static assets, and no client-side framework, component system or CDN reference SHALL be present
-
-#### Scenario: Every shipped inline script is within budget
-
-- **WHEN** the inline scripts embedded by the dashboard are enumerated
-- **THEN** each SHALL be attributable either to the SSR shell or to one named view or component module, and each SHALL be smaller than 2 KB
+- **GIVEN** a destructive form submitted through the framework's no-JavaScript path
+- **WHEN** the request reaches the action
+- **THEN** the action's own scope, admin and mutation-protection checks SHALL decide the outcome, and the presence or absence of the dialog SHALL grant no authority
 
 ### Requirement: The dashboard MUST surface a sessions list view at `/dashboard/sessions`
 
@@ -557,15 +539,15 @@ The `/dashboard` overview page SHALL surface a "Sessions (active)" stat card alo
 
 ### Requirement: Dashboard timestamps MUST render in the viewer's local timezone
 
-Every timestamp surfaced by the dashboard (memories list and detail, sessions list and detail, the soft-delete banner, prompts, consolidation runs and operations, projects list, tokens list, judgments list, and the `replaces` chain on memory detail) SHALL be rendered through a single helper that emits a `<time>` element with:
+Every timestamp surfaced by the dashboard (memories list and detail, sessions list and detail, the soft-delete banner, prompts, consolidation runs and operations, projects, tokens, judgments, entities, maintenance, and the `replaces` chain on memory detail) SHALL be rendered through a single shared timestamp component that emits a `<time>` element with:
 
 - A `datetime` attribute set to the ISO-8601 UTC representation (suffix `Z`) of the underlying timestamp.
 - A `data-rembric-ts` attribute marking it as a Rembric-managed timestamp.
 - A visible text content that, before any client script runs, equals the UTC string `YYYY-MM-DD HH:MM:SS UTC`.
 
-A small inline script bundled in the dashboard layout (`<head>`) SHALL upgrade every `<time data-rembric-ts>` element in place after the document is parsed and after every HTMX content swap, replacing its `textContent` with a `Intl.DateTimeFormat`-formatted string using the browser's timezone and default locale.
+A client component rendered by the dashboard shell SHALL upgrade every `<time data-rembric-ts>` element in place after hydration, replacing its `textContent` with a `Intl.DateTimeFormat`-formatted string using the browser's timezone and default locale. The previous inline script in the shell `<head>` and its re-run on every HTMX content swap are retired: a timestamp produced by a later client-side render SHALL be upgraded by the same component on mount, with no document-level rescan.
 
-The SQLite storage, the service-layer `new Date()` writes, and the MCP serialization of timestamps SHALL remain UTC; only the dashboard HTML changes.
+The SQLite storage, the service-layer `new Date()` writes, and the MCP serialization of timestamps SHALL remain UTC; only the rendered dashboard changes.
 
 #### Scenario: SSR renders UTC fallback
 
@@ -579,8 +561,8 @@ The SQLite storage, the service-layer `new Date()` writes, and the MCP serializa
 
 #### Scenario: HTMX swap re-applies the upgrade
 
-- **WHEN** an HTMX swap injects new `<time data-rembric-ts>` elements into the page (e.g. the memories filter form's partial response)
-- **THEN** the upgrader SHALL run again on the newly inserted nodes so they also display local time
+- **WHEN** a dashboard surface re-renders a subtree and that subtree contains new `<time data-rembric-ts>` elements (the swap that used to inject them, now a client-side render)
+- **THEN** the timestamp component SHALL upgrade the new elements on mount, without requiring a document-level rescan of the elements already rendered
 
 #### Scenario: Null or invalid timestamp renders an em-dash
 
@@ -589,117 +571,70 @@ The SQLite storage, the service-layer `new Date()` writes, and the MCP serializa
 
 #### Scenario: Dashboard layout includes the upgrader script exactly once
 
-- **WHEN** any dashboard page is rendered through the layout shell
-- **THEN** the HTML `<head>` SHALL include exactly one inline `<script>` whose responsibility is to upgrade `<time data-rembric-ts>` elements
-
-### Requirement: Dashboard CSS MUST be organised as a layered design system
-
-The dashboard styles SHALL live under `apps/server/src/dashboard/styles/` and SHALL be split across exactly two layers of source files:
-
-- A `core/` directory containing, in this order, `tokens.css` (CSS custom properties for palette, typography stack, and spacing scale), `base.css` (reset, root element defaults, `::selection`, scrollbar, focus ring, anchor behaviour), `atoms.css` (single-class building blocks: `.pill`, `.btn`, `.bn`, `.inp`, `.sel`, `.tag`, `.flash`, `.hl-lime`, `.u-lime`, `.spark`), `layout.css` (app shell: `.app`, `.sb`, `.sb-*`, `.mob-bar`, `.main`, `.view-head`), and `patterns.css` (composed surfaces: `.stat`, `.card`, `.tbl`, `.filters`, `.pager`, `.section-bar`, `.kv-grid`, `.content-block`, `.grid-7`, `.grid-6`, `.row-2`, `.row-3`, `.health`, `.tl`, plus the full responsive override block).
-- A `views/` directory containing one `<view>.css` per dashboard route, holding only the selectors that are exclusively used by that view.
-
-The shipped artefact SHALL be two CSS bundles per page: one shared `core.css` and one `views/<view>.css`. No view CSS SHALL be inlined into the HTML response body; no inline `<style>` block SHALL be emitted by `shell()` beyond zero-byte placeholders.
-
-#### Scenario: A page renders with two CSS links
-
-- **WHEN** any authenticated dashboard route returns HTML
-- **THEN** the `<head>` SHALL contain exactly one `<link rel="stylesheet">` whose `href` ends with `core.<hash>.css` AND, when the view has its own CSS file, exactly one `<link rel="stylesheet">` whose `href` ends with `views/<view>.<hash>.css`
-
-#### Scenario: The HTML body carries no `<style>` block
-
-- **WHEN** any authenticated dashboard route returns HTML
-- **THEN** the response body SHALL NOT contain a `<style>` element
-
-#### Scenario: Adding a new view requires adding its CSS file
-
-- **WHEN** a contributor adds a new dashboard route that needs view-specific selectors
-- **THEN** they SHALL add a new file `apps/server/src/dashboard/styles/views/<view>.css`, register the view key in the build script's view list, and reference the view key from the route's `shell()` call — and a `pnpm run build` SHALL emit and serve the new file with no further configuration
+- **WHEN** any dashboard page is rendered through the shell
+- **THEN** the shell SHALL mount exactly one component responsible for upgrading `<time data-rembric-ts>` elements, with no second upgrader and no document-level rescan
 
 ### Requirement: Dashboard CSS MUST be minified and content-hashed in production
 
-The build step SHALL minify every dashboard CSS file via `lightningcss` and SHALL emit each output with a content-hash segment in its filename (e.g. `core.a3f1e2.css`). The HTTP layer SHALL serve content-hashed CSS with `Cache-Control: public, max-age=31536000, immutable`.
+The dashboard's production build SHALL emit minified, content-hashed CSS and SHALL serve it with `Cache-Control: public, max-age=31536000, immutable`. The dashboard no longer owns this pipeline itself: Tailwind v4 (through its PostCSS integration) produces the CSS, the framework's build minifies and content-hashes it, and the framework serves it. The retired machinery is the `lightningcss` build step, the `core.<hash>.css` + `views/<view>.<hash>.css` two-bundle contract and the `manifest.json` view registry. The requirement is the observable outcome: the stylesheet a production page references SHALL be content-hashed and minified, and its response SHALL carry the immutable cache directive. If the framework's default response for a deployed environment does not include that directive, the header SHALL be set explicitly rather than the promise dropped.
 
 #### Scenario: Hashed files are served with immutable cache
 
-- **WHEN** a request hits `/dashboard/assets/styles/core.a3f1e2.css`
+- **WHEN** a production dashboard page requests the stylesheet it references
 - **THEN** the response SHALL carry `Cache-Control: public, max-age=31536000, immutable`
 
 #### Scenario: A CSS edit produces a new hash
 
-- **WHEN** the contents of any source `*.css` file changes and `pnpm run build` runs again
-- **THEN** the affected output filename SHALL have a different hash than the previous build, and the `manifest.json` SHALL reflect the new filename
-
-### Requirement: Dashboard HTML MUST be whitespace-minified in production
-
-The `shell()` helper SHALL run every rendered response through a whitespace-collapsing minifier before returning it, removing runs of whitespace between tags and stripping HTML comments. The minifier SHALL NOT alter the content of `<pre>`, `<textarea>`, or `<script>` elements, and SHALL NOT remove or rewrite any attribute or tag.
-
-#### Scenario: Response has no inter-tag indentation
-
-- **WHEN** any dashboard route returns HTML
-- **THEN** the response body SHALL NOT contain runs of two or more whitespace characters between a `>` and a `<`, outside `<pre>`, `<textarea>`, or `<script>` elements
-
-#### Scenario: Pre-formatted content is preserved
-
-- **WHEN** a memory body containing newlines is rendered inside a `<pre>` element
-- **THEN** the original newlines and indentation inside the `<pre>` SHALL be preserved exactly
-
-### Requirement: Dashboard MUST follow the brutalist visual identity
-
-The dashboard SHALL render in a single dark theme with the following design tokens locked at the `:root` scope:
-
-- `--bg: #0a0a0a`, `--bg-elev: #141414`, `--bg-row-hover: #15170d`
-- `--fg: #f2f2f2`, `--fg-dim: #9a9a9a`, `--fg-faint: #2a2a2a`
-- `--lime: #c6f24e`, `--lime-ink: #0a0a0a`, `--warn: #ff8c00`, `--danger: #ff3344`
-- `--f-display: "Space Grotesk", system-ui, sans-serif`
-- `--f-sans: "Inter", system-ui, sans-serif`
-- `--f-mono: "JetBrains Mono", ui-monospace, monospace`
-- Spacing scale `--s-1: 4px` through `--s-8: 64px`
-
-Changing any of these tokens SHALL require a new OpenSpec change. The dashboard SHALL NOT ship a light theme, a theme switcher, or per-user theme settings.
-
-#### Scenario: Tokens are declared once in core.css
-
-- **WHEN** a contributor inspects `apps/server/src/dashboard/styles/core/tokens.css`
-- **THEN** the file SHALL contain all design tokens listed above, declared inside a single `:root { ... }` block
+- **WHEN** the contents of a theme token or a component's styles change and the production build runs again
+- **THEN** the referenced stylesheet's path SHALL change, so no browser serves the stale stylesheet from cache
 
 ### Requirement: Dashboard fonts MUST be self-hosted
 
-The dashboard SHALL serve Space Grotesk (weights 400, 500, 600, 700), Inter (weights 400, 500, 600), and JetBrains Mono (weights 400, 500, 600) as woff2 files from `/dashboard/assets/fonts/`. The dashboard SHALL NOT reference Google Fonts or any other font CDN at runtime. Font files SHALL be served with `Cache-Control: public, max-age=31536000, immutable`.
+The dashboard SHALL serve Space Grotesk (weights 400, 500, 600, 700), Inter (weights 400, 500, 600), and JetBrains Mono (weights 400, 500, 600) as woff2 files committed inside the application, loaded through `next/font/local` and exposed as the theme's font variables. The dashboard SHALL NOT reference Google Fonts or any other font CDN at runtime, and SHALL NOT fetch a font at request time. The loader hashes, self-hosts and preloads the files from this origin, so the previous `@font-face` declarations in hand-written CSS, the fixed `/dashboard/assets/fonts/<family>-<weight>.woff2` URLs and the hand-written immutable-cache rule are retired; the observable outcome those stated — fonts served from this origin with long-lived immutable caching — is unchanged.
 
 #### Scenario: No external font requests
 
 - **WHEN** a browser loads any dashboard page
 - **THEN** the page SHALL NOT trigger an HTTP request to `fonts.googleapis.com`, `fonts.gstatic.com`, or any host other than the Rembric server
 
+#### Scenario: The three families resolve through the theme
+
+- **WHEN** any dashboard page is rendered
+- **THEN** the display, sans and mono font variables SHALL resolve to Space Grotesk, Inter and JetBrains Mono respectively, and the built output SHALL contain the hashed woff2 files served from this origin
+
 #### Scenario: Every font weight is reachable
 
-- **WHEN** a request hits `/dashboard/assets/fonts/space-grotesk-700.woff2`
-- **THEN** the response SHALL be a valid woff2 file with `Content-Type: font/woff2`
+- **WHEN** a heading, a body paragraph and a code block are rendered
+- **THEN** each family SHALL be loaded with the weights the previous contract declared, so no weight falls back to a synthesized variant
 
 ### Requirement: Dashboard navigation MUST use a sidebar with persisted collapse state
 
-The dashboard SHALL render its primary navigation as a left-hand vertical sidebar listing the routes Overview, Memories, Sessions, Prompts, Judgments, Consolidation, Projects, Tokens, Maintenance. The sidebar SHALL support a collapsed mode (icons only, narrower fixed width) on desktop viewports and SHALL expose a toggle button to switch states.
+The dashboard SHALL render its primary navigation as a left-hand vertical sidebar listing the routes Overview, Memories, Sessions, Prompts, Judgments, Consolidation, Projects, Tokens, Maintenance. The sidebar SHALL be built from the adopted collapsible sidebar block — its provider, trigger, inset, nav-group, nav-item and badge primitives — rather than from hand-written layout CSS, and SHALL support a collapsed mode (icons only, narrower fixed width) on desktop viewports with a toggle control. That block's provider SHALL also own the narrow-viewport behaviour, replacing the custom mobile bar: below the tablet breakpoint the navigation SHALL be reachable through the provider's mobile sheet, and the separate `☰ MENU` drawer implementation and its inline script are retired.
 
-The collapse state SHALL be persisted in an HTTP cookie named `rbr-sb-collapsed` (value `1` collapsed, `0` or absent expanded), scoped to `Path=/dashboard`, with `SameSite=Lax`. The server SHALL read this cookie when rendering any dashboard page and SHALL set the root container's class accordingly so the SSR HTML matches the persisted state on first paint.
+The collapse state SHALL be persisted in an HTTP cookie named `rbr-sb-collapsed` (value `1` collapsed, `0` or absent expanded), scoped to `Path=/dashboard`, with `SameSite=Lax`. The server SHALL read this cookie when rendering any dashboard page and SHALL render the sidebar's initial state from it, so the server-rendered HTML matches the persisted state on first paint.
 
-The toggle SHALL work without JavaScript via a `POST /dashboard/_sidebar/toggle` form submission protected by the existing CSRF mechanism; a small inline script MAY progressively enhance the toggle to apply the collapsed class client-side (so the CSS width transition plays) while it `fetch()`es the same endpoint to persist the cookie.
+The toggle SHALL work without client JavaScript: it SHALL submit a Server Action that flips the cookie and returns to the page the control was used on. A client component MAY additionally apply the collapsed state optimistically so the width transition plays.
 
 #### Scenario: Collapsed state survives reload
 
-- **GIVEN** the operator has clicked the sidebar collapse button
+- **GIVEN** the operator has collapsed the sidebar
 - **WHEN** the operator reloads any dashboard page
-- **THEN** the SSR HTML SHALL include `class="app is-collapsed"` on the root container, and no client script SHALL be required to apply that class
+- **THEN** the server-rendered HTML SHALL reflect the collapsed state, and no client script SHALL be required to apply it
 
 #### Scenario: Toggle works without JavaScript
 
-- **WHEN** the operator submits the toggle form with JavaScript disabled
-- **THEN** the server SHALL flip the `rbr-sb-collapsed` cookie and redirect back to the page the form was submitted from
+- **WHEN** the operator activates the toggle with JavaScript disabled
+- **THEN** the server SHALL flip the `rbr-sb-collapsed` cookie and return the operator to the page the control was used on
 
 #### Scenario: CSRF protection on toggle
 
-- **WHEN** `POST /dashboard/_sidebar/toggle` arrives without a valid CSRF token
-- **THEN** the server SHALL respond with `403 Forbidden` and SHALL NOT flip the cookie
+- **WHEN** the toggle submission fails the dashboard's mutation protection
+- **THEN** the server SHALL refuse it with `403 Forbidden` and SHALL NOT flip the cookie
+
+#### Scenario: The narrow-viewport navigation comes from the sidebar block
+
+- **WHEN** any dashboard page is loaded at a viewport width of 980 px or less
+- **THEN** the navigation SHALL be reachable through the sidebar block's mobile sheet, and no separate mobile-bar component or drawer script SHALL exist in the application
 
 #### Scenario: Prompts entry appears in the sidebar between Sessions and Judgments
 
@@ -708,34 +643,34 @@ The toggle SHALL work without JavaScript via a `POST /dashboard/_sidebar/toggle`
 
 ### Requirement: Dashboard MUST be fully responsive across desktop, tablet, and phone viewports
 
-Every dashboard route SHALL render correctly and remain fully usable from a viewport width of 320 px upwards. The responsive system SHALL honour the following breakpoints:
+Every dashboard route SHALL render correctly and remain fully usable from a viewport width of 320 px upwards. The responsive system SHALL honour the following bands, expressed through the utility engine's responsive variants and the adopted components' own breakpoints:
 
-- **≥1281 px (full desktop)**: full-width sidebar (~196 px), multi-column grids at their maximum density (`.grid-7` shows 7 columns, `.grid-6` shows 6, `.kv-grid` shows 6).
-- **≤1280 px (compact desktop)**: `.main` padding reduced; `.grid-7` reflows to 4 columns; `.grid-6` reflows to 3 columns.
-- **≤980 px (tablet / mobile drawer)**: sidebar collapses into a sticky `.mob-bar` at the top of the viewport with a `☰ MENU` toggle that opens a full-width drawer; multi-column grids stack to 2-3 columns; `.row-2` and `.row-3` collapse to single column; tables remain horizontally scrollable inside `.tbl-host`; `.filters` becomes one-per-row; `.action-bar` wraps with action hint on its own row.
-- **≤640 px (phone)**: `.grid-7` and `.grid-6` show 2 columns; `.kv-grid` shows 2 columns; `.health` stacks to 1 column; `.login-stage` keeps both panes stacked vertically (no longer hides the identity pane); `.view-head h1` reduces to ~1.8rem; table minimum width drops; `.stat-v` shrinks to ~2.4rem.
+- **≥1281 px (full desktop)**: full-width expanded sidebar; dense stat grids at their maximum column count.
+- **≤1280 px (compact desktop)**: reduced main padding; dense stat grids reflow to a reduced column count.
+- **≤980 px (tablet / narrow)**: the sidebar's mobile sheet becomes the navigation; multi-column grids stack to 2-3 columns; paired and tripled columns collapse to a single column; data tables remain horizontally scrollable inside their own container; filter rows become one control per row; action bars wrap.
+- **≤640 px (phone)**: dense stat grids show 2 columns; two-column key/value grids show 2 columns; the login stage keeps both panes stacked vertically (it does not hide the identity pane); view-head headings reduce in size; table minimum widths drop.
 
-At every viewport, the page SHALL NOT introduce horizontal page-level scrolling (only `.tbl-host` and code blocks may scroll horizontally). Interactive controls (buttons, pager items, sidebar items, form fields) SHALL have a touch target of at least 44 × 44 CSS pixels at viewports ≤980 px.
+At every viewport, the page SHALL NOT introduce horizontal page-level scrolling (only a table's own scroll container and code/preformatted blocks may scroll horizontally). Interactive controls (buttons, pager items, sidebar items, form fields) SHALL have a touch target of at least 44 × 44 CSS pixels at viewports ≤980 px.
 
 #### Scenario: Sidebar becomes a mobile drawer at ≤980 px
 
 - **WHEN** any dashboard page is loaded at a viewport width of 980 px or less
-- **THEN** the page SHALL render a sticky `.mob-bar` at the top of the viewport, the desktop sidebar SHALL be hidden by default, and tapping the `☰ MENU` button SHALL slide the navigation in as a full-width drawer
+- **THEN** the desktop sidebar SHALL be hidden by default and tapping the sidebar block's mobile trigger SHALL open the navigation sheet
 
 #### Scenario: No horizontal page scroll at any breakpoint
 
 - **WHEN** any dashboard page is loaded at viewport widths 1440, 1100, 768, 540, or 360 px
-- **THEN** the document element's horizontal overflow SHALL be `hidden` or the rendered content SHALL fit within the viewport, with the only horizontally-scrollable elements being `.tbl-host` containers and any explicit code/`<pre>` blocks
+- **THEN** the document element's horizontal overflow SHALL be `hidden` or the rendered content SHALL fit within the viewport, with the only horizontally-scrollable elements being a table's scroll container and any explicit code/preformatted block
 
 #### Scenario: Stat grids reflow at narrow widths
 
-- **WHEN** any page containing a `.grid-7` is rendered at a viewport width of 640 px or less
+- **WHEN** any page containing a dense stat grid is rendered at a viewport width of 640 px or less
 - **THEN** the grid SHALL show exactly 2 columns and SHALL preserve its internal border lines between cards
 
 #### Scenario: Tables stay reachable on phone widths
 
 - **WHEN** a table wider than the viewport is rendered at ≤640 px
-- **THEN** the table SHALL be wrapped in `.tbl-host` and SHALL scroll horizontally within that container without expanding the page width
+- **THEN** the table SHALL scroll horizontally within its own container without expanding the page width
 
 ### Requirement: The dashboard MUST surface a maintenance view at `/dashboard/maintenance`
 
@@ -1101,7 +1036,9 @@ When the `:id` does not match any row, the page SHALL respond with `404 Not Foun
 
 ### Requirement: The dashboard brand block MUST display the running server version
 
-The dashboard SHALL render the running server version (the `version` field of the server package, loaded at boot via `REMBRIC_VERSION` from `apps/server/src/version.ts`) inside the brand block of the desktop sidebar (`.sb-brand`) and the mobile bar (`.mob-bar .brand`), as the line directly under `REMBRIC`. The version SHALL be rendered as a `<small>` element with the text `v<version>` (displayed uppercased by the brand's existing `text-transform`). The brand SHALL NOT render a `SELF-HOSTED` line — the version takes that row. The rendering SHALL reuse the existing `.label-stack small` styles and SHALL NOT introduce new CSS rules.
+The dashboard SHALL render the running server version (the `version` field of the server package, loaded at boot via `REMBRIC_VERSION` from `apps/web/src/lib/version.ts`) inside the brand block of the desktop sidebar (`.sb-brand`) and the mobile bar (`.mob-bar .brand`), as the line directly under `REMBRIC`. The version SHALL be rendered as a `<small>` element with the text `v<version>` (displayed uppercased by the brand's existing `text-transform`). The brand SHALL NOT render a `SELF-HOSTED` line — the version takes that row. The rendering SHALL reuse the existing `.label-stack small` styles and SHALL NOT introduce new CSS rules.
+
+`REMBRIC_VERSION` resolves from the release manifest `apps/web/package.json` — the file the `server` component's release-please updater bumps and tags `server-v<version>` — falling back to the compose `REMBRIC_VERSION` env pin and finally to the `0.0.0` sentinel.
 
 #### Scenario: Sidebar brand shows the version
 
@@ -1141,60 +1078,36 @@ When no newer version is known and the update check is enabled, the same brand-b
 
 ### Requirement: The dashboard MUST present a per-version dismissable update modal with the release changelog
 
-When a newer version is known and the operator has not dismissed that specific version, the dashboard SHALL present an update modal showing: current version → new version, the release publication time (via `formatTs`), the release changelog body rendered from the GitHub Release, and a link to the release on GitHub. A "Later" action SHALL dismiss the modal for that version only (client-side persistence); the next newer release SHALL re-trigger it. The modal's primary action SHALL depend on the self-update capability state:
+When a newer version is known and the operator has not dismissed that specific version, the dashboard SHALL present an update modal showing: current version → new version, the release publication time (via the shared timestamp component), the release changelog body rendered from the GitHub Release, and a link to the release on GitHub. A "Later" action SHALL dismiss the modal for that version only (client-side persistence); the next newer release SHALL re-trigger it. The modal SHALL NOT offer an in-application update trigger — the served application does not replace itself — so its action area SHALL depend on the deployment's capability state:
 
-- `available` — an update button that triggers the one-click flow
-- `pinned` — no button; an explanation that the image tag is pinned and how to unpin
-- `manual` — a copy-to-clipboard `docker compose pull && docker compose up -d` command and a link to `docs/updates.md` for enabling one-click
+- `pinned` — an explanation that the image tag is pinned and how to unpin it.
+- every other state, including a deployment that could be upgraded — a copy-to-clipboard upgrade command and a link to `docs/updates.md`, so the operator performs the swap at the deployment layer. This is the branch the previous contract called `available`, whose in-app trigger is retired with the orchestrator.
 
 #### Scenario: First visit after a release
 
 - **WHEN** an operator opens the dashboard and a newer, undismissed version exists
-- **THEN** the update modal SHALL appear with the version diff, changelog, and the capability-appropriate action
+- **THEN** the update modal SHALL appear with the version diff, the changelog, and the capability-appropriate action
 
 #### Scenario: Dismissed version stays dismissed
 
 - **WHEN** the operator chose "Later" for `0.22.0` and reloads the dashboard
-- **THEN** the modal SHALL NOT reappear for `0.22.0`, while the brand badge remains
+- **THEN** the modal SHALL NOT reappear for `0.22.0`
 
 #### Scenario: Manual quadrant
 
-- **WHEN** the modal renders with capability `manual`
-- **THEN** it SHALL show the copy-paste update command and the docs link instead of an update button
-
-### Requirement: The one-click update action MUST require a danger-tone confirmation
-
-The one-click update trigger SHALL be a form protected by the dashboard's `data-confirm` modal with `data-confirm-tone="danger"`, and its confirmation copy SHALL state that the server will stop, replace its container, and restart, and that a database backup is taken first.
-
-#### Scenario: Confirmation before update
-
-- **WHEN** the operator clicks the update button
-- **THEN** the danger-tone confirmation modal SHALL appear and no update SHALL start until confirmed
-
-### Requirement: The dashboard MUST show update progress and reload itself on the new version
-
-After a one-click update is confirmed, the dashboard SHALL show a progress view with discrete steps (backup, image pull with progress, service restart, version verification) updated by polling a status endpoint. While the server is restarting, connection failures SHALL be rendered as the restart step, not as errors. The page SHALL then poll a session-authenticated version endpoint and, once it answers with a version different from the one the page rendered with, SHALL reload automatically. If the update fails before the swap, the progress view SHALL show the failure reason; if it fails after the swap (rollback), the reloaded page SHALL surface that the previous version is still running.
-
-#### Scenario: Successful update reloads on new version
-
-- **WHEN** the upgrader completes and the replacement container becomes healthy
-- **THEN** the operator's page SHALL detect the new version via polling and reload, showing the dashboard on the new version with the session still valid
-
-#### Scenario: Failure before swap
-
-- **WHEN** the backup or pull step fails
-- **THEN** the progress view SHALL display the failure reason and the dashboard SHALL remain fully functional on the current version
+- **WHEN** the modal renders under any capability state
+- **THEN** it SHALL NOT contain a control that updates the running deployment, and it SHALL show either the pinned-tag explanation or the copy-paste upgrade command with the docs link
 
 ### Requirement: List tables MUST NOT spend a column on row ids
 
-Dashboard list tables SHALL NOT render a dedicated `id` column. Row identity is carried by the row's semantic cell (title, content, or timestamp), and navigation to a detail page — where one exists — is provided by whole-row `data-href` plus exactly one real `<a href>` anchor hosted on that semantic cell, so cmd-click / middle-click / keyboard navigation keep working.
+Dashboard list tables SHALL NOT render a dedicated `id` column. Row identity is carried by the row's semantic cell (title, content, or timestamp), and navigation to a detail page — where one exists — is provided by exactly one real `<a>`/`<Link>` anchor hosted on that semantic cell, so cmd-click / middle-click / keyboard navigation keep working. The whole-row `data-href` attribute and the inline click handler that consumed it are retired with the hand-written dashboard; the row is not the link.
 
 Concretely:
 
-- Sessions list: the `title` cell carries the anchor to `/dashboard/sessions/{id}` (rows keep `data-href`).
-- Memories list, session detail → Memories, memory detail → Predecessors: the `content` cell carries the anchor to `/dashboard/memories/{id}` (rows keep `data-href`).
-- Consolidation runs list: the `started` cell carries the anchor to `/dashboard/consolidation/{id}` (rows keep `data-href`).
-- Judgments list: the `created` cell carries the anchor to `/dashboard/judgments/{id}` (rows gain `data-href`).
+- Sessions list: the `title` cell carries the anchor to `/dashboard/sessions/{id}`.
+- Memories list, session detail → Memories, memory detail → Predecessors: the `content` cell carries the anchor to `/dashboard/memories/{id}`.
+- Consolidation runs list: the `started` cell carries the anchor to `/dashboard/consolidation/{id}`.
+- Judgments list: the `created` cell carries the anchor to `/dashboard/judgments/{id}`.
 - Projects (active + archived), prompts list, session detail → Prompts, consolidation run detail → Ops: the id column is removed with no replacement anchor — these rows have no detail page. Memory shortId anchors inside the ops table's `affected` / `created` cells are retained: they are cross-navigation, not row identity.
 
 `shortId(...)` rendering remains in use outside list-table columns (detail-page headings such as `Rembric Memory {shortId}.`, ops `affected`/`created` cells, prompt session links).
@@ -1202,15 +1115,19 @@ Concretely:
 #### Scenario: A navigable list row keeps exactly one real anchor
 
 - **WHEN** an authenticated operator renders any list whose rows have a detail page (sessions, memories, consolidation runs, judgments, predecessors, session-detail memories)
-- **THEN** each row SHALL carry `data-href` pointing at its detail URL
-- **AND** each row SHALL contain exactly one `<a>` anchor pointing at that same detail URL, hosted on the row's semantic cell
+- **THEN** each row SHALL contain exactly one anchor pointing at its detail URL, hosted on the row's semantic cell
 - **AND** no `<th>` labelled `id` SHALL be present in the table header
 
 #### Scenario: Tables without detail pages drop the id column with no replacement
 
 - **WHEN** an authenticated operator renders the projects, prompts, session-detail prompts, or run-detail ops tables
 - **THEN** no `<th>` labelled `id` SHALL be present and no cell SHALL render the row's own short id
-- **AND** row action forms SHALL keep functioning (they carry the full id in their `action` URLs)
+- **AND** row action controls SHALL keep functioning (their actions carry the full id)
+
+#### Scenario: Row navigation requires no click handler
+
+- **WHEN** a list row with a detail page is rendered
+- **THEN** it SHALL NOT rely on a row-level click handler or a `data-href` attribute to navigate, and keyboard activation of the semantic cell's anchor SHALL reach the detail page
 
 ### Requirement: The update page MUST offer a manual check with an honest outcome
 
@@ -1280,15 +1197,15 @@ The dashboard SHALL provide a manual sweep trigger at `/dashboard/consolidation`
 
 On detail views, the dashboard SHALL render long text `content` fields as Markdown using an in-process parser, rather than displaying the raw Markdown source inside an escaped `<pre>` block. This applies to: memory detail content (`/dashboard/memories/:id`), session description (seed goal) and **curated** session summary (`/dashboard/sessions/:id`), the expanded prompt content cell (`/dashboard/prompts`), and the Source and Target memory content on the judgment detail view (`/dashboard/judgments/:id`).
 
-**Session summaries SHALL be Markdown-rendered ONLY when curated (`summary_final = 1`).** When a session has a summary with `summary_final = 0` (a raw transcript sync from a client hook/provider, never confirmed by the model), the detail view SHALL instead render it as escaped preformatted text (monospace, inside its own `overflow-x: auto` container — the existing `<pre>` pattern used for judgment Evidence), and SHALL display an "RAW" (uncurated) badge adjacent to the Summary heading, using the existing chip/badge styling — no new design token. Rationale: raw transcripts frequently contain Markdown-looking framework text (tables, headers, tool documentation); rendering them as formatted Markdown makes an uncurated dump visually indistinguishable from a model-authored summary, which misled operators in practice. The session description (seed goal) is operator/agent-provided, never raw-synced, and SHALL remain Markdown-rendered unconditionally.
+**Session summaries SHALL be Markdown-rendered ONLY when curated (`summary_final = 1`).** When a session has a summary with `summary_final = 0` (a raw transcript sync from a client hook/provider, never confirmed by the model), the detail view SHALL instead render it as escaped preformatted text (monospace, inside its own `overflow-x: auto` container — the pattern the judgment Evidence block uses), and SHALL display an "RAW" (uncurated) badge adjacent to the Summary heading, using the shared badge component — no ad-hoc colour value. Rationale: raw transcripts frequently contain Markdown-looking framework text (tables, headers, tool documentation); rendering them as formatted Markdown makes an uncurated dump visually indistinguishable from a model-authored summary, which misled operators in practice. The session description (seed goal) is operator/agent-provided, never raw-synced, and SHALL remain Markdown-rendered unconditionally.
 
 Fields that are NOT free-form Markdown content SHALL NOT be Markdown-rendered: the judgment Reason SHALL remain a plain (escaped) paragraph, and the judgment Evidence SHALL remain a `<pre>` block because it is pretty-printed JSON.
 
-The Markdown parser SHALL be configured to **disable raw HTML passthrough** (`html: false`): any HTML tags present in the source SHALL be rendered as escaped text, never as live markup. The parser SHALL reject dangerous URL schemes (e.g. `javascript:`, `vbscript:`, `data:`) in links, leaving the affected link inert. No separate HTML sanitizer SHALL be required for safety. The rendered HTML SHALL be the **only** value passed through the template's raw/unescaped path; user-supplied content SHALL never bypass escaping except as the parser's output.
+The Markdown parser SHALL be configured to **disable raw HTML passthrough** (`html: false`): any HTML tags present in the source SHALL be rendered as escaped text, never as live markup. The parser SHALL reject dangerous URL schemes (e.g. `javascript:`, `vbscript:`, `data:`) in links, leaving the affected link inert. No separate HTML sanitizer SHALL be required for safety. The rendered HTML SHALL be the **only** value passed to an unescaped rendering boundary in the entire dashboard — the Markdown component's `dangerouslySetInnerHTML`. User-supplied content SHALL never bypass escaping anywhere else.
 
-The rendering SHALL be performed entirely server-side and in-process; no CDN, network call, or client-side JavaScript SHALL be required to display formatted content. Rendering SHALL reuse the locked brutalist design tokens and self-hosted fonts; it SHALL NOT introduce a new design token, and fenced/inline code SHALL remain monospace.
+The rendering SHALL be performed entirely server-side and in-process; no CDN, network call, or client-side JavaScript SHALL be required to display formatted content. Rendering SHALL use the theme's tokens and the self-hosted font variables, SHALL NOT introduce an ad-hoc colour or font value outside them, and fenced/inline code SHALL remain monospace.
 
-Each rendered Markdown block SHALL provide an icon-only control that copies the verbatim Markdown source to the clipboard, so the raw source remains recoverable behind the render. The source SHALL be carried in the page (not re-fetched) such that copying yields the original source — including the literal `**`, backticks, and fences — rather than the rendered HTML. The control SHALL function in non-secure (plain-HTTP) deployments via a clipboard fallback. This control is a progressive enhancement; the formatted content itself SHALL still render with JavaScript disabled. (The uncurated-summary `<pre>` block needs no copy control: its visible text IS the verbatim source.)
+Each rendered Markdown block SHALL provide an icon-only control that copies the verbatim Markdown source to the clipboard, so the raw source remains recoverable behind the render. The source SHALL be carried in the page (not re-fetched) such that copying yields the original source — including the literal `**`, backticks, and fences — rather than the rendered HTML. The control SHALL function in non-secure (plain-HTTP) deployments via a clipboard fallback. This control is a progressive enhancement implemented as a client component; the formatted content itself SHALL still render with JavaScript disabled. (The uncurated-summary `<pre>` block needs no copy control: its visible text IS the verbatim source.)
 
 List and table views SHALL NOT render Markdown: truncated `content` snippets in list cells SHALL remain plain escaped text.
 
@@ -1338,6 +1255,11 @@ List and table views SHALL NOT render Markdown: truncated `content` snippets in 
 
 - **WHEN** the operator views the `/dashboard/memories` list where a row's content contains `**bold**`
 - **THEN** the truncated snippet cell SHALL display the raw characters as escaped plain text and SHALL NOT render Markdown formatting
+
+#### Scenario: The unescaped boundary is exactly one
+
+- **WHEN** the dashboard source is searched for an unescaped rendering boundary
+- **THEN** the only occurrence SHALL be the Markdown component, and it SHALL pass the parser's output and nothing else
 
 ### Requirement: Dashboard list headers MUST report the true filtered total
 
@@ -1423,7 +1345,7 @@ Every paginated dashboard list view (`/dashboard/memories`, `/dashboard/sessions
 
 ### Requirement: User-supplied text rendered outside the Markdown pipeline MUST be HTML-escaped
 
-Any dashboard template that interpolates user- or agent-supplied text via the `raw()` helper (i.e. outside the Markdown-rendering pipeline covered by the Markdown-escaping requirement) SHALL escape that text with `escape()` first. This applies in particular to prompt tags (agent-supplied via `memory.save_prompt`, rendered on the session detail and prompts list views) and project slugs (operator-supplied at project creation; legacy slugs may predate the current slug validation regex and are not guaranteed to be free of HTML metacharacters).
+Any dashboard component that renders user- or agent-supplied text SHALL pass it as a React text child, which React escapes, or through the theme's components as a plain string prop. The dashboard SHALL NOT contain a general-purpose unescaped-rendering helper: the `raw()`, `SafeHtml` and `escape()` helpers of the hand-written dashboard are deleted, and the Markdown component's `dangerouslySetInnerHTML` is the single unescaped boundary in the application. This applies in particular to prompt tags (agent-supplied via `memory.save_prompt`, rendered on the session detail and prompts list views) and project slugs (operator-supplied at project creation; legacy slugs may predate the current slug validation regex and are not guaranteed to be free of HTML metacharacters).
 
 #### Scenario: A prompt tag containing HTML metacharacters renders as literal text
 
@@ -1438,6 +1360,11 @@ Any dashboard template that interpolates user- or agent-supplied text via the `r
 - **WHEN** the operator opens a dashboard view that renders that slug (e.g. the sessions list)
 - **THEN** the slug SHALL render as escaped literal text
 - **AND** SHALL NOT be interpreted as HTML or execute as script in the operator's browser
+
+#### Scenario: A second unescaped boundary fails the guard
+
+- **WHEN** a component outside the Markdown component introduces an unescaped rendering boundary
+- **THEN** the dashboard's guard test SHALL fail naming the file, so the boundary count cannot grow silently
 
 ### Requirement: The dashboard MUST expose accumulated knowledge per entity
 
@@ -1535,7 +1462,7 @@ Where a session, prompt or entity row previously rendered a `global` label becau
 
 ### Requirement: The dashboard login view MUST present a single canonical brand mark, headline, and a footer naming every bundled plugin client
 
-The `/dashboard/login` page SHALL render a single brand block in the top-left of the left pane containing the transparent Rembric logo (`/dashboard/assets/logo-transparent.png`) at 56 × 56 px on desktop, 48 × 48 px at viewports ≤ 980 px, and 40 × 40 px at viewports ≤ 640 px, followed by two lines of mono text (`REMBRIC` and `v<version>`, where `<version>` is the running server package version loaded via `REMBRIC_VERSION`). The main headline SHALL read `REMBRIC DASHBOARD.` with `REMBRIC` rendered via the `hl-lime` highlight pill and the trailing period rendered in `var(--lime)`. The headline `line-height` SHALL be at least `1.3` so the `hl-lime` background does not visually clip the next line.
+The `/dashboard/login` page SHALL render a single brand block in the top-left of the left pane containing the transparent Rembric logo (`/dashboard/assets/logo-transparent.png`) at 56 × 56 px on desktop, 48 × 48 px at viewports ≤ 980 px, and 40 × 40 px at viewports ≤ 640 px, followed by two lines of mono text (`REMBRIC` and `v<version>`, where `<version>` is the running server package version loaded via `REMBRIC_VERSION` from `apps/web/src/lib/version.ts`). The main headline SHALL read `REMBRIC DASHBOARD.` with `REMBRIC` rendered via the `hl-lime` highlight pill and the trailing period rendered in `var(--lime)`. The headline `line-height` SHALL be at least `1.3` so the `hl-lime` background does not visually clip the next line.
 
 A footer SHALL list **every** bundled plugin client, separated visually by lime square bullets, followed by a single generic `MCP CLIENTS` entry **last**. The order SHALL be `CLAUDE CODE`, `OPENCODE`, `CODEX CLI`, `PI`, `HERMES`, `MCP CLIENTS`.
 
@@ -1577,3 +1504,224 @@ The right pane SHALL contain only the admin-token form (a labelled password inpu
 
 - **WHEN** the login page is rendered
 - **THEN** the response HTML SHALL NOT contain the strings `§ 00 / ACCESS`, `OPERATOR DASHBOARD`, `APPEND-ONLY`, `ADMIN-SCOPED TOKENS ONLY`, `STORED IN HTTPONLY COOKIE`, or `PLAINTEXT SHOWN ONLY ONCE IN /TOKENS`
+
+### Requirement: Dashboard MUST follow the liquid-glass visual identity
+
+The dashboard SHALL render the identity-A liquid-glass visual identity in both a dark mode and a light mode, expressed as CSS custom properties in the shadcn token slots rather than as values frozen in this specification. The theme SHALL be declared once, in `apps/web/src/app/globals.css`.
+
+The token slots this identity occupies:
+
+- **Semantic surface and text roles** — `--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--muted`, `--muted-foreground`, `--border`, `--input`, `--ring`, `--radius`.
+- **Brand role** — `--primary` (with its foreground pair) as the lime brand fill, carried over unchanged from the identity this one replaces.
+- **Semantic state roles** — `--destructive` for irreversible actions, plus a warning role for reversible destructive ones; these are the two tones the confirmation contract distinguishes.
+- **Light-surface text accent** — an olive-family token for text on light glass surfaces, distinct from the brand fill, so lime stays a fill and never becomes body text.
+- **Typography roles** — `--font-sans`, `--font-display` and `--font-mono`, wired to the self-hosted families.
+- **Glass roles** — a `--glass-*` group (surface tint, blur radius, saturation, specular edge, border) owned by the identity layer rather than by the semantic set, so glass surfaces can be retuned without touching component code.
+
+The **exact values** of the glass group and of the light-surface accent are NOT fixed by this requirement: they are finalised at implementation against the design reference and recorded once, in `globals.css`. Freezing values here would lock in numbers nobody has chosen, which is the failure mode of the requirement this one replaces. The retired brutalist contract is its token list, its single `#0a0a0a` surface, its prohibition on a light theme, and its "changing any of these tokens SHALL require a new OpenSpec change" rule: changing a token value SHALL NOT require a spec change, as long as every role above remains occupied and both modes still render.
+
+The dashboard SHALL support a dark mode and a light mode selected by the `.dark` class on the document element, defaulting to dark. A theme switcher or per-user theme setting is not required by this requirement and SHALL NOT be introduced by it.
+
+#### Scenario: Tokens are declared once in core.css
+
+- **WHEN** a contributor inspects the token declaration (the file the previous contract called `core/tokens.css`, now the `globals.css` theme block)
+- **THEN** every role listed above SHALL be declared in a single `@theme`/`:root` block plus a `.dark` block, and no entry of the retired brutalist token list SHALL remain in the repository
+
+#### Scenario: Both modes render
+
+- **WHEN** the document element carries the `.dark` class the dark values SHALL apply, and when it does not the light values SHALL apply
+- **THEN** text and surfaces in each mode SHALL be rendered from that mode's foreground and surface tokens, and no component SHALL fall back to a hardcoded colour that breaks in the other mode
+
+#### Scenario: Changing a token value needs no spec change
+
+- **WHEN** an implementation changes a token value in `globals.css`
+- **THEN** no OpenSpec change SHALL be required, provided every role above stays occupied and both modes still render
+
+#### Scenario: Glass surfaces are tunable independently
+
+- **WHEN** a contributor changes a `--glass-*` value
+- **THEN** every glass surface SHALL follow it without any component file being edited
+
+### Requirement: The dashboard UI SHALL be built from shadcn/ui blocks and components over Tailwind v4
+
+The dashboard SHALL be implemented with shadcn/ui over Tailwind v4, using its blocks and components to the maximum extent the design allows. shadcn components SHALL be copied into `apps/web/src/components/ui/` and owned by this repository — edited freely, upgraded deliberately — and SHALL NOT be consumed as a versioned runtime UI dependency. The supporting dependencies SHALL be limited to `tailwindcss` v4 with `@tailwindcss/postcss`, `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`, the `@radix-ui/*` packages the adopted components require, and `@tanstack/react-table` for the data-dense tables. Drag-and-drop toolkits and alternate icon sets SHALL NOT be adopted: the dashboard has no drag interaction, and `lucide-react` is the icon set every adopted component already uses.
+
+The adopted blocks, and the views they serve:
+
+- **`sidebar-07` (collapsible)** — the shell and navigation: provider, trigger, inset, nav-group/nav-item with badges, nav-user. Its provider's mobile sheet replaces the custom mobile bar and drawer script.
+- **`dashboard-01`** — the home overview: section cards (the stat strip), the area chart (the activity sparkline), and the data table (the recents table).
+- **`login-01`** — the login view: the split layout, with the Rembric brand mark in the identity pane.
+- **The data-table composition and its primitives** (`table`, `badge`, `button`, `input`, `label`, `select`, `checkbox`, `dropdown-menu`, `tabs`, `toggle-group`, `separator`, `drawer`, `avatar`, `sheet`, `sonner`, `breadcrumb`, `chart`, `card`) — the list surfaces and the detail surfaces.
+- **`alert-dialog`** (or the equivalent dialog primitive) — destructive confirmations.
+
+A block SHALL NOT be adopted whole where doing so imports a dependency or an affordance the dashboard does not need: the composition is copied and pruned, and every pruned piece SHALL be named in `design.md` against the block it came from.
+
+#### Scenario: Components are owned source, not a runtime dependency
+
+- **WHEN** the dependency graph of `apps/web` is inspected
+- **THEN** no component library SHALL appear as a runtime dependency, and every adopted component SHALL exist as a file under `apps/web/src/components/ui/`
+
+#### Scenario: The stack's dependencies are the enumerated set
+
+- **WHEN** `apps/web/package.json` is inspected
+- **THEN** the UI-related dependencies SHALL be limited to the enumerated set, `@tanstack/react-table` SHALL be present, and no drag-and-drop toolkit and no alternate icon package SHALL be present
+
+#### Scenario: A block is pruned, not imported wholesale
+
+- **WHEN** a block is adopted for a view
+- **THEN** the pieces the dashboard does not use SHALL be removed rather than shipped, and the remaining composition, together with the pruned pieces, SHALL be recorded against the view it serves
+
+### Requirement: Dashboard styles MUST be organised as a three-layer system
+
+The dashboard's styles SHALL be organised in exactly three layers:
+
+- **Theme layer** — the design tokens, declared once in `apps/web/src/app/globals.css` in a Tailwind v4 `@theme` block together with the `:root` and `.dark` custom-property blocks. No other file SHALL declare a design token.
+- **Component layer** — the owned shadcn components under `apps/web/src/components/ui/**`, styled with Tailwind utilities and `class-variance-authority` variants. A component's variants live in that component's own file, never in a separate stylesheet.
+- **Identity layer** — the hand-authored liquid-glass utilities the visual-identity requirement defines, declared once above the component layer and consumed by it.
+
+Tailwind v4 (CSS-first `@theme`) SHALL be the only utility engine. No per-route stylesheet SHALL exist: a route expresses its layout with the shared components, their variants and utility classes. No route, layout or component SHALL emit a `<style>` element in the response body — the built stylesheet is a linked, content-hashed asset.
+
+#### Scenario: The theme is declared once
+
+- **WHEN** a contributor inspects `apps/web/src/app/globals.css`
+- **THEN** it SHALL contain the single declaration of the dashboard's design tokens, and no other file in the repository SHALL declare them
+
+#### Scenario: The HTML body carries no `<style>` block
+
+- **WHEN** any authenticated dashboard route returns HTML
+- **THEN** the response body SHALL NOT contain a `<style>` element
+
+#### Scenario: Adding a view requires no stylesheet
+
+- **WHEN** a contributor adds a new dashboard route that needs view-specific presentation
+- **THEN** they SHALL express it with the shared components, their variants and utility classes, and no new CSS file SHALL be required
+
+### Requirement: Data-dense list views SHALL be built from one shared data-table composition
+
+Every list surface with sorting, filtering and pagination — memories, sessions, prompts, judgments, projects, tokens, entities, consolidation runs, the maintenance breakdowns and the home recents table — SHALL be rendered from a single shared data-table composition (the shadcn table primitives driven by `@tanstack/react-table`), so column definitions, empty states, pagination controls and row linking are defined once. The composition SHALL accept a server-provided page of rows. A view whose contract places filtering, ordering and counting on the server — which is every paginated view — SHALL drive the composition's controls through the URL (requesting the next server page) rather than letting the client re-sort or re-filter the page it received; a view over a fully loaded in-memory set MAY use the composition's client-side transformations.
+
+#### Scenario: Every list surface uses the one composition
+
+- **WHEN** a contributor inspects the ported list views
+- **THEN** each SHALL render through the shared data-table composition, and no view SHALL hand-roll its own table markup
+
+#### Scenario: A server-paginated list is not re-sorted on the client
+
+- **GIVEN** a server-paginated list view
+- **WHEN** the operator renders it and then changes a sort or filter control
+- **THEN** the rows SHALL be re-requested from the server with the change encoded in the URL, and the order SHALL be the server's order
+
+#### Scenario: The empty state comes from the composition
+
+- **WHEN** a list has no rows for the active filter
+- **THEN** the composition SHALL render the view's declared empty message rather than a bare empty table
+
+### Requirement: Dashboard mutations SHALL be Server Actions
+
+Every dashboard mutation SHALL be a Server Action invoked from a React form or a client component, validated at the action boundary before any service call, executed against the same service method the hand-written route called, and followed by a revalidation of every path whose data it changed. A rejected mutation SHALL surface as form state rendered next to the control that caused it rather than as a separate error page; a mutation that returns to a list SHALL preserve the existing redirect-plus-query-parameter flash contract. An action SHALL NOT trust a client-supplied identifier: scope, project binding and admin gating SHALL be resolved inside the action from the session, exactly as the service layer requires. No dashboard mutation SHALL be invoked by a client-side `fetch()` to a dashboard URL — the HTTP routes the actions replace are deleted with the views they served.
+
+**The OAuth consent decision is the one exception**: it SHALL remain a form `POST` to the protocol's authorization endpoint, because that endpoint is part of the OAuth protocol contract rather than a dashboard route, and the consent view SHALL therefore stay server-rendered with no client-side JavaScript requirement.
+
+#### Scenario: A mutation runs through an action and revalidates
+
+- **WHEN** an operator submits a dashboard form
+- **THEN** the submission SHALL invoke a Server Action that validates its input, calls the service, revalidates the affected paths, and returns updated form state or a redirect
+
+#### Scenario: An invalid submission changes nothing
+
+- **WHEN** an action receives input that fails validation
+- **THEN** it SHALL return an error to the form, SHALL NOT call the service, and SHALL NOT change any row
+
+#### Scenario: No dashboard mutation is invoked by a client fetch
+
+- **WHEN** the client-side code under `apps/web/src/**` is inspected
+- **THEN** it SHALL contain no `fetch()` or equivalent call to a dashboard mutation URL
+
+#### Scenario: The consent decision stays a protocol POST
+
+- **WHEN** the OAuth consent view renders
+- **THEN** its decision control SHALL submit a form `POST` to the authorization endpoint, and the view SHALL render and function without client-side JavaScript
+
+### Requirement: Client-side data fetching SHALL be limited to scoped React Query islands
+
+Server Components SHALL own the initial data for every dashboard route. `@tanstack/react-query` SHALL be used only inside client islands whose data changes after render: the update check's polling, incremental search, and optimistic action state. An island SHALL NOT become the source of truth for a list, a detail record, a filtered set or a total the server computes; those SHALL remain server-rendered reads. The dashboard SHALL NOT introduce a global client-side state store. An island's first render SHALL use the server-provided value, so hydration has nothing to disagree with.
+
+#### Scenario: A ported list is server-rendered
+
+- **WHEN** an operator opens any list view
+- **THEN** its rows, filters and totals SHALL be rendered by the server, and no client-side query SHALL be required to display them
+
+#### Scenario: Polling is an island, not the page
+
+- **WHEN** the operator is on a surface that polls (the update check)
+- **THEN** only that island SHALL fetch, and the rest of the page SHALL remain server-rendered
+
+#### Scenario: No global client store
+
+- **WHEN** the dependency graph of `apps/web` is inspected
+- **THEN** no global state-management library SHALL be present
+
+### Requirement: Dashboard UI mechanisms SHALL translate to the React stack rather than be ported
+
+The port SHALL delete the mechanisms it replaces instead of re-implementing them. The translations are:
+
+- `apps/server/src/dashboard/components.ts`'s HTML-string helpers → React components with typed props under `apps/web/src/components/dashboard/**`.
+- `raw()`, `SafeHtml` and the `escape()` helper → React text children, which React escapes.
+- The single unescaped boundary → the Markdown component's `dangerouslySetInnerHTML`.
+- `minifyHtml()` and its `<pre>`/`<textarea>`/`<script>` carve-outs → nothing: JSX emits no inter-tag whitespace outside preformatted text.
+- The six shell scripts (`TS_UPGRADER`, `MOB_TOGGLE`, `SB_COLLAPSE`, `ROW_LINK`, `CONFIRM`, `MD_COPY`) → the timestamp component, the sidebar block's mobile sheet, the sidebar cookie action, the semantic-cell link, the confirmation dialog and the copy-source control.
+- The whole-row `data-href` click → a real link on the row's semantic cell.
+- The two-CSS-link per-page delivery and the `views/<view>.css` registry → the component layer and utility classes.
+- Stored form `action="/dashboard/..."` route strings → Server Actions, with the OAuth consent decision excepted (see the mutation requirement).
+
+Preserved verbatim by the port: self-hosted fonts, the timestamp convention, the destructive-confirmation contract, the responsive bands, the data-access boundaries (server-side reads through the `@rembric/core` services, mutations through Server Actions), and DS1–DS6.
+
+#### Scenario: A deleted mechanism is not re-implemented
+
+- **WHEN** a contributor inspects the ported dashboard
+- **THEN** `apps/web` SHALL contain no HTML-minifying step, no `data-href` row navigation, no inline first-party script in a shell, and no per-view stylesheet
+
+#### Scenario: The preserved conventions still hold
+
+- **WHEN** any ported view is rendered
+- **THEN** its timestamps, fonts, destructive confirmations, responsive bands, data-access boundaries and data-safety behaviour SHALL match the pre-port contract
+
+### Requirement: The dashboard application SHALL bootstrap through its framework instrumentation hook
+
+The application's instrumentation hook SHALL be its single bootstrap path, executed once per process: open the database (migrations run inside the database factory), log the resolved absolute database path and whether the file already existed, bootstrap the admin token, start the session reaper, and drain the embedder. No second bootstrap path SHALL exist. The embedder SHALL remain lazily dynamically imported, and its model assets SHALL reach the process through the image's copy step rather than through module tracing.
+
+#### Scenario: Bootstrap runs once per process
+
+- **WHEN** the application starts
+- **THEN** the database SHALL be opened and migrated, and the startup log SHALL name the resolved absolute database path together with whether the file pre-existed
+
+#### Scenario: A missing migrations directory fails loudly
+
+- **WHEN** the migrations directory cannot be read
+- **THEN** startup SHALL fail with an error naming the path, and SHALL NOT continue against an empty or partially migrated database
+
+#### Scenario: The embedder is not loaded at boot
+
+- **WHEN** the process starts and no request has needed embeddings
+- **THEN** the embedder SHALL NOT have been imported, and the model assets SHALL be present in the image by copy
+
+### Requirement: The served dashboard application SHALL NOT host a scheduler or a self-upgrade orchestrator
+
+The dashboard application SHALL NOT run a timer that performs consolidation or any other background mutation: the consolidation sweep SHALL remain a deterministic, throttled service call in the request path. No cron exists to port and none SHALL be introduced inside the served process; if a time-based sweep is ever required, it SHALL be a separate script driven by an OS scheduler rather than a duty hidden in the web process.
+
+The self-upgrade orchestrator SHALL NOT live in the served application: a process that replaces itself while serving is not a supported path. The dashboard SHALL keep the version display, the update-availability check, the changelog modal and the manual check, and SHALL NOT offer an in-application update trigger, an update progress view, or a version-polling endpoint. Docker owns the swap by pulling the image; the installer owns it for non-Docker deployments; `docs/updates.md` is the operator-facing route.
+
+#### Scenario: No background timer in the served process
+
+- **WHEN** the application's startup code is inspected
+- **THEN** no scheduler, interval or timer performing consolidation or any other background mutation SHALL be registered, and the sweep SHALL be reachable only through the request path
+
+#### Scenario: The dashboard offers no in-app update trigger
+
+- **WHEN** an operator views the update surface while a newer version is known
+- **THEN** the surface SHALL show the deployment-layer upgrade path and SHALL NOT render a control that updates the running deployment
+
+#### Scenario: The retired update routes are gone
+
+- **WHEN** the application's routes are inspected
+- **THEN** no update-progress or in-app upgrade route SHALL exist, and a request to one SHALL return the standard not-found response

@@ -1,11 +1,11 @@
 ---
 name: rembric-smoke-tests
-description: End-to-end smoke against the local rembric dev stack (`pnpm run dev:docker:up`). Apply when the user says "smoke", "probar contra docker", "dev:up", or after applying an OpenSpec change that touches HTTP (`apps/server/src/server/api-router.ts`), MCP tools (`packages/mcp/src/`), or DB migrations (`packages/db/src/migrations/`). Encodes bring-up, mount verification, probe pattern and teardown — not the probes themselves.
+description: End-to-end smoke against the local rembric dev stack (`pnpm run dev:docker:up`). Apply when the user says "smoke", "probar contra docker", "dev:up", or after applying an OpenSpec change that touches HTTP (`apps/web/src/app/api/`), MCP tools (`packages/mcp/src/`), or DB migrations (`packages/db/src/migrations/`). Encodes bring-up, mount verification, probe pattern and teardown — not the probes themselves.
 ---
 
 # Rembric smoke pattern
 
-Real-stack verification of a change before opening the PR. Read `docker-compose.dev.yml`, `apps/server/Dockerfile`, and `package.json::dev:docker:up` for the source of truth on ports, mounts, and the dev target — this file gives you only the pattern that survives those changing.
+Real-stack verification of a change before opening the PR. Read `apps/web/Dockerfile` and `package.json::dev` (next dev) for the source of truth on ports and the dev target — this file gives you only the pattern that survives those changing.
 
 ## 0. Preflight: free the RAM the build needs
 
@@ -46,16 +46,16 @@ until docker ps --filter name=rembric-dev --filter health=healthy --format '{{.N
 
 - Container port: from `docker-compose.dev.yml::ports`.
 - Admin bearer: `grep '^REMBRIC_ADMIN_TOKEN=' .env | cut -d= -f2-`. **Never `cat .env`** — the harness blocks it to keep secrets out of the transcript.
-- Default seeded project slug: from `apps/server/src/scripts/seed-dev.ts`.
+- Default seeded project slug: from `apps/web/src/scripts/seed-dev.ts`.
 
 ## 5. Probe the change's surface
 
 - **HTTP**: `curl … | jq` against `http://localhost:<port>/api/<slug>/…` with `Authorization: Bearer …` and `Content-Type: application/json`. Parse responses with `jq`, not regex.
 - **MCP**: POST JSON-RPC to `/mcp/<slug>` (path-scoped) or `/mcp` (unscoped). Send `Accept: application/json, text/event-stream` — the response is SSE-framed, so strip a leading `data: ` before `JSON.parse`. Handshake first (`initialize` → store the `mcp-session-id` header → `notifications/initialized`), then `tools/call`.
-- **DB**: the container is intentionally minimal (no `sqlite3`, no `ps`) — and the **host has no `sqlite3` either**. Read the bind-mounted file with node, from the pnpm store, with `cwd` inside `apps/server`:
+- **DB**: the container is intentionally minimal (no `sqlite3`, no `ps`) — and the **host has no `sqlite3` either**. Read the bind-mounted file with node, from the pnpm store, with `cwd` inside `apps/web`:
 
   ```bash
-  cd <worktree>/apps/server
+  cd <worktree>/apps/web
   node -e 'const D=require("better-sqlite3");const db=new D("../../data-dev/data.db",{readonly:true});
     console.log(db.prepare("SELECT id,status,ended_at FROM sessions ORDER BY started_at DESC LIMIT 3").all());'
   ```

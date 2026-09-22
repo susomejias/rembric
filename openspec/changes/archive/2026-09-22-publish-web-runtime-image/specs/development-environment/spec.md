@@ -140,7 +140,7 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 - **WHEN** `docker buildx imagetools inspect ghcr.io/<owner>/rembric:<version>` is run
 - **THEN** the manifest list SHALL advertise both `linux/amd64` and `linux/arm64`
 
-#### Scenario: The published image is built from a distroless glibc base
+#### Scenario: Runtime stage is built from a distroless glibc base
 
 - **GIVEN** the published `:<version>` image (either architecture)
 - **WHEN** its `runner` stage is inspected

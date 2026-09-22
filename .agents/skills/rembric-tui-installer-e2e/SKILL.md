@@ -14,7 +14,7 @@ Run this before merging/deploying an install/distribution change so a regression
 ```bash
 # 1a. The headless test suite (args, preflight, server install incl. empty-token
 #     refill, server update, agent routing, output degradation, root-shim parity).
-cd "$REPO/apps/server" && pnpm vitest run ../../install.test.ts
+cd "$REPO/apps/web" && pnpm vitest run --root ../.. ../../install.test.ts
 
 # 1b. POSIX syntax — dash-compatible, no bashisms.
 cd "$REPO"
