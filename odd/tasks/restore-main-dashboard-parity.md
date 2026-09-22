@@ -17,6 +17,17 @@ Parallel read-only investigation with one bounded writer; no concurrent writes i
 - [ ] P5 Audit functional parity with actual main. Static audit COMPLETE (mutation layer, updater, OAuth consent, metadata gaps all enumerated; verifier mubc4xmx-8-26wv).
 - [ ] P8 Demolish apps/server after cutover (owner confirmed end-state: NO apps/server in final tree). Sequence: (1) web image published under existing channel; (2) mutations + OAuth AS implemented as Next route handlers (/authorize,/token,/register) with existing consent page + session CSRF — no Hono dependency in the SDK auth pieces; (3) version anchor relocated out of apps/server (release-please reanchor or neutral package) so lib/version.ts keeps resolving; (4) retire Hono test oracle once web suite covers the contract; (5) git rm apps/server, final spec deltas, installer/docs/MCP client repoint.
 
+## Lote 7-8 items E — decisiones del owner-delegado (medidas inline, HEAD a3780dd5)
+
+1. **seed-dev/seed-volumetric** → `apps/web/src/scripts/` (dev-only). docker-publish solo lo grep-ea como señal NEGATIVA (que NO esté en la imagen publicada — satisfecho estructuralmente); docs/docker.md documenta el dev compose que muere con P8.3c. Repoint allow-list de invariants.
+2. **config.ts → retirar** con apps/server. La web lee 13 REMBRIC*\* inline con validación propia donde importa (oauth.ts valida PUBLIC_URL); REMBRIC_HOST/PORT/MCP_ALLOWED*\* no existen en web (no hay http server propio).
+3. **logger.ts → retirar** (cero consumers fuera de server, medido).
+4. **retrieval harness** → `packages/core/src/test-support/retrieval/` (4 suites co-localizadas + baselines); `CANDIDATES_PER_SAVE_MAX_DEFAULT` se inlinea en el harness (test-only); scripts raíz eval/corpus:build → `--filter @rembric/core`.
+5. **plugin tests** → corren bajo el vitest de apps/web (include extendido) con un fixture de boot `next start` en puerto temporal — el MISMO harness del Lote 6 (mcp-integration web split). plugin.test.ts usa createServer real para驱动 el bridge contra HTTP vivo; la web es ese endpoint.
+6. **upgrade-helper + test → retirar** (solo lo ejecutaba el upgrader efímero de la imagen server retirada; el web app eliminó self-update).
+7. **properties.test.ts → retirar** (modelo self-contained, sin código de producción). **transcript-parser.test.ts → apps/plugin** (es un test del plugin).
+8. **Lote 6 consolidado**: construir UNA vez el harness de boot (next start + temp REMBRIC_DATA_DIR) usado por el split de mcp-integration Y los tests del plugin. NOTA transitoria medida (HEAD a3780dd5): plugin.test.ts ya acumula 33 fallos conforme el árbol server encoge (importa server/index + fixtures que mueren) — estado conocido, se arregla con el harness, NO parchear antes.
+
 ## Evidence
 
 User screenshots: login 2026-09-21 16.18.48; overview 16.19.20; memories 16.19.40. Previous sidebar change 4f770345 was not verified in an authenticated browser. Prior completion claims do not establish parity.
