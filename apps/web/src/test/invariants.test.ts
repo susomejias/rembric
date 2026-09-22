@@ -63,14 +63,6 @@ const coreRoot = join(repoRoot, 'packages/core/src');
  * handlers must still police them where they now live.
  */
 const mcpRoot = join(repoRoot, 'packages/mcp/src');
-/**
- * `apps/server/src` — the tree this suite moved out of, still present until
- * `apps/server` is deleted. Only the anchors whose TARGET has not moved read it:
- * the dev seed reset, the dev-only image stage and the boot ordering in
- * `bootstrap.ts`. Nothing under it is scanned; the four scan roots above are the
- * tree the rules police once the deletion lands.
- */
-const serverRoot = join(repoRoot, 'apps/server/src');
 
 /**
  * Paths are reported and allow-listed repo-root-relative — `apps/web/src/...`
@@ -118,10 +110,10 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory\b/i,
     description:
-      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in packages/db/src/repositories/memory-repository.ts or the dev seed reset in apps/server/src/scripts/seed-dev.ts',
+      'raw `DELETE FROM memory` is forbidden outside the operator-only purge in packages/db/src/repositories/memory-repository.ts or the dev seed reset in apps/web/src/scripts/seed-dev.ts',
     allow: [
       'packages/db/src/repositories/memory-repository.ts',
-      'apps/server/src/scripts/seed-dev.ts',
+      'apps/web/src/scripts/seed-dev.ts',
     ],
   },
   {
@@ -162,10 +154,10 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+sessions\b/i,
     description:
-      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in packages/db/src/repositories/agent-sessions-repository.ts or the dev seed reset in apps/server/src/scripts/seed-dev.ts',
+      'raw `DELETE FROM sessions` is forbidden outside the operator-only purge in packages/db/src/repositories/agent-sessions-repository.ts or the dev seed reset in apps/web/src/scripts/seed-dev.ts',
     allow: [
       'packages/db/src/repositories/agent-sessions-repository.ts',
-      'apps/server/src/scripts/seed-dev.ts',
+      'apps/web/src/scripts/seed-dev.ts',
     ],
   },
   {
@@ -191,8 +183,8 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+memory_relations\b/i,
     description:
-      'raw `DELETE FROM memory_relations` is forbidden — relations are append-only, except in the dev seed reset (apps/server/src/scripts/seed-dev.ts)',
-    allow: ['apps/server/src/scripts/seed-dev.ts'],
+      'raw `DELETE FROM memory_relations` is forbidden — relations are append-only, except in the dev seed reset (apps/web/src/scripts/seed-dev.ts)',
+    allow: ['apps/web/src/scripts/seed-dev.ts'],
   },
   {
     pattern: /delete\s*\(\s*prompts\s*\)/i,
@@ -202,10 +194,10 @@ const FORBIDDEN: ForbiddenRule[] = [
   {
     pattern: /DELETE\s+FROM\s+prompts\b/i,
     description:
-      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in packages/db/src/repositories/prompts-repository.ts or the dev seed reset in apps/server/src/scripts/seed-dev.ts',
+      'raw `DELETE FROM prompts` is forbidden outside the operator-only purge in packages/db/src/repositories/prompts-repository.ts or the dev seed reset in apps/web/src/scripts/seed-dev.ts',
     allow: [
       'packages/db/src/repositories/prompts-repository.ts',
-      'apps/server/src/scripts/seed-dev.ts',
+      'apps/web/src/scripts/seed-dev.ts',
     ],
   },
   {
@@ -344,7 +336,7 @@ describe('append-only invariants (static grep)', () => {
   });
 
   it('allow-list anchors: scripts/seed-dev.ts contains DELETE FROM memory / sessions / memory_relations', () => {
-    const file = join(serverRoot, 'scripts/seed-dev.ts');
+    const file = join(srcRoot, 'scripts/seed-dev.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
     expect(/DELETE\s+FROM\s+sessions\b/i.test(src)).toBe(true);
@@ -352,7 +344,7 @@ describe('append-only invariants (static grep)', () => {
   });
 
   it('seed-dev.ts gates --reset behind REMBRIC_ALLOW_DESTRUCTIVE_SEED before invoking the wipe helper', () => {
-    const file = join(serverRoot, 'scripts/seed-dev.ts');
+    const file = join(srcRoot, 'scripts/seed-dev.ts');
     const src = readFileSync(file, 'utf8');
     const gateIdx = src.search(/env\[['"]REMBRIC_ALLOW_DESTRUCTIVE_SEED['"]\]/);
     const wipeCallIdx = src.search(/\bwipe\s*\(\s*deps\.handle\s*\)/);
@@ -650,7 +642,9 @@ const SCOPE_BYPASS_ALLOWED_PREFIXES = [
   'packages/core/src/consolidation/',
   'apps/web/src/app/dashboard/',
   // Eval harness ingest re-reads its own throwaway corpus across scopes
-  // post-ingest — see add-retrieval-eval-harness.
+  // post-ingest — see add-retrieval-eval-harness. Two copies while `apps/server`
+  // is retired: the colocated one in `packages/core` and the one it replaces.
+  'packages/core/src/test-support/retrieval/ingest.ts',
   'apps/server/src/test/retrieval/ingest.ts',
 ];
 
@@ -755,7 +749,7 @@ describe('data-access confinement invariant', () => {
 
   it('SQL executes only under packages/db/src/', () => {
     const offenders = scanSql([...appFiles, ...coreFiles, ...mcpFiles]).filter(
-      (o) => o.file !== 'apps/server/src/scripts/seed-dev.ts',
+      (o) => o.file !== 'apps/web/src/scripts/seed-dev.ts',
     );
     if (offenders.length > 0) {
       const formatted = offenders
@@ -2145,6 +2139,13 @@ const WIDENED_SCOPE_DISCRIMINANT = /'authorized-projects'/;
 const WIDENED_SCOPE_SITES: Record<string, number> = {
   'packages/db/src/scope.ts': 1,
   'packages/mcp/src/_shared.ts': 1,
+  // The retrieval eval harness's in-memory retriever has to hand the search
+  // path the same value the production construction site would — it builds it
+  // from a resolved `QueryScope` instead of importing it, because that site
+  // takes an MCP request context. Not request-facing: nothing outside
+  // `src/test-support/` reads it, so it decides nobody's access. Everything
+  // else in this list stays pinned to one site.
+  'packages/core/src/test-support/retrieval/retrievers/hybrid.ts': 1,
 };
 
 describe('the widened scope has one construction site', () => {
