@@ -1,6 +1,6 @@
 import { once } from 'node:events';
 import { mkdtemp, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -211,127 +211,137 @@ describe('stdio to HTTP transport', () => {
     },
   );
 
-  it('passes initialize through and recovers exactly once from a terminated session', async () => {
-    const requests: {
-      path: string;
-      body: string;
-      session: string | undefined;
-      authorization: string | undefined;
-    }[] = [];
-    let session = 's1';
-    let initializeCount = 0;
-    let toolAttempts = 0;
-    const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const body = Buffer.concat(chunks).toString();
-      requests.push({
-        path: request.url ?? '',
-        body,
-        session: request.headers['mcp-session-id'],
-        authorization: request.headers.authorization,
-      });
-      if (request.url === '/healthz') {
-        response.setHeader('content-type', 'application/json');
-        response.end(JSON.stringify({ version: '0.28.2' }));
-        return;
-      }
-      const message = JSON.parse(body) as { id?: number; method?: string };
-      if (message.method === 'initialize') {
-        initializeCount += 1;
-        session = initializeCount === 1 ? 's1' : 's2';
-        response.setHeader('mcp-session-id', session);
+  it.skipIf(!existsSync('/proc'))(
+    'passes initialize through and recovers exactly once from a terminated session',
+    async () => {
+      const requests: {
+        path: string;
+        body: string;
+        session: string | undefined;
+        authorization: string | undefined;
+      }[] = [];
+      let session = 's1';
+      let initializeCount = 0;
+      let toolAttempts = 0;
+      const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = Buffer.concat(chunks).toString();
+        requests.push({
+          path: request.url ?? '',
+          body,
+          session: request.headers['mcp-session-id'],
+          authorization: request.headers.authorization,
+        });
+        if (request.url === '/healthz') {
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ version: '0.28.2' }));
+          return;
+        }
+        const message = JSON.parse(body) as { id?: number; method?: string };
+        if (message.method === 'initialize') {
+          initializeCount += 1;
+          session = initializeCount === 1 ? 's1' : 's2';
+          response.setHeader('mcp-session-id', session);
+          response.setHeader('content-type', 'application/json');
+          response.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: message.id,
+              result: { protocolVersion: '2025-06-18' },
+            }),
+          );
+          return;
+        }
+        if (message.method === 'notifications/initialized') {
+          response.statusCode = 202;
+          response.end();
+          return;
+        }
+        toolAttempts += 1;
+        if (toolAttempts === 1) {
+          response.statusCode = 404;
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32001 } }));
+          return;
+        }
         response.setHeader('content-type', 'application/json');
         response.end(
           JSON.stringify({
             jsonrpc: '2.0',
             id: message.id,
-            result: { protocolVersion: '2025-06-18' },
+            result: { content: [{ type: 'text', text: 'ok' }] },
           }),
         );
-        return;
-      }
-      if (message.method === 'notifications/initialized') {
-        response.statusCode = 202;
-        response.end();
-        return;
-      }
-      toolAttempts += 1;
-      if (toolAttempts === 1) {
-        response.statusCode = 404;
-        response.setHeader('content-type', 'application/json');
-        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32001 } }));
-        return;
-      }
-      response.setHeader('content-type', 'application/json');
-      response.end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: message.id,
-          result: { content: [{ type: 'text', text: 'ok' }] },
-        }),
+      });
+      const base = await listen(server);
+      const project = await mkdtemp(join(tmpdir(), 'mcp-bridge-'));
+      await writeFile(join(project, '.rembric'), 'PROJECT_SLUG=demo\n');
+      const client = await startBridge({
+        REMBRIC_SERVER_URL: base,
+        REMBRIC_API_TOKEN: 'secret-token',
+        CLAUDE_PROJECT_DIR: project,
+        PWD: '',
+      });
+
+      const initializeRaw =
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"claude-code","version":"9.9.9"}}}';
+      client.sendRaw(initializeRaw);
+      expect(await client.nextLine()).toMatchObject({
+        id: 1,
+        result: { protocolVersion: '2025-06-18' },
+      });
+      client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+      client.send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'memory.get', arguments: {} },
+      });
+      expect(await client.nextLine()).toMatchObject({
+        id: 2,
+        result: { content: [{ text: 'ok' }] },
+      });
+
+      expect(requests.filter((request) => request.path === '/healthz')).toHaveLength(1);
+      expect(requests.every((request) => request.authorization === 'Bearer secret-token')).toBe(
+        true,
       );
-    });
-    const base = await listen(server);
-    const project = await mkdtemp(join(tmpdir(), 'mcp-bridge-'));
-    await writeFile(join(project, '.rembric'), 'PROJECT_SLUG=demo\n');
-    const client = await startBridge({
-      REMBRIC_SERVER_URL: base,
-      REMBRIC_API_TOKEN: 'secret-token',
-      CLAUDE_PROJECT_DIR: project,
-      PWD: '',
-    });
+      expect(requests.filter((request) => request.path?.startsWith('/mcp/demo'))).toHaveLength(6);
+      const mcpRequests = requests.filter((request) => request.path?.startsWith('/mcp/demo'));
+      expect(mcpRequests[0].body).toBe(initializeRaw);
+      expect(mcpRequests[3].body).toBe(initializeRaw);
+      expect(JSON.parse(mcpRequests[0].body).params.clientInfo).toEqual({
+        name: 'claude-code',
+        version: '9.9.9',
+      });
+      expect(mcpRequests.map((request) => JSON.parse(request.body).method)).toEqual([
+        'initialize',
+        'notifications/initialized',
+        'tools/call',
+        'initialize',
+        'notifications/initialized',
+        'tools/call',
+      ]);
+      expect(mcpRequests.map((request) => request.session)).toEqual([
+        undefined,
+        's1',
+        's1',
+        undefined,
+        's2',
+        's2',
+      ]);
+      expect(client.stderr).not.toContain('secret-token');
+      if (client.child.pid === undefined) throw new Error('bridge subprocess has no pid');
+      expect(readFileSync(`/proc/${client.child.pid}/cmdline`, 'utf8')).not.toContain(
+        'secret-token',
+      );
+      expect(requests.every((request) => request.path !== '/.well-known')).toBe(true);
 
-    const initializeRaw =
-      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"claude-code","version":"9.9.9"}}}';
-    client.sendRaw(initializeRaw);
-    expect(await client.nextLine()).toMatchObject({
-      id: 1,
-      result: { protocolVersion: '2025-06-18' },
-    });
-    client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
-    client.send({
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'tools/call',
-      params: { name: 'memory.get', arguments: {} },
-    });
-    expect(await client.nextLine()).toMatchObject({ id: 2, result: { content: [{ text: 'ok' }] } });
-
-    expect(requests.filter((request) => request.path === '/healthz')).toHaveLength(1);
-    expect(requests.every((request) => request.authorization === 'Bearer secret-token')).toBe(true);
-    expect(requests.filter((request) => request.path?.startsWith('/mcp/demo'))).toHaveLength(6);
-    const mcpRequests = requests.filter((request) => request.path?.startsWith('/mcp/demo'));
-    expect(mcpRequests[0].body).toBe(initializeRaw);
-    expect(mcpRequests[3].body).toBe(initializeRaw);
-    expect(JSON.parse(mcpRequests[0].body).params.clientInfo).toEqual({
-      name: 'claude-code',
-      version: '9.9.9',
-    });
-    expect(mcpRequests.map((request) => JSON.parse(request.body).method)).toEqual([
-      'initialize',
-      'notifications/initialized',
-      'tools/call',
-      'initialize',
-      'notifications/initialized',
-      'tools/call',
-    ]);
-    expect(mcpRequests.map((request) => request.session)).toEqual([
-      undefined,
-      's1',
-      's1',
-      undefined,
-      's2',
-      's2',
-    ]);
-    expect(client.stderr).not.toContain('secret-token');
-    if (client.child.pid === undefined) throw new Error('bridge subprocess has no pid');
-    expect(readFileSync(`/proc/${client.child.pid}/cmdline`, 'utf8')).not.toContain('secret-token');
-    expect(requests.every((request) => request.path !== '/.well-known')).toBe(true);
-
-    client.child.stdin.end();
-    server.close();
-  });
+      client.child.stdin.end();
+      server.close();
+    },
+  );
 
   it('propagates a second 404 without a third attempt or second recovery', async () => {
     const methods: string[] = [];
