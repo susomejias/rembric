@@ -15,12 +15,6 @@ import type { CorpusItem, IngestedCorpus, IngestedMemory } from './types.js';
 
 const DAY_MS = 86_400_000;
 
-/**
- * Mirror of the shipping `CANDIDATES_PER_SAVE_MAX` default
- * (`apps/web/src/lib/mcp-server.ts` reads the same 5). Inlined instead of read
- * from a config module: the harness measures the shipping SAVE PATH, not the
- * deployment's environment.
- */
 const CANDIDATES_PER_SAVE_MAX_DEFAULT = 5;
 
 export interface Ingested extends IngestedCorpus {
@@ -42,20 +36,6 @@ interface SaveDeps {
   ) => Promise<boolean>;
 }
 
-/**
- * The shipping save-time curation path, composed here.
- *
- * `packages/mcp/src/memory-tools.ts::saveMemoryWithCandidates` is the one
- * implementation a live `memory.save` goes through — `topic_key` supersession,
- * inline embedding, save-time candidate detection and entity linking — and this
- * harness must ingest through that path rather than a bare insert (design.md
- * Decision 2). It cannot be imported from `@rembric/core`: the dependency edge
- * runs the other way (`@rembric/mcp` depends on `@rembric/core`), and declaring
- * it here — even as a devDependency — is a turbo build cycle, measured. The
- * composition below calls the same public core/db primitives that wrapper
- * calls, so the corpus is still the shipping path's output. Any new step in
- * that wrapper has to be mirrored here.
- */
 async function saveThroughCuration(
   deps: SaveDeps,
   input: SaveMemoryInput,
@@ -63,8 +43,6 @@ async function saveThroughCuration(
 ): Promise<ReturnType<MemoryService['saveWithTopicKey']>['memory']> {
   const { memory: saved } = deps.memory.saveWithTopicKey(input, scope);
 
-  // Extraction is pure and runs before detection reads: the just-saved row must
-  // not count toward its own entity's rarity stats.
   const extracted = extractEntities(saved.title, saved.content);
 
   try {
@@ -79,8 +57,7 @@ async function saveThroughCuration(
       deps.relations.createPending({ sourceId: saved.id, targetId: candidate.targetId });
     }
   } catch {
-    // Best-effort in the shipping wrapper too: a detection or embedding failure
-    // must not fail the save.
+    // Best-effort, as in the shipping wrapper: detection or embedding failure must not fail the save.
   }
 
   try {
@@ -92,18 +69,6 @@ async function saveThroughCuration(
   return saved;
 }
 
-/**
- * Ingests `items` through the real save path — `MemoryService.saveWithTopicKey`
- * + inline `embedNow` + save-time candidate detection, exactly like a live
- * `memory.save` call — into a fresh throwaway SQLite file. Per design.md
- * Decision 2: this is what makes the harness measure the shipping system,
- * not a synthetic index.
- *
- * Each item's `createdAt`/`lastSeenAt` is stamped `daysAgo` days before the
- * moment this function runs (not a fixed historical date), so the relative
- * age structure — and therefore the ranking boost it drives — is identical
- * regardless of which calendar day the eval executes.
- */
 export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Promise<Ingested> {
   const { handle, dataDir, cleanup } = createTestDb();
   const repos = createRepositories(handle.db);
@@ -115,9 +80,6 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
     projectIdBySlug.set(p.slug, row.id);
   }
 
-  // `clock` ends the loop frozen at the last item's daysAgo — harmless today only
-  // because `MemoryService.search` never threads `now` into `hybridSearch`'s
-  // recency boost (that uses real wall-clock `Date.now()` directly).
   const clock = new TestClock();
   const embedText = (text: string): Promise<Float32Array> =>
     embedder.embed(embeddingQueryInput(text));
@@ -157,10 +119,6 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
     allIds.push(saved.id);
   }
 
-  // A topic_key upsert flips an earlier row in this same loop from
-  // active -> superseded; re-read final state instead of trusting each
-  // insert's own row, and drop anything no longer active so grep/dump see
-  // exactly the corpus `hybrid`'s default status='active' filter sees.
   const finalRows = repos.memory.unsafeGetByIds(allIds);
   const ingested: IngestedMemory[] = finalRows
     .filter((m) => m.status === 'active')

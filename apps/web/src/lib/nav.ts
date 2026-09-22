@@ -16,43 +16,24 @@ export type BadgeKey = 'needsReview' | 'pendingJudgments';
 
 export interface NavEntry {
   readonly key: string;
-  /** Sidebar section the entry is listed under. */
   readonly group: 'main' | 'admin';
-  /** The section number the sidebar prints in the item's `title`: `§ 02 · Memories`. */
   readonly num: string;
   readonly label: string;
   readonly href: string;
   readonly icon: LucideIcon;
-  /** The one badge counter this entry paints, if any. */
   readonly badgeKey?: BadgeKey;
 }
 
-/**
- * One badge's server-wide total plus its per-project split. A connection resolves
- * to exactly one project, but the dashboard reads across all of them, so a badge
- * that carried only a total would say "3" where the operator needs to know *which*
- * project to open. `badgeTooltip` is what turns the split into the item's title.
- */
 export interface BadgeBreakdown {
   readonly total: number;
   readonly byProject: ReadonlyArray<{ readonly label: string; readonly count: number }>;
 }
 
-/** The two counters the sidebar paints, each keyed to the one entry that resolves it. */
 export type NavBadgeCounters = {
   readonly needsReview?: BadgeBreakdown;
   readonly pendingJudgments?: BadgeBreakdown;
 };
 
-/**
- * The navigation table is data, not markup: ordering, labels, icons, section
- * numbers and badges are pinned here so the sidebar reads one source. Order,
- * `num` and the two badge entries are MAIN above ADMIN, `needsReview` on
- * memories and `pendingJudgments` on judgments.
- *
- * Every entry carries its own icon: a repeated glyph reads as a rendering bug
- * rather than as two sections.
- */
 export const NAV: readonly NavEntry[] = [
   {
     key: 'overview',
@@ -138,11 +119,6 @@ export const NAV: readonly NavEntry[] = [
   },
 ];
 
-/**
- * The two sections, in render order, each carrying the caption the sidebar paints
- * above its items. The captions are literal `MAIN` / `ADMIN` rather than
- * prettified, because the rail's identity type is uppercase.
- */
 export const NAV_GROUPS = [
   { key: 'main', heading: 'MAIN' },
   { key: 'admin', heading: 'ADMIN' },
@@ -155,10 +131,6 @@ export function navEntryForPath(pathname: string): NavEntry | undefined {
   );
 }
 
-/**
- * Native `title` for a sidebar badge: the headline plus the per-project
- * breakdown, one project per line, biggest first.
- */
 export function badgeTooltip(key: BadgeKey, badge: BadgeBreakdown): string {
   const head =
     key === 'pendingJudgments'
@@ -170,12 +142,6 @@ export function badgeTooltip(key: BadgeKey, badge: BadgeBreakdown): string {
   return lines.length > 0 ? `${head}\n${lines.join('\n')}` : head;
 }
 
-/**
- * `/dashboard/login` is the one dashboard route that renders with no chrome: it
- * is a full-bleed screen carrying its own brand block, and `middleware.ts` keeps
- * it public. The path is named here, once, because the shell that has to opt out
- * of the sidebar, the header and the content column is its only reader.
- */
 export const CHROME_FREE_PATH = '/dashboard/login';
 
 export function isChromeFreePath(pathname: string | null | undefined): boolean {

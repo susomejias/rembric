@@ -35,40 +35,6 @@ import {
 } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
-/**
- * The dashboard frame: the vertical rail, the content column beside it, and the
- * one route that renders with neither.
- *
- * It owns the content column because no layout can opt out of its parent or read
- * the pathname, and `/dashboard/login` is a full-bleed screen that must keep
- * rendering without the frame, so the only place that exception can live is a
- * client component above the column. `lib/nav` names the path once; this is its
- * only reader.
- *
- * `TooltipProvider` is here because the rail's icons-only mode is the only
- * tooltip surface in the app, and the primitive's tooltips need a provider above
- * them — the root layout has none.
- *
- * `min-w-0` on both the inset and its content column is load-bearing: the inset
- * is a flex item, so its default `min-width: auto` refuses to shrink below the
- * column's min-content width and a wide child would push the whole page past the
- * viewport.
- *
- * The content column takes the full width the inset offers — no `max-w` and no
- * `mx-auto`. A cap here left a several-hundred-pixel void on the right at a wide
- * viewport with the rail collapsed. Readable-content widths belong to the content
- * that needs them (markdown panels, forms), not to the dashboard frame.
- *
- * This column also owns the vertical rhythm, and owns it alone: `oauth-consent`
- * renders in this frame without a `Page`, so `Page` carries no vertical padding
- * and the two can never be added into one gap.
- *
- * `version` and `updater` are the rail's two server-side facts, resolved in
- * `dashboard/layout.tsx` and handed down rather than read here: the running
- * release identity comes off the filesystem (`lib/version`), and the update
- * read-state comes from the release-check service. Neither is importable from
- * this client module.
- */
 export function SidebarFrame({
   children,
   counters = {},
@@ -97,25 +63,6 @@ export function SidebarFrame({
   );
 }
 
-/**
- * The dashboard's primary navigation, on the shadcn sidebar primitives.
- *
- * The rail is the primitive's, in icons-only mode, so the mouse hover edge, the
- * ⌘B shortcut and the mobile sheet all come from `SidebarProvider` rather than
- * from a second implementation.
- *
- * What is tuned is deliberately two things: the row labels wear the rail's
- * identity type (`font-mono uppercase`) and the badge keeps the `--warn` ink.
- * Everything else is the primitive's own presentation — the
- * group captions are the stock `SidebarGroupLabel`, the rows are its default
- * size, and the active row is its `data-active` fill. A 3px lime rule and
- * `size="lg"` rows are deliberately avoided: a 3px border on the primitive's
- * rounded row reads as a bracket, and tall rows make a ten-item rail read as a
- * list of panels.
- *
- * The order of the three regions: brand block and update slot, then
- * `MAIN` / `ADMIN`, then the sign-out and the collapse toggle in the footer.
- */
 export function AppSidebar({
   counters = {},
   version,
@@ -146,10 +93,6 @@ export function AppSidebar({
                 {group.heading}
               </SidebarGroupLabel>
               <SidebarGroupContent>
-                {/* `gap-1` is the only spacing this rail adds to the primitive's
-                    own rows: at `gap-0` a ten-item rail reads as one continuous
-                    block (main's own rows sat flush too, but they carried a 44px
-                    row). The rows keep the primitive's padding. */}
                 <SidebarMenu className="gap-1">
                   {entries.map((entry) => (
                     <NavItem
@@ -175,15 +118,6 @@ export function AppSidebar({
   );
 }
 
-/**
- * The rail's brand block — the mark, the wordmark and the running version. The
- * mark is the transparent logo the login
- * card also wears; the wordmark and the version drop out in icons-only mode, where
- * only the mark has room.
- *
- * `version` is a prop because it is a filesystem read (`lib/version`), which this
- * client module cannot do itself.
- */
 function BrandBlock({ version }: { version: string }) {
   return (
     <Link
@@ -206,17 +140,9 @@ function BrandBlock({ version }: { version: string }) {
   );
 }
 
-/**
- * The raw release-check facts, as the layout reads them off the service. Passed
- * to the rail as data rather than as a rendered slot so the client owns the
- * wording and the branch table stays testable on its own.
- */
 export interface UpdaterInput {
-  /** `REMBRIC_UPDATE_CHECK=off` disables the daily check; the slot still renders. */
   readonly enabled: boolean;
-  /** The release the check found, or `null` when it found none. */
   readonly latestVersion: string | null;
-  /** Most recent check this process lifetime, `null` until one has run. */
   readonly lastCheckedAt: Date | null;
 }
 
@@ -226,22 +152,6 @@ export type UpdaterReadState =
   | { readonly kind: 'unknown' }
   | { readonly kind: 'checked' };
 
-/**
- * The slot's read-state, from the service's own public surface.
- *
- * The mapping cannot claim "up to date". `UpdateCheckService.peek()` answers
- * `null` both when a check succeeded and found nothing and when the check could
- * not reach GitHub — the failed-check flag behind that difference is private — so
- * the only reading that stays true under every outcome is that no newer release
- * is *known*. The slot says exactly that, and never `UP TO DATE`; `checked` is
- * what `lastCheckedAt` set means, and `unknown` is a process that has not
- * completed a check yet.
- *
- * A disabled check is its own state rather than an absent slot: `/dashboard/
- * update` is where the operator turns the reading over, so the rail must keep
- * pointing at it. Hiding the slot would strand the only in-app route to the page
- * that explains the setting.
- */
 export function updaterReadState(input: UpdaterInput): UpdaterReadState {
   if (!input.enabled) return { kind: 'disabled' };
   if (input.latestVersion !== null) {
@@ -250,15 +160,6 @@ export function updaterReadState(input: UpdaterInput): UpdaterReadState {
   return input.lastCheckedAt === null ? { kind: 'unknown' } : { kind: 'checked' };
 }
 
-/**
- * The update slot under the brand, in the theme's utilities,
- * and a link in every state, including a disabled check, so `/dashboard/update`
- * stays reachable even when the rail has nothing to announce. An available
- * release wears the accent; the no-news states are quiet so a working rail is not
- * permanently shouting.
- *
- * In icons-only mode the label drops to `sr-only` and the box keeps its dot.
- */
 function UpdaterSlot({ updater }: { updater: UpdaterInput }) {
   const state = updaterReadState(updater);
 
@@ -308,29 +209,6 @@ function badgeFor(entry: NavEntry, counters: NavBadgeCounters): NavItemBadge | n
   return { count: breakdown.total, title: badgeTooltip(entry.badgeKey, breakdown) };
 }
 
-/**
- * One rail row. The active row is the primitive's `data-active` fill, raised to
- * the accent ink (`data-active:text-primary` — the icon inherits it), plus a
- * straight lime rule at the row's left edge.
- *
- * The type and icon sizes are deliberate, not the primitive's defaults: the
- * label is ~11.5px over an 18px icon, where the stock row is 14px over 16px.
- * `h-9` is the one addition to the primitive's 32px row; the taller target is what
- * the mobile sheet's rows get too. The icons-only size is untouched: the primitive
- * pins it with `group-data-[collapsible=icon]:size-8!`.
- *
- * The rule is a detached element rather than a `border-l` on the row because the
- * stock row is rounded: a left border follows the corner radius into a bracket.
- *
- * `pr-8` is what keeps a long label from running under the badge.
- *
- * `pointer-events-auto` is the one thing the badge cannot inherit: the primitive
- * disables pointer events on it, and a `title` on an element the pointer never
- * reaches is a tooltip nobody can read. The click still bubbles to the row's own
- * link, so only the hover target changes.
- *
- * The tooltip is the primitive's, so icons-only mode still names each row.
- */
 function NavItem({
   entry,
   isActive,

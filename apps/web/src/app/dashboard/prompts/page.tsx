@@ -45,32 +45,11 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The prompt library, in the production dashboard's composition: the numbered
- * view head, the scope/agent/session/search filter bar, and the prompts as a
- * table with the title/project/session/agent/tags/status/created/content
- * columns.
- *
- * The filter model and the read are the ported view's own: the FTS branch
- * searches the whole corpus post-pagination, so the URL's other filters are
- * applied to its rows in memory (`matchesFilters`) while the non-search branch
- * pushes every filter down into SQL.
- */
 export const dynamic = 'force-dynamic';
 
 const DELETE_FORM = 'prompt.delete';
 const UNDELETE_FORM = 'prompt.undelete';
 
-/**
- * The operator's two prompt verbs, on the per-row actions stack: Delete soft-deletes
- * and redirects to the flash the list reads; Undelete clears `deleted_at` the same
- * way. Both are gated by `guardAction` — session, then admin scope, then the CSRF
- * token minted for that exact form name — and both carry `adminBypass`, because
- * these are the operator's own verbs. Idempotence lives in the service (`softDelete`
- * and `undelete` are no-ops on a row already in the target state); the action's job
- * is to reach it and to flash. `redirect` is called outside the `try` so the
- * framework's control-flow error is not caught as a service failure.
- */
 export async function deletePrompt(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, DELETE_FORM);
@@ -101,7 +80,6 @@ export async function undeletePrompt(_prev: ActionState, formData: FormData): Pr
   redirect(`/dashboard/prompts?undeleted=${encodeURIComponent(id)}`);
 }
 
-/** The trimmed string field the action reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -156,8 +134,6 @@ export default async function PromptsPage({
   const hasMore = rows.length > PAGE_SIZE;
   const visible = rows.slice(0, PAGE_SIZE);
 
-  // A text query has no cheap exact count, so the pager shows a lower bound
-  // rather than a wrong exact figure.
   const totalCount: number | undefined = resolvedProject.unknown
     ? 0
     : ftsQuery
@@ -344,11 +320,6 @@ export default async function PromptsPage({
   );
 }
 
-/**
- * Main's per-row action stack: a soft-deleted row offers Undelete instead of Delete,
- * and only Delete is confirmation-gated — a `warn` tone, because the row is one
- * Undelete away from coming back.
- */
 function PromptActions({ id, deleted }: { id: string; deleted: boolean }) {
   if (deleted) {
     return (

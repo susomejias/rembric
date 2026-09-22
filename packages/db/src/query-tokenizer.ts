@@ -1,28 +1,10 @@
 import type Database from 'better-sqlite3';
 
-/**
- * The query's terms are read back out of FTS5 rather than reproduced in
- * JavaScript — memory/spec.md, "Term-statistics lookups MUST be keyed on the
- * index's own terms". A term the application invents is absent from the index's
- * statistics and takes the weight of a term the corpus has never seen, which is
- * the maximum, so the corpus's commonest word can score as its rarest.
- *
- * Both tables live in the connection's temporary schema and the tokenising one
- * is contentless, so no query text reaches the durable database or its WAL.
- */
 export const QUERY_TERMS_TABLE = 'rembric_query_terms';
 export const QUERY_TERMS_VOCAB_TABLE = 'rembric_query_terms_vocab';
 /** Anything but `temp` puts per-query writes into the WAL of an append-only store. */
 export const QUERY_TERMS_SCHEMA = 'temp';
 
-/**
- * fts5 declaration arguments the derivation knows how to carry. `content=` and
- * `content_rowid=` are dropped (the tokenising table holds its own text); a
- * bare argument is a column definition and is replaced by the single `body`
- * column. Anything else fails startup rather than being silently omitted: a
- * `tokenize=` that did not reach this table is exactly the divergence the
- * mechanism exists to remove.
- */
 const CARRIED_OPTIONS = ['tokenize', 'prefix', 'detail', 'columnsize'];
 const DROPPED_OPTIONS = ['content', 'content_rowid'];
 
@@ -51,11 +33,6 @@ export function inheritedFts5Arguments(declaration: string): string[] {
   return carried;
 }
 
-/**
- * Splits the argument list of `... USING fts5(<args>)` on commas that are not
- * inside a string or bracketed identifier. FTS5 accepts `'`, `"`, `` ` `` and
- * `[…]` around an option's value, and a tokenizer argument list arrives quoted.
- */
 function splitFts5Arguments(declaration: string): string[] {
   const open = declaration.indexOf('(');
   const close = declaration.lastIndexOf(')');
@@ -111,12 +88,6 @@ export function deriveQueryTokenizerDdl(declaration: string): QueryTokenizerTabl
   };
 }
 
-/**
- * Creates the tokenising table on `sqlite`, deriving its declaration from the
- * one the migrations left behind. Must run AFTER the migration runner: the
- * declaration is read out of `sqlite_master`, so a migration that changes
- * `memory_fts`'s tokenizer is picked up on the next boot with no code change.
- */
 export function createQueryTokenizerTables(sqlite: Database.Database): string[] {
   const declaration = sqlite
     .prepare<[], { sql: string }>(`SELECT sql FROM sqlite_master WHERE name = 'memory_fts'`)

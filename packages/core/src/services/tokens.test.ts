@@ -42,9 +42,6 @@ describe('TokensService.create', () => {
   });
 
   it('does not admit a project scope string as caller-supplied input', () => {
-    // Enforced by `tsc`, not by this assertion: widening `CreateTokenInput.scope`
-    // to an arbitrary string makes the directives below unused and reds the build
-    // (openspec/specs/auth/spec.md "The project segment cannot be supplied as a slug").
     const rejected: CreateTokenInput[] = [
       // @ts-expect-error `project:<id>` must be composed from a resolved project row, never accepted here
       { name: 'slug-write', scope: 'project:alpha' },
@@ -127,8 +124,6 @@ describe('isAuthorized', () => {
       isAuthorized(unbound('project:abc'), 'write', { scope: 'project', projectId: 'xyz' }),
     ).toBe(false);
     expect(isAuthorized(unbound('project:abc'), 'write', { scope: 'global' })).toBe(false);
-    // The premise the include_global widening gate rests on: neither
-    // project-pinned form may READ global either.
     expect(isAuthorized(unbound('project:abc'), 'read', { scope: 'global' })).toBe(false);
     expect(isAuthorized(unbound('read:project:abc'), 'read', { scope: 'global' })).toBe(false);
   });
@@ -143,9 +138,6 @@ describe('isAuthorized', () => {
   });
 
   it('the two set literals authorize nothing by string alone', () => {
-    // The union's base. Both fall through to the final `return false`: neither
-    // is `*`/`read:*`, and `'projects'.startsWith('project:')` is false because
-    // position 7 is 's', not ':' — asserted rather than reasoned about.
     expect('projects'.startsWith('project:')).toBe(false);
     expect('read:projects'.startsWith('read:project:')).toBe(false);
     for (const scope of ['projects', 'read:projects'] as const) {
@@ -182,8 +174,6 @@ describe('isAuthorized', () => {
       isAuthorized(set('read:projects'), 'write', { scope: 'project', projectId: 'abc' }),
     ).toBe(false);
 
-    // A membership row on any other arm is inert: on a `read:*` base the set
-    // would otherwise be decorative, since that base already reads everything.
     expect(isAuthorized(set('read:*'), 'write', { scope: 'project', projectId: 'abc' })).toBe(
       false,
     );
@@ -206,10 +196,6 @@ describe('TokensService.authenticate — verified-credential cache (#266)', () =
   });
 
   it('skips the scrypt scan on a repeat authenticate() call for the same token', async () => {
-    // Constructed over the SAME `repos` instance the spy watches — the
-    // shared `tokens` from the outer beforeEach wraps its own, separate
-    // Repositories object, so a spy on this file's `repos` would never
-    // observe calls made through it.
     const scopedTokens = new TokensService(repos, db.handle.db);
     const { plaintext } = scopedTokens.create({ name: 'cached', scope: '*' });
     const listAllSpy = vi.spyOn(repos.tokens, 'listAll');
@@ -256,8 +242,6 @@ describe('TokensService.authenticate — verified-credential cache (#266)', () =
   });
 
   it('evicts the oldest entry once the cache exceeds its bound', async () => {
-    // Small injected bound so this proves the eviction policy without
-    // paying for dozens of real scrypt verifies (the whole point of #266).
     const smallCacheTokens = new TokensService(repos, db.handle.db, undefined, 2);
     const p1 = smallCacheTokens.create({ name: 'evict-1', scope: '*' }).plaintext;
     const p2 = smallCacheTokens.create({ name: 'evict-2', scope: '*' }).plaintext;

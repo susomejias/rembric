@@ -1,12 +1,3 @@
-/**
- * Self-update capability detection — the four-quadrant contract.
- *
- * Detection is strictly runtime and side-effect free: no socket on disk
- * means the Docker code path is never entered (zero-action compatibility).
- * A socket that exists but cannot be used degrades to `manual` with a
- * single informational log line, never an error.
- */
-
 import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 
@@ -112,8 +103,6 @@ export class CapabilityDetector {
     }
 
     const { repo, tag } = splitImageRef(inspect.Config.Image);
-    // Ground truth is the tag the container was created from; the
-    // REMBRIC_VERSION env var (compose pin via env_file) is a cross-check.
     if (isPinnedTag(tag) || (tag === 'latest' && isPinnedTag(this.env['REMBRIC_VERSION'] ?? ''))) {
       return {
         state: 'pinned',

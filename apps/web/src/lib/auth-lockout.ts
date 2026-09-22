@@ -1,25 +1,11 @@
-/**
- * Failed-authentication lockout, keyed on a pre-auth identity (source IP or a
- * trusted-proxy forwarded hop).
- *
- * Consulted BEFORE token-hash verification so an unauthenticated caller cannot
- * force repeated expensive hashing (the scrypt scan blocks the single Node
- * thread). Only *failed* attempts accrue; a success clears the record, so
- * legitimate clients are never penalised.
- */
-
 export interface AuthLockoutConfig {
-  /** Failures within the window before the identity is locked out. */
   maxFailures: number;
-  /** Window (ms) over which failures accumulate. */
   windowMs: number;
-  /** How long (ms) a lockout lasts once tripped. */
   lockoutMs: number;
 }
 
 export interface LockoutDecision {
   locked: boolean;
-  /** Seconds until the lockout lifts. 0 when not locked. */
   retryAfterSeconds: number;
 }
 
@@ -41,7 +27,6 @@ export class AuthLockout {
     }
   }
 
-  /** Is this identity currently locked out? Cheap; it does no hashing. */
   check(key: string): LockoutDecision {
     const rec = this.records.get(key);
     if (!rec) return { locked: false, retryAfterSeconds: 0 };
@@ -55,7 +40,6 @@ export class AuthLockout {
     return { locked: false, retryAfterSeconds: 0 };
   }
 
-  /** Record a failed authentication for this identity; trips lockout at the threshold. */
   recordFailure(key: string): void {
     const ts = this.now();
     const rec = this.records.get(key);
@@ -71,7 +55,6 @@ export class AuthLockout {
     }
   }
 
-  /** Clear the failure record for this identity after a successful auth. */
   recordSuccess(key: string): void {
     this.records.delete(key);
   }

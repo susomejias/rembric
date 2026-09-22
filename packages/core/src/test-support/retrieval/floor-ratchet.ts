@@ -1,20 +1,3 @@
-/**
- * The gated retrieval metrics and the ratchets that protect their committed
- * bounds — floors for the higher-is-better metrics, caps for the
- * lower-is-better ones.
- *
- * A floor is written as `measured - tolerance`, which on its own is not a
- * regression gate at all: re-running `--write-baselines` after a regression
- * rewrote the floor UNDERNEATH the regressed value, so the next run compared
- * against the worse number and CI stayed green permanently. Two regressions of
- * a tolerance each, with a baseline rewrite between them, took the gate down by
- * two tolerances and nothing recorded that it had moved.
- *
- * A floor therefore only ever moves UP. Lowering one stays possible — a
- * deliberate recall-for-tokens trade is legitimate — but only as an explicit,
- * printed act, never as a side effect of regenerating baselines.
- */
-
 export const FLOOR_METRICS = ['precisionAtK', 'recallAtK', 'mrr'] as const;
 export type FloorMetric = (typeof FLOOR_METRICS)[number];
 export type MetricFloors = Record<FloorMetric, number>;
@@ -116,13 +99,6 @@ export interface RatchetedCaps {
   notes: string[];
 }
 
-/**
- * The floor ratchet's mirror image: a cap only ever moves DOWN, and is clamped
- * to 1 because every capped metric is a rate. `headroomByMetric` is per-metric
- * because the denominators differ — empty-gold queries, gold-bearing queries,
- * and rows returned on non-widened queries — and a shared one set from the
- * coarsest axis silently tolerates several queries going wrong on a finer one.
- */
 export function ratchetCaps(opts: {
   label: string;
   measuredByK: Record<number, MetricCaps>;

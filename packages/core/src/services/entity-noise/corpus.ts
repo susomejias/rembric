@@ -1,41 +1,9 @@
 import { type EntityKind } from '@rembric/db';
 
-/**
- * Adversarial corpus behind `memory-entities`' "a kind MUST earn its place
- * against the lexical branch" requirement. It exists so the justification
- * table in that spec is measured rather than asserted in prose.
- *
- * The measurement asks one question per probe: an agent has an exact
- * identifier and looks it up as text. `sanitizeFtsQuery` quotes each
- * whitespace-delimited token and ORs them, and FTS5's `unicode61` tokenizer
- * drops `/`, `.`, `_`, `#` and `-` — so how many of the documents the lexical
- * branch returns are not about that identifier at all?
- *
- * A decoy is admissible ONLY under one of the two mechanisms the spec names,
- * and it MUST declare which. Without that rule any kind's figure could be
- * inflated by writing more prose:
- *
- *   - `near-miss-identifier` — the document carries a DIFFERENT, valid
- *     identifier of the same class whose tokens overlap the target's (a
- *     prefix, a suffix, or a sibling in the same numeric family).
- *   - `tokenization-collision` — the document is ordinary prose that happens
- *     to contain the identifier's tokens, reachable only because the
- *     tokenizer dropped the separator that made it an identifier.
- *
- * A kind whose probes measure 0% noise is NOT thereby unjustified: it may
- * still earn its place by enumeration or by removing a false extraction (the
- * other two clauses of the requirement).
- */
-
 export type NoiseMechanism = 'near-miss-identifier' | 'tokenization-collision';
 
 export interface NoiseProbe {
   kind: EntityKind;
-  /**
-   * Sub-family within the kind, when one kind's branches measure differently
-   * enough that a single figure would misreport both — `error_code`'s prefixed
-   * families versus its closed gRPC name list. Also the reporting group key.
-   */
   family?: string;
   /** The exact identifier the agent is looking up. */
   identifier: string;
@@ -45,13 +13,6 @@ export interface NoiseProbe {
   decoys: readonly { readonly text: string; readonly mechanism: NoiseMechanism }[];
 }
 
-/**
- * The figures published in `memory-entities`' justification table, as whole
- * percentage points, keyed by reporting group. `noise-rate.test.ts` asserts
- * the measurement against this map, so the table and the corpus cannot drift
- * and a new kind cannot be justified in prose alone. Regenerate with
- * `npx tsx src/test/entity-noise/report.ts`.
- */
 export const PUBLISHED_NOISE: Readonly<Record<string, number>> = {
   path: 67,
   hostname: 67,
@@ -186,8 +147,6 @@ export const NOISE_PROBES: readonly NoiseProbe[] = [
     family: 'error_code (ERR_/SQLITE_/E_/errno)',
     identifier: 'ERR_MODULE_NOT_FOUND',
     truth: 'the entrypoint throws ERR_MODULE_NOT_FOUND when the dist copy is stale',
-    // No admissible decoy: the prefix plus the underscores make the whole
-    // token one FTS5 phrase with no shorter valid sibling and no prose form.
     decoys: [],
   },
   {

@@ -23,8 +23,6 @@ interface TestDb {
 
 function createTestDb(): TestDb {
   const dataDir = mkdtempSync(join(tmpdir(), 'rembric-db-test-'));
-  // Silenced: every fixture applies every migration, so the announcing ones
-  // would narrate themselves once per test.
   const handle = createDb({ dataDir, onMigrationProgress: () => {}, onStartupLog: () => {} });
   return {
     handle,

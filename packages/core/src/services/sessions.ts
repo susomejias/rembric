@@ -5,18 +5,6 @@ import { ulid } from 'ulid';
 
 import { DomainError } from './errors.js';
 
-/**
- * Backing store for `/dashboard` cookie sessions.
- *
- * The cookie carries `<sessionId>.<signature>` where the signature is an
- * HMAC over the session id using `sessionKey`. We look up the row in
- * `dashboard_sessions`, check expiration, and return the underlying token
- * for authz decisions.
- *
- * CSRF: each session row carries a `csrfSecret` used to mint per-form
- * CSRF tokens by HMAC over (sessionId, formName).
- */
-
 const COOKIE_NAME = 'rembric_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -84,10 +72,6 @@ export class SessionsService {
     this.repos.dashboardSessions.deleteById(sessionId);
   }
 
-  /**
-   * Mint a CSRF token tying a session to a form name. Forms include this
-   * value as a hidden input or HTMX header; mutating handlers verify.
-   */
   csrfToken(session: DashboardSession, formName: string): string {
     return createHmac('sha256', session.csrfSecret).update(formName).digest('base64url');
   }

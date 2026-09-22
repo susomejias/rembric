@@ -1,23 +1,3 @@
-/**
- * Volumetric corpus generator — the reproduction recipe for a performance claim.
- *
- * Usage:
- *   pnpm run corpus:build -- --db <dir> [--memories N] [--sessions M] [--seed S] [--skew]
- *
- * The pnpm script is `corpus:build`, deliberately NOT `seed:*`: this script and
- * `seed-dev.ts` have opposite safety properties and must not be confusable at a
- * glance. `seed-dev` wipes on `--reset`; this one cannot delete anything and
- * refuses a database that already holds memories.
- *
- * It is NOT a demo fixture and it is NOT run by the shipped image. It exists so
- * that "we measured this at 50k" is a command a reader can run rather than a
- * figure quoted from a database that existed on one machine on one day.
- *
- * Its vectors are synthetic (see SYNTHETIC_VECTOR_CAVEAT): no claim about
- * retrieval quality, ranking, fusion or abstention may be drawn from a corpus
- * it built. `pnpm run eval` is the instrument for those.
- */
-
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
@@ -45,22 +25,16 @@ import {
 export const SYNTHETIC_VECTOR_CAVEAT =
   'vectors are deterministic pseudo-random unit vectors, NOT embeddings — no retrieval-quality, ranking, fusion or abstention claim may be drawn from this corpus (use `pnpm run eval`)';
 
-/**
- * Refused regardless of whether they are populated: `dev:docker:up` reseeds on
- * every boot, so an empty `data-dev` is exactly when a corpus would be lost.
- */
 export const RESERVED_DIR_NAMES: readonly string[] = ['data', 'data-dev'];
 export const RESERVED_ABSOLUTE_DIRS: readonly string[] = ['/data'];
 
 export interface VolumetricArgs {
-  /** Directory that holds (or will hold) `data.db`. */
   dataDir: string;
   memories: number;
   sessions: number;
   relations: number;
   prompts: number;
   seed: number;
-  /** Memories follow `VOLUMETRIC_SHAPE.skewShares` instead of an even split. */
   skew: boolean;
 }
 
@@ -88,7 +62,6 @@ function requireCount(flag: string, raw: string): number {
   return n;
 }
 
-/** An unrecognised flag is a usage error, so `--reset` cannot be silently ignored. */
 export function parseArgs(argv: readonly string[]): VolumetricArgs {
   let dataDir: string | undefined;
   let memories: number = DEFAULT_ARGS.memories;
@@ -144,11 +117,6 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
   return args;
 }
 
-/**
- * The cross-axis preconditions. Asserted by `buildCorpus` too, so a
- * programmatic caller cannot bypass them and silently get self-relations or an
- * empty project.
- */
 export function assertBuildable(args: VolumetricArgs): void {
   if (args.relations > 0 && args.memories < MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS) {
     throw new UsageError(
@@ -169,13 +137,11 @@ export function assertBuildable(args: VolumetricArgs): void {
   }
 }
 
-/** Accepts the directory or the `data.db` file itself; `createDb` owns the basename. */
 export function normalizeDataDir(dbArg: string): string {
   const abs = resolve(dbArg);
   return basename(abs) === 'data.db' ? resolve(abs, '..') : abs;
 }
 
-/** Opens read-only for the emptiness test, so a refusal never modifies a file. */
 export function refuseTarget(dataDir: string): string | null {
   const abs = resolve(dataDir);
   if (RESERVED_DIR_NAMES.includes(basename(abs)) || RESERVED_ABSOLUTE_DIRS.includes(abs)) {
@@ -193,7 +159,6 @@ export function refuseTarget(dataDir: string): string | null {
   if (!existsSync(dbFile)) return null;
   if (!statSync(dbFile).isFile()) return `refusing to write to ${dbFile}: not a regular file`;
 
-  // Read-only so the check itself cannot create, migrate or touch anything.
   const handle = createDb({ dataDir: abs, readonly: true });
   let memories: number | null;
   try {
@@ -201,7 +166,6 @@ export function refuseTarget(dataDir: string): string | null {
   } finally {
     handle.close();
   }
-  // null = the table does not exist, i.e. an unmigrated or empty file.
   if (memories !== null && memories > 0) {
     return (
       `refusing to write to ${dbFile}: it already holds ${memories} memories. ` +
@@ -213,79 +177,33 @@ export function refuseTarget(dataDir: string): string | null {
   return null;
 }
 
-/**
- * The declared shape, asserted by the co-located test. Each figure is labelled
- * with its provenance: reproduced from `tune`, or a harness choice.
- */
 export const VOLUMETRIC_SHAPE = {
-  /** `tune`: "6 scopes" — read here as six projects, one per scope slot. */
   scopeCount: 6,
   projectCount: 6,
-  /**
-   * `--skew` only. Share of the memory axis per scope slot, in slot order, so
-   * slot 1 (`vol-0`) dominates and slot 0 (`vol-shared`) is the smallest. A
-   * corpus split evenly over six projects is the one shape a widening cost is
-   * never measured on in production, where one repository usually holds most of
-   * what an agent has ever written.
-   */
   skewShares: [0.02, 0.6, 0.2, 0.1, 0.05, 0.03],
-  /** `tune`: "realistic ~1.3KB bodies". Median of the generated distribution. */
   bodyBytesP50: 1300,
-  /** The long tail D3 asks for: p90 at roughly twice the median. */
   bodyBytesP90: 2600,
-  /** `tune`: "~18 entities per memory", as counted by the real extractor. */
   entitiesPerMemory: 18,
-  /** `tune`: "~1.35 confirmations per memory". Affirmations; the harness writes no refutations. */
   confirmationsPerMemory: 1.35,
-  /**
-   * HARNESS CHOICE, not a `tune` figure — `tune` never published a ratio. Set
-   * high enough that `memory_replaces` and the supersede chains are populated
-   * for the findings that walk that graph. Realised as: two fifths of memories
-   * sit in two-long `topic_key` chains, so one fifth end up superseded.
-   */
   supersededFraction: 0.2,
-  /** HARNESS CHOICE: an all-active session corpus would not exercise the status filters. */
   sessionsEndedFraction: 0.8,
-  /** HARNESS CHOICE: an all-NULL `session_id` makes session-grouped reads free. */
   memoriesWithSessionFraction: 0.7,
-  /** HARNESS CHOICES: `tune` publishes a relation count but no status spread. */
   relationsPendingFraction: 0.25,
   relationsOrphanedFraction: 0.05,
-  /** HARNESS CHOICES: prompts are short directives, not memory bodies. */
   promptBytesP50: 260,
   promptsDeletedFraction: 0.15,
-  /** Confirmed on disk at `embedder.ts:24` and in migration 0014, not copied from prose. */
   embeddingDims: 768,
 } as const;
 
-/** Upper bound of the pending band; above it a relation is judged. */
 const RELATION_ORPHAN_CUTOFF =
   VOLUMETRIC_SHAPE.relationsPendingFraction + VOLUMETRIC_SHAPE.relationsOrphanedFraction;
 
-/** Two per scope: a relation needs two distinct memories in one scope. */
 const MIN_MEMORIES_PER_SCOPE_FOR_RELATIONS = 2 * VOLUMETRIC_SHAPE.scopeCount;
 
-/** Above `DEFAULT_SEARCH_LIMIT`, so the thinnest project can still fill a page. */
 const MIN_MEMORIES_PER_SKEWED_SCOPE = 10;
 
-/**
- * Positions in one repeat of the skew pattern. `skewShares × 100` are integers,
- * so a block of this length realises them exactly and every whole block leaves
- * the corpus on the declared shares.
- */
 const SKEW_BLOCK_LENGTH = 100;
 
-/**
- * Smooth weighted round-robin: at each position take the slot furthest behind
- * its share so far. Every slot's rows are therefore spread across the whole
- * `created_at` span rather than clustered, which a cumulative-threshold split
- * would not give — the dominant project would hold the oldest rows and the
- * recency term of the ranking boost would read the skew as an age difference.
- *
- * A tie goes to the lowest slot index. `skewShares` holds no two equal values,
- * so no tie arises for it (measured: zero over a 100-long block); the rule
- * matters only if the shares are ever made equal.
- */
 export function interleaveShares(shares: readonly number[], length: number): number[] {
   const assigned = shares.map(() => 0);
   const out: number[] = [];
@@ -307,26 +225,17 @@ export function interleaveShares(shares: readonly number[], length: number): num
 
 const SKEW_BLOCK = interleaveShares(VOLUMETRIC_SHAPE.skewShares, SKEW_BLOCK_LENGTH);
 
-/** Scope slot of memory `index`: even round-robin, or the skew block. */
 export function scopeSlotFor(index: number, skew: boolean): number {
   return skew ? SKEW_BLOCK[index % SKEW_BLOCK_LENGTH]! : index % VOLUMETRIC_SHAPE.scopeCount;
 }
 
-/** `supersedes` absent here, so every one in the corpus is a `topic_key` audit row. */
 const JUDGED_VERDICTS = RELATION_VALUES.filter((r) => r !== 'supersedes');
 
-/**
- * Fixed, so the corpus is not a function of when it was built. Consequence:
- * decay/review are derived against the READ clock, so those axes need an
- * explicit `nowMs` rather than the ambient one.
- */
 export const CORPUS_EPOCH_MS = Date.parse('2026-01-01T00:00:00.000Z');
 const CORPUS_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
 
-/** Memories per enclosing transaction. Purely a throughput knob; no shape effect. */
 const BATCH_SIZE = 500;
 
-/** `Math.random()` is absent from this file, and a test asserts that. */
 function splitmix32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -338,10 +247,6 @@ function splitmix32(seed: number): () => number {
   };
 }
 
-/**
- * Index-addressable substream: a row's content does not depend on how many draws
- * earlier rows made, so extending one generator cannot perturb another.
- */
 function rngFor(seed: number, stream: number, index: number): () => number {
   let h = (seed ^ 0x9e3779b9) >>> 0;
   for (const v of [stream, index]) {
@@ -369,10 +274,6 @@ function pick<T>(rng: () => number, xs: readonly T[]): T {
   return xs[Math.floor(rng() * xs.length)]!;
 }
 
-/**
- * Free of anything the entity extractor matches — no dots, digits or capitals —
- * so a body's entity count is exactly the tokens the generator placed in it.
- */
 // prettier-ignore
 const WORDS: readonly string[] = [
   'after', 'against', 'already', 'always', 'annotation', 'append', 'archive', 'because',
@@ -396,20 +297,17 @@ const WORDS: readonly string[] = [
   'worker', 'writer',
 ];
 
-/** Uppercase fragments used only inside error-code and env-var tokens. */
 // prettier-ignore
 const SHOUT: readonly string[] = [
   'BUSY', 'CANTOPEN', 'CORRUPT', 'FULL', 'LOCKED', 'MISUSE', 'NOTADB', 'PROTOCOL',
   'READONLY', 'SCHEMA', 'TOOBIG', 'CONSTRAINT',
 ];
 
-/** Restated, not imported: these are tokens a body says, not the extractor's contract. */
 // prettier-ignore
 const ERRNOS: readonly string[] = [
   'ENOENT', 'EACCES', 'EBUSY', 'ETIMEDOUT', 'ECONNRESET', 'ENOSPC', 'EEXIST', 'EINVAL',
 ];
 
-/** JIRA-style prefixes, none of them in the extractor's standards denylist. */
 const TICKET_PREFIXES: readonly string[] = ['RBR', 'OPS', 'PLT', 'SRE', 'DEV', 'INF'];
 
 const AGENTS: readonly string[] = ['claude-code', 'codex-cli', 'hermes', 'opencode', 'pi'];
@@ -420,10 +318,6 @@ function hex(rng: () => number, n: number): string {
   return out;
 }
 
-/**
- * One per entity kind the extractor recognises. Suffixed so values cannot
- * collide within a body: the extractor dedupes per kind, which would undercount.
- */
 const ENTITY_TOKENS: readonly ((rng: () => number) => string)[] = [
   (r) => `https://${pick(r, WORDS)}-${int(r, 100, 999)}.example.com/repo/pull/${int(r, 1, 9999)}`,
   (r) => `apps/${pick(r, WORDS)}/src/${pick(r, WORDS)}/${pick(r, WORDS)}-${int(r, 10, 99)}.ts`,
@@ -435,22 +329,16 @@ const ENTITY_TOKENS: readonly ((rng: () => number) => string)[] = [
   (r) => pick(r, ERRNOS),
   (r) => `$REMBRIC_${pick(r, SHOUT)}`,
   (r) => `RBR_${pick(r, SHOUT)}=${int(r, 1, 9)}`,
-  // RFC 9562 layout with the version and variant nibbles constrained, which is
-  // what the extractor's UUID rule requires.
   (r) =>
     `${hex(r, 8)}-${hex(r, 4)}-${int(r, 1, 8)}${hex(r, 3)}-${pick(r, ['8', '9', 'a', 'b'])}${hex(r, 3)}-${hex(r, 12)}`,
-  // A short SHA needs both a hex letter and a digit to be admitted as a ref.
   (r) => `${hex(r, 5)}${int(r, 0, 9)}${pick(r, ['a', 'b', 'c', 'd', 'e', 'f'])}${hex(r, 5)}`,
   (r) => `CVE-20${int(r, 10, 26)}-${int(r, 1000, 99999)}`,
   (r) => `10.${int(r, 0, 255)}.${int(r, 0, 255)}.${int(r, 1, 254)}`,
-  // Digit-only suffix on purpose: a hex suffix here would also be admitted as a
-  // git ref and inflate that kind's count.
   (r) => `${pick(r, WORDS)}-${pick(r, WORDS)}-${int(r, 1, 9)}.service`,
   (r) => Array.from({ length: 6 }, () => hex(r, 2)).join(':'),
   (r) => `${pick(r, WORDS)}-${int(r, 10, 99)}.local`,
 ];
 
-/** Mixture chosen to land p50/p90 on the declared figures with a thin tail beyond. */
 const LENGTH_BUCKETS: readonly { lo: number; hi: number; p: number }[] = [
   { lo: 0.5, hi: 1.0, p: 0.5 },
   { lo: 1.0, hi: 1.7, p: 0.35 },
@@ -468,7 +356,6 @@ function targetBodyBytes(rng: () => number): number {
   return VOLUMETRIC_SHAPE.bodyBytesP50;
 }
 
-/** Affirmation counts with mean ≈ `confirmationsPerMemory`. */
 const CONFIRMATION_BUCKETS: readonly { n: number; p: number }[] = [
   { n: 0, p: 0.36 },
   { n: 1, p: 0.25 },
@@ -491,18 +378,10 @@ export interface GeneratedMemory {
   title: string;
   content: string;
   type: MemoryType;
-  /** Present only for the chain members; drives the supersede fraction. */
   topicKey: string | null;
   tags: string[];
 }
 
-/**
- * Pure function of `(seed, index)`. Tokens interleaved, not clustered in a
- * header. `slotOrdinal` is the row's position WITHIN its scope slot, which the
- * chain layout is keyed on so an uneven split still produces two-long chains;
- * its default is the even split's value, so an omitted argument reproduces the
- * corpus a three-argument call produced.
- */
 export function generateMemory(
   seed: number,
   index: number,
@@ -526,14 +405,12 @@ export function generateMemory(
   while (bytes < proseBytes) {
     const word = pick(rng, WORDS);
     sinceStop += 1;
-    // Never immediately after a token: some rules strip trailing punctuation.
     const stop = sinceStop >= int(rng, 8, 14);
     prose.push(stop ? `${word}.` : word);
     if (stop) sinceStop = 0;
     bytes += word.length + 1 + (stop ? 1 : 0);
   }
 
-  // Even interleave: one token every `stride` prose words.
   const stride = Math.max(1, Math.floor(prose.length / (tokens.length + 1)));
   const parts: string[] = [];
   let ti = 0;
@@ -544,7 +421,6 @@ export function generateMemory(
   while (ti < tokens.length) parts.push(tokens[ti++]!);
 
   const type = MEMORY_TYPES[index % MEMORY_TYPES.length]!;
-  // Two fifths sit in two-long chains, so a fifth end up superseded.
   const chainPos = slotOrdinal % 5;
   const chainId = Math.floor(slotOrdinal / 5);
   const topicKey = chainPos < 2 ? `vol/chain/${scopeSlot}/${chainId}` : null;
@@ -558,7 +434,6 @@ export function generateMemory(
   };
 }
 
-/** A deterministic pseudo-random unit vector at the width confirmed on disk. */
 export function generateVector(seed: number, index: number): Float32Array {
   const rng = rngFor(seed, STREAM.vector, index);
   const v = new Float32Array(VOLUMETRIC_SHAPE.embeddingDims);
@@ -575,7 +450,6 @@ export function generateVector(seed: number, index: number): Float32Array {
 
 export interface BuildResult {
   memories: number;
-  /** Indexed by scope slot; the realised split, even or skewed. */
   memoriesByScopeSlot: number[];
   superseded: number;
   confirmations: number;
@@ -596,11 +470,6 @@ export interface BuildDeps {
   log?: (line: string) => void;
 }
 
-/**
- * Rows go in through the services so derived state is trigger-built as in
- * production. `insertEmbedding` is the embedding worker's own call, not a
- * direct write to the vec index.
- */
 export function buildCorpus(deps: BuildDeps): BuildResult {
   const { handle, args } = deps;
   assertBuildable(args);
@@ -622,9 +491,6 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
 
   clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS;
-  // Slot 0 is a project of its own so that `vol-0`..`vol-4` stay on slots 1..5:
-  // a corpus's numbered projects must hold stable rows, which is what the
-  // narrow-path baseline is measured on.
   const projects = [
     projectsSvc.create({ slug: 'vol-shared', displayName: 'Volumetric shared' }),
     ...Array.from({ length: VOLUMETRIC_SHAPE.projectCount - 1 }, (_, i) =>
@@ -650,14 +516,9 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     seed: args.seed,
   };
 
-  // Per scope slot, so the relation axis can pair within a scope without a query.
   const idsByScope: string[][] = Array.from({ length: VOLUMETRIC_SHAPE.scopeCount }, () => []);
   const sessionIds: string[] = [];
 
-  /**
-   * One batch/progress/clock scaffold for all four phases. A closure, not a
-   * module function, because it assigns the captured `clockMs`.
-   */
   const phase = (
     label: string,
     total: number,
@@ -680,7 +541,6 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
 
   phase('sessions', args.sessions, (i, sessionStep) => {
     const rng = rngFor(args.seed, STREAM.session, i);
-    // Spread across projects so a project-scoped query is not a single value.
     const project = projects[i % projects.length]!;
     const session = sessionsSvc.start({
       tokenId: token.token.id,
@@ -749,7 +609,6 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
       const confirmRng = rngFor(args.seed, STREAM.confirmation, i);
       const n = confirmationCount(confirmRng);
       for (let c = 0; c < n; c += 1) {
-        // Spread through the window so the timeline is not degenerate.
         clockMs += Math.max(1, Math.round(memoryStep / (n + 1)));
         memorySvc.confirm(row.id, scope, {
           source: { agent: 'volumetric-harness' },
@@ -758,8 +617,6 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
         result.confirmations += 1;
       }
     },
-    // Between batches, never inside one: without it the planner keeps an empty
-    // database's statistics all run, which makes the build quadratic.
     () => refreshStatistics(handle),
   );
 
@@ -767,7 +624,6 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     const rng = rngFor(args.seed, STREAM.relation, i);
     const slot = i % VOLUMETRIC_SHAPE.scopeCount;
     const pool = idsByScope[slot]!;
-    // Offset rather than a second draw, so a pair is never degenerate.
     const a = int(rng, 0, pool.length - 1);
     const b = (a + 1 + int(rng, 0, pool.length - 2)) % pool.length;
     const pending = relationsSvc.createPending({
@@ -801,7 +657,6 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     const rng = rngFor(args.seed, STREAM.prompt, i);
     const slot = i % VOLUMETRIC_SHAPE.scopeCount;
     const projectId = projects[slot]!.id;
-    // Only when the session axis was built, so the axes stay independent.
     const sessionId = sessionIds.length > 0 ? sessionIds[i % sessionIds.length]! : null;
     const words: string[] = [];
     let bytes = 0;

@@ -13,16 +13,6 @@ import { createTestDb } from '../../test-support/db.js';
 
 import { NOISE_PROBES, type NoiseProbe } from './corpus.js';
 
-/**
- * Measures each entity kind's lexical false-positive rate through the REAL
- * retrieval path — `sanitizeFtsQuery` into the production `searchBm25Ids` over
- * a live FTS5 index — rather than reasoning about the tokenizer on paper.
- *
- * Each probe gets its own throwaway database: the question is how noisy a
- * lookup is against its OWN near-misses, so one probe's decoys must not
- * inflate another's figure.
- */
-
 export interface ProbeResult {
   probe: NoiseProbe;
   /** True when the lexical branch returned the document that genuinely references the identifier. */
@@ -38,12 +28,6 @@ export interface KindNoise {
   group: string;
   kind: EntityKind;
   probes: number;
-  /**
-   * Worst per-probe rate in the group. Worst case, not the mean: the corpus is
-   * adversarial, and a mean would let a benign probe dilute a real collision
-   * (a path in a different directory measures 0% while a `.bak` sibling
-   * measures 67% — reporting 33% would describe neither).
-   */
   noiseRate: number;
   results: ProbeResult[];
 }

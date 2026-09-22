@@ -24,10 +24,6 @@ afterEach(() => db.cleanup());
 
 describe('adminQueryTermFrequencies keys the read on the index own terms', () => {
   it('resolves a term whose index form differs from an application-side tokenisation', () => {
-    // Greek final sigma and the Cyrillic breve: `unicode61` lowercases and maps
-    // the final sigma but does not fold either accent, so the index's terms are
-    // `στάσισ` and `майский` — neither of which an accent-stripping tokenisation
-    // would have produced.
     for (let i = 0; i < 3; i++) save(`gr${i}`, 'στάσις του майский κόμβου');
     save('other', 'unrelated english prose');
 
@@ -35,8 +31,6 @@ describe('adminQueryTermFrequencies keys the read on the index own terms', () =>
     expect(new Set(stats.keys())).toEqual(new Set(['майский', 'στάσισ']));
     expect(stats.get('στάσισ')).toBe(3);
     expect(stats.get('майский')).toBe(3);
-    // The fabricated keys an accent-stripping tokenisation would have used are
-    // NOT what the read is keyed on.
     expect(stats.has('стасис')).toBe(false);
     expect(stats.has('маискии')).toBe(false);
   });

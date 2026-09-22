@@ -12,11 +12,6 @@ import { ProjectsService } from '@rembric/core';
 
 import { createTestDb, type TestDb } from '../test-support/index.js';
 
-/**
- * Marker-write failures are injected through a partial `node:fs` mock, not
- * through `chmod`: this suite runs as root, root bypasses permission bits, so a
- * read-only marker stays writable and every such test passes vacuously.
- */
 const marker = vi.hoisted(() => ({ writes: 0, failFrom: Number.POSITIVE_INFINITY }));
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -91,9 +86,6 @@ describe('ensureEntityExtractor marker I/O failures', () => {
     marker.failFrom = marker.writes + 2;
     expect(() => ensureEntityExtractor(repos, db.dataDir, db.handle.db)).toThrow(/EACCES/);
 
-    // The wipe committed, so the corpus is genuinely unscanned — but the marker
-    // must not claim the new recipe, or a drain interrupted here would never be
-    // re-checked.
     expect(repos.entities.adminCountEntities({})).toBe(0);
     expect(repos.entities.adminBacklogCount()).toBe(1);
     expect(readMarkerRaw().pending).toBe(true);

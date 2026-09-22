@@ -11,30 +11,19 @@ const DIGITS = Array.from({ length: 10 }, (_, n) => n);
 
 export interface NumberTickerProps {
   value: number;
-  /** Digits to pad to (left). */
   pad?: number;
-  /** Per-digit roll duration in seconds. */
   duration?: number;
-  /** Stagger between digits. */
   stagger?: number;
-  /** Render only after the element enters the viewport. */
   startOnView?: boolean;
   prefix?: string;
   suffix?: string;
-  /** Add a small blur during digit rolls. */
   blur?: boolean;
   className?: string;
   digitClassName?: string;
-  /** Insert locale group separators (commas). Server-component safe. */
   locale?: boolean;
-  /** Custom formatter. Client-only — server components must use `locale` instead. */
   format?: (value: number) => string;
 }
 
-/**
- * Spectrum UI's `number-ticker`, copied from the registry item of the same name
- * (https://ui.spectrumhq.in/r/number-ticker.json).
- */
 export function NumberTicker({
   value,
   pad,
@@ -69,14 +58,10 @@ export function NumberTicker({
 
   const glyphs = useMemo(() => {
     const chars = text.split('');
-    // Key by place value (position from the right), so a changing digit keeps
-    // its identity and rolls to the new value instead of remounting at 0.
     return chars.map((char, i) => ({ char, id: `g-${chars.length - 1 - i}` }));
   }, [text]);
   const readableText = `${prefix ?? ''}${text}${suffix ?? ''}`;
 
-  // Stagger is an entrance flourish: once the reveal has played, value changes
-  // roll every digit immediately.
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     if (!armed || entered) return;

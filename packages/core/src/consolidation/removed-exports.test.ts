@@ -4,26 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-/**
- * 9.13 — guard against re-introducing removed consolidation machinery.
- *
- * The change `convergent-saves-and-synchronous-judgment` deleted the
- * three LLM-driven detectors (`findRedundancyCandidates`,
- * `findDriftCandidates`, `findContradictionCandidates`); the change
- * `remove-llm-consolidation` deleted the LLM orphan judge
- * (`judgeDecisionSchema`), the cron scheduler (`ConsolidationScheduler`,
- * `croner`), and the server-side `generate` chat path; `tidy-consolidation-journal`
- * deleted the dead op producers (`applyMerge`, `applySupersede`, `recordNoop`,
- * `recordFailed`) — the deterministic sweep produces only `decay` and
- * `orphan_promote`, and `undoOp` still unwinds historical merge/supersede rows.
- * A regression that brings any of those names back into the consolidation
- * module would silently resurrect a dead code path.
- *
- * This test scans every `.ts` file under `src/consolidation/` (excluding
- * tests) and fails if a forbidden symbol is defined, imported, or
- * re-exported.
- */
-
 const FORBIDDEN_SYMBOLS = [
   'findRedundancyCandidates',
   'findDriftCandidates',
@@ -37,11 +17,6 @@ const FORBIDDEN_SYMBOLS = [
   'recordFailed',
 ] as const;
 
-/**
- * Symbols forbidden across ALL of src/ (not just consolidation/):
- * `embed-embeddings-in-process` deleted the llm/ directory whole — the
- * embedder is in-process and `LlmClient` must not come back.
- */
 const FORBIDDEN_SRC_WIDE = ['LlmClient'] as const;
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -74,8 +49,6 @@ describe('9.13 — legacy consolidator detectors stay deleted', () => {
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!;
           const trimmed = line.trim();
-          // Allow comments that document the removal; the substring
-          // matters only in executable code.
           if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
             continue;
           }

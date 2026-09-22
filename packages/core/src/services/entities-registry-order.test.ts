@@ -3,11 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type * as extractorRules from '@rembric/core';
 import type { ExtractorRule } from '@rembric/core';
 
-/**
- * Registry order is presentation-only, which the registry's own comment asserts
- * and the shipped budget made false. Mocked rather than parameterised so the
- * claim is tested against the real, un-injectable registry.
- */
 type Permutation = (rules: ExtractorRule[]) => ExtractorRule[];
 
 async function extractedSet(text: string, permute: Permutation): Promise<Set<string>> {
@@ -34,16 +29,6 @@ const UNDER_BUDGET =
   'apps/server/src/db/migrate.ts threw ERR_MODULE_NOT_FOUND on nas.local; ' +
   'see PROJ-12 and #7, commit cfb5c04, NODE_ENV=production, $DATABASE_URL, 192.168.1.50';
 
-/**
- * The other two corpora leave `spare == 0` and truncate only single-rule kinds,
- * so mutation testing showed they pass with the kind sort, the value sort and the
- * remainder pass all removed. THREE kinds each well over their fair share is what
- * makes the remainder observable — `q = 83`, `total = 249`, so exactly one kind
- * gets the spare slot and which one depends on iteration order. `ticket` is fed
- * by BOTH its rules so that its truncation also depends on the value sort.
- * Counts must be equal and the kind count odd, or the budget divides evenly and
- * the remainder pass goes unexercised again.
- */
 const CONTESTED = [
   Array.from({ length: 300 }, (_, i) => `src/mod${i}/index.ts`).join('\n'),
   Array.from({ length: 150 }, (_, i) => `#${1000 + i}`).join(' '),

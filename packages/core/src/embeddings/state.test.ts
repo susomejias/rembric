@@ -54,8 +54,6 @@ describe('ensureVectorModel', () => {
     }).processBatch();
     expect(vecCount()).toBe(1);
 
-    // Simulate a pre-v2 marker: correct model, but the old content-only recipe
-    // (no inputVersion field). The recipe axis must force a re-embed.
     writeFileSync(
       join(db.dataDir, 'embedding-state.json'),
       JSON.stringify({ modelId: EMBEDDING_MODEL_ID }) + '\n',

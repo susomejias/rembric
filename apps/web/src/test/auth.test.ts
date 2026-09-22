@@ -6,13 +6,6 @@ import { AuthError, authenticate, isDomainError } from '../lib/auth';
 
 import { createTestDb, type TestDb } from './db';
 
-/**
- * `lib/auth.ts` — the bearer gate every `/api` and `/mcp` request passes
- * through. The subject is the real resolver over a real migrated database; the
- * only thing simulated is the OAuth grant, which is minted through the real
- * `OAuthService` (`registerClient` → `issueCode` → `redeemCode`), not stubbed.
- */
-
 const TTL = { accessTtlMs: 3_600_000, refreshTtlMs: 30 * 86_400_000 };
 
 describe('authenticate — static + OAuth coexistence', () => {
@@ -81,8 +74,6 @@ describe('authenticate — static + OAuth coexistence', () => {
     });
     expect(ctx.scope).toBe('*');
     expect(ctx.token.name).toMatch(/^oauth:/);
-    // An OAuth grant reaches exactly one project, and `oauth:<clientId>` is no
-    // `tokens` row: there is no membership to read.
     expect(ctx.memberProjectIds).toEqual([]);
   });
 
@@ -133,8 +124,6 @@ describe('authenticate — static + OAuth coexistence', () => {
   });
 
   it('never authenticates a token row with an empty hash (synthetic-token safety)', async () => {
-    // The OAuth synthetic Token carries hash:'' and is never persisted; this
-    // guards the invariant that an empty stored hash can never match.
     repos.tokens.insert({
       id: 'empty-hash',
       name: 'empty-hash',
@@ -214,7 +203,6 @@ describe('authenticate — static + OAuth coexistence', () => {
     });
     expect(ctx.project?.id).toBe(proj.id);
     expect(ctx.requestedSlug).toBe('auth-proj');
-    // Only the MCP transport establishes one; the `/api` surface never reads it.
     expect(ctx.mcpSessionId).toBeNull();
   });
 
@@ -227,8 +215,6 @@ describe('authenticate — static + OAuth coexistence', () => {
       projects,
       oauth,
     });
-    // The handler decides (`project_not_found`); the resolver must not fall back
-    // to another project, and must not answer with somebody else's row.
     expect(ctx.project).toBeNull();
     expect(ctx.requestedSlug).toBe('no-such-project');
   });
@@ -262,20 +248,11 @@ describe('authenticate — static + OAuth coexistence', () => {
     });
 
     expect(ctx.token.projectId).toBe(proj.id);
-    // The consumers of this context (`lib/api.ts`, the MCP scope resolver) ask
-    // `isAuthorized`; the scope string alone is not the contract.
     expect(isAuthorized(ctx, 'write', { scope: 'project', projectId: proj.id })).toBe(true);
     expect(isAuthorized(ctx, 'write', { scope: 'project', projectId: other.id })).toBe(false);
   });
 });
 
-/**
- * `isDomainError` is identified by shape, not class identity: Turbopack sits two
- * copies of `@rembric/core` in one bundle (measured), so `instanceof` is false
- * across them. The `name` clause is what stops better-sqlite3's `SqliteError` —
- * which also carries a string `code` — from being read as an authentication
- * failure and answered with a 401 instead of a 500.
- */
 describe('isDomainError — shape discrimination', () => {
   it('accepts a DomainError shaped by name + string code', () => {
     const err = new Error('token not recognized');

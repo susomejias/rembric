@@ -4,13 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-/**
- * Exact-set assertions, never `toContain`: a containment check cannot catch a
- * spec claiming an event type is *absent*, which is the defect these guard.
- * Event-type and handler counts are both asserted because Codex's per-hook
- * trust prompt counts handlers while its docs count event types.
- */
-
 type HookHandler = { type: string; command: string; async?: boolean; timeout?: number };
 type HookGroup = { matcher?: string; hooks: HookHandler[] };
 type HookManifest = { hooks: Record<string, HookGroup[]> };
@@ -51,12 +44,6 @@ describe('hooks.json (Claude Code)', () => {
     expect(claudeHooks.PostToolUse).toBeUndefined();
   });
 
-  // `fork` fires for --fork-session, /fork and /branch from v2.1.214 (before
-  // that the same action arrived as `resume`). Omitting it means a forked
-  // conversation fires NO hook at all: no row, no nudge, session_id NULL for
-  // its whole life. Codex declares no `fork` source, so its manifest keeps
-  // three; both sides are pinned so a "consistency" fix cannot give Codex a
-  // matcher it never emits.
   it('declares exactly the two literal SessionStart matchers, the registration group including fork', () => {
     expect(claudeHooks.SessionStart.map((group) => group.matcher)).toEqual([
       'startup|resume|clear|fork',
@@ -74,9 +61,6 @@ describe('hooks.json (Claude Code)', () => {
     ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
   });
 
-  // Stop carries exactly ONE entry, and it must NOT be async: an async hook
-  // is fire-and-forget by the host's contract and could not deliver a
-  // response the next turn depends on.
   it('declares exactly one synchronous Stop entry, invoking stop-report.sh', () => {
     const handlers = claudeHooks.Stop.flatMap((group) => group.hooks);
     expect(handlers).toHaveLength(1);
@@ -107,19 +91,12 @@ describe('hooks.codex.json (Codex CLI)', () => {
     expect(codexHooks.PostToolUse).toBeUndefined();
   });
 
-  // `matcher` filters SessionEnd's `reason`, whose only current value is
-  // `other`, so declaring one would only ever narrow the event to nothing.
   it('declares a matcher-less SessionEnd entry', () => {
     expect(codexHooks.SessionEnd).toHaveLength(1);
     expect(Object.keys(codexHooks.SessionEnd[0])).toEqual(['hooks']);
     expect(codexHooks.SessionEnd[0].hooks).toHaveLength(1);
   });
 
-  // Codex allows SessionEnd 1 second by default and 3 at most, against 600 for
-  // every other hook. The declared maximum alone still lets one hanging request
-  // eat the whole budget, so the POST is separately capped below it — a hanging
-  // server then yields the stderr diagnostic instead of a handler killed with
-  // no record. Both halves are asserted, plus the control that 3 is the ceiling.
   it('fits the SessionEnd handler inside the event budget', () => {
     const entry = codexHooks.SessionEnd[0].hooks[0];
     expect(entry.timeout).toBe(3);
@@ -177,8 +154,6 @@ describe('plugin manifest identity across clients', () => {
     expect(codex.keywords).toEqual(claude.keywords);
   });
 
-  // The whole key set, not a filter over two names: filtering lets a stray
-  // `commands` or `skills` key pass, which is the claim this is meant to pin.
   it('neither manifest declares a commands field — /rembric:* is Claude-Code-only', () => {
     expect(claude.commands).toBeUndefined();
     expect(Object.keys(codex).sort()).toEqual([
@@ -196,13 +171,6 @@ describe('plugin manifest identity across clients', () => {
   });
 });
 
-/**
- * Which script an event invokes, and with which agent argument, was entirely
- * unguarded: pointing Codex's `Stop` at `claude-code` passed the whole suite
- * and would route Codex transcripts through the Claude formatter, yielding
- * empty summaries. Pinned as an ordered list per manifest, and the tail
- * argument matters as much as the script name.
- */
 describe('every hook invokes the script the spec names', () => {
   const invocations = (hooks: Record<string, HookGroup[]>): string[] =>
     Object.entries(hooks).flatMap(([event, groups]) =>
@@ -239,9 +207,6 @@ describe('every hook invokes the script the spec names', () => {
     ]);
   });
 
-  // Both manifests wire the same scripts, diverging only through the agent-name
-  // argument. A per-client copy is the shape that lets the two drift, so its
-  // absence is asserted rather than left to review.
   it('ships no per-client script variant', () => {
     expect(readdirSync(join(here, '..', 'scripts')).filter((f) => f.endsWith('.codex.sh'))).toEqual(
       [],
@@ -254,9 +219,6 @@ describe('every hook invokes the script the spec names', () => {
     expect(files).not.toContain('stop-nudge.sh');
   });
 
-  // An event declaring an empty `hooks` array satisfied both the event-set and
-  // the handler-count gates, so moving SessionEnd's handler elsewhere shipped
-  // a manifest where sessions never POST /end.
   it.each([
     ['hooks.json', 'claude'],
     ['hooks.codex.json', 'codex'],

@@ -2,12 +2,6 @@ import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-/**
- * Capability gate for the sqlite-vec features the hybrid-search migration
- * (0014) and the dense retriever depend on. Kept (not throwaway) so a future
- * sqlite-vec bump that drops a capability fails here loudly rather than
- * silently corrupting search. Pure extension behavior — no app code.
- */
 describe('sqlite-vec vec0 capabilities (hybrid-search gate)', () => {
   let db: Database.Database;
 

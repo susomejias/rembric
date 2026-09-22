@@ -6,20 +6,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDb, type TestDb } from './test-support/db.js';
 import { defaultProjectScope } from './test-support/default-project.js';
 
-/**
- * The pathological corpus, measured rather than reasoned about.
- *
- * The proposal's case for a response budget rests on an ARITHMETIC hypothesis
- * (~2.1 KB per judged annotation, ~20 MB pretty for 200 × 50, ~40 MB transported,
- * ~1.3 MB of scaffolding surviving with `reason` removed). This fixture builds the
- * corpus and measures the real bytes at the real projection, so the constants
- * follow the measurement rather than the estimate. Kept as a test, not a script,
- * so it stays re-runnable and reviewed.
- *
- * Sized to the requirement's worst legal request: `limit` 200 rows × the
- * `RELATION_ANNOTATION_MAX` per-row bound.
- */
-
 const ROWS = 200;
 const ANNOTATIONS_PER_ROW = RELATION_ANNOTATION_MAX;
 /** The `memory.judge` / `memory.compare` schema cap, so `reason` is at its legal maximum. */
@@ -31,8 +17,6 @@ let relations: RelationsService;
 let repos: ReturnType<typeof createRepositories>;
 const pageIds: string[] = [];
 
-// Realistic content lengths rather than minimal ones: the distribution a
-// `memory.session_summary` produces, so the row scaffolding is not understated.
 const CONTENT_LENGTHS = [420, 855, 1_400, 2_530, 4_100];
 
 beforeAll(() => {
@@ -135,9 +119,6 @@ describe('annotation payload size at the worst legal request', () => {
   });
 
   it('measures the POST-change worst case: the aggregate budget at several reason bounds', () => {
-    // The budget is pinned to shipped behaviour (200 rows x the multi-row default
-    // of 10 = 2 000 annotations), so it is not the knob that moves. This measures
-    // what the reason bound has to do at that size, which is what chooses its value.
     const budgeted = [...relations.listForMemories(pageIds, 10).values()].flatMap((p) => p.views);
     expect(budgeted).toHaveLength(2_000);
 
@@ -164,8 +145,6 @@ describe('annotation payload size at the worst legal request', () => {
   });
 
   it('measures the per-shape cost of one annotation, judged and pending', () => {
-    // A pending annotation is produced by save-time detection, not by `compare` —
-    // `pending_conflict` is a derived KIND, not a relation a caller can record.
     const judged = relations.listForMemories([pageIds[0]!], 1).get(pageIds[0]!)!.views[0]!;
     const pendingShape = {
       ...judged,

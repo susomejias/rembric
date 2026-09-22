@@ -10,10 +10,6 @@ import { createElement } from 'react';
 import { renderToReadableStream } from 'react-dom/server';
 import { vi } from 'vitest';
 
-/**
- * The service graph a dashboard page reads through `getServices()`. The pages
- * take only what they need from it; each test file swaps the graph per fixture.
- */
 export const servicesRef: { current: unknown } = { current: undefined };
 
 export function buildDashboardServices(handle: DbHandle): Record<string, unknown> {
@@ -28,14 +24,6 @@ export function buildDashboardServices(handle: DbHandle): Record<string, unknown
   };
 }
 
-/**
- * The `@/` alias is deliberately absent from the test project (see
- * `dashboard-mutations.test.ts`); each dashboard module reaches its neighbours
- * through `@/…`, so its specifiers are stubbed here and proxied to the real
- * relative files. Only the three request-scoped modules are replaced outright —
- * the service graph, the CSRF session and the mutation guard — because a RSC
- * render has no request context.
- */
 export function installViewMocks(pathname = '/dashboard'): void {
   vi.mock('next/link', () => ({
     default: ({ href, children, ...rest }: { href?: string; children?: unknown }) =>
@@ -82,9 +70,6 @@ export function installViewMocks(pathname = '/dashboard'): void {
     async () => await import('../../components/dashboard/support'),
   );
   vi.mock('@/components/dashboard/ui', async () => await import('../../components/dashboard/ui'));
-  // The sidebar shell is stubbed at its boundary: `dashboard/layout.tsx`'s real
-  // `badgeCounters()` and `lib/nav`'s real `badgeTooltip` are what the badge
-  // tests target, not shadcn's sidebar primitive graph.
   vi.mock('@/components/dashboard/app-sidebar', async () => {
     const { badgeTooltip } = await import('../../lib/nav');
     type Breakdown = { total: number; byProject: { label: string; count: number }[] };
@@ -129,7 +114,6 @@ export function installViewMocks(pathname = '/dashboard'): void {
   vi.mock('@/lib/ease', async () => await import('../../lib/ease'));
 }
 
-/** Renders a React element (an RSC page's return value) to its static HTML. */
 export async function renderToHtml(element: unknown): Promise<string> {
   const stream = (await renderToReadableStream(element as never)) as ReadableStream<Uint8Array> & {
     allReady?: Promise<unknown>;
@@ -146,14 +130,12 @@ export async function renderToHtml(element: unknown): Promise<string> {
   return html;
 }
 
-/** The slice of `html` starting at `marker`, bounded to `length` characters. */
 export function after(html: string, marker: string, length = 400): string {
   const at = html.indexOf(marker);
   if (at === -1) throw new Error(`marker not found: ${marker}`);
   return html.slice(at, at + length);
 }
 
-/** Rendered judgment-link ids in document order. */
 export function judgmentLinkOrder(html: string): string[] {
   const out: string[] = [];
   const re = /href="\/dashboard\/judgments\/([^"]+)"/g;

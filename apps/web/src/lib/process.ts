@@ -13,68 +13,34 @@ import {
 import type { Services } from './services';
 import { getServices } from './services';
 
-/**
- * The web app's process-level responsibilities: the eager database open, the
- * admin-token bootstrap, the stale-session reaper, the embedder drain worker and
- * the resumable entity-extraction backfill.
- *
- * `instrumentation.ts`'s `register()` is the only caller. `register()` may not
- * throw (Next treats a throwing hook as a fatal boot error), so every timer
- * below owns its own error handling and this module never propagates.
- */
-
-/** Minimum length for a bootstrap admin token. */
 const ADMIN_TOKEN_MIN_LENGTH = 16;
 
-/** Reap every 30 min, hourly forced embedding pass, 30 s tick. */
 const REAP_INTERVAL_MS = 30 * 60_000;
 const EMBED_TICK_MS = 30_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
 
-/**
- * `bootstrap.ts`: the entity backfill self-schedules — 500 ms between batches
- * while a backlog drains, 30 s when idle, plus an hourly forced pass.
- */
 const ENTITY_DRAIN_DELAY_MS = 500;
 const ENTITY_IDLE_DELAY_MS = 30_000;
 const ENTITY_FALLBACK_MS = 60 * 60_000;
 
-/** `bootstrap.ts`: refresh the data-loss state marker every 60 s. */
 const MARKER_REFRESH_MS = 60_000;
 
-/**
- * `register()` is documented as once per server instance, but Next re-evaluates
- * modules on an HMR edit, so a module-level flag alone lets a reload start a
- * second reaper and a second drain over the same database. The flag lives on
- * `globalThis` for the same reason `lib/db.ts` caches the handle there.
- */
 const globalForProcess = globalThis as typeof globalThis & {
   __rembricProcessStarted?: boolean;
 };
 
 export function startProcess(): void {
   if (globalForProcess.__rembricProcessStarted === true) {
-    // Loud on purpose: this is the only evidence that a re-invocation of
-    // `register()` was absorbed instead of starting a second reaper.
     console.error('[process] already started in this process → skipping re-entry');
     return;
   }
   globalForProcess.__rembricProcessStarted = true;
 
-  // Eager `getServices()` is what opens the SQLite file: `createDb` runs the
-  // migrations and narrates the resolved absolute path (data-safety DS1) before
-  // this returns. Called lazily on the first request instead, that line moves
-  // past the point where a mistyped `REMBRIC_DATA_DIR` could still be caught.
   const services = getServices();
 
-  // Both the guard and the marker read the path this process actually opened,
-  // never `REMBRIC_DATA_DIR` — the same choice `startEntityBackfill` makes
-  // (data-safety DS1).
   const dataDir = dirname(services.db.raw.name);
   const diagnostics = createDiagnostics(services.db);
 
-  // The server's refusal, ported: `register()` may not throw, so a tripped
-  // guard terminates the process here (EX_CONFIG) rather than degrading.
   try {
     assertDataLossGuard({ dataDir, diagnostics, env: process.env });
   } catch (err) {
@@ -85,8 +51,6 @@ export function startProcess(): void {
     throw err;
   }
 
-  // The persistence spec's boot banner, `[bootstrap]`-prefixed so operators can
-  // grep the startup summary out of the container logs.
   const counts = queryCounts(diagnostics);
   console.error(
     `[bootstrap] counts: memory=${counts.memory} projects=${counts.projects} sessions=${counts.sessions} tokens=${counts.tokens} prompts=${counts.prompts}`,
@@ -107,21 +71,8 @@ export function startProcess(): void {
   startEntityBackfill(services);
 }
 
-/**
- * Mints an admin token on first run, once, and prints it. The env var is
- * authoritative only at first run; the call is a no-op once any token row
- * exists.
- *
- * Deliberately diverges from a boot path that exits 78 when
- * `REMBRIC_ADMIN_TOKEN` is unset on first run: `register()` may not terminate
- * the process, so an operator who never set the variable would own a database
- * nobody can sign in to.
- */
 function bootstrapAdminToken(services: Services): void {
   const configured = process.env['REMBRIC_ADMIN_TOKEN'];
-  // Resolved before the row check, not after: the signing key depends on the
-  // secret alone, so a deployment that already owns token rows and passes the
-  // token in the environment must still get a usable dashboard.
   const threaded = threadSessionSecret(configured ?? null);
 
   const existing = services.tokens.count();
@@ -140,9 +91,6 @@ function bootstrapAdminToken(services: Services): void {
   let token: string;
   if (configured !== undefined && configured.length > 0) {
     if (configured.length < ADMIN_TOKEN_MIN_LENGTH) {
-      // Same refusal as the server's `REMBRIC_ADMIN_TOKEN: z.string().min(16)`,
-      // minus the exit: an operator who set a weak value is told why it was not
-      // used, and no token is invented over their explicit intent.
       console.error(
         `[process] REMBRIC_ADMIN_TOKEN is shorter than ${ADMIN_TOKEN_MIN_LENGTH} characters and was NOT used; no admin token created — set a strong random value (openssl rand -hex 32)`,
       );
@@ -160,8 +108,6 @@ function bootstrapAdminToken(services: Services): void {
     return;
   }
 
-  // Only after the row exists: a signing key for a token the database does not
-  // hold would sign sessions nobody can authenticate against.
   threadSessionSecret(token);
 
   if (token === configured) {
@@ -177,20 +123,6 @@ function bootstrapAdminToken(services: Services): void {
   );
 }
 
-/**
- * Publishes the admin token as this process's session-signing key.
- *
- * Next loads `.env` from `apps/web/`, never from the repository root, so this
- * process may resolve neither variable while `lib/session.ts` reads the same
- * two. Writing the resolved value back into the environment is what makes a
- * session minted here verify there and vice versa — the key is the only thing
- * the two must agree on.
- *
- * An explicit `REMBRIC_SESSION_SECRET` is never overwritten: it is the
- * operator's override.
- *
- * Returns whether a usable key is now in the environment.
- */
 function threadSessionSecret(candidate: string | null): boolean {
   const explicit = process.env['REMBRIC_SESSION_SECRET'];
   if (explicit !== undefined && explicit.length > 0) return true;
@@ -200,12 +132,6 @@ function threadSessionSecret(candidate: string | null): boolean {
   return true;
 }
 
-/**
- * The boot sweep catches rows leaked by a PRIOR run; the interval catches a
- * client killed mid-session while THIS process keeps running, which would
- * otherwise block `findActiveForTransport` for the next session on the same
- * (token, project) for as long as the server stays up.
- */
 function startSessionReaper(services: Services): void {
   const { agentSessions, sessionAbandonAfterMs } = services;
 
@@ -237,14 +163,6 @@ function startSessionReaper(services: Services): void {
   );
 }
 
-/**
- * An immediate first pass, a 30 s tick, and an hourly forced full re-scan in
- * case some insert path forgets to signal the worker.
- *
- * The embedder loads lazily (the recorded process-model decision for
- * `apps/web`): a pass with no backlog returns before `embeddingWorker()`, so an
- * idle boot never pays for the model while the first pending row starts it.
- */
 function startEmbeddingDrain(services: Services): void {
   let inFlight = false;
 
@@ -268,8 +186,6 @@ function startEmbeddingDrain(services: Services): void {
   tickTimer.unref?.();
   fallbackTimer.unref?.();
 
-  // Matches the server's immediate first pass: whatever a prior run left
-  // unembedded is picked up now rather than one tick from now.
   run(false);
 
   console.error(
@@ -281,25 +197,6 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * The extractor identity check, an immediate forced batch, and a
- * self-scheduling drain.
- *
- * `ensureEntityExtractor` is boot work, not drain work, and it is what makes
- * `entityIndexResetWarning` resolvable: `lib/mcp-server.ts` reports "the next
- * restart" as the moment a recipe change is repaired, so a boot that skipped
- * the check would leave that warning in `memory.doctor` forever.
- *
- * `dataDir` comes from the open connection rather than from
- * `REMBRIC_DATA_DIR`, the same choice `lib/mcp-server.ts::buildDoctorReport`
- * documents (data-safety DS1): the marker must be read from the directory this
- * process actually opened, or a deployment whose env disagrees with the file it
- * is serving would reset a marker next to a database it never touches.
- *
- * No shutdown path clears the pending `setTimeout`: Next's `register()` has no
- * teardown counterpart and the process is killed rather than drained, so the
- * timer is only ever `unref`'d.
- */
 function startEntityBackfill(services: Services): void {
   const dataDir = dirname(services.db.raw.name);
 
@@ -315,9 +212,6 @@ function startEntityBackfill(services: Services): void {
     );
   }
 
-  // The worker never has to be awaited: a batch is synchronous, so a full
-  // batch costs a stall rather than a promise, and a throw is caught here
-  // instead of surfacing as an unhandled rejection.
   const worker = services.entityBackfillWorker;
   const tick = (force: boolean): void => {
     try {
@@ -330,9 +224,6 @@ function startEntityBackfill(services: Services): void {
   const nextDelay = (): number =>
     worker.hasPendingWork ? ENTITY_DRAIN_DELAY_MS : ENTITY_IDLE_DELAY_MS;
 
-  // Self-scheduling rather than a fixed tick: a recipe-change rebuild drains
-  // the whole corpus, and a 30 s tick left entity lookups incomplete for ~100
-  // minutes over 10k memories.
   const schedule = (delayMs: number): void => {
     const timer = setTimeout(() => {
       tick(false);
@@ -341,8 +232,6 @@ function startEntityBackfill(services: Services): void {
     timer.unref?.();
   };
 
-  // Matches the server's immediate forced first pass: whatever a prior run left
-  // unscanned — and whatever the reset above just wiped — is picked up now.
   tick(true);
   schedule(nextDelay());
 

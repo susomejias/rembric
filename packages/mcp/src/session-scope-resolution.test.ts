@@ -17,20 +17,6 @@ import { seedProject } from './test-support/default-project.js';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * Regression coverage for scope resolution in the session-tool surface.
- * Before the fix, these handlers ignored the `SessionRouter`, so a
- * path-less `/mcp` agent that pinned a project via `project.use`
- * silently saw global scope from `memory.context`, `memory.timeline`,
- * `memory.stats`, `memory.save_prompt`, and `memory.capture_passive`.
- *
- * All handlers now share `resolveEffectiveScope` (`_shared.ts`):
- *   1. ctx.project          → path-scoped connection
- *   2. SessionRouter entry  → path-less connection with prior project.use
- *   3. the default project  → nothing resolved on a path-LESS connection
- *      (a path slug naming no project is refused, not resolved to it)
- */
-
 const MCP_SESSION_ID = 'mcp-sess-scope-test';
 const SCOPE: TokenScope = '*';
 
@@ -89,10 +75,6 @@ beforeEach(() => {
     .get()!;
   const created = tokens.create({ name: 'other', scope: SCOPE });
   otherToken = created.token;
-  // One broad deps object passed (as a variable, to dodge excess-property
-  // checks) to each per-domain builder; the merged handlers expose the
-  // scope-resolving tools this suite exercises (context/timeline from memory,
-  // save_prompt/search_prompts from prompt, stats/capture_passive from observability).
   const deps = {
     repos: createRepositories(db.handle.db),
     logInternalError,
@@ -133,8 +115,6 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
       projectScope(project.id),
     );
 
-    // Pin the project for this (tokenId, mcpSessionId) pair, as
-    // `project.use` would.
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(adminToken), () =>
@@ -150,11 +130,6 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
   });
 
   it('memory.timeline succeeds when called with the router-pinned scope', async () => {
-    // The scope resolution is shared by every session-tool handler via
-    // resolveEffectiveScope. The router-fallback branch is exhaustively
-    // covered by the other tests in this suite (context, stats,
-    // save_prompt, capture_passive). For timeline we just confirm that
-    // calling it with a project-scoped target does not error out.
     const project = projects.create({ slug: 'bar', displayName: null });
     const target = memory.save(
       {
@@ -253,8 +228,6 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(isError).toBeFalsy();
     expect(payload.saved).toBe(1);
 
-    // Confirm via memory.context that the captured row landed in the
-    // pinned project, not in global.
     const ctx = await runWithContext(makeContext(adminToken), () =>
       Promise.resolve(handlers.context({})),
     );
@@ -302,8 +275,6 @@ describe('resolveEffectiveScope — fallback to the default project', () => {
     // Pin under admin token, NOT under the other token.
     router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
-    // Other token, same mcpSessionId string — but the router keys on
-    // (tokenId, mcpSessionId), so they SHALL not collide.
     const r = await runWithContext(makeContext(otherToken), () =>
       Promise.resolve(handlers.context({})),
     );
@@ -318,11 +289,6 @@ describe('resolveEffectiveScope — fallback to the default project', () => {
 
 describe('resolveEffectiveScope — path-scoped connections override router', () => {
   it('ctx.requestedSlug set + ctx.project null → refuses, ignores router pin', async () => {
-    // Simulate a path-scoped request to a slug whose project does NOT
-    // exist. Auth would not populate ctx.project, but a leftover router entry
-    // from a previous session might still exist. The session-tool surface MUST
-    // NOT fall back to the stale router entry — that would silently leak data
-    // from a different project — and no longer falls back to global either.
     const leftoverProject = projects.create({ slug: 'leftover', displayName: null });
     memory.save(
       {

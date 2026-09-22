@@ -9,11 +9,6 @@ import {
 } from 'lucide-react';
 import { Toaster as Sonner, type ToasterProps } from 'sonner';
 
-// Upstream wraps this in `next-themes`' `useTheme()`, which needs a
-// `ThemeProvider`. The theme here is a class on `<html>`, so the provider would
-// be dead weight and its `theme` prop would report the OS preference instead of
-// the applied theme. The palette comes from the semantic tokens below either
-// way, so the wrapper just reads them directly.
 const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner

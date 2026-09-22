@@ -26,14 +26,6 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * `memory.context.pendingJudgments[]` is a page of an AGED queue: five rows,
- * older than the orphan threshold. Without a total the caller cannot tell the
- * page from the queue, and without a size the un-aged rows are unreachable from
- * every MCP surface — `memory.judge` needs a judgmentId only this list or
- * save-time `candidates[]` emits, and `memory.compare` needs both ids up front.
- */
-
 const MCP_SESSION_ID = 'mcp-sess-pending-judgments';
 const SCOPE = '*' as const;
 const ORPHAN_AFTER_MS = 86_400_000;
@@ -146,8 +138,6 @@ describe('memory.context reports the pending-judgment total beside the page', ()
 
     expect(isError).toBe(false);
     const list = payload.pendingJudgments as PendingEntry[];
-    // Asserting only `total >= list.length` would pass against the very bug
-    // this change fixes (returning the page length as the total).
     expect(list).toHaveLength(5);
     expect(payload.pendingJudgmentsTotal).toBe(8);
     expect(list.length).toBeLessThan(payload.pendingJudgmentsTotal as number);

@@ -28,9 +28,6 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-// `_transcript.sh` prefers jq and falls back to awk when it is absent, so a
-// machine without jq would exercise the fallback and read as a content
-// mismatch rather than a missing dependency. Fail on the dependency instead.
 it('jq is installed, so these tests exercise the jq path and not the awk fallback', () => {
   expect(spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
 });
@@ -69,9 +66,6 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-// Async execFile — NOT execFileSync: the script's curl and this test's HTTP
-// server share one event loop, and a synchronous spawn deadlocks until curl
-// times out (same constraint stop-report.test.ts documents).
 async function runFull(
   script: string,
   stdin: string,
@@ -79,10 +73,6 @@ async function runFull(
 ): Promise<{ stdout: string; stderr: string }> {
   const child = execFileAsync('bash', [join(scripts, script), ...args], {
     encoding: 'utf8',
-    // The shipped 3s POST cap is a production budget, not a test one: under the
-    // full suite's worker load curl can hit it, the request never reaches the
-    // stub, and an assertion on `requests[0]` fails intermittently. The cap has
-    // its own describe below, which sets the value explicitly.
     env: {
       ...process.env,
       REMBRIC_SERVER_URL: serverUrl,
@@ -125,9 +115,6 @@ describe('session-start.sh ensures then resumes', { retry: 2 }, () => {
     expect(out).toContain('rembric: If this is a continuation');
   });
 
-  // The rule is unconditional by design: no host reports a resume on a cold
-  // start, so a client that branched on `source` would still miss the case the
-  // resume exists for. Removing the field entirely must change nothing.
   it.each([['startup'], ['resume'], ['clear'], ['fork'], ['compact']])(
     'does not condition the resume on source=%s',
     async (source) => {
@@ -160,8 +147,6 @@ describe('session-start.sh ensures then resumes', { retry: 2 }, () => {
     expect(paths()).toEqual([]);
   });
 
-  // A server predating the route answers 404. The nudge and the exit code are
-  // what must survive it: the host session continues either way.
   it('degrades a rejected resume to one stderr diagnostic and keeps the session', async () => {
     writeRembricFile('demo');
     notFound.add('/api/demo/sessions/sess-abc/resume');
@@ -271,8 +256,6 @@ describe(
       expect(body.final).toBe(false);
     });
 
-    // The control that makes the dispatch load-bearing: the same Codex transcript
-    // read by the Claude parser yields nothing, so the script degrades to `{}`.
     it('yields a degraded /end for a Codex transcript read by the Claude parser', async () => {
       writeRembricFile('demo');
       await run(
@@ -319,8 +302,6 @@ describe(
 );
 
 describe('rembric_post honours REMBRIC_POST_MAX_TIME', () => {
-  // curl is shimmed so the flag can be read off the real invocation; asserting
-  // it any other way would test the assertion, not the helper.
   async function curlArgs(env: Record<string, string>): Promise<string[]> {
     const binDir = join(dir, 'bin');
     const log = join(dir, 'curl-args');

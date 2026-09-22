@@ -68,12 +68,6 @@ export interface QueryItem {
   /** Corpus fixture ids that count as relevant. Empty for `abstention` queries. */
   goldStableIds: string[];
   scope: QueryScopeFixture;
-  /**
-   * Asks the retriever to read every corpus project rather than `scope` alone.
-   * Read by the harness as an explicit declaration, never inferred from whether
-   * foreign rows came back: it is what removes a query from `foreignScopeRate`'s
-   * denominator, so inferring it would make the isolation gate self-satisfying.
-   */
   widened?: true;
   /** Marks the small Spanish subset (design.md Open Question 1). */
   bilingual?: boolean;

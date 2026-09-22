@@ -1,9 +1,3 @@
-/**
- * Database-level introspection and administration. These operate on the
- * SQLite file itself (PRAGMA, dbstat, VACUUM), not on any aggregate —
- * which is why this is a function module, not a repository.
- */
-
 import type { DbHandle } from './client.js';
 
 export interface DbSizeInfo {
@@ -40,20 +34,12 @@ export function readJournalMode(handle: DbHandle): string {
   return row?.journal_mode ?? 'unknown';
 }
 
-/**
- * `PRAGMA quick_check` — returns 'ok' on a healthy database, otherwise
- * the first reported problem line.
- */
 export function quickCheck(handle: DbHandle): string {
   const row = handle.raw.prepare<[], Record<string, string>>('PRAGMA quick_check').get();
   if (!row) return 'unknown';
   return Object.values(row)[0] ?? 'unknown';
 }
 
-/**
- * Per-btree on-disk bytes via the optional `dbstat` virtual table.
- * Returns null when the module is not compiled into the SQLite build.
- */
 export function readDbstatBytes(handle: DbHandle): Map<string, number> | null {
   try {
     const rows = handle.raw
@@ -68,10 +54,6 @@ export function readDbstatBytes(handle: DbHandle): Map<string, number> | null {
   }
 }
 
-/**
- * COUNT(*) for a dynamically-named table. Returns null when the table
- * does not exist (virtual-table shadow names vary across builds).
- */
 export function countTableRows(handle: DbHandle, table: string): number | null {
   try {
     const row = handle.raw
@@ -87,27 +69,10 @@ export function vacuumInto(handle: DbHandle, dest: string): void {
   handle.raw.prepare('VACUUM INTO ?').run(dest);
 }
 
-/**
- * Re-sample `sqlite_stat1` on the open connection, bounded by the
- * `analysis_limit` the client already set.
- *
- * `createDb` runs this once at open and `PRAGMA optimize` once at close, which
- * is the right cadence for a long-lived server: it boots, its statistics match
- * the corpus it booted with, and a restart refreshes them. A bulk writer has no
- * restart — it compresses a year of saves into minutes — so without this its
- * planner keeps the statistics of an empty database for the whole run. Measured
- * consequence on `entities.linkMemory`'s OR chain: the degenerate
- * `(scope, project_id)` prefix scan instead of a MULTI-INDEX OR, whose cost is
- * linear in the scope's entity count and therefore quadratic over a build.
- */
 export function refreshStatistics(handle: DbHandle): void {
   handle.raw.exec('ANALYZE');
 }
 
-/**
- * Handle-bound facade for consumers that must not hold the raw database
- * handle themselves (the dashboard maintenance page).
- */
 /** Liveness ping for the healthz endpoint. Throws on a dead connection. */
 export function ping(handle: DbHandle): void {
   handle.raw.prepare('SELECT 1').get();

@@ -16,11 +16,6 @@ import { parseSessionEnd } from '../../../../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * `POST /api/:slug/sessions/:id/end` — mirrors `api-router.ts`'s end handler.
- * Note the `?? {}` on the body: an absent or non-JSON body ends the session
- * with no summary, and does not fail validation.
- */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string; id: string }> },

@@ -43,10 +43,6 @@ describe('evaluateSessionNudge — the gate', () => {
   });
 
   it('does not fire when the summary is no older than the work', () => {
-    // `last_work_at` is the reported turn's START, and the summary write is
-    // normally that turn's LAST activity, so EQUALITY is the state a
-    // summary-writing turn actually produces — `work < summary` only shows
-    // up when a later turn wrote one without reporting a tool.
     const writtenAt = minutesAfter(STARTED, 30);
     expect(
       evaluateSessionNudge(
@@ -156,9 +152,6 @@ describe('composeSessionNotice', () => {
   });
 
   it('cuts a nothing-stored title without leaving a lone surrogate', () => {
-    // The leading ASCII char is what makes this discriminating: it shifts the
-    // cut onto an odd code-unit boundary, so a naive `slice` stops exactly
-    // between the two units of an emoji.
     const text = composeSessionNotice(
       row({ summary: null, title: `x${'😀'.repeat(50)}` }),
       SUMMARY_MAX_CHARS,
@@ -176,9 +169,6 @@ describe('composeSessionNotice', () => {
   });
 
   it('never leaves a lone surrogate when the heading cut lands inside an emoji', () => {
-    // The 32-code-unit display cut falls exactly between the two code units
-    // of the emoji; a naked slice keeps the high surrogate, which decodes to
-    // U+FFFD wherever the notice is read back.
     const heading = `## ${'a'.repeat(28)}😀 and more heading text`;
     const text = composeSessionNotice(
       row({ summary: `${heading}\nbody`, title: 't' }),
@@ -197,9 +187,6 @@ describe('composeSessionNotice', () => {
   });
 
   it('stays within the byte bound with sections stored and an unbounded placeholder title', () => {
-    // The shape `computePlaceholderTitle` produces from a deep cwd: the title
-    // is the variable-length input of BOTH branches, not only the
-    // nothing-stored one.
     const title = `${'deep-directory-name'.repeat(21)} · 09:41 UTC`;
     const text = composeSessionNotice(
       row({ summary: '## Goal\nship it', title }),
@@ -209,12 +196,6 @@ describe('composeSessionNotice', () => {
   });
 
   it('stays within the byte bound when a long title forces the every-section-elided return', () => {
-    // Forty sections plus a title that leaves no room for even one entry, so
-    // the builder takes its `+N more`-only path — the one return that never
-    // re-checked the bound. The title is ASCII and longer than any budget, so
-    // it is cut to fill the budget EXACTLY and the composed notice lands on
-    // 640 on the nose: reserving one byte too few (a `+N more` label costed
-    // at fewer digits than 40 needs) shows up here as 641.
     const sections: string[] = [];
     for (let i = 0; i < 40; i++) sections.push(`## Section ${i}`, `body ${i}`);
     const text = composeSessionNotice(
@@ -228,10 +209,6 @@ describe('composeSessionNotice', () => {
   it('a pathological forty-section, 100-char-heading summary stays within the byte bound and keeps ## Goal', () => {
     const sections: string[] = [];
     for (let i = 0; i < 40; i++) {
-      // Every heading after the first is unrelated padding text — NOT a
-      // "Goal"-prefixed variant — so `## Goal` surviving is discriminating:
-      // it can only appear in the composed text if section 0 (stored FIRST,
-      // in stored order) was kept rather than elided.
       const heading =
         i === 0
           ? '## Goal'

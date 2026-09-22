@@ -2,10 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 
-// The resume emission lives in the shared core rather than in each JS/TS
-// client, so this is the only place the rule can be pinned for all of them at
-// once — the clients contribute a transport and nothing else.
-
 const SLUG = 'resume-fixture';
 
 function protocol(): ReturnType<typeof createSessionProtocol> {
@@ -60,8 +56,6 @@ describe('the shared core resumes every session it ensures', () => {
     await core.ensureSession('s-once');
     await core.ensureSession('s-once');
 
-    // Control: the first ensure really did emit both writes, so the
-    // nothing-further assertion below is not measured over an empty set.
     expect(afterFirst).toHaveLength(2);
     expect(stub.paths).toEqual(afterFirst);
   });
@@ -113,8 +107,6 @@ describe('the shared core resumes every session it ensures', () => {
     expect(stub.paths).toEqual([]);
   });
 
-  // Every way the ensure fails is a way the resume would fail too, so the skip
-  // costs no resume — and it keeps a dead server's cost at one POST_TIMEOUT_MS.
   it('skips the resume when the ensure did not land', async () => {
     for (const status of [401, 404, 500]) {
       const stub = stubFetch(() => new Response('refused', { status }));

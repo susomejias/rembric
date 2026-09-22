@@ -1,13 +1,5 @@
 import { measureLexicalNoise, noisePercent } from './measure.js';
 
-/**
- * Prints the measured per-kind lexical noise table. Run it when a kind's
- * pattern or the corpus changes, then update `memory-entities`' justification
- * table and `PUBLISHED_NOISE` (asserted by `noise-rate.test.ts`):
- *
- *   npx tsx packages/core/src/services/entity-noise/report.ts
- */
-
 const rows = measureLexicalNoise().sort((a, b) => b.noiseRate - a.noiseRate);
 const tick = '`';
 

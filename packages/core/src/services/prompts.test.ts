@@ -6,11 +6,6 @@ import { PromptsService } from '@rembric/core';
 
 import { createTestDb, defaultProjectScope, type TestDb } from '../test-support/index.js';
 
-/**
- * Typed helper for asserting on `DomainError.code` without tripping the
- * `@typescript-eslint/no-unsafe-argument` rule that fires on
- * `expect.objectContaining({ code: 'foo' })` (whose return is typed `any`).
- */
 function withCode(code: string): Error {
   return expect.objectContaining({ code }) as Error;
 }
@@ -278,8 +273,6 @@ describe('PromptsService.searchByScope', () => {
     prompts.save({ content: 'project-scoped', title: 'project-scoped', projectId });
     prompts.save({ content: 'project-less', title: 'project-less', projectId: null });
 
-    // Control: the project-scoped prompt IS returned in its own project, so the
-    // absence below is the predicate rather than an empty table.
     expect(
       prompts.searchByScope({ scope: projectScope(projectId) }).prompts.map((p) => p.content),
     ).toEqual(['project-scoped']);

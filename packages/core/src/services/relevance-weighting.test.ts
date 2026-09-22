@@ -128,8 +128,6 @@ describe('the level on a five-memory instance', () => {
     expect(onlyUbiquitous).toBeCloseTo(0.087011377 / (0.087011377 + Math.log(4)), 8);
     expect(onlyUbiquitous).toBeCloseTo(0.059059, 5);
     expect(onlyRare).toBeCloseTo(0.940941, 5);
-    // Unweighted, both rows score exactly 0.5 — the quantity this replaces
-    // cannot tell them apart at all.
     expect(tokenContainment(tokenSet('ubiquitous rare'), tokenSet('R\n\nrare only'))).toBe(0.5);
   });
 });
@@ -161,8 +159,6 @@ describe('the level at the corpus-size edges', () => {
     const functionWordsOnly = coverage(query, row('X', 'how does the user want'), N, df);
     const answering = coverage(query, row('Y', 'changelog entries'), N, df);
     expect(functionWordsOnly).toBeLessThan(answering);
-    // The gap comes from the weighting, not from the number of terms matched:
-    // the function-word row matches FIVE terms and the answering row ONE.
     expect(tokenContainment(tokenSet(query), tokenSet('X\n\nhow does the user want'))).toBeCloseTo(
       5 / 6,
       12,
@@ -227,8 +223,6 @@ describe('the save-time path stays unweighted and keeps the shared tokeniser', (
       expect(src, `save-time similarity must not read ${weighted}`).not.toMatch(
         new RegExp(`\\b${weighted}\\b`),
       );
-    // Control: the shared tokeniser IS still imported, so the assertion above
-    // is about the weighting and not about the import having gone away.
     expect(src).toMatch(/\btokenSet\b/);
   });
 

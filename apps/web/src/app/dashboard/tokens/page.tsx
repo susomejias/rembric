@@ -50,7 +50,6 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
   if (!guard.ok) return guardFailure(guard);
 
   const name = readField(formData, 'name');
-  // Deduplicated: a repeated slug would fail `token_projects`' composite primary key.
   const projectInputs = [
     ...new Set(
       formData
@@ -73,8 +72,6 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
 
   if (!name) return { error: 'Name is required.' };
 
-  // Refused, not defaulted: an omitted `access` would otherwise resolve to the
-  // more privileged `write`.
   if (accessInput !== 'read' && accessInput !== 'write') {
     return { error: "Access must be 'write' or 'read'." };
   }
@@ -145,7 +142,6 @@ export default async function TokensPage({
 
   const tokens = tokensService.list();
 
-  // Archived included: a token pinned to an archived project keeps authorizing.
   const projectRows = projects.list(true);
   const slugById = new Map(projectRows.map((p) => [p.id, p.slug]));
 
@@ -170,8 +166,6 @@ export default async function TokensPage({
 
   const selectable = projectRows.filter((p) => p.archivedAt === null);
 
-  // Read back off the persisted row, not the query string: the panel states what
-  // was minted.
   const minted = tokens.find((t) => t.name === mintedName);
   const mintedSlug = minted?.projectId == null ? null : (slugById.get(minted.projectId) ?? null);
   const mintedMembers = minted ? (memberSlugs.get(minted.id) ?? []) : [];

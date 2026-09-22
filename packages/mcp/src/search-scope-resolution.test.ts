@@ -8,13 +8,6 @@ import { readableProjects, resolveSearchScope, type EffectiveScope } from '@remb
 
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 
-/**
- * The single site that builds a widened search scope. Its whole job is to hand
- * the layers below a set nobody downstream can check — so what is asserted here
- * is which projects reach that set, and that the two preconditions the set has
- * to satisfy hold before it is built at all.
- */
-
 let db: TestDb;
 let repos: Repositories;
 let projects: ProjectsService;
@@ -50,10 +43,6 @@ function reachOf(scope: TokenScope, memberProjectIds: readonly string[] = []): R
   };
 }
 
-/**
- * `projects.list` orders by `created_at`, which ties for rows a test creates in
- * the same millisecond — so membership is what is asserted, never the order.
- */
 function membersOf(scope: Awaited<ReturnType<typeof widen>>): string[] {
   return scope.kind === 'authorized-projects' ? [...scope.projectIds].sort() : [];
 }
@@ -117,15 +106,10 @@ describe('the widened set is the token reach `project.list` publishes', () => {
 
 describe('the widened set is never built without its two preconditions', () => {
   it('falls back to the resolved scope when the home project is not in the reach', async () => {
-    // Reachable rather than hypothetical: a connection pinned to a project by
-    // `project.use` keeps resolving to it after an operator archives it, and an
-    // archived project is not a widening candidate.
     projects.archive(alpha.id);
     const scope = await widen(reachOf('*'), alpha, true);
 
     expect(scope).toEqual(projectScope(alpha.id));
-    // Control: the same token over the same corpus widens from a live home, so
-    // the fallback is attributable to the missing home and not to an empty reach.
     const control = await widen(reachOf('*'), beta, true);
     expect(control).toMatchObject({ kind: 'authorized-projects', homeProjectId: beta.id });
     expect(membersOf(control)).toEqual([home0, beta.id, gamma.id].sort());

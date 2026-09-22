@@ -11,10 +11,8 @@ import { getSession, type SessionCookieSource } from '../../../lib/session';
 
 const ON_DEMAND_BACKUP_PREFIX = 'on-demand-';
 
-/** On-demand snapshots kept by the writer — the number the card's copy states. */
 export const ON_DEMAND_BACKUP_KEEP = 3;
 
-/** Exact shape a downloadable backup filename must have — no path traversal. */
 const BACKUP_FILENAME_RE = new RegExp(
   `^(?:${ON_DEMAND_BACKUP_PREFIX}|${PRE_UPDATE_BACKUP_PREFIX})[A-Za-z0-9._-]+\\.sqlite$`,
 );
@@ -83,7 +81,6 @@ export function readMaintenanceState(withBytes: boolean): MaintenanceState {
   };
 }
 
-/** Read per call, never at module scope, so a build-time import can neither bake nor create a data directory. */
 export function resolveDataDir(): string {
   return process.env['REMBRIC_DATA_DIR'] ?? join(homedir(), '.rembric');
 }
@@ -97,7 +94,6 @@ function listAllBackupsDesc(dir: string): BackupFile[] {
   try {
     files = readdirSync(dir);
   } catch {
-    // No `backups/` yet is the normal first-run state, not an error.
     return [];
   }
   return files
@@ -116,7 +112,6 @@ function listAllBackupsDesc(dir: string): BackupFile[] {
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
-/** The `on-demand-<ms>` name sorts chronologically, so newest-first is a reverse sort. */
 function listOnDemandBackupsDesc(dir: string): string[] {
   let files: string[];
   try {
@@ -134,7 +129,6 @@ export function latestOnDemandBackup(): BackupFile | null {
   return listAllBackupsDesc(backupsDir()).find((b) => b.kind === 'on-demand') ?? null;
 }
 
-/** Snapshots the live DB via `VACUUM INTO` and prunes older on-demand backups. */
 export function createOnDemandBackup(): BackupFile {
   const dir = backupsDir();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -145,19 +139,12 @@ export function createOnDemandBackup(): BackupFile {
   for (const older of listOnDemandBackupsDesc(dir).slice(ON_DEMAND_BACKUP_KEEP)) {
     try {
       unlinkSync(join(dir, older));
-    } catch {
-      // Retention is best-effort; never fail the backup over it.
-    }
+    } catch {}
   }
   const stat = statSync(path);
   return { file, path, createdAt: stat.mtime, sizeBytes: stat.size, kind: 'on-demand' };
 }
 
-/**
- * `BACKUP_FILENAME_RE` is the ONLY gate on the by-name route: it pins the exact
- * producer-generated shape — no `/`, no `..` — so a filename taken straight from
- * the URL has no path-traversal surface.
- */
 export function resolveBackupDownload(file: string | null): BackupDownload {
   if (file === null) {
     const latest = latestOnDemandBackup();
@@ -199,7 +186,6 @@ export function backupDownloadDenial(request: {
   return null;
 }
 
-/** Streams the file rather than `readFileSync`: it scales with the whole memory corpus. */
 export function streamBackup(backup: BackupFile): Response {
   const body = Readable.toWeb(createReadStream(backup.path)) as ReadableStream<Uint8Array>;
   return new Response(body, {
@@ -212,7 +198,6 @@ export function streamBackup(backup: BackupFile): Response {
   });
 }
 
-/** `withBytes` runs `dbstat`, which walks every page — opt-in, not per render. */
 function readBreakdown(diagnostics: DbDiagnostics, withBytes: boolean): DbBreakdown {
   const size = diagnostics.readDbSize();
   const perTable: DbBreakdown['perTable'] = [];

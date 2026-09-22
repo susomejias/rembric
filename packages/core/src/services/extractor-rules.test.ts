@@ -3,12 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import { applyRule, EXTRACTOR_RULES } from '@rembric/core';
 
-/**
- * Registry-driven: every assertion here is derived from the rules themselves,
- * so a new kind is covered the moment it is declared — the point of moving the
- * patterns into a registry in the first place.
- */
-
 describe('extractor registry — structural invariants', () => {
   it('every rule pattern is global (matchAll would throw otherwise)', () => {
     for (const rule of EXTRACTOR_RULES) {
@@ -53,9 +47,6 @@ describe('extractor registry — declared examples must match, and match nothing
   for (const rule of EXTRACTOR_RULES) {
     for (const ex of rule.examples) {
       it(`${rule.kind}: ${JSON.stringify(ex.text.slice(0, 48))}`, () => {
-        // Set equality, not `toContain`: a containment assertion cannot see
-        // over-extraction, which is how a truncated `path` value shipped green
-        // alongside the correct one.
         expect(unique(applyRule(rule, ex.text))).toEqual(unique(ex.values));
       });
     }
@@ -74,9 +65,6 @@ describe('extractor registry — declared rejects must NOT match', () => {
 
 describe('extractor registry — cross-rule isolation', () => {
   it("no rule matches another rule's rejects for its own kind", () => {
-    // A reject declared for one rule is prose as far as its KIND is concerned,
-    // so a sibling rule of the SAME kind must not resurrect it (this is what
-    // guards the two-rule `ticket` and `error_code` pairs against each other).
     for (const rule of EXTRACTOR_RULES) {
       const siblings = EXTRACTOR_RULES.filter((r) => r !== rule && r.kind === rule.kind);
       for (const sibling of siblings) {
@@ -88,11 +76,6 @@ describe('extractor registry — cross-rule isolation', () => {
   });
 
   it("a rule may only match another kind's reject when it claims that value as its own example", () => {
-    // Rejects were previously only run against rules of the same kind, so a
-    // pattern could quietly claim another kind's prose. Some rejects ARE
-    // another kind's identifier — `uuid` rejects a git SHA on purpose — and
-    // those are legitimate exactly when the matching rule declares that value
-    // among its own examples. Anything else is a cross-kind false positive.
     for (const rule of EXTRACTOR_RULES) {
       for (const other of EXTRACTOR_RULES) {
         if (other === rule) continue;

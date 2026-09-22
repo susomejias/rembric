@@ -50,19 +50,6 @@ import {
 import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 
-/**
- * Tool handlers backing the core memory tools: save / search / get / confirm
- * plus the memory-reading research tools context / timeline.
- *
- * Scope resolution happens here once and is then threaded into every
- * service call. The service layer enforces the scope at the SQL level
- * (rows outside scope are invisible) so handlers cannot leak by mistake.
- *
- * No tool takes a scope argument: the destination is the connection's single
- * resolved project (`resolveEffectiveScope` in `_shared`), so `memory.get` and
- * `memory.confirm` answer `not_found` for an id belonging to another one.
- */
-
 /** An entry carries two snippets and two titles, ~2x a recentMemories row, so 50 costs about what `memories: 100` does. */
 const PENDING_JUDGMENTS_MAX = 50;
 /** A queue-depth warning, not a page of an inventory — the caller asks for inventory by passing a size. */
@@ -71,11 +58,6 @@ const PENDING_JUDGMENTS_DEFAULT = 5;
 export const CONTEXT_SESSIONS_MAX = 25;
 export const CONTEXT_PROMPTS_MAX = 50;
 export const CONTEXT_MEMORIES_MAX = 100;
-/**
- * A combined budget across `before` and `after`, not a per-argument page cap —
- * deliberately its own bound rather than sharing a value with the context page
- * maxima it happens to collide with.
- */
 export const TIMELINE_WINDOW_MAX = 50;
 
 /** Per-surface `relations` defaults; the maximum and the multi-row default are shared. */
@@ -300,8 +282,6 @@ export const candidate = z.object({
 const entityRef = z.object({ kind: z.string(), value: z.string() });
 
 const memoryRow = z.object({
-  // Identity fields are always present; the rest MAY be omitted by the
-  // `fields` projection, and `content` MAY be truncated by `snippet`.
   id: z.string(),
   type: z.string(),
   title: z.string(),
@@ -315,11 +295,6 @@ const memoryRow = z.object({
   lastSeenAt: z.string().nullable().optional(),
   topicKey: z.string().nullable().optional(),
   relations: z.array(relationView).optional(),
-  /**
-   * Annotations that exist for this memory before `relations_limit` bounds the
-   * array above — never the array's length restated, so a bounded list is
-   * `relationsTotal > relations.length` and needs no companion flag.
-   */
   relationsTotal: z.number().optional(),
   reviewState: z.string().optional(),
   reviewAfter: z.string().nullable().optional(),
@@ -354,11 +329,6 @@ const expandedMemoryRow = memoryRow.extend({
   relationKind: z.string(),
 });
 
-/**
- * `SearchVerdict` in zod — the one declaration both surfaces that publish it
- * are built from, so `memory.search`'s wire names and `memory.context`'s cannot
- * drift apart. `z.literal(true)` mirrors the TS type: never emitted as `false`.
- */
 const searchVerdict = {
   abstained: z.boolean(),
   abstainReason: z.string().optional(),
@@ -370,29 +340,15 @@ export const memorySearchOutput = {
   memories: z.array(memoryRow),
   expanded: z.array(expandedMemoryRow).optional(),
   ...searchVerdict,
-  /**
-   * The slugs read, present whenever `across_projects` was requested — however
-   * authorization resolved it. An unauthorized widening is dropped and served
-   * rather than refused, so without this the caller cannot tell an exhaustive
-   * cross-project answer from a widening that did nothing.
-   */
   searchedProjects: z.array(z.string()).optional(),
   /** Reports the result, not the request: absent when only one project was read. */
   widened: z.boolean().optional(),
   /** True when `entity` drove retrieval (exact-address, not ranked). */
   viaEntity: z.boolean().optional(),
-  /**
-   * Present only on an EMPTY entity lookup whose scope still has unscanned
-   * memories: "not in the index" and "not indexed yet" are otherwise the same
-   * empty response, and after an extractor recipe change the second one lasts
-   * as long as the drain does.
-   */
   entityIndexDraining: z.boolean().optional(),
 };
 
 export const memoryGetOutput = {
-  // Single-id response (when `id` is provided). Optional so the same tool can
-  // also return the batch shape below (when `ids` is provided).
   memory: z
     .object({
       id: z.string(),
@@ -411,10 +367,6 @@ export const memoryGetOutput = {
   head: z
     .object({ id: z.string(), title: z.string(), content: z.string(), status: z.string() })
     .optional(),
-  // Bounded to the nearest predecessors (see PREDECESSOR_CAP); content is
-  // intentionally omitted — titles are immutable-by-construction labels for
-  // the omitted content. `truncated` is true when the reachable `replaces`
-  // graph holds more predecessors than were returned.
   predecessors: z
     .array(
       z.object({
@@ -432,8 +384,6 @@ export const memoryGetOutput = {
   confirmationCount: z.number().optional(),
   relations: z.array(relationView).optional(),
   relationsTotal: z.number().optional(),
-  // Single-id response's entities[] projection (bounded; see memoryRow for
-  // the batch response's equivalent field).
   entities: z.array(entityRef).optional(),
   entitiesTotal: z.number().optional(),
   reviewState: z.string().optional(),
@@ -503,13 +453,6 @@ export const contextOutput = {
       via: z.enum(['entity', 'ranked']),
     }),
   ),
-  /**
-   * The ranked pass's own verdict. ABSENT when that pass never ran (no derivable
-   * seed, or the entity pre-pass already filled the channel) — reporting
-   * `abstained: false` for a search that never happened would assert a verdict
-   * the server never measured. `gateShortened` is measured against the limit
-   * THAT pass requested, so the channel can be full while it is set.
-   */
   rankedPass: z.object(searchVerdict).optional(),
   pendingJudgments: z.array(
     z.object({
@@ -523,14 +466,6 @@ export const contextOutput = {
       ageMs: z.number(),
     }),
   ),
-  /**
-   * Total in-scope ADJUDICABLE pending-judgment count (both endpoints still
-   * `active`) — `pendingJudgments` above is a page,
-   * and by default an AGED one, so its length says nothing about the queue.
-   * Drain with `judgments: min(pendingJudgmentsTotal, PENDING_JUDGMENTS_MAX)`,
-   * repeating while the total stays above 0: a total over the max is rejected
-   * by the input schema before the handler's clamp can round it down.
-   */
   pendingJudgmentsTotal: z.number(),
   needsReview: z.array(
     z.object({
@@ -542,11 +477,6 @@ export const contextOutput = {
       ageMs: z.number(),
     }),
   ),
-  /**
-   * Total in-scope needs-review count — `needsReview` above is capped at
-   * a handful of the oldest. Lets the agent tell a healthy corpus from a
-   * collapsing one and batch-confirm via `memory.confirm({ids})` when deep.
-   */
   needsReviewTotal: z.number(),
 };
 
@@ -565,10 +495,6 @@ export interface MemoryToolDeps extends ErrorReportingDeps {
   candidates?: CandidateOptions;
   /** Optional — repositories needed for save-time candidates + context/timeline reads. */
   repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
-  /**
-   * Optional — embeds the just-saved row inline so vec candidate
-   * detection has a self-vector to kNN from.
-   */
   embedNow?: (
     memoryId: string,
     title: string,
@@ -579,30 +505,12 @@ export interface MemoryToolDeps extends ErrorReportingDeps {
   router?: SessionRouter;
   /** Every connection resolves to a project, so scope resolution cannot proceed without this. */
   projects: ProjectsService;
-  /**
-   * Optional — when present, `memory.save` attaches the most-recently-
-   * active session row for `(tokenId, projectId)` to the memory when the
-   * SessionRouter has no entry. This is the bridge that makes
-   * HTTP-driven sessions (the plugin's hooks POSTing `/api/<slug>/sessions`)
-   * show up as `memory.session_id` on subsequent MCP-side saves. Also used
-   * by `memory.context` to surface recent sessions.
-   */
   agentSessions?: AgentSessionsService;
   /** Optional — required by `memory.context` to surface recent prompts. */
   prompts?: PromptsService;
   /** Optional — pending relations older than this surface in `memory.context`. */
   orphanAfterMs?: number;
-  /**
-   * Optional — provides access to the active `McpServer` so handlers can
-   * await (or trigger) roots discovery when no project is resolved yet.
-   * Set by `createMcpServer` after construction.
-   */
   getServer?: () => McpServer;
-  /**
-   * Optional — in-memory tool-call counters (proactive-entity-recall, D6).
-   * When present, `memory.save`/`memory.search`/`memory.context` record one
-   * successful-call increment per token. Absent → no counting, zero cost.
-   */
   usageCounters?: UsageCounters;
 }
 
@@ -618,15 +526,6 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
   };
 }
 
-/**
- * Wrap a memory tool handler so a SUCCESSFUL call increments the usage
- * counter for the calling token. Failure arrives two ways at this layer:
- * a throw (propagates before any increment) and `errToMcp`'s
- * `{isError: true}` result (checked below) — those are the only two, which
- * is why the wrapper can live at the composition seam instead of inside
- * every handler's return ladder. Counting itself never fails a call: the
- * record sits in a try/catch and the context lookup is best-effort.
- */
 function counted<Args extends unknown[], Res>(
   deps: MemoryToolDeps,
   tool: CountedTool,
@@ -650,24 +549,6 @@ function counted<Args extends unknown[], Res>(
   };
 }
 
-/**
- * Resolve the active Rembric session id for a memory write.
- *
- * Sources, in order of precedence:
- *   0. An explicit `sessionId` passed by the caller.
- *   1. The `SessionRouter` entry for `(tokenId, mcpSessionId)` — set by
- *      an explicit `memory.session_start` call over MCP.
- *   2. The UNAMBIGUOUS `status='active'` row for `(tokenId, projectId)` —
- *      captures sessions created out-of-band by the plugin's HTTP hooks
- *      (`POST /api/<slug>/sessions`); returns nothing (never guesses by
- *      recency) when more than one is live — see
- *      `AgentSessionsService.findActiveForTransport`.
- *
- * Returns null when no active session can be resolved (the memory is
- * saved with `session_id = NULL`, the back-compat path for clients that
- * neither run the plugin nor call `memory.session_start`). Whenever a
- * session id resolves, its activity clock is bumped.
- */
 function resolveActiveSessionId(
   deps: MemoryToolDeps,
   projectId: string | null,
@@ -726,13 +607,6 @@ export interface SaveWithCandidatesDeps {
   ) => Promise<boolean>;
 }
 
-/**
- * The one save-time curation path: topic_key upsert bookkeeping, inline
- * embedding, and candidate detection + pending-relation creation. Shared by
- * `memory.save` and `memory.capture_passive` so bulk-captured rows go
- * through the identical pipeline instead of a bare insert — see
- * `openspec/changes/fix-audited-defects`.
- */
 export async function saveMemoryWithCandidates(
   deps: SaveWithCandidatesDeps,
   input: SaveMemoryInput,
@@ -745,21 +619,12 @@ export async function saveMemoryWithCandidates(
 }> {
   const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
 
-  // Deterministic entity extraction — pure, no I/O. Linking (below) is
-  // deferred until AFTER candidate detection reads: the just-saved row must
-  // not count toward its own entity's rarity stats, or a save can tip a
-  // borderline-common entity over the gate one save sooner than it should.
   const extractedEntities: ExtractedEntity[] = extractEntities(m.title, m.content);
 
-  // Save-time candidate detection: surface up to N similar active
-  // memories so the agent can judge them while the context is fresh.
   let candidates: SaveTimeCandidateView[] = [];
   let candidatesDetected = 0;
   if (deps.repos && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
     try {
-      // Give the new row its vector before detection runs, so the vec
-      // pass has a self-vector to kNN from (model is warm by boot
-      // contract; on failure detection degrades to FTS5 for this save).
       if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, scope.projectId);
       const found = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
       candidatesDetected = found.detected;
@@ -780,18 +645,11 @@ export async function saveMemoryWithCandidates(
         });
       }
     } catch {
-      // Candidate detection is best-effort. A failure here (e.g. the
-      // FTS5 query rejects an unusual token) must not prevent the
-      // save from returning a usable response.
       candidates = [];
       candidatesDetected = 0;
     }
   }
 
-  // Link the just-saved row into the entity index now that candidate
-  // detection has already read the prior state. Independent of candidate
-  // detection being enabled at all (the index itself must stay current) —
-  // best-effort, never fails the save.
   if (deps.repos) {
     try {
       deps.repos.entities.linkMemory(m.id, scope.projectId, extractedEntities, m.createdAt);
@@ -845,9 +703,6 @@ async function handleSave(
   };
 
   try {
-    // Archived projects reject new writes (projects spec, "Archiving a
-    // project"). Enforced here rather than in resolveEffectiveScope so the
-    // read paths (search/get) keep returning an archived project's memories.
     if (activeProject) deps.projects.assertWritable(activeProject.id);
 
     const {
@@ -871,30 +726,13 @@ async function handleSave(
 
 const RELATION_EXPANSION_KINDS = new Set(['supersedes', 'superseded_by', 'conflicts_with']);
 const RELATION_EXPANSION_CAP = 5;
-/**
- * 10 sits above the 99th percentile of production-shaped extraction (measured
- * p99 = 8, max 23), so it withholds something on 0.7% of rows. Raising it to 25
- * would cover the observed maximum and add nothing to the other 99.3%. Changing
- * it requires a fresh distribution — see the `memory` spec's constants rule.
- */
 const ENTITIES_PROJECTION_CAP = 10;
 
-/**
- * The aggregate annotation budget: `rows × per-row bound`, checked BEFORE any query.
- *
- * Rejected rather than clamped, matching the per-row bound's published rule — a
- * silently smaller answer is worse than a refused one, because a caller that asked
- * for 50 annotations and got 10 has no way to tell. The message has to name both
- * parameters and a legal trade, since the caller cannot see the budget otherwise.
- */
 function annotationBudgetError(
   rowParam: 'limit' | 'ids',
   rows: number,
   perRow: number,
 ): ReturnType<typeof mcpError> | null {
-  // `rows` is the EFFECTIVE count. On the entity branch with no `limit` that is
-  // `RANK_WINDOW_CEILING`, so the message quotes a number the caller never typed —
-  // which is the point: it is what the server would have served.
   if (rows * perRow <= RELATION_ANNOTATION_RESPONSE_BUDGET) return null;
   const affordable = Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / perRow);
   return mcpError(
@@ -931,8 +769,6 @@ async function handleSearch(
   try {
     const resolved = await resolveEffectiveScope(deps);
     scope = resolved.scope;
-    // The resolved scope is authorized first, so the widening can only ever add
-    // projects to a call that was already allowed.
     assertAuthorized('read', scope, deps);
     searchScope = resolveSearchScope(deps, resolved, args.across_projects);
   } catch (err) {
@@ -952,10 +788,6 @@ async function handleSearch(
     offset: args.offset,
   };
 
-  // The EFFECTIVE row count, not the declared one. An omitted `limit` means 8 rows
-  // on the ranked branch but `RANK_WINDOW_CEILING` on the entity branch, which is
-  // specified as complete within scope — budgeting against the declared value let
-  // `{ entity, relations_limit: 50 }` through and serve 20 000 annotations.
   const effectiveRows =
     args.limit ?? (args.entity === undefined ? DEFAULT_SEARCH_LIMIT : RANK_WINDOW_CEILING);
   const searchBudget = annotationBudgetError(
@@ -978,19 +810,11 @@ async function handleSearch(
           args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
         )
       : null;
-    // Derived review metadata (batched confirmation lookup) — informational
-    // only; never affects ordering or which rows are returned.
     const review = deps.memory.reviewStateForMemories(memories);
-    // Optional projection (selection/ordering/scope are already final and are
-    // never affected): truncate content to `snippet` chars, then keep only the
-    // requested `fields` plus the always-present identity fields.
     const fieldSet =
       args.fields && args.fields.length > 0
         ? new Set<string>(['id', 'type', 'title', ...args.fields])
         : null;
-    // A projected bounded list keeps its total: the two are one field's worth of
-    // meaning, and both are specified as present WHENEVER the list is, so a
-    // projection that dropped the count would make truncation undetectable.
     if (fieldSet?.has('relations')) fieldSet.add('relationsTotal');
     if (fieldSet?.has('entities')) fieldSet.add('entitiesTotal');
     const formatRow = (m: (typeof memories)[number]): Record<string, unknown> => ({
@@ -1091,8 +915,6 @@ async function handleGet(
         args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
       );
       if (batchBudget) return batchBudget;
-      // Batch: scoped + ordered; out-of-scope / unknown ids land in
-      // `notFound` and never leak content.
       const rows = deps.memory.getMany(args.ids, scope);
       const relations = deps.relations
         ? deps.relations.listForMemories(
@@ -1172,8 +994,6 @@ async function handleGet(
         content: result.head.content,
         status: result.head.status,
       },
-      // Pass-through: the service already projects exactly these four fields, so
-      // re-mapping here would only be a second place for them to drift.
       predecessors: result.predecessors,
       predecessorCount: result.predecessorCount,
       truncated: result.truncated,
@@ -1217,10 +1037,6 @@ async function handleConfirm(
     }
 
     assertAuthorized('write', scope, deps);
-    // An explicit sessionId wins; otherwise fall back to the unambiguous
-    // active session for (token, project) — either way
-    // confirmations.session_id stops being permanently NULL. See
-    // openspec/changes/fix-audited-defects.
     const confirmProjectId = scope.projectId;
     let sessionId: string | undefined;
     try {
@@ -1266,22 +1082,11 @@ async function handleArchive(deps: MemoryToolDeps, args: { id: string }) {
 }
 
 const CONTEXT_SNIPPET_CHARS = 350;
-// needsReview is recurring (every memory.context) and usually populated, so
-// it is kept frugal on COUNT (only the 3 oldest). Its snippet uses the same
-// CONTEXT_SNIPPET_CHARS cap as the other lists for a homogeneous payload.
 const NEEDS_REVIEW_MAX = 3;
 
 /** Small and separate from `memoriesLimit` so enabling relevance never halves the recency channel (design.md Open Questions). */
 export const RELEVANCE_LIMIT = 5;
 
-/**
- * When `focus` is absent, derive a seed from signals the server already
- * holds: the active project's label, the current (in-progress, unsummarized
- * — so not in `recentSessions`) session's placeholder title (carries the
- * cwd basename), and the most recent curated prompt. Returns undefined when
- * nothing usable is derivable, so the caller can leave `relevantMemories`
- * empty rather than running a query on empty text.
- */
 function deriveFocusSeed(
   deps: MemoryToolDeps,
   scope: Scope,
@@ -1293,9 +1098,6 @@ function deriveFocusSeed(
   if (project) parts.push(project.displayName ?? project.slug);
 
   if (deps.router && deps.agentSessions) {
-    // Same precedence as `resolveSessionId`, but inlined to reuse the row
-    // `findActiveForTransport` already fetches instead of re-fetching it by
-    // id — this runs on every unfocused memory.context call.
     const key = routerKey();
     const routerHit = key ? deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId : null;
     const session = routerHit
@@ -1381,10 +1183,6 @@ async function handleContext(
       createdAt: p.createdAt,
     }));
 
-  // Relevance channel — separate from recentMemories (which is pure
-  // recency) so the model can tell the two apart. An explicit `focus`
-  // always wins; otherwise a seed is derived so the improvement doesn't
-  // depend on the agent knowing to ask.
   const focusText = args.focus?.trim() || deriveFocusSeed(deps, scope, recentPrompts);
   let relevantMemories: {
     id: string;
@@ -1398,19 +1196,8 @@ async function handleContext(
   }[] = [];
   let rankedPass: SearchVerdict | undefined;
   if (focusText) {
-    // Entity-derived results are folded into this one channel rather than
-    // exposed separately (design.md's resolved open question 3: "leaning
-    // fold, more explainable as one channel than two"). An entity
-    // recognized in the seed (most often from a recent prompt naming a
-    // file/error/ticket) is an exact match, so it's admitted ahead of the
-    // ranked hybrid-search fallback, deduped by id, capped at the same
-    // limit. `via` keeps the two populations distinguishable in the
-    // response, matching `memory.search`'s `viaEntity` observability.
     const byId = new Map<string, { memory: Memory; via: 'entity' | 'ranked' }>();
     if (deps.repos) {
-      // No `types`/`status` passed: this channel's own behavior is every
-      // type, non-archived — the same defaults `findMemoriesByEntity` always
-      // had. Only `recallHints` narrows those (proactive-recall D4/D4b).
       for (const { memories } of iterateEntityMatches(deps.repos, {
         scope,
         seedText: focusText,
@@ -1450,9 +1237,6 @@ async function handleContext(
     }));
   }
 
-  // Pending relations the agent should close with memory.judge while context
-  // is fresh. Unjudged rows are deterministically orphaned by the sweep after
-  // the deadline.
   const now = Date.now();
   const wantsInventory = args.judgments !== undefined;
   const judgmentsLimit = clamp(
@@ -1480,10 +1264,6 @@ async function handleContext(
     }));
   const pendingJudgmentsTotal = deps.repos.relations.countPendingInScope(relationsScope);
 
-  // Active memories past their review shelf life — re-affirm with
-  // memory.confirm, supersede with memory.save + topic_key, or judge if they
-  // contradict another memory. Unary (one memory, no counterpart), disjoint
-  // from pendingJudgments. Derived read-time state; nothing is mutated.
   const needsReview = deps.memory.needsReviewForContext(scope, NEEDS_REVIEW_MAX).map((it) => ({
     id: it.memory.id,
     type: it.memory.type,

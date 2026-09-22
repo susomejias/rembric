@@ -57,6 +57,7 @@ export default tseslint.config(
       'import-x': importPlugin,
     },
     rules: {
+      'no-empty': ['error', { allowEmptyCatch: true }],
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
       '@typescript-eslint/no-unused-vars': [
@@ -68,10 +69,6 @@ export default tseslint.config(
         {
           'newlines-between': 'always',
           groups: ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
-          // Workspace packages resolve differently with and without a built
-          // dist (node_modules export vs tsconfig paths to source), which
-          // flips their classification. Pin them to one group so the required
-          // order is stable across both states.
           pathGroups: [{ pattern: '@rembric/**', group: 'internal', position: 'after' }],
           alphabetize: { order: 'asc', caseInsensitive: true },
         },

@@ -59,10 +59,6 @@ async function runSweep(_prev: ActionState, formData: FormData): Promise<ActionS
   );
 }
 
-/**
- * A Server Action cannot set a status, so the 409/400 page copy the service
- * errors used to produce survives as the message the operator reads.
- */
 function undoFailure(err: unknown): ActionState {
   if (err instanceof PurgedRowMissingError) {
     return {
@@ -132,7 +128,6 @@ function readField(form: FormData, name: string): string {
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** The two judgment windows the sweep enforces, read the way the sweep reads them. */
 function orphanThresholds(): { afterMs: number; deadlineMs: number } {
   return {
     afterMs: envInt('JUDGMENT_ORPHAN_AFTER_MS', 86_400_000, 60_000, 30 * 86_400_000),

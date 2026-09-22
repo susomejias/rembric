@@ -7,20 +7,6 @@ import { schema } from '@rembric/db';
 import { createTestDb } from '../test-support/db.js';
 import { ALL_TABLES } from '../test-support/schema-inventory.js';
 
-/**
- * 13.12 — migration round-trip + 13.13 — schema-drift detection.
- *
- * The fixture above (`createTestDb`) calls `createDb` which applies every
- * migration on a fresh on-disk file. If any migration is destructive or
- * fails (e.g. a column type change without a backfill) this whole module
- * would fail to load.
- *
- * Here we additionally compare the resulting schema against a checked-in
- * snapshot of column shapes. Any new migration that changes a table
- * surface needs to update the snapshot, forcing the author to think
- * about whether the change is forward-compatible.
- */
-
 interface ColumnInfo {
   name: string;
   type: string;
@@ -34,13 +20,6 @@ interface SqliteMasterRow {
   tbl_name: string;
 }
 
-/**
- * Every trigger a table-rebuild migration must recreate. A dropped trigger
- * is silent — new rows stop being FTS/vec-indexed with no error anywhere —
- * so this is the guard the `procedural`-type table-rebuild migration
- * (improve-recall-relevance) depends on: run this test before and after
- * writing that migration and confirm the set is unchanged.
- */
 const EXPECTED_TRIGGERS: Record<string, string[]> = {
   memory: [
     'memory_ai',
@@ -54,30 +33,10 @@ const EXPECTED_TRIGGERS: Record<string, string[]> = {
   prompts: ['prompts_ai', 'prompts_ad', 'prompts_au'],
 };
 
-/**
- * Derived from the shared taxonomy in `schema-inventory.ts`, not restated: this
- * list and the source/derived registry in `invariants.test.ts` were two
- * hand-maintained copies of the same 29 names and drifted within one branch
- * (`memory_replaces`, `prompts_fts` and the three `oauth_*` tables were missing
- * here while the rest of this file already knew them). The vec0 shadow set is
- * pinned there too, so a sqlite-vec layout change is one edit.
- */
 const EXPECTED_TABLES = [...ALL_TABLES];
 
-/**
- * Shadow tables of FTS5 / vec0. Their INDEX set varies by extension version even
- * when the table set does not, so they are excluded from the index/PK/
- * WITHOUT-ROWID assertions below — a prefix on purpose here, because it is the
- * index set that is unpinnable, not the table set.
- */
 const SHADOW_TABLE = /^(memory_fts|prompts_fts|memory_vec)/;
 
-/**
- * Every index on a table we own, asserted as an EXACT set — a subset assertion
- * is what let `memory_entity_links`' composite PK exist in SQL but not in
- * Drizzle. `sql: null` marks a PK/UNIQUE autoindex, which is how a table
- * silently losing WITHOUT ROWID would show up. Normalized by `normalizeDdl`.
- */
 const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   {
     name: 'confirmations_memory_id_idx',
@@ -231,19 +190,9 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   { name: 'tokens_name_unique', sql: 'CREATE UNIQUE INDEX tokens_name_unique ON tokens (name)' },
 ];
 
-/**
- * Live in migration SQL only, deliberately — NOT omissions to be "fixed".
- * drizzle-kit 0.27.2 splits an `sql` index expression on its commas and
- * back-quotes each fragment as an identifier, so it emits invalid DDL for both
- * (verified). `memory_topic_key_active_uidx` additionally needs to be an
- * expression index to enforce its uniqueness across NULL project_id at all.
- */
 const DRIZZLE_INEXPRESSIBLE_INDEXES = [
   'memory_scope_seen_idx',
   'memory_topic_key_active_uidx',
-  // Expression column (COALESCE) plus a partial WHERE. `.where()` alone is
-  // expressible — `memory_topic_key_active_idx` is declared — but an `sql`
-  // index COLUMN is what drizzle-kit mangles, so this joins the other two.
   'sessions_active_transport_idx',
 ];
 
@@ -260,8 +209,6 @@ function normalizeDdl(ddl: string | null): string | null {
   return ddl === null ? null : ddl.replace(/`/g, '').replace(/\s+/g, ' ').trim();
 }
 
-// `pk` is the 1-based position within the primary key, so a composite PK reads
-// 1, 2, … — that ordering is load-bearing for `memory_entity_links`.
 const EXPECTED_COLUMNS: Record<
   string,
   { name: string; type: string; notnull: 0 | 1; pk: number }[]
@@ -383,11 +330,6 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
       expect(tables, `table '${expected}' missing after migrations`).toContain(expected);
     }
 
-    // Exact set, shadows included: tolerating unclassified tables is how
-    // `memory_replaces`, `prompts_fts` and the three `oauth_*` tables stayed
-    // unenumerated here while the rest of the file already knew them. The vec0
-    // shadows used to be exempt for varying by extension version; they are now
-    // pinned in `schema-inventory.ts`, so an upgrade fails in one place.
     expect(tables).toEqual([...EXPECTED_TABLES].sort());
   });
 
@@ -411,8 +353,6 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
         .all()
         .map((c) => ({ name: c.name, type: c.type, notnull: c.notnull, pk: c.pk }));
 
-      // Order can vary if ALTER TABLE reorders, so compare as sorted sets
-      // keyed by name.
       const sortByName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
       expect(actual.sort(sortByName), `schema drift on table '${table}'`).toEqual(
         expected.sort(sortByName),

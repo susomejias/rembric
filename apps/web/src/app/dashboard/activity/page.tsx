@@ -20,14 +20,6 @@ import {
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
-/**
- * Activity — the signal-log view, derived from the corpus rather than from an
- * event stream. Rembric keeps no event table on purpose: this page composes the
- * four records that *are* durable — memory writes, judged relations, session
- * starts and consolidation runs — into one chronological reading.
- *
- * The four reads are the same admin* queries the other views already run.
- */
 export const dynamic = 'force-dynamic';
 
 type Signal = {

@@ -25,13 +25,6 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * `memory.context`'s relevance channel runs the same scoped hybrid search and
- * inherits the module gate constants with no separate wiring, so an enabled
- * gate can silently empty a channel the agent reads at session start. Asserted
- * against the SHIPPED constants, not against overrides.
- */
-
 let db: TestDb;
 let defaultScope: Scope;
 let defaultProjectId: string;
@@ -158,9 +151,6 @@ describe('memory.context relevance channel under the shipped gates', () => {
     saveFillers(12);
     const focus = 'how do we restart the nimbus scheduler';
 
-    // Control at the service layer, since the gates are deliberately unreachable
-    // from the tool: without the filter the same pass fills the page, so the
-    // short page below is the gate's doing and not a small corpus.
     const ungated = await memory.searchWithAbstention({ query: focus, limit: 5 }, defaultScope, {
       relativeLevelRatio: null,
     });
@@ -173,8 +163,6 @@ describe('memory.context relevance channel under the shipped gates', () => {
     expect(body.rankedPass).toEqual({ abstained: false, gateShortened: true });
   });
 
-  // Premise changed: a project is always active, so the seed always carries at
-  // least its label and the no-seed branch is no longer reachable from the tool.
   it('seeds an unfocused call from the active project, and reports abstention when nothing matches', async () => {
     memory.save({ type: 'project', title: 'Anything', content: 'anything at all' }, defaultScope);
 
@@ -226,9 +214,6 @@ describe('memory.context relevance channel under the shipped gates', () => {
         handlers.context({ focus: `${path} how do we restart the nimbus scheduler` }),
       ),
     );
-    // The channel is full — 3 entity rows plus the ranked pass's 2 survivors —
-    // while the ranked pass's own page of 5 came back short. Both are true at
-    // once because the flag describes that pass's page against ITS limit.
     expect(body.relevantMemories).toHaveLength(RELEVANCE_LIMIT);
     expect(
       body.relevantMemories

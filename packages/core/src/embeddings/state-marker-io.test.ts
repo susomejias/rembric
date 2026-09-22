@@ -21,11 +21,6 @@ import {
   type TestDb,
 } from '../test-support/index.js';
 
-/**
- * Marker-write failures are injected through a partial `node:fs` mock, not
- * through `chmod`: this suite runs as root, root bypasses permission bits, so a
- * read-only marker stays writable and every such test passes vacuously.
- */
 const marker = vi.hoisted(() => ({ writes: 0, failFrom: Number.POSITIVE_INFINITY }));
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -173,9 +168,6 @@ describe('ensureVectorModel pending marker', () => {
     expect(ensureVectorModel(repos, db.dataDir)).toEqual({ wiped: 2, markerWritten: false });
     marker.failFrom = Number.POSITIVE_INFINITY;
 
-    // The costly ordering: the drain rebuilds under the current recipe BEFORE
-    // the retry, so the retry discards valid work. Accepted (design D2), pinned
-    // here so the cost is visible rather than inferred from the cheap ordering.
     await drain();
     expect(repos.vectors.count()).toBe(2);
     expect(ensureVectorModel(repos, db.dataDir)).toEqual({ wiped: 2, markerWritten: true });

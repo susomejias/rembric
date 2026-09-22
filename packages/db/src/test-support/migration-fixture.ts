@@ -12,16 +12,6 @@ import { join } from 'node:path';
 
 import { createDb, defaultMigrationsDir, type DbHandle } from '@rembric/db';
 
-/**
- * Stepping a database to the state just before one migration, then forward
- * through it.
- *
- * A migration that rebuilds a table, moves rows between them, or repartitions a
- * virtual table is only observable this way: `createTestDb` applies every
- * migration to an empty file, so the interesting population never exists. The
- * migrations directory is therefore staged file by file.
- */
-
 const SOURCE_DIR = defaultMigrationsDir();
 
 export interface MigrationFixture {
@@ -31,12 +21,6 @@ export interface MigrationFixture {
   stagePrior: () => void;
   /** The migration under test — verbatim, or a substituted body for fault injection. */
   stage: (body?: string) => void;
-  /**
-   * The migration under test AND every later one. Required by any assertion
-   * that reads a row back through a repository or service: the Drizzle schema
-   * always describes HEAD, so a file frozen at an older migration is missing
-   * columns the ORM's `SELECT *` names.
-   */
   stageThroughHead: () => void;
   unstage: () => void;
   /** The migration's committed text. */
@@ -71,8 +55,6 @@ export function createMigrationFixture(migration: string): MigrationFixture {
     },
     unstage: () => unlinkSync(staged),
     source: () => readFileSync(join(SOURCE_DIR, migration), 'utf8'),
-    // Silenced by default, as `createTestDb` is: every open applies migrations,
-    // so the progress lines would narrate themselves once per test.
     open: (onMigrationProgress = () => {}) =>
       createDb({ dataDir, migrationsDir, onMigrationProgress, onStartupLog: () => {} }),
     cleanup: () => {

@@ -87,10 +87,6 @@ async function purgePrompts(_prev: ActionState, formData: FormData): Promise<Act
   redirect(`/dashboard/maintenance?purged-prompts=${purged}`);
 }
 
-/**
- * No `try`: a failed `VACUUM INTO` must surface, never be swallowed as a silent
- * "no-op".
- */
 async function backupNow(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, BACKUP_FORM);
@@ -305,10 +301,6 @@ export default async function MaintenancePage({
         </DataBody>
       </DataTable>
 
-      {/* `min-w-0` on both columns is load-bearing: a grid item's default
-          `min-width: auto` floors its track at its min-content width — the
-          tables' own 720px — so without it the grid, not the tables, overflows
-          the viewport. */}
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
         <div className="min-w-0">
           <SectionBar name="Per-table breakdown" meta={breakdown.source.toUpperCase()} />

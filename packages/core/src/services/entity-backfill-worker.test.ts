@@ -48,8 +48,6 @@ describe('EntityBackfillWorker', () => {
     new EntityBackfillWorker({ repos, tx: db.handle.db, batchSize: 1 }).processBatch();
     expect(repos.entities.adminBacklogCount()).toBe(1);
 
-    // A brand-new worker instance (simulating a process restart) picks up
-    // exactly where the backlog left off — no separate cursor to lose.
     const resumed = new EntityBackfillWorker({
       repos,
       tx: db.handle.db,

@@ -17,10 +17,6 @@ import {
 import { errToMcp, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 
-/**
- * Curated-prompt MCP tools: save_prompt / search_prompts.
- */
-
 export const savePromptSchema = {
   content: z.string().min(1).max(20_000),
   title: z.string().min(1).max(100),

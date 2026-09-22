@@ -106,8 +106,6 @@ export const QUERIES: QueryItem[] = [
     scope: project('nimbus'),
   },
 
-  // >= 8 so the rates move in 0.125 steps; each shares vocabulary with its own
-  // scope so the gate is scored, not an empty candidate set. See queries.test.ts.
   {
     id: 'q-abstain-atlas-graphql',
     text: 'what GraphQL schema versioning strategy does atlas use',
@@ -190,10 +188,6 @@ export const QUERIES: QueryItem[] = [
     bilingual: true,
   },
 
-  // |gold| >= each gated k, so a row taking a slot in the page pushes an answer
-  // out of it. Below that size Precision@k is pinned at its arithmetic ceiling
-  // and Recall@k saturates, and a foreign row displaces nothing measurable.
-  // Asserted in queries.test.ts rather than left to the fixture.
   {
     id: 'q-atlas-release-checklist',
     text: 'what does the atlas release checklist require before shipping a build',
@@ -224,10 +218,6 @@ export const QUERIES: QueryItem[] = [
     scope: project('nimbus'),
   },
 
-  // Gold outside the queried project, so recall scores the widening itself:
-  // reading the home project alone cannot answer either of these, however well
-  // it ranks. Each home project holds a plausible near-answer, so the narrow
-  // page is a wrong answer rather than an empty one.
   {
     id: 'q-widened-dunning-window',
     text: 'how long is the dunning window before an account is suspended',

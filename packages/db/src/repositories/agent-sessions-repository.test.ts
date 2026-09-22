@@ -125,8 +125,6 @@ describe('AgentSessionsRepository admin filters', () => {
         limit: 10,
         offset: 0,
       });
-      // S4 matches agent+status but is soft-deleted — excluded from the
-      // non-deleted partition.
       expect(rows.map((r) => r.id)).toEqual(['S1']);
     });
   });

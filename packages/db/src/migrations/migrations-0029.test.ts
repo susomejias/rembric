@@ -7,13 +7,6 @@ import {
   type MigrationFixture,
 } from '../test-support/migration-fixture.js';
 
-/**
- * 0029 rebuilds a table that is an FK parent of two populated children, so
- * the interesting cases are only observable against a database migrated to
- * 0028 first and then stepped forward — which is what the shared fixture's
- * file-by-file staging is for.
- */
-
 const MIGRATION = '0029_tokens_project_binding.sql';
 
 type Row = Record<string, unknown>;

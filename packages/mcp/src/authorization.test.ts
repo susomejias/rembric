@@ -24,13 +24,6 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * Cross-cutting authorization matrix — every tool handler must go through
- * the shared gate (`_shared.ts::assertAuthorized` / `requireScope`)
- * regardless of which tool-domain module it lives in. Pins the scenarios
- * from the `enforce-mcp-authorization` design (D4 classification table).
- */
-
 const MCP_SESSION_ID = 'mcp-sess-authz-test';
 
 let db: TestDb;
@@ -410,8 +403,6 @@ describe('project.list is filtered by token scope', () => {
     expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
-      // The system default project is listed on the same terms as any other,
-      // and is found by `is_default` — the slug is not its identity.
       {
         slug: defaultProject(db.handle).slug,
         displayName: 'Default',
@@ -429,8 +420,6 @@ describe('project.list is filtered by token scope', () => {
     expect([...entries(payload)].sort((x, y) => x.slug.localeCompare(y.slug))).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
-      // The system default project is listed on the same terms as any other,
-      // and is found by `is_default` — the slug is not its identity.
       {
         slug: defaultProject(db.handle).slug,
         displayName: 'Default',
@@ -449,8 +438,6 @@ describe('project.list is filtered by token scope', () => {
     expect(entries(payload)).toEqual([
       { slug: projectA.slug, displayName: null, archived: false, activeMemoryCount: 2 },
     ]);
-    // The handler names its own scope per row, so the authorization filter has
-    // to run first: B's scope must never reach the read.
     expect(scopesRead).toEqual([projectA.id]);
   });
 

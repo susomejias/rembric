@@ -19,12 +19,6 @@ import {
 import { errToMcp, mcpError, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 
-/**
- * Session-lifecycle MCP tools: session_start / session_end / session_summary
- * / session_resume / session_get. The schemas are `Record<string, ZodType>`
- * (what the MCP SDK's `server.tool()` expects).
- */
-
 export const sessionStartSchema = {
   agent: z.string().min(1).max(120).optional(),
   description: z.string().max(2000).optional(),
@@ -41,10 +35,6 @@ export const sessionSummarySchema = {
   title: z.string().min(1).max(100).optional(),
 };
 
-// No `.optional()`, unlike session_end/session_summary: there is no terminal
-// row to fall back to (the router binding was cleared on end, and the active
-// lookup filters `status = 'active'`), so a fallback could only guess by
-// recency.
 export const sessionResumeSchema = {
   sessionId: z.string().min(1),
 };
@@ -128,17 +118,11 @@ async function handleSessionStart(
 ) {
   const ctx = getRequestContext();
 
-  // `args.project` is resolved here rather than by the shared resolver, which
-  // knows nothing about it, so the unresolvable-slug refusal is needed
-  // explicitly for the argument path.
   const deadSlug = unresolvableSlug();
   if (deadSlug !== null) {
     return errToMcp(unresolvableSlugError(deadSlug, deps.projects), deps.logInternalError);
   }
 
-  // The scope this session attaches to: an explicit `args.project` wins,
-  // otherwise the shared resolver decides (URL path → router pin → default
-  // project), awaiting roots discovery on a path-less connection.
   let scope: Scope;
   let source: ProjectResolutionSource;
   if (args.project === undefined) {
@@ -174,11 +158,6 @@ async function handleSessionStart(
     return errToMcp(err, deps.logInternalError);
   }
 
-  // Reuse resolution order (see the sessions spec's no-guess requirement
-  // and the mcp-api session-lifecycle requirement): transport pin →
-  // fresh-unique → sole-active-any-staleness → mint. The pin is an id, not
-  // a guess; the sole-active fallback is the only caller-licensed adoption
-  // of a stale-but-live row and lives in findSoleActiveForReuse.
   const key = routerKey();
   const boundId = key
     ? (deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId ?? null)
@@ -203,10 +182,6 @@ async function handleSessionStart(
   let reused = false;
   if (session) {
     reused = true;
-    // findActiveForTransport now excludes rows idle past TRANSPORT_STALENESS_MS
-    // (fix-audited-defects); a session whose only activity is repeated
-    // session_start calls must still count as touched, or it goes stale and
-    // this reuse branch stops firing on its own next call.
     deps.agentSessions.touchActivity(session.id);
   } else {
     try {
@@ -226,10 +201,6 @@ async function handleSessionStart(
 
   if (key) {
     deps.router.setActiveSession(key.tokenId, key.mcpSessionId, session.id);
-    // A router entry means the agent deliberately activated this project, which
-    // `project.use`'s switch gates then treat as a project to be switched away
-    // from. A `'default'` resolution is a fallback, not an activation, so
-    // pinning it would make the documented `project.use` remedy unreachable.
     if (projectId !== null && source !== 'default') {
       deps.router.setActiveProject(key.tokenId, key.mcpSessionId, projectId, source);
     }
@@ -254,9 +225,6 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-  // touch:false — end() stamps last_activity_at on an active row (and
-  // deliberately not on a terminal one); touching here too would be a second
-  // UPDATE of the same row for one request.
   const sessionId = resolveSessionId(deps, args.sessionId, scope.projectId, { touch: false });
   if (!sessionId) {
     return mcpError(
@@ -271,8 +239,6 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
       tokenId: ctx.token.id,
     });
     const key = routerKey();
-    // Not on an abandoned row: `end()` used to throw there, so the binding
-    // survived. Clearing it now would drop auto-attach to `session_id = NULL`.
     if (key && ended.status !== 'abandoned') {
       deps.router.clearSession(key.tokenId, key.mcpSessionId);
     }
@@ -293,8 +259,6 @@ async function handleSessionSummary(
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-  // touch:false — writeSummary() stamps last_activity_at on an active row, and
-  // deliberately does not on a terminal one.
   const sessionId = resolveSessionId(deps, args.sessionId, scope.projectId, { touch: false });
   if (!sessionId) {
     return mcpError(
@@ -342,10 +306,6 @@ async function handleSessionResume(deps: SessionToolDeps, args: { sessionId: str
     }
     const resumed = deps.agentSessions.resume(args.sessionId, { tokenId: ctx.token.id });
     const key = routerKey();
-    // The pin is what makes attribution unambiguous: `resolveSessionId` reads
-    // the router entry before the sole-active-session fallback, which refuses
-    // to resolve whenever a second session is live for the same (token,
-    // project). Set on the already-active no-op path too.
     if (key) {
       deps.router.setActiveSession(key.tokenId, key.mcpSessionId, resumed.id);
     }
@@ -364,12 +324,6 @@ async function handleSessionResume(deps: SessionToolDeps, args: { sessionId: str
   }
 }
 
-/**
- * Run the cross-token check first (mask as session_not_found, matching
- * the existing behavior of `end`/`summary`), then check the soft-delete
- * gate. Returns an MCP error response when the session is deleted by the
- * owning token, or `null` when the caller may proceed.
- */
 function rejectIfDeleted(
   deps: SessionToolDeps,
   sessionId: string,
@@ -383,9 +337,6 @@ function rejectIfDeleted(
   if (row.tokenId !== callerTokenId) {
     return mcpError('session_not_found', `session '${sessionId}' not found`);
   }
-  // Matches the HTTP handler's mask. Without it a terminal row from any other
-  // project this token ever touched is writable, which the late-write path
-  // widened from "my one live session" to "every session ever".
   if (row.projectId !== projectId) {
     return mcpError('session_not_found', `session '${sessionId}' not found`);
   }

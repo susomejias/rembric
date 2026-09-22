@@ -12,17 +12,6 @@ import {
   type TestDb,
 } from '../test-support/index.js';
 
-/**
- * 13.19 — embedding worker behavior (in-process embedder).
- *
- * Covers:
- *   - backfill: every memory missing a vector gets one
- *   - retry semantics on failure (skip now, retry next call)
- *   - skips archived rows
- *   - is idempotent (running twice does not double-insert)
- *   - early return without touching the embedder when nothing is pending
- */
-
 let db: TestDb;
 let mem: MemoryService;
 let embedder: FakeEmbedder;

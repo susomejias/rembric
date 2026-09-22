@@ -1,10 +1,3 @@
-/**
- * Shared entity-relevance lookup, consumed by BOTH `memory.context`'s focus
- * pass and `recallHints` — the one place `findMemoriesByEntity` is called
- * with a type/status filter, so the two paths cannot drift back into
- * different assumptions about which rows are eligible (proactive-recall D4).
- */
-
 import {
   type EntitiesRepository,
   type Memory,
@@ -36,13 +29,6 @@ export interface EntityRelevanceOptions {
   skip?: (entity: ExtractedEntity) => boolean;
 }
 
-/**
- * Lazily probes the entity index for each entity extracted from `seedText`,
- * one query per probed entity. A generator, not an eagerly-computed array,
- * so a caller's own stop condition (`shouldContinue`) can prevent a query
- * for an entity the caller no longer needs — exactly what the pre-existing
- * `memory.context` loop already relied on before this became shared.
- */
 export function* iterateEntityMatches(
   repos: { entities: Pick<EntitiesRepository, 'findMemoriesByEntity'> },
   opts: EntityRelevanceOptions,

@@ -65,11 +65,6 @@ export class PromptsRepository {
       .all();
   }
 
-  /**
-   * Scope-aware search. FTS5 (`prompts_fts MATCH`) when `query` is
-   * non-empty, else recency. Returns rank-ordered (or newest-first) rows
-   * plus the unpaginated total for the same predicate.
-   */
   searchByScope(opts: SearchPromptsOpts): { prompts: Prompt[]; total: number } {
     const useFts = typeof opts.query === 'string' && opts.query.trim().length > 0;
 
@@ -81,8 +76,6 @@ export class PromptsRepository {
       if (opts.agent) ftsFilters.push(sql`p.agent = ${opts.agent}`);
       const ftsWhere = sql.join(ftsFilters, sql` AND `);
 
-      // One row beyond the page, at offset 0 only: that is the only place an
-      // unfull page proves the total, so elsewhere the extra row is waste.
       const lookahead = opts.offset === 0 ? opts.limit + 1 : opts.limit;
       const matched = this.db.all<{ id: string }>(
         sql`
@@ -132,10 +125,6 @@ export class PromptsRepository {
     const totalRow = this.db.select({ v: count() }).from(prompts).where(wherePredicate).get();
     return { prompts: rows, total: totalRow?.v ?? 0 };
   }
-
-  //  The ONE escape hatch in the otherwise append-only contract for the
-  //  `prompts` table. The invariant test white-lists ONLY this file for
-  //  `DELETE FROM prompts`.
 
   countDeleted(): number {
     const row = this.db
@@ -188,9 +177,6 @@ export class PromptsRepository {
     if (opts.projectId) conditions.push(eq(prompts.projectId, opts.projectId));
     if (opts.agent) conditions.push(eq(prompts.agent, opts.agent));
     if (opts.sessionIdPrefix) {
-      // Range, not LIKE: LIKE needs NOCASE and this column collates BINARY.
-      // Upper-cased because LIKE was ASCII-case-insensitive and session ids are
-      // ULIDs — without this, a lowercase prefix silently matches nothing.
       const prefix = opts.sessionIdPrefix.toUpperCase();
       conditions.push(and(gte(prompts.sessionId, prefix), lt(prompts.sessionId, prefix + '￿'))!);
     }

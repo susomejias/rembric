@@ -17,15 +17,6 @@ import { buildSessionHandlers } from '@rembric/mcp';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * `memory.session_start`'s "reuse an existing session instead of minting a
- * new one" logic shares `AgentSessionsService.findActiveForTransport` with
- * the auto-attach fallback used by memory.save/confirm/session_summary.
- * Focused coverage for the reuse-under-ambiguity case this proposal fixes;
- * see agent-sessions.test.ts and memory-tools.test.ts for the rest of
- * findActiveForTransport's contract.
- */
-
 const SCOPE: TokenScope = '*';
 
 let db: TestDb;
@@ -181,8 +172,6 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     const stale = startSession('pi');
     backdate(stale.id, 89);
     startSession('other');
-    // Already-active resume: a no-op write that still pins the transport,
-    // so the stale row stays stale and only the binding can resolve it.
     await runWithContext(ctx, () => handlers.sessionResume({ sessionId: stale.id }));
 
     const r = await runWithContext(ctx, () => handlers.sessionStart({}));
@@ -197,8 +186,6 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     const ended = startSession('ended');
     await runWithContext(ctx, () => handlers.sessionResume({ sessionId: ended.id }));
     expect(router.get(adminToken.id, 'transport-fallthrough')?.rembricSessionId).toBe(ended.id);
-    // The plugin ends its row over HTTP, which never clears an MCP binding:
-    // after quit the pin legitimately points at a terminal row.
     agentSessions.end(ended.id, { tokenId: adminToken.id });
 
     const r = await runWithContext(ctx, () => handlers.sessionStart({}));
@@ -247,9 +234,6 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
     expect(after?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
   });
 
-  // `end()` used to throw on an abandoned row, so `clearSession` was
-  // unreachable and the binding survived. Widening `end()` made it reachable;
-  // clearing it would drop every later save on this transport to session_id NULL.
   it('session_end on an abandoned row keeps the transport binding', async () => {
     const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-1' };
     const s = startSession();
@@ -272,10 +256,6 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
     expect(agentSessions.getById(s.id)?.status).toBe('ended');
   });
 
-  // The rest of this file runs on the default project's context, so the project
-  // mask is never exercised there. Late writes widened the reachable set from "my one
-  // live session" to "every terminal session this token created", which is what
-  // makes the mask load-bearing rather than decorative.
   it('masks a terminal session belonging to another project as session_not_found', async () => {
     const mine = projects.create({ slug: 'mine' });
     const theirs = projects.create({ slug: 'theirs' });
@@ -444,9 +424,6 @@ describe('memory.session_resume', () => {
     expect(out.status).toBe('active');
   });
 
-  // The pin, not the sole-active fallback, is what carries attribution: a
-  // second live session for the same (token, project) makes that fallback
-  // refuse to resolve, so this is the only arrangement where the two differ.
   it('pins the transport binding even with a second active session in the same scope', async () => {
     const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-resume' };
     const s = startSession();
@@ -534,11 +511,6 @@ describe('memory.session_resume', () => {
   });
 });
 
-/**
- * A resumed row is `active` again, so the three lifecycle tools must take
- * their active branch on it — the branch the row's previous terminal state
- * had made unreachable.
- */
 describe('session tools acting on a resumed session', () => {
   interface SummaryResponse {
     ok: boolean;
@@ -571,14 +543,10 @@ describe('session tools acting on a resumed session', () => {
 
     expect(out.reused).toBe(true);
     expect(out.sessionId).toBe(s.id);
-    // The control: `reused: true` describes adoption only if the row count is
-    // unmoved — matching ids alone would also hold if a second row existed.
     expect(sessionRowIds(adminToken.id, defaultProjectId)).toEqual([s.id]);
   });
 
   it('memory.session_end writes a fresh ended_at on a resumed row and clears the binding', async () => {
-    // Injected clock: two `end()` calls can land in the same millisecond, which
-    // makes a fresh `ended_at` indistinguishable from the discarded one.
     const ticks = [
       new Date('2026-01-01T00:00:00.000Z'),
       new Date('2026-01-01T01:00:00.000Z'),
@@ -629,9 +597,6 @@ describe('session tools acting on a resumed session', () => {
     );
     expect(parseText<SummaryResponse>(first).summary).toBe('A');
 
-    // The control: while the row is still terminal, first-final-wins refuses
-    // the second write. Without this arm the post-resume replacement below
-    // could just be a property the write always had.
     const refused = await runWithContext(makeContext(), () =>
       handlers.sessionSummary({ sessionId: s.id, summary: 'B', title: 'second' }),
     );

@@ -13,14 +13,6 @@ import {
 import { seedProject } from '../test-support/default-project.js';
 import { createTestDb, type TestDb } from '../test-support/index.js';
 
-/**
- * The lexical component's two halves are sourced differently and the asymmetry
- * is contracted — memory/spec.md, "Term-statistics lookups MUST be keyed on the
- * index's own terms". The query side is the index's; the row side is
- * `indexTerms`, whose disagreement may only under-count. Both halves are
- * asserted over scripts the committed en/es eval corpus cannot contain.
- */
-
 const SCRIPTS = [
   { name: 'Cyrillic with й/ё', text: 'майский район войти ёлка' },
   { name: 'Greek with a final sigma', text: 'στάσις αναζήτηση ολοκληρώθηκε τέλος' },
@@ -66,8 +58,6 @@ describe('the query side resolves to the document frequency the index records', 
         expect(doc, `${term} must not be reported absent`).not.toBeNull();
       }
 
-      // The application's tokenisation of the same text produces at least one
-      // term the index does NOT hold — this is why the read is not keyed on it.
       const fabricated = [...new Set(indexTerms(script.text))].filter(
         (t) => indexDf(t) === undefined,
       );
@@ -122,8 +112,6 @@ describe('a row-side disagreement can only under-count', () => {
     const weightOf = termWeightsFor(n, stats);
     expect(stats.get(HELD)).toBe(5);
 
-    // Not the absent-term maximum: the index reported the term, so its weight is
-    // the weight of a term five of six rows hold.
     expect(weightOf(HELD)).toBeLessThan(termWeight(n, 0));
     expect(weightOf(HELD)).toBe(termWeight(n, 5));
 
@@ -134,9 +122,6 @@ describe('a row-side disagreement can only under-count', () => {
     const covered = relevanceComponents(queryTokens, containing, COSINE, weightOf);
     const absent = relevanceComponents(queryTokens, lacking, COSINE, weightOf);
 
-    // `indexTerms` mangles the й, so the row's own term does not match the
-    // index's — counted as not covered, which is no higher than a row that
-    // genuinely lacks it.
     expect(covered.coverage).toBe(0);
     expect(covered.coverage).toBeLessThanOrEqual(absent.coverage);
     // The dense branch is untouched, so the row is still reachable on its cosine.

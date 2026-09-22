@@ -112,8 +112,6 @@ describe('the annotation reason is bounded on the multi-row surfaces only', () =
 
     expect(fromSearch.reason).toHaveLength(ANNOTATION_REASON_CHARS);
     expect(fromSearch.reason!.endsWith('…')).toBe(true);
-    // The leading text is the stored prefix, so the truncation is a slice and not a
-    // re-render of something else.
     expect(STORED_REASON.startsWith(fromSearch.reason!.slice(0, -1))).toBe(true);
     // Byte-identical between the two multi-row surfaces.
     expect(fromBatch).toEqual(fromSearch);
@@ -164,8 +162,6 @@ describe('the annotation reason is bounded on the multi-row surfaces only', () =
     };
     for (const [name, row] of Object.entries(surfaces)) {
       expect(row, name).toBeDefined();
-      // Non-vacuous: the fixture's stored reason exceeds the cap, so a surface that
-      // forgot the helper would return 2 000 here rather than the bound.
       expect(row!.relations[0]!.reason, name).toHaveLength(ANNOTATION_REASON_CHARS);
     }
   });
@@ -179,8 +175,6 @@ describe('the aggregate annotation budget', () => {
     expect(RELATION_ANNOTATION_RESPONSE_BUDGET).toBe(
       RANK_WINDOW_CEILING * MULTI_ROW_ANNOTATION_DEFAULT,
     );
-    // No request that omits `relations_limit` can be rejected, on EITHER branch —
-    // the ranked one at its `limit` maximum, and the entity one at its page size.
     expect(overBudget(SEARCH_LIMIT_MAX, MULTI_ROW_ANNOTATION_DEFAULT)).toBe(false);
     expect(overBudget(RANK_WINDOW_CEILING, MULTI_ROW_ANNOTATION_DEFAULT)).toBe(false);
   });
@@ -243,10 +237,6 @@ describe('the aggregate annotation budget', () => {
   });
 
   it('the entity branch is budgeted by its EFFECTIVE page size, not by the declared limit', async () => {
-    // Regression guard. The entity branch substitutes RANK_WINDOW_CEILING for an
-    // omitted `limit`, so budgeting against the declared value (8) admitted
-    // `{ entity, relations_limit: 50 }` and served 400 x 50 = 20 000 annotations —
-    // twice the regression this bound exists to remove. Found by review, not here.
     const scope = projectScope(project.id);
     const m = memory.save(
       { type: 'project', title: 'entity row', content: 'a note about ENOENT' },
@@ -266,8 +256,6 @@ describe('the aggregate annotation budget', () => {
     )) as { isError?: boolean; content: { text: string }[] };
     expect(rejected.isError).toBe(true);
 
-    // And the pure-default entity search is still served, which is what forced the
-    // budget to be derived from the branch's page size rather than from `limit`.
     const served = (await runWithContext(fakeContext(project), () =>
       Promise.resolve(handlers.search({ entity: 'ENOENT' })),
     )) as { isError?: boolean };
@@ -277,8 +265,6 @@ describe('the aggregate annotation budget', () => {
   });
 
   it('single-id memory.get is exempt by construction, not by a special case', async () => {
-    // 1 x RELATION_ANNOTATION_MAX can never exceed the budget, so no check is needed
-    // on that path — asserted rather than special-cased in the handler.
     expect(overBudget(1, RELATION_ANNOTATION_MAX)).toBe(false);
     const { sourceId } = judgedPair();
     const raw = (await runWithContext(fakeContext(project), () =>
@@ -313,14 +299,7 @@ function annotationBytes(rows: { relations: unknown[] }[]): number {
 describe('the worst legal annotation payload is a named, asserted ceiling', () => {
   it('every legal multi-row request stays under the ceiling, both emitted copies counted', async () => {
     const scope = projectScope(project.id);
-    // The fixture must REACH the budget, not merely be large: an earlier version
-    // built 12 rows x 50 = 600 annotations, so the guard measured a fifth of the
-    // worst case and did not bite when the constants were raised. Sized from the
-    // constants: `floor(budget / MAX)` rows, each saturated to `MAX`.
     const rowsAtMax = Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / RELATION_ANNOTATION_MAX);
-    // Targets FIRST, annotated rows last: search returns the most recent, so building
-    // the rows first made the page all targets — one annotation each, a fifth of the
-    // budget, and a guard that measured slack.
     const targets = Array.from(
       { length: rowsAtMax * RELATION_ANNOTATION_MAX },
       (_, k) =>
@@ -356,10 +335,6 @@ describe('the worst legal annotation payload is a named, asserted ceiling', () =
     // Non-vacuous, and at the budget: anything less and the guard measures slack.
     expect(annotations.length).toBe(RELATION_ANNOTATION_RESPONSE_BUDGET);
     expect(annotations.every((a) => (a.reason ?? '').length <= ANNOTATION_REASON_CHARS)).toBe(true);
-    // The ANNOTATION projection, not the whole result: unbounded `content` is
-    // deliberately out of scope (design D8), and including it would make this
-    // ceiling a function of how long the memories happen to be rather than of the
-    // constants it exists to pin. `ok()` emits every payload twice, both counted.
     const transported = annotationBytes(body.memories);
     expect(transported, `${transported} annotation bytes`).toBeLessThanOrEqual(
       ANNOTATION_PAYLOAD_CEILING_BYTES,

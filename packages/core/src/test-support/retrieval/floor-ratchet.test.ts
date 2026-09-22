@@ -35,8 +35,6 @@ describe('ratchetFloors', () => {
   });
 
   it('holds the floor when a rewrite would lower it, and says so', () => {
-    // Measured 0.36 → proposed floor 0.31, below the committed 0.35. Before the
-    // ratchet this wrote 0.31 and the regression became the new normal.
     const { floors, notes } = run(0.36, 0.35);
     expect(floors[8]!.precisionAtK).toBeCloseTo(0.35, 10);
     expect(notes).toHaveLength(1);
@@ -120,8 +118,6 @@ describe('ratchetCaps', () => {
   });
 
   it('holds the cap when a rewrite would loosen it, and says so', () => {
-    // The mirror image of the floor hazard: a regression must not be able to
-    // raise the cap above itself on the next --write-baselines.
     const { caps, notes } = runCaps(0.375, 0.375);
     expect(caps[8]!.abstentionFalsePositiveRate).toBeCloseTo(0.375, 10);
     expect(notes).toHaveLength(1);
@@ -171,11 +167,6 @@ describe('ratchetCaps', () => {
   });
 });
 
-/**
- * The new cap carries the same three properties as the other two, plus the one
- * that is only true of it: zero headroom, so a measurement of zero commits a
- * bound of zero and a single foreign row is over it.
- */
 describe('the foreign-scope cap', () => {
   function foreignCaps(measured: number, previous: number | undefined, allowLoosening = false) {
     return ratchetCaps({

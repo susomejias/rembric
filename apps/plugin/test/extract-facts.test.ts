@@ -42,8 +42,6 @@ describe('deterministic session facts (claude-code)', () => {
   });
 
   it('does NOT count a file it only read as touched', () => {
-    // `Read` on a.ts must not be what puts a.ts in the list — the Edit does.
-    // Asserted by exclusion of the read-only path in a transcript with no edits.
     const readOnly = tmpFile(
       't.jsonl',
       `${JSON.stringify({
@@ -65,8 +63,6 @@ describe('deterministic session facts (claude-code)', () => {
     expect(out).not.toContain('files touched');
   });
 
-  // The assertion that matters most: a list of commands with no status is the
-  // version of this that looks right and is useless.
   it('identifies the failed command AS failed, and does not mark the others', () => {
     const out = extract(fixture);
     expect(out).toContain('commands: 3 run, 1 distinct failed');
@@ -76,8 +72,6 @@ describe('deterministic session facts (claude-code)', () => {
     expect(failedBlock).not.toContain('git status');
   });
 
-  // The count above the list must mean the same thing the list does. A
-  // non-distinct count read as "12 failures" over a single deduplicated entry.
   it('counts DISTINCT failures, so a retried command does not inflate the number', () => {
     const rows: string[] = [];
     for (let i = 0; i < 12; i++) {
@@ -116,8 +110,6 @@ describe('deterministic session facts (claude-code)', () => {
     expect(extract(fixture)).toMatch(/tools: .*Read/);
   });
 
-  // Traceability: every emitted path and command must exist in the input. A
-  // fallback that can assert something that did not happen is worse than none.
   it('emits no path and no command absent from the transcript', () => {
     const out = extract(fixture);
     const input = execFileSync('cat', [fixture], { encoding: 'utf8' });
@@ -128,11 +120,6 @@ describe('deterministic session facts (claude-code)', () => {
     }
   });
 
-  // PRIVACY. `last request:` / `last reply:` are the only fact material carrying
-  // user/assistant TEXT, so they are the only place a <private> span can reach a
-  // payload — and the payload goes into the next model's context AND into a
-  // stored column. `_transcript.sh`'s own header contract requires redaction of
-  // every payload-bound string; the first version of this extraction skipped it.
   it('redacts a <private> span in the final exchange', () => {
     const tx = tmpFile(
       't.jsonl',
@@ -163,10 +150,6 @@ describe('deterministic session facts (claude-code)', () => {
     expect(out).toContain('[REDACTED]');
   });
 
-  // The traceability guarantee, attacked. The render layer parses a
-  // KIND<TAB>VALUE stream, and `file_path` / `name` / `tool_use_id` used to reach
-  // it unsanitised — so a model-chosen filename could write synthetic records
-  // that a later reader, and the next model's injected context, would believe.
   it('cannot be made to fabricate a command from a file path', () => {
     const tx = tmpFile(
       't.jsonl',
@@ -186,8 +169,6 @@ describe('deterministic session facts (claude-code)', () => {
 `,
     );
     const out = extract(tx);
-    // The injected text may appear INSIDE the path — that is honest, it is what
-    // the transcript said. What must not happen is a fabricated command RECORD.
     expect(out).toContain('commands: 0 run, 0 distinct failed');
     expect(out).not.toContain('failed commands:');
     expect(out).toContain('files touched (1 distinct)');
@@ -242,9 +223,6 @@ describe('deterministic session facts (claude-code)', () => {
     expect(out).toContain('commands: 2 run, 0 distinct failed');
   });
 
-  // A command that failed and was then fixed used to read as failed — the opposite
-  // of the session's final state, and the one fact a "Verified+how" handoff turns
-  // on. The later success is in the stream, so use it.
   it('does not report a command that failed and was later fixed', () => {
     const rows = [
       { id: 'b1', cmd: 'pnpm test', err: true },
@@ -313,9 +291,6 @@ describe('deterministic session facts (claude-code)', () => {
   });
 
   it('returns empty rather than erroring when jq is unavailable', () => {
-    // Absolute bash: emptying PATH must remove `jq` from the script's view
-    // WITHOUT removing the interpreter from node's, or this fails to spawn
-    // rather than exercising the degrade.
     const out = execFileSync(
       '/bin/bash',
       ['-c', `. "${transcriptSh}"; rembric_extract_facts_claude_code "${fixture}"`],

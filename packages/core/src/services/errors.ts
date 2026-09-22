@@ -1,8 +1,3 @@
-/**
- * Domain errors emitted by services. The HTTP layer maps these to MCP /
- * dashboard responses; tests assert on `code` rather than message strings.
- */
-
 export type DomainErrorCode =
   | 'invalid_scope'
   | 'invalid_slug'
@@ -32,11 +27,6 @@ export class DomainError extends Error {
   constructor(
     public readonly code: DomainErrorCode,
     message: string,
-    /**
-     * Machine-readable extras `errToMcp` merges into the response body, so a
-     * thrown error can carry what a hand-built `mcpError` would (e.g.
-     * `suggestedSlugs` on `project_not_found`). The HTTP mapper drops them.
-     */
     public readonly details?: Record<string, unknown>,
   ) {
     super(message);

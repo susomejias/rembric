@@ -61,8 +61,6 @@ describe('ProjectsService.list / rename / archive', () => {
     projects.archive(archived.id);
 
     const active = projects.list();
-    // The system default project is an ordinary listed project, resolved by the
-    // boolean that identifies it rather than by the spelling of its slug.
     expect(active.map((p) => p.slug).sort()).toEqual(
       ['a', 'b', defaultProject(db.handle).slug].sort(),
     );
@@ -107,8 +105,6 @@ describe('ProjectsService.list / rename / archive', () => {
   it('refuses to archive at all when no row carries is_default', () => {
     const def = defaultProject(db.handle);
     db.handle.raw.prepare('UPDATE projects SET is_default = 0').run();
-    // Fail closed: a database with no default is the state the guard's own
-    // reason argues from, so it must refuse rather than compare against nothing.
     expect(() => projects.archive(def.id)).toThrow(/missing its default/);
     expect(projects.getById(def.id)?.archivedAt).toBeNull();
   });

@@ -31,12 +31,6 @@ describe('createDb connection tuning', () => {
     return h;
   }
 
-  /**
-   * Runs `fn` with stderr captured and returns only the `[db]` lines, so the
-   * DS1 line is asserted where the container reads it — the default channel,
-   * not an injected sink. The migration narration shares that channel and is
-   * filtered out.
-   */
   function captureDbLines<T>(fn: () => T): { lines: string[]; result: T } {
     const lines: string[] = [];
     const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
@@ -107,8 +101,6 @@ describe('createDb connection tuning', () => {
     first.close(); // clean shutdown: writes statistics for 200 rows
     expect(memoryStat(open().raw)).toMatch(/^200 /);
 
-    // The corpus grows 10x, then the process dies without a clean shutdown, so
-    // nothing re-analyzes. `PRAGMA optimize` at open would leave the 200 behind.
     const grown = createDb({ dataDir });
     seed(grown.raw, 200, 2_000);
     grown.raw.close();

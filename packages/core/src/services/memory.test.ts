@@ -126,10 +126,6 @@ describe('memory.save', () => {
     expect(refetched?.title).toBe('Use pnpm workspaces');
   });
 
-  // fix-audited-defects: SQLite's length() (and the CHECK built on it) stops
-  // at the first NUL, so a value whose JS .length satisfies a bound can still
-  // trip the DB constraint and surface as an opaque internal_error with the
-  // row never written. These must be rejected before the DB sees them.
   it('rejects a title containing a NUL byte with invalid_input, never writing a row', () => {
     try {
       memory.save(
@@ -329,8 +325,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
       clock.now(),
     );
 
-    // The content never mentions "ENOENT" literally, so a text query for
-    // it finds nothing — the entity link is the only way to surface this.
     const byText = await memory.search({ query: 'ENOENT' }, projectScope(projectId));
     expect(byText.map((m) => m.id)).not.toContain(a.id);
 
@@ -357,8 +351,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
       projectScope(projectId),
     );
 
-    // The row exists but has never been scanned — exactly the state a recipe
-    // bump leaves the whole corpus in. Empty alone would read as "unknown".
     const draining = await memory.searchWithAbstention(
       { entity: 'apps/server/src/db/migrate.ts' },
       projectScope(projectId),
@@ -450,10 +442,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
       [{ kind: 'path', value: 'apps/server/src/db/migrate.ts' }],
       clock.now(),
     );
-    // 20 newer memories sharing the same entity but not the query text —
-    // more than the default page size, so `old` sits outside a naive
-    // offset+limit fetch window if the query filter is applied afterward
-    // on too small a pool.
     for (let i = 0; i < 20; i++) {
       const m = memory.save(
         { type: 'project', title: `Newer ${i}`, content: `unrelated note ${i}` },
@@ -614,8 +602,6 @@ describe('memory.search — entity filter (add-entity-index)', () => {
     expect(
       (await memory.search({ entity: 'src/both.ts' }, projectScope(projectId))).map((m) => m.id),
     ).toEqual([projectMem.id]);
-    // The control: the excluded memory IS linked to the same entity and is
-    // returned in its own scope, so the exclusion is the scope predicate.
     expect(
       (await memory.search({ entity: 'src/both.ts' }, defaultProjectScope(db.handle))).map(
         (m) => m.id,
@@ -674,8 +660,6 @@ describe('memory.search — topic_key history', () => {
     expect(listing.map((m) => m.id).sort()).toEqual([fresh.id, old.id].sort());
     expect(listing.map((m) => m.status).sort()).toEqual(['active', 'superseded']);
 
-    // Same default through the hybrid path, whose lexical branch is the one
-    // that used to drop the status predicate entirely.
     const lexical = await memory.search({ topicKey, query: 'deploy runbook revision' }, scope);
     expect(lexical.map((m) => m.id).sort()).toEqual([fresh.id, old.id].sort());
 
@@ -922,12 +906,6 @@ describe('memory.purgeDisconnectedArchived', () => {
     expect(memory.unsafeGetById(m.id)).toBeUndefined();
   });
 
-  // Explicitly pins the `agent_memory_archive` purge carve-out (PURGE_PREDICATE
-  // excludes that op_type from the affected_ids pin). Archiving journals an
-  // agent_memory_archive op referencing the row; without the carve-out that op
-  // would pin the row and this purge would find nothing. Kept separate from the
-  // generic "not referenced anywhere" case so a future refactor of that test
-  // can't silently stop exercising the carve-out.
   it('purges an agent-archived memory whose only reference is its own archive op', () => {
     const m = memory.save(
       { type: 'user', title: 'Agent archived', content: 'agent-archived' },
@@ -1001,9 +979,6 @@ describe('memory.purgeDisconnectedArchived', () => {
       { type: 'user', title: 'Old', content: 'old', topicKey: 'demo-topic' },
       projectScope(projectId),
     );
-    // Auto-supersede via topic_key: the new save points its `replaces`
-    // at oldRow.id, and oldRow transitions to 'superseded'. Manually
-    // flip it to archived to satisfy the (a) condition of the predicate.
     memory.save(
       { type: 'user', title: 'New', content: 'new', topicKey: 'demo-topic' },
       projectScope(projectId),
@@ -1286,16 +1261,11 @@ describe('deriveTitle', () => {
   });
 
   it('falls back to a single-line collapse when the first line is marker-only', () => {
-    // First line strips to empty → fallback to content, whitespace collapsed so
-    // the title never contains an embedded newline.
     expect(deriveTitle('### \nreal second line')).toBe('### real second line');
     expect(deriveTitle('   \nReal title')).toBe('Real title');
   });
 
   it('does not split a surrogate pair at the 100-char truncation boundary', () => {
-    // 99 ASCII chars + one astral emoji (2 UTF-16 units) = 101 units; a raw
-    // slice(0,100) would cut the emoji in half, leaving a lone high surrogate
-    // that decodes to U+FFFD when read back.
     const content = 'x'.repeat(99) + '😀' + 'trailing text';
     const title = deriveTitle(content);
     expect(title.length).toBeLessThanOrEqual(100);

@@ -10,8 +10,6 @@ export const dynamic = 'force-dynamic';
 
 export function GET(request: NextRequest): NextResponse {
   const target = new URL(`/dashboard/oauth-consent${request.nextUrl.search}`, request.url);
-  // 302, not `NextResponse.redirect`'s 307 default: the operator follows it with
-  // a GET, and a 307 would preserve the method for no reason.
   return NextResponse.redirect(target, 302);
 }
 
@@ -20,7 +18,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   try {
     form = await request.formData();
   } catch {
-    // An unparseable body carries no token, so it fails CSRF by definition.
     return csrfRejection();
   }
 
@@ -74,11 +71,6 @@ function csrfRejection(): NextResponse {
   return NextResponse.json({ ok: false, code: 'csrf_invalid' }, { status: 403 });
 }
 
-/**
- * A `redirect_uri` that cannot be parsed. The blob is HMAC-signed, so this is
- * unreachable from a legitimate flow; answering 400 keeps `new URL` from throwing
- * a 500.
- */
 function invalidRedirect(): NextResponse {
   return NextResponse.json(
     { ok: false, code: 'invalid_request' },

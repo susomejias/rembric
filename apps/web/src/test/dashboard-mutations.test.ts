@@ -43,17 +43,6 @@ import { guardAction } from '../lib/actions/guard';
 import { getServices } from '../lib/services';
 import type { SessionCookieSource } from '../lib/session';
 
-/**
- * The `@/` alias bridge for the modules under test that live in the dashboard
- * tree.
- *
- * The test project has no `@` alias (see `maintenance/data.ts`) and the shared
- * modules it tests import relatively. `entities/page.tsx` is a Server Component
- * and `update/actions.ts` is a Server Action module, so importing them pulls in
- * the view layer's alias specifiers. Only the render-time components — which a
- * node test never renders — are stubbed; the guard and the service graph are
- * proxied to the real modules, so the tested path is the production path.
- */
 vi.mock('@/components/dashboard/action-form', () => ({}));
 vi.mock('@/components/dashboard/confirm-submit', () => ({}));
 vi.mock('@/components/dashboard/csrf-field', () => ({}));
@@ -63,34 +52,11 @@ vi.mock('@/components/dashboard/ui', () => ({}));
 vi.mock('@/components/ui/button', () => ({}));
 vi.mock('@/lib/actions/guard', async () => await import('../lib/actions/guard'));
 vi.mock('@/lib/services', async () => await import('../lib/services'));
-// `update-service.ts` reads the running version from the app's manifest; the
-// test pins it so the release comparison is deterministic.
 vi.mock('@/lib/version', () => ({ REMBRIC_VERSION: '0.0.1' }));
 
-/**
- * `lib/session.ts` reaches `next/headers` only when a caller injects no cookie
- * source. A Server Action has no injection point, so driving one through the
- * real guard means supplying that store here — the same fixture cookie the
- * direct `guardAction` tests inject.
- */
 const requestCookies = vi.hoisted(() => ({ current: null as SessionCookieSource | null }));
 vi.mock('next/headers', () => ({ cookies: () => requestCookies.current }));
 
-/**
- * The mutation layer's contract, against a real migrated SQLite file.
- *
- * Everything below `guardAction` is the production path: the guard resolves the
- * session through the app's own cached `SessionsService` (over the same file
- * this fixture created), verifies the CSRF token with the same service the page
- * minted it from, and hands back the same `getServices()` graph the page's
- * action calls. The only injected thing is the cookie store, because a Server
- * Action reads it from a request context this process does not have.
- *
- * The fixture uses a fresh temp dir, real migrations and paired cleanup, plus a
- * second connection onto the running data dir. `REMBRIC_DATA_DIR` and `REMBRIC_ADMIN_TOKEN` are
- * set in `beforeAll`, which is early enough: `lib/db.ts` and `lib/session.ts`
- * open nothing at import time.
- */
 const ADMIN_TOKEN = 'web-mutation-test-admin-token-enough-entropy';
 
 interface Fixture {
@@ -110,9 +76,6 @@ let fixture: Fixture;
 
 function createFixture(): Fixture {
   const dataDir = mkdtempSync(join(tmpdir(), 'rembric-web-test-'));
-  // Silenced: every fixture applies every migration, and the provenance line
-  // would print once for this throwaway database and once again for the app's
-  // own connection to it.
   const handle = createDb({ dataDir, onMigrationProgress: () => {}, onStartupLog: () => {} });
   const repos = createRepositories(handle.db);
   const tokens = new TokensService(repos, handle.db);
@@ -125,8 +88,6 @@ function createFixture(): Fixture {
     deriveSessionKey(ADMIN_TOKEN),
   );
   const admin = sessions.create(adminRow.id);
-  // A valid, non-admin credential: the same service mints its session, so the
-  // only difference the guard sees is the scope the token row carries.
   const limitedToken = tokens.create({ name: 'limited', scope: 'read:*', expiresAt: null });
   const limited = sessions.create(limitedToken.token.id);
 
@@ -143,15 +104,12 @@ function createFixture(): Fixture {
     cleanup: () => {
       try {
         handle.close();
-      } catch {
-        // ignore double-close
-      }
+      } catch {}
       rmSync(dataDir, { recursive: true, force: true });
     },
   };
 }
 
-/** A cookie store carrying one session cookie value, or none. */
 function cookieSource(cookie: string | null): SessionCookieSource {
   return {
     get: (name) =>
@@ -168,7 +126,6 @@ function form(fields: Record<string, string | string[]>): FormData {
   return data;
 }
 
-/** A submission shaped exactly like the rendered form: fields plus its CSRF token. */
 let adminCookie: SessionCookieSource;
 
 function csrfFor(formName: string): string {
@@ -181,15 +138,9 @@ function submission(formName: string, fields: Record<string, string | string[]> 
 
 beforeAll(() => {
   fixture = createFixture();
-  // The app opens its own connection to this directory the first time a
-  // mutation runs; these are the two variables it resolves that from.
   process.env['REMBRIC_DATA_DIR'] = fixture.dataDir;
   process.env['REMBRIC_ADMIN_TOKEN'] = ADMIN_TOKEN;
-  // `getServices().oauth` is present iff REMBRIC_PUBLIC_URL is set — the same
-  // gate `bootstrap.ts` uses — and the consent endpoint mints codes through it.
   process.env['REMBRIC_PUBLIC_URL'] = 'http://127.0.0.1:3100';
-  // `areqKey()`/`sessionSecretBase()` fall through to the admin token; an
-  // inherited secret would derive a different key than the fixture signs with.
   delete process.env['REMBRIC_SESSION_SECRET'];
   adminCookie = cookieSource(fixture.admin.cookie);
 });
@@ -219,7 +170,6 @@ describe('guardAction', () => {
 
   it('refuses a session minted from a non-admin token, even with a valid CSRF token', async () => {
     const result = await guardAction(
-      // A correctly bound token: the refusal must come from the scope, not the CSRF check.
       form({ csrf: fixture.sessions.csrfToken(fixture.limited.session, FORM) }),
       FORM,
       cookieSource(fixture.limited.cookie),
@@ -250,10 +200,6 @@ describe('guardAction', () => {
     expect(result).toMatchObject({ ok: true });
     if (!result.ok) return;
 
-    // The control for the three refusals above: the same fixture cookie, with
-    // the token minted for this form name, is admitted. The guard hands back
-    // the very graph the page reads and writes through, so the mutation and the
-    // view cannot be two views of the same rows.
     expect(result.services).toBe(getServices());
 
     const create = vi.spyOn(result.services.projects, 'create');
@@ -268,7 +214,6 @@ describe('guardAction', () => {
 });
 
 describe('projects mutations', () => {
-  // create → archive → unarchive, each guarded by its own form name.
   it('creates, archives and unarchives a project, and refuses the default project', async () => {
     const project = fixture.projects.create({ slug: 'slice-one', displayName: null });
 
@@ -300,15 +245,12 @@ describe('projects mutations', () => {
       project.id,
     );
 
-    // The archived arm is refused at the service, not only hidden by the
-    // template: `assertWritable` is the boundary a crafted POST would reach.
     const defaultProject = fixture.projects.getDefault();
     expect(() => fixture.projects.archive(defaultProject.id)).toThrow(DomainError);
   });
 });
 
 describe('sessions mutations', () => {
-  /** A fresh active run, exactly as `dashboard-e2e.test.ts` seeds one. */
   function startSession(): string {
     const started = fixture.agentSessions.start({
       tokenId: fixture.admin.id,
@@ -318,7 +260,6 @@ describe('sessions mutations', () => {
     return started.id;
   }
 
-  // softDelete → undelete round trip.
   it('soft-deletes a session and restores it, while refusing an ended abandon', async () => {
     const id = startSession();
 
@@ -342,8 +283,6 @@ describe('sessions mutations', () => {
     restore.services.agentSessions.undelete(id, { adminBypass: true });
     expect(restore.services.agentSessions.getById(id)?.deletedAt).toBeNull();
 
-    // Abandon is only offered for an active row; the transition it would make
-    // from `ended` is refused, which is what keeps the rendered control honest.
     const ended = startSession();
     fixture.agentSessions.end(ended, { tokenId: fixture.admin.id });
     const abandon = await guardAction(
@@ -360,9 +299,6 @@ describe('sessions mutations', () => {
 });
 
 describe('tokens mutations', () => {
-  // The empty project set mints the admin scope, one slug mints the
-  // single-project arm, and the minted plaintext is the only copy that will
-  // ever exist.
   it('mints an admin-scope token over no project and revokes it by name', async () => {
     const guard = await guardAction(
       submission('token.create', { name: 'slice-three-admin', access: 'write', expires: '' }),
@@ -387,8 +323,6 @@ describe('tokens mutations', () => {
     if (!revoke.ok) return;
     revoke.services.tokens.revoke('slice-three-admin');
     expect(revoke.services.tokens.findByName('slice-three-admin')?.revokedAt).not.toBeNull();
-    // Revoking twice is a refusal, which is what the `—` cell promises: the row
-    // offers no second Revoke.
     expect(() => revoke.services.tokens.revoke('slice-three-admin')).toThrow(DomainError);
   });
 
@@ -420,9 +354,6 @@ describe('tokens mutations', () => {
 });
 
 describe('memories mutations', () => {
-  // The row is read unscoped and the scope the service call is pinned to comes
-  // from that row's own project. Confirm records the operator's event, which is
-  // what bumps the confirmation count the detail hub renders.
   const ARCHIVE_FORM = 'memory.archive';
   const CONFIRM_FORM = 'memory.confirm';
 
@@ -435,7 +366,6 @@ describe('memories mutations', () => {
     return row.id;
   }
 
-  /** Read the row unscoped, then scope to its project. */
   function resolveScope(id: string): Scope {
     const row = getServices().memory.unsafeGetById(id);
     if (!row?.projectId) throw new Error('fixture: memory has no project to scope to');
@@ -472,8 +402,6 @@ describe('memories mutations', () => {
       cookieSource(fixture.limited.cookie),
     );
     expect(result).toMatchObject({ ok: false, error: 'admin_required' });
-    // The control for the refusal: an admin session would archive this same row,
-    // so an unchanged status is evidence the guard stopped before the service.
     expect(getServices().memory.unsafeGetById(id)?.status).toBe('active');
   });
 
@@ -481,17 +409,12 @@ describe('memories mutations', () => {
     const id = saveMemory('slice-four-scope');
     const other = fixture.projects.create({ slug: 'slice-four-other', displayName: null });
 
-    // The positive control is the round-trip above: the same kind of row, scoped
-    // from its own project, archives. Here the wrong project's scope must refuse
-    // and leave the row untouched.
     expect(() => getServices().memory.archive(id, projectScope(other.id))).toThrow(DomainError);
     expect(getServices().memory.unsafeGetById(id)?.status).toBe('active');
   });
 });
 
 describe('judgments mutations', () => {
-  // The operator closes a pending judgment once; the second call is the
-  // "already closed" answer the row's form surfaces as an error.
   const ORPHAN_FORM = 'judgment.orphan';
 
   function pendingJudgment(): string {
@@ -532,19 +455,15 @@ describe('judgments mutations', () => {
     expect(guard.services.relations.orphanByOperator(judgmentId)).toBe(true);
     expect(getServices().repos.relations.findByJudgmentId(judgmentId)?.status).toBe('orphaned');
 
-    // `false` is the missing-or-closed branch the action turns into its error.
     expect(guard.services.relations.orphanByOperator(judgmentId)).toBe(false);
   });
 });
 
 describe('maintenance mutations', () => {
-  // Each purge POST covers the zero-count branch the UI renders as a disabled
-  // control and the non-zero branch it renders as a danger-confirmed form.
   const PURGE_SESSIONS = 'maintenance.purge-sessions';
   const PURGE_MEMORIES = 'maintenance.purge-archived-memories';
   const PURGE_PROMPTS = 'maintenance.purge-prompts';
 
-  /** End a run and backdate `ended_at` past the one-hour purge grace. */
   function endAndBackdate(sessionId: string): void {
     getServices().agentSessions.end(sessionId, { tokenId: fixture.admin.id });
     fixture.handle.raw
@@ -620,12 +539,8 @@ describe('maintenance mutations', () => {
 });
 
 describe('maintenance backup', () => {
-  // The writer, the retention rule and the filename gate all
-  // live in `maintenance/data.ts`; the routes are thin over them, so the tests
-  // drive the routes themselves — a handler-level assertion, not a mock of one.
   const BACKUP_FORM = 'maintenance.backup';
 
-  /** `REMBRIC_DATA_DIR` is the fixture's temp dir, so this is where the writer writes. */
   function backupsPath(): string {
     return join(fixture.dataDir, 'backups');
   }
@@ -650,7 +565,6 @@ describe('maintenance backup', () => {
     expect(guard).toMatchObject({ ok: true });
     if (!guard.ok) return;
 
-    // The zero state the page renders before any snapshot exists.
     expect(latestOnDemandBackup()).toBeNull();
 
     const created = createOnDemandBackup();
@@ -659,8 +573,6 @@ describe('maintenance backup', () => {
     expect(existsSync(created.path)).toBe(true);
     expect(created.sizeBytes).toBeGreaterThan(0);
 
-    // The read layer agrees with the writer, so the table and the flash cannot
-    // be two views of different files.
     const state = readMaintenanceState(false);
     expect(state.latestOnDemand?.file).toBe(created.file);
     expect(state.backups.map((b) => b.file)).toContain(created.file);
@@ -670,8 +582,6 @@ describe('maintenance backup', () => {
   it('keeps only the 3 newest on-demand snapshots', () => {
     rmSync(backupsPath(), { recursive: true, force: true });
     mkdirSync(backupsPath(), { recursive: true });
-    // Deterministic: the writer's own name is `Date.now()`, which sorts after
-    // every one of these three, so exactly the oldest is past the keep window.
     for (const ms of [1_000, 2_000, 3_000]) {
       writeFileSync(join(backupsPath(), `on-demand-${ms}.sqlite`), 'older snapshot');
     }
@@ -707,8 +617,6 @@ describe('maintenance backup', () => {
   it('serves a named snapshot, including a pre-update one, and 404s a missing file', async () => {
     rmSync(backupsPath(), { recursive: true, force: true });
     mkdirSync(backupsPath(), { recursive: true });
-    // The pre-update snapshot the self-update flow takes before every upgrade:
-    // listable and downloadable, never written by this app.
     const preUpdate = 'pre-update-v0.24.0-1700000000000.sqlite';
     writeFileSync(join(backupsPath(), preUpdate), 'not a real sqlite file, just bytes');
 
@@ -727,8 +635,6 @@ describe('maintenance backup', () => {
 
   it('rejects a filename outside the producer-generated shape before it touches the fs', async () => {
     const traversal = '../../../../etc/passwd';
-    // The resolver is where the gate lives, so both the route and this direct
-    // call refuse: no `stat`, no `join` onto a traversed path.
     expect(resolveBackupDownload(traversal)).toMatchObject({ ok: false, status: 400 });
 
     const response = await downloadBackup(fileRequest(traversal), {
@@ -737,8 +643,6 @@ describe('maintenance backup', () => {
     expect(response.status).toBe(400);
     expect(response.headers.get('content-disposition')).toBeNull();
 
-    // A shaped-but-absolute name is refused the same way, which is the point of
-    // pinning the shape rather than only stripping `..`.
     expect(resolveBackupDownload('/etc/passwd')).toMatchObject({ ok: false, status: 400 });
   });
 
@@ -754,12 +658,10 @@ describe('maintenance backup', () => {
 });
 
 describe('consolidation sweep and undo', () => {
-  // The forced sweep and the two undo POSTs, bound in `lib/services.ts`.
   const SWEEP_FORM = 'sweep.run';
   const RUN_UNDO_FORM = 'run.undo';
   const OP_UNDO_FORM = 'op.undo';
 
-  /** A row DEFAULT_DECAY archives: `project`'s window is 180 days, and no affirmations exist. */
   function decayCandidate(title: string): string {
     const { memory } = getServices();
     const row = memory.save(
@@ -784,8 +686,6 @@ describe('consolidation sweep and undo', () => {
     expect(guard).toMatchObject({ ok: true });
     if (!guard.ok) return;
 
-    // Zero state: nothing is decay-eligible, so the default project's run
-    // journals no op — the `no-op` status the run table renders.
     const idleRunId = defaultRunId(guard.services);
     expect(guard.services.repos.consolidation.adminOpCounts(idleRunId)).toEqual({
       total: 0,
@@ -835,7 +735,6 @@ describe('consolidation sweep and undo', () => {
     expect(guard.services.undoOp(op.id)).toEqual({ reverted: op.id, skipped: [] });
     expect(guard.services.memory.unsafeGetById(id)?.status).toBe('active');
 
-    // The second undo must surface `already reverted` as the form's error flash.
     expect(() => guard.services.undoOp(op.id)).toThrow(/already reverted/);
   });
 
@@ -853,9 +752,6 @@ describe('consolidation sweep and undo', () => {
     );
     expect(refused).toMatchObject({ ok: false, error: 'admin_required' });
 
-    // The control for the refusal: the same run, undone by an admin, reactivates
-    // the row — so an unchanged status above is the guard stopping before the
-    // service, not a mutation that would have failed anyway.
     const undo = await guardAction(
       submission(RUN_UNDO_FORM, { runId }),
       RUN_UNDO_FORM,
@@ -870,9 +766,6 @@ describe('consolidation sweep and undo', () => {
 });
 
 describe('entities rebuild', () => {
-  // The guard first, then `resetIndex()` plus up to `REBUILD_MAX_BATCHES`
-  // forced batches over the live worker, then the processed count carried back
-  // on the redirect.
   const FORM = 'entities.rebuild';
 
   it('re-scans the whole backlog across batches and reports the processed count', async () => {
@@ -880,8 +773,6 @@ describe('entities rebuild', () => {
     expect(guard).toMatchObject({ ok: true });
     if (!guard.ok) return;
 
-    // More than one worker batch (the default batchSize is 100), so a cap that
-    // stopped after a single batch would leave the count short.
     const seeded = 150;
     const scope = projectScope(fixture.projects.getDefault().id);
     for (let i = 0; i < seeded; i++) {
@@ -898,8 +789,6 @@ describe('entities rebuild', () => {
   });
 
   it('stops on the first empty batch when there is nothing to scan', () => {
-    // The zero-backlog branch: `resetIndex()` re-pends every memory, so an empty
-    // corpus is the only state where the first forced batch processes nothing.
     const dataDir = mkdtempSync(join(tmpdir(), 'rembric-entities-empty-'));
     const handle = createDb({ dataDir, onMigrationProgress: () => {}, onStartupLog: () => {} });
     try {
@@ -916,17 +805,13 @@ describe('entities rebuild', () => {
 });
 
 describe('update manual check', () => {
-  // Driven through the real guard and the process singleton
-  // `update-service.ts` builds.
   const FORM = 'update.check';
   const RELEASES_URL = 'http://updates.test/releases';
 
-  /** The singleton is cached on `globalThis`; each case needs its own env. */
   function resetUpdatesSingleton(): void {
     delete (globalThis as Record<string, unknown>)['__rembricUpdates'];
   }
 
-  /** The path `redirect()` threw toward. */
   async function redirectTarget(run: () => Promise<unknown>): Promise<string> {
     try {
       await run();
@@ -937,7 +822,6 @@ describe('update manual check', () => {
     throw new Error('expected redirect() to throw');
   }
 
-  /** The `REMBRIC_UPDATE_CHECK_URL` seam, answered by a stubbed global fetch. */
   function stubReleases(releases: unknown): void {
     vi.stubGlobal(
       'fetch',
@@ -974,10 +858,8 @@ describe('update manual check', () => {
 
     const digest = await redirectTarget(() => checkForUpdates({ error: null }, submission(FORM)));
 
-    // A found update needs no flash; the refreshed cache is what the page reads.
     expect(digest).toContain('/dashboard/update');
     expect(digest).not.toContain('checked=');
-    // The same singleton the page peeks now carries the found release.
     expect(getUpdates().peek()?.latestVersion).toBe('9.9.9');
   });
 
@@ -1005,8 +887,6 @@ describe('update manual check', () => {
 });
 
 describe('oauth consent endpoint', () => {
-  // At the provider's redirect path. GET delegates to the consent page; POST is
-  // the protocol decision.
   const FORM = 'oauth.consent';
   const REDIRECT_URI = 'https://client.example/callback';
 

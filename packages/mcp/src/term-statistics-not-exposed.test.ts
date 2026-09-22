@@ -19,14 +19,6 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * The relevance level's term statistics are index-global aggregates read
- * outside scope resolution. memory/spec.md bounds that exception by forbidding
- * them from reaching a payload: "No response field SHALL expose a raw term
- * statistic." Asserted over the SERIALIZED text every tool actually returns,
- * not over the types.
- */
-
 const FORBIDDEN = [
   /"documentCount"/,
   /"documentTotal"/,

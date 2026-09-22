@@ -200,8 +200,6 @@ describe('foreignScopeRate', () => {
   });
 
   it('takes widening from the query declaration, not from the rows that came back', () => {
-    // Same rows, opposite declarations: inferring widening from the presence of
-    // foreign rows would make both of these read 0 and gate nothing.
     const declared = aggregate(
       [metric({ queryId: 'gold-a', widened: true, returnedRows: 4, foreignRows: 4 })],
       CEILINGS,

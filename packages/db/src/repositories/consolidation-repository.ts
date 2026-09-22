@@ -46,11 +46,6 @@ export class ConsolidationRepository {
     );
   }
 
-  /**
-   * Unscoped — `admin`-prefixed so the confinement gate covers it. The sweep
-   * runs per scope but the latest-run banner (dashboard, `memory.doctor`) is
-   * deliberately server-wide.
-   */
   adminLatestRun(): Pick<ConsolidationRun, 'startedAt' | 'summary'> | undefined {
     return this.db
       .select({ startedAt: consolidationRuns.startedAt, summary: consolidationRuns.summary })

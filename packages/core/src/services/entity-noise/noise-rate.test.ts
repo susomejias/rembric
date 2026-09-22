@@ -4,13 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { NOISE_PROBES, PUBLISHED_NOISE } from './corpus.js';
 import { measureLexicalNoise, noisePercent } from './measure.js';
 
-/**
- * `memory-entities` requires each kind to earn its place against the lexical
- * branch, with measured evidence. This suite is that measurement's gate: the
- * published table is asserted against a live FTS5 index, so a figure cannot be
- * stated in prose and a kind cannot be added without a probe.
- */
-
 describe('entity kinds — lexical noise measurement', () => {
   const measured = measureLexicalNoise();
 
@@ -24,8 +17,6 @@ describe('entity kinds — lexical noise measurement', () => {
   });
 
   it('every probe declares a truth document the lexical branch actually returns', () => {
-    // A probe whose truth document does not match would report noise of 100%
-    // for the wrong reason: the query is broken, not the class noisy.
     for (const r of measured) {
       for (const p of r.results) {
         expect(p.truthMatched, `${p.probe.identifier}: truth document not retrieved`).toBe(true);

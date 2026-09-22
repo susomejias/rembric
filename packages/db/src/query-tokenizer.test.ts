@@ -19,11 +19,6 @@ import {
 import { createTestDb, type TestDb } from './test-support/db.js';
 import { ALL_TABLES, SHADOW_TABLE_NAMES } from './test-support/schema-inventory.js';
 
-/**
- * The tokenising table's declaration comes from `memory_fts`'s own, read out of
- * `sqlite_master`, so the two cannot be edited into disagreement — memory/spec.md,
- * "The tokenising table inherits the index's declared tokenizer".
- */
 describe('the query-tokenising declaration is derived, not restated', () => {
   let scratchDir: string;
   let raw: Database.Database;
@@ -49,8 +44,6 @@ describe('the query-tokenising declaration is derived, not restated', () => {
     return raw;
   }
 
-  // The two helper tables are created by this test from its own constants, so
-  // the table names are literal strings rather than interpolated SQL.
   const termsInsert = `INSERT INTO temp.${QUERY_TERMS_TABLE}(rowid, body) VALUES (0, ?)`;
   const termsSelect = `SELECT term FROM temp.${QUERY_TERMS_VOCAB_TABLE} ORDER BY term`;
 
@@ -85,8 +78,6 @@ describe('the query-tokenising declaration is derived, not restated', () => {
   });
 
   it('fails at startup, not on the first query', () => {
-    // `contentless_delete` is a real fts5 option a later migration could add,
-    // and one whose omission changes behaviour — so it must not be dropped.
     const db = withIndexDeclaredAs(`content, content='', contentless_delete=1`);
     expect(() => createQueryTokenizerTables(db)).toThrow(/contentless_delete/);
     expect(
@@ -169,8 +160,6 @@ describe('the query-tokenising table on the real migrated schema', () => {
       .map((r) => r.name);
     expect(durable).not.toContain(QUERY_TERMS_TABLE);
     expect(durable).not.toContain(QUERY_TERMS_VOCAB_TABLE);
-    // Control: the durable vocabulary read IS in the schema, so the assertion
-    // above is about the temp table and not about an empty list.
     expect(durable).toContain('memory_fts_vocab');
 
     const ledger = db.handle.raw
@@ -206,8 +195,6 @@ describe('the query-tokenising table on the real migrated schema', () => {
     }
     expect(sizes()).toEqual(before);
 
-    // Control: a durable write DOES move one of those numbers, so the equality
-    // above is a property of the temp schema and not of the measurement.
     db.handle.raw
       .prepare(
         `INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at)

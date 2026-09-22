@@ -99,16 +99,10 @@ describe('parseAllowBuilds', () => {
   });
 });
 
-/**
- * A gate never observed to fail is not a gate. Each case mutates an in-memory
- * copy of the real files — never the tree — and asserts the violation names the
- * offender. The unmutated positive direction belongs to `invariants.test.ts`.
- */
 describe('findSupplyChainViolations fires on each way the surface can drift', () => {
   const violationsWith = (over: Partial<SupplyChainSources>) =>
     findSupplyChainViolations({ ...real, ...over }).join('\n');
 
-  /** Replaces husky's whole line. Throws rather than silently no-op if it stops matching. */
   const grant = (line: string) => {
     const mutated = real.workspace.replace(/^ {2}husky: true.*$/m, line);
     if (mutated === real.workspace)
@@ -116,13 +110,6 @@ describe('findSupplyChainViolations fires on each way the surface can drift', ()
     return mutated;
   };
 
-  /**
-   * `apps/web/Dockerfile` carries no `pnpm rebuild` instruction — the flat
-   * install brings the native postinstall outputs with it — so the rebuild arms
-   * inject one instead of mutating a line that is not there. A `.replace()` whose
-   * needle has vanished is a silent no-op, which reads as a missing violation
-   * rather than as a missing fixture.
-   */
   const withRebuild = (dockerfile: string, args: string): string => {
     const install = /^RUN pnpm install\b.*$/m.exec(dockerfile)?.[0];
     if (!install) throw new Error('no install instruction to hang the rebuild arm on');

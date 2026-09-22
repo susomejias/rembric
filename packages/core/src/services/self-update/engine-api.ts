@@ -1,11 +1,3 @@
-/**
- * Minimal Docker Engine API client over the unix socket.
- *
- * Implemented with `node:http` (`socketPath`) on purpose: the self-update
- * feature is contractually zero-dependency (openspec/specs/self-update).
- * Only the handful of endpoints the updater needs are covered.
- */
-
 import { request as httpRequest } from 'node:http';
 
 export const DEFAULT_DOCKER_SOCKET = '/var/run/docker.sock';
@@ -98,11 +90,6 @@ export class DockerEngineApi {
     return JSON.parse(res.body) as ContainerInspect;
   }
 
-  /**
-   * Pull `repo:tag`, streaming the daemon's NDJSON progress events into
-   * `onProgress`. Resolves when the stream ends; rejects on a stream-level
-   * `error` event from the daemon.
-   */
   async pullImage(
     repo: string,
     tag: string,
@@ -166,9 +153,6 @@ export class DockerEngineApi {
   }
 
   private async prune<T>(kind: 'containers' | 'images', filters: PruneFilters): Promise<T> {
-    // An unscoped prune would sweep every stopped container / dangling image
-    // on the host, including other services'. The type requires a label, but
-    // JS callers bypass types — refuse at runtime too, before any socket I/O.
     const labels: unknown = filters.label;
     if (
       !Array.isArray(labels) ||

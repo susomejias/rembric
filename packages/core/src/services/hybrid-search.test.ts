@@ -102,13 +102,6 @@ describe('rank window floor', () => {
     };
   }
 
-  // Only rows ranked strictly below the k+2 crossover in BOTH branches are
-  // "free passes" a single-branch rank-1 match must survive against — at
-  // window=64, k=60 that's ranks 63-64 (2 rows), not an arbitrary count. A
-  // 3rd "both-branches" row already sits above the crossover and legitimately
-  // outranks a single-signal match, which is correct ranking, not a defect
-  // this fix is meant to (or could) prevent — more genuinely-relevant
-  // competitors than fit on a page is not something any window floor can fix.
   it('a rank-1 single-branch row outranks bottom-of-window both-branches rows at the floored window', () => {
     const window = computeRankWindowSize(8, 0); // 64
     const single = 'single-branch-rank-1';
@@ -190,17 +183,11 @@ describe('applyRankingBoost', () => {
   });
 
   it('cannot invert a large, still-reachable raw-score gap even at the boost extremes', () => {
-    // 'strong' and 'weak' hit the actual reachable extremes ([0.9, 1.35], not
-    // the declared-but-unreachable [0.7, 1.4] clamp — see hybrid-search.ts).
-    // The old version of this test used a `strong: 0.1` input ~3x above the
-    // maximum two-branch fused score (2/61 ≈ 0.033), so max boost on the
-    // weaker id could never have inverted it regardless of the clamp.
     const meta = new Map([
       ['weak', { type: 'user' as const, lastSeenAt: NOW }], // +0.1 type, +0.1 recency
       ['strong', { type: 'project' as const, lastSeenAt: new Date(NOW.getTime() - 200 * DAY_MS) }], // +0 type, -0.1 recency
     ]);
-    const confirmations = new Map([['weak', 5]]); // +0.15 → weak boost = 1.35
-    // Both scores are within the two-branch RRF ceiling (2/61 ≈ 0.0328).
+    const confirmations = new Map([['weak', 5]]);
     const fused = [
       { id: 'strong', score: 0.03 },
       { id: 'weak', score: 0.005 },
@@ -210,10 +197,6 @@ describe('applyRankingBoost', () => {
   });
 });
 
-/**
- * The evidence that no threshold in RRF space can gate relevance. Pure
- * arithmetic over `RANK_CONSTANT`, so it holds as long as that constant does.
- */
 /** The consecutive-pair rule both replaced quantities used, kept as the thing being disproved. */
 function consecutiveFilter<T>(ranked: T[], ratio: number, of: (r: T) => number): T[] {
   for (let i = 0; i < ranked.length - 1; i++) {
@@ -238,10 +221,6 @@ describe('RRF scores cannot carry a relevance threshold', () => {
   });
 
   it('leaves only two bands, so no ratio can express relevance', () => {
-    // The class-boundary ratio is `(60+m)/(2·(61+m))` for m both-branches rows:
-    // 0.4919 at m=1, rising to 0.5. Within a class it is 0.9839 upwards. Every
-    // ratio therefore lands in one of three regimes and none of them is a
-    // statement about match quality.
     const boundary = (m: number) => (RANK_CONSTANT + m) / (2 * (RANK_CONSTANT + m + 1));
     expect(boundary(1)).toBeCloseTo(0.4919, 4);
     expect(boundary(200)).toBeLessThan(0.5);
@@ -249,8 +228,6 @@ describe('RRF scores cannot carry a relevance threshold', () => {
   });
 
   it('is a three-valued knob: below the boundary band nothing fires, the middle selects branch membership', () => {
-    // Two ids found by both branches, five found by one — the only structure
-    // an RRF-space ratio can see.
     const both = ['b0', 'b1'];
     const single = ['s0', 's1', 's2', 's3', 's4'];
     const fused = fuseRRFWithScores([both, [...both, ...single]], RANK_CONSTANT);
@@ -269,8 +246,6 @@ describe('applyRelativeLevelFilter', () => {
     const kept = applyRelativeLevelFilter(decaying, 0.9, 0.5);
     expect(kept.map((r) => r.level)).toEqual([0.9, 0.8, 0.7, 0.6, 0.5]);
     expect(kept).toHaveLength(5);
-    // Every consecutive step here is >= 0.75, so the old rule kept all seven
-    // and returned a row at 33% of the leader.
     expect(consecutiveFilter(decaying, 0.5, (r) => r.level)).toHaveLength(7);
   });
 
@@ -360,9 +335,6 @@ describe('poolLeader', () => {
     expect(poolLeader([...leveled].reverse(), scored)).toEqual(poolLeader(leveled, scored));
   });
 
-  // The previous shape reported per-component maxima over DIFFERENT rows while
-  // the spec instructs a reader to take them as one row's pair: here the
-  // highest coverage in the pool is c's 0.4, which must NOT be reported.
   it("reports the leader row's own two components, not each component's pool maximum", () => {
     expect(poolLeader(leveled, scored)).toEqual({ level: 0.9, coverage: 0.1, cosine: 0.9 });
   });
@@ -488,13 +460,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
   });
 
   it('excludes a row from search results if memory_vec.status is stale, even though the dense branch returned its id', async () => {
-    // Simulates the pre-fix race (#257): construct a memory_vec row whose
-    // cached `status` disagrees with the live `memory.status`, bypassing
-    // the normal insert/sync paths entirely (a raw UPDATE to memory_vec
-    // does not go through the memory_vec_status_sync trigger, which is
-    // defined ON `memory`, not on `memory_vec`). This proves the search
-    // hydration guard — not the trigger, not insertEmbedding — is what
-    // keeps a stale vec row from leaking into results.
     const stale = mem.save(
       { type: 'user', title: 'Stale vector token', content: 'stale vector token' },
       projectScope(projectId),
@@ -586,8 +551,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(scoped.map((m) => m.id)).toContain(projectRow.id);
     expect(scoped.map((m) => m.id)).not.toContain(otherRow.id);
 
-    // The control: the excluded row is retrievable in its own scope, so the
-    // exclusion above is the scope predicate rather than a failed index.
     const own = await mem.search({ query: 'widget note' }, defaultProjectScope(db.handle));
     expect(own.map((m) => m.id)).toContain(otherRow.id);
   });
@@ -658,9 +621,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       limit: 8,
       offset: 0,
     });
-    // The dense branch has no distance floor, so the unrelated query still pools
-    // the row — which is what makes this an assertion about the gates and not
-    // about an empty pool (that case abstains, below).
     expect(result.ids.length).toBeGreaterThan(0);
     expect(result.abstained).toBe(false);
     expect(result.abstainReason).toBeUndefined();
@@ -703,9 +663,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       offset: 0,
     });
     expect(result.abstained).toBe(true);
-    // "While BOTH gates are disabled the branch SHALL perform no gate-related
-    // work at all" (memory/spec.md) — the verdict is a length check on an array
-    // already in hand.
     expect(textByIds).not.toHaveBeenCalled();
     expect(documentCount).not.toHaveBeenCalled();
     textByIds.mockRestore();
@@ -733,8 +690,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(result.abstained).toBe(true);
     expect(leader?.poolSize).toBe(0);
     expect(leader?.level).toBe(0);
-    // The df list is why the sink is called at all here: it shows which query
-    // terms the index does not hold, which is why the pool is empty.
     expect(leader?.documentCount).toBeGreaterThan(0);
     expect([...(leader?.documentFrequencies.keys() ?? [])]).toContain('zzzqqq');
   });
@@ -754,8 +709,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
       limit: 8,
       offset: 0,
     };
-    // Control: the same query without the filter pools the row, so the
-    // abstention below is the filter's doing and not a broken probe.
     const unfiltered = await hybridSearch(shared);
     expect(unfiltered.ids.length).toBeGreaterThan(0);
     expect(unfiltered.abstained).toBe(false);
@@ -783,13 +736,6 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
   });
 });
 
-/**
- * The gate decision itself, with a non-empty candidate set on BOTH sides of
- * every assertion. No embedder is wired, so `level` is the lexical component
- * alone; it is IDF-weighted against the live index, so each threshold below is
- * placed relative to a level READ from that index rather than to a memorised
- * constant that only held while coverage was unweighted.
- */
 const relevanceLevel = (...args: Parameters<typeof relevanceComponents>) =>
   relevanceComponents(...args).level;
 
@@ -839,13 +785,9 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
 
   it('pins the two levels the thresholds below are placed around', () => {
     const q = tokenSet(QUERY);
-    // Degenerate case: with every term equally weighted the level is the plain
-    // token fraction, which is what the thresholds below used to be placed around.
     expect(relevanceLevel(q, WEAK, undefined, EQUAL_WEIGHTS)).toBeCloseTo(3 / 7, 10);
     expect(relevanceLevel(q, STRONG, undefined, EQUAL_WEIGHTS)).toBe(1);
 
-    // Against the live (here empty) index every term is `df = 0`, so the two
-    // agree — and the tests below still read the live value rather than these.
     mem.save({ type: 'project', ...WEAK }, projectScope(projectId));
     expect(liveLevel(STRONG)).toBe(1);
     expect(liveLevel(WEAK)).toBeLessThan(1);
@@ -878,8 +820,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
   });
 
   it('passes a leader whose level exactly equals the floor', async () => {
-    // Pins the comparison as `level < floor` and not `<=`, at whatever level
-    // the live index gives this row.
     const query = 'alpha beta gamma delta';
     const row = { title: 'Alpha notes', content: 'alpha and beta only' };
     mem.save({ type: 'project', ...row }, projectScope(projectId));
@@ -896,8 +836,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
   });
 
   it('measures the floor against the window maximum, not the fusion leader', async () => {
-    // `weak` is returned by BOTH branches so RRF ranks it first; `strong` is
-    // lexical-only and ranks behind it while carrying full coverage.
     const fake = new FakeEmbedder();
     const embedded = new MemoryService(repos, db.handle.db, undefined, (t) => fake.embed(t));
     const weakText = { title: 'Nimbus roster', content: 'nimbus roster of on-call names' }; // 1/7
@@ -913,8 +851,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     expect(relevanceLevel(q, STRONG, undefined, EQUAL_WEIGHTS)).toBe(1);
 
     const embedQuery = (t: string) => fake.embed(t);
-    // `relativeLevelRatio: null` is explicit: this test isolates the FLOOR, and
-    // inheriting a shipped ratio would let a second mechanism move the result.
     const ungated = await search({ embedQuery, relativeLevelRatio: null });
     expect(ungated.ids[0]).toBe(weak.id); // fusion put the weak row first
 
@@ -953,9 +889,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     expect(page2.ids).toEqual([]); // short/empty because only two rows were relevant
     expect(page2.abstained).toBe(false);
 
-    // Without the filter the same page 2 is populated, so the emptiness is the
-    // filter's doing and not corpus exhaustion. `null` explicitly: inheriting
-    // the shipped ratio would leave the filter on and make this no control.
     const page2Ungated = await search({ relativeLevelRatio: null, limit: 2, offset: 2 });
     expect(page2Ungated.ids).toHaveLength(2);
 
@@ -1028,8 +961,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
       expect(filtered.gateShortened).toBe(true);
       expect(filtered.abstained).toBe(false);
 
-      // The other half of the disjointness: an empty pool gives the filter
-      // nothing to remove, so the flag cannot accompany the abstention.
       const empty = await search({ query: 'zzzqqq wwwvvv', relativeLevelRatio: 1 });
       expect(empty.abstained).toBe(true);
       expect(empty.gateShortened).toBeUndefined();
@@ -1058,12 +989,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     }
   };
 
-  /**
-   * STRONG at level 1.0 plus three weak rows, so a ratio can be placed between
-   * them. leaderLevel is the strong row's 1.0, so a cut IS the ratio — and both
-   * cuts are placed around the weak rows' LIVE level rather than a constant, so
-   * they follow the level function instead of having to be retuned with it.
-   */
   const fourRowPool = () => {
     const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId));
     saveWeakRows(3);
@@ -1087,11 +1012,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     return { survivors, cut: liveLevel({ title: 'Weak 0', content: WEAK.content }) + 0.05 };
   };
 
-  // The gate levels the WHOLE fused pool. Asserted on the row set actually read
-  // rather than on a verdict, because the two are only loosely coupled: a
-  // `limit + offset + margin` prefix silently levels fewer rows, and whether
-  // that changes the verdict then depends on where fusion happened to put the
-  // best row. This pins the mechanism instead of one corpus's luck.
   const fillPool = (n: number) => {
     for (let i = 0; i < n; i++) {
       mem.save(
@@ -1174,9 +1094,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     expect(level()).toBe(levelBefore);
     expect(levelBefore).toBeCloseTo(3 / 7, 10);
 
-    // Why a floor over the level can work and a floor over the old quantity
-    // cannot: the whole observable range of the latter is under 1e-5 wide and
-    // pinned just above 0.5, at both corpus sizes.
     for (const v of [normalizedBefore, normalizedLexicalLeader()]) {
       expect(v).toBeGreaterThan(0.5);
       expect(v).toBeLessThan(0.50001);
@@ -1184,11 +1101,6 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
   }, 30_000);
 });
 
-// The tests around the gates pass their values EXPLICITLY so they test the
-// mechanism rather than the shipped configuration. That leaves nothing watching
-// the configuration itself, so this pins it: `memory/spec.md` requires a
-// committed sweep before a gate is enabled, and this is what makes a silent
-// change to one visible in review.
 describe('the shipped gate configuration', () => {
   it('ships the floor disabled and the relative filter at its swept value', async () => {
     const mod = await import('@rembric/core');
@@ -1248,10 +1160,6 @@ describe('the disabled path does no gate work', () => {
       );
     }
     const { repos: counting, calls } = countingRepos();
-    // Both gates passed as `null` EXPLICITLY. This test's subject is the
-    // mechanism — disabled gates issue no extra read — not the current value of
-    // the shipped constants. Reading them from the module made it fail the day
-    // one gate was enabled on evidence, which is a legitimate change.
     await hybridSearch({
       repos: counting,
       query: 'rollout timezone rotation',
@@ -1262,10 +1170,6 @@ describe('the disabled path does no gate work', () => {
       abstentionFloor: null,
       relativeLevelRatio: null,
     });
-    // One lexical read plus the boost's two metadata reads. An exact list, not a
-    // `not.toContain`, so a second new read added later fails here too. The
-    // proxy covers `termStatistics` as well as `memory`, so the level's term
-    // lookups would show up here if the disabled path reached them.
     expect(calls).toEqual(['searchBm25Ids', 'rankingMetadataByIds', 'confirmationCountsByIds']);
     for (const read of ['textByIds', 'adminDocumentCount', 'adminQueryTermFrequencies'])
       expect(calls).not.toContain(read);
@@ -1305,8 +1209,6 @@ describe('the disabled path does no gate work', () => {
         ),
       );
     }
-    // Give one row every boost signal, so the oracle has to agree about the
-    // boost too rather than only about fusion order.
     mem.confirm(saved[7]!.id, projectScope(projectId), { source: { agent: 'test' } });
     mem.confirm(saved[7]!.id, projectScope(projectId), { source: { agent: 'test' } });
     mem.confirm(saved[7]!.id, projectScope(projectId), { source: { agent: 'test' } });
@@ -1321,8 +1223,6 @@ describe('the disabled path does no gate work', () => {
       now: () => new Date('2026-01-01T00:00:00.000Z'),
     };
 
-    // No embedder is wired, so the dense list is empty and the whole
-    // pre-change pipeline is reproducible here: FTS ids -> RRF -> boost -> slice.
     const lexicalIds = repos.memory
       .searchBm25Ids({
         matchExpr: sanitizeFtsQuery(opts.query),
@@ -1422,9 +1322,6 @@ describe('confirm the exclusion holds (add-entity-index Decision 1 / task 8.1)',
       defaultProjectScope(db.handle),
     );
 
-    // Link every row to entities — the entity index now exists, fully
-    // populated — but no fusion stream reads it, so a plain text query
-    // must be untouched by its presence.
     for (const r of rows) {
       repos.entities.linkMemory(
         r.id,

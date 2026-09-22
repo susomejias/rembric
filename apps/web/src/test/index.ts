@@ -1,8 +1,3 @@
-/**
- * Test fixtures barrel. Imported as `from '../test/index.js'` (or shorter)
- * by `*.test.ts` files in the same package.
- */
-
 export { agentSessionRow } from './agent-sessions.js';
 export { createTestDb } from './db.js';
 export type { TestDb } from './db.js';

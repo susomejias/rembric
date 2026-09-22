@@ -1,12 +1,3 @@
-/**
- * Self-update orchestrator — the server-side half of the one-click flow.
- *
- * Runs everything that can run while this process is still alive:
- * backup → pull → launch the ephemeral upgrader container. The container
- * swap itself happens in the upgrader (see `scripts/upgrade-helper.ts`),
- * which outlives this process by design.
- */
-
 import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -35,9 +26,6 @@ export type StartResult =
 export const BACKUP_PREFIX = 'pre-update-';
 const BACKUP_KEEP = 3;
 
-// The exact values are load-bearing against on-host history: upgraders and
-// images created by past releases carry them, so a rename would silently stop
-// matching that backlog (orchestrator.test.ts pins the literals for this reason).
 const UPGRADER_LABEL_KEY = 'rembric.upgrader';
 const UPGRADER_LABEL_VALUE = '1';
 const UPGRADER_LABEL_FILTER = `${UPGRADER_LABEL_KEY}=${UPGRADER_LABEL_VALUE}`;
@@ -56,12 +44,6 @@ export interface BackupDeps {
   now?: () => number;
 }
 
-/**
- * Consistent pre-update snapshot, mandatory and gating: any throw here
- * aborts the update before a single container is touched. Keeps the
- * `BACKUP_KEEP` most recent pre-update files. Returns the snapshot path
- * so the upgrader can name it in recovery instructions.
- */
 export function createPreUpdateBackup(deps: BackupDeps): (targetVersion: string) => string {
   const now = deps.now ?? Date.now;
   return (targetVersion: string) => {
@@ -92,10 +74,6 @@ export interface OrchestratorDeps {
   socketPath?: string;
   /** Entrypoint of the upgrader inside the new image. */
   helperEntrypoint?: string[];
-  /**
-   * Raw REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS, forwarded verbatim to the
-   * upgrader — the helper is the sole validator (`parseHealthTimeoutMs`).
-   */
   upgradeHealthTimeoutMs?: string;
   now?: () => number;
   log?: (line: string) => void;
@@ -131,11 +109,6 @@ export class SelfUpdateOrchestrator {
     return this.deps.capability.detectCached();
   }
 
-  /**
-   * Kick off a one-click update. Refuses with no side effects unless the
-   * capability state is `available`. Returns as soon as the upgrader
-   * container is launched — from there the swap is out of our hands.
-   */
   async start(targetVersion: string): Promise<StartResult> {
     if (this.running) return { ok: false, code: 'already_running' };
     const cap = await this.deps.capability.detect();
@@ -175,9 +148,6 @@ export class SelfUpdateOrchestrator {
     const tag = cap.imageTag ?? 'latest';
     const engine = this.deps.engineFactory(this.socketPath);
 
-    // Reclaim BEFORE pulling: on a disk-full host (the very incident this
-    // exists for) the pull is the step that fails with ENOSPC — cleanup must
-    // run first or it is unreachable exactly when it is most needed.
     await this.cleanupStaleUpdateArtifacts(engine);
 
     this.current.phase = 'pull';
@@ -197,23 +167,15 @@ export class SelfUpdateOrchestrator {
     const name = `rembric-upgrader-${this.now()}`;
     const created = await engine.createContainer(name, {
       Image: imageRef,
-      // Absolute node path: the new image is distroless (gcr.io/distroless/nodejs22),
-      // which ships node at /nodejs/bin/node and puts NO bare `node` on PATH. A bare
-      // `node` here fails the upgrader with "exec: node: not found" (regressed the
-      // self-update when the runtime image moved to distroless).
       Entrypoint: this.deps.helperEntrypoint ?? [
         '/nodejs/bin/node',
         '/app/dist/scripts/upgrade-helper.js',
       ],
-      // Root inside the one-shot upgrader sidesteps host docker-GID
-      // mismatches; it only ever talks to the socket it is handed.
       User: 'root',
       Env: [
         `REMBRIC_UPGRADE_TARGET_CONTAINER=${cap.containerId}`,
         `REMBRIC_UPGRADE_IMAGE=${imageRef}`,
         `REMBRIC_UPGRADE_VERSION=${targetVersion}`,
-        // Path as seen from the host-side data volume; only used in
-        // operator-facing recovery messages, never opened by the helper.
         `REMBRIC_UPGRADE_BACKUP=${backupPath}`,
         ...(this.deps.upgradeHealthTimeoutMs !== undefined
           ? [`REMBRIC_UPGRADE_HEALTH_TIMEOUT_MS=${this.deps.upgradeHealthTimeoutMs}`]
@@ -231,15 +193,6 @@ export class SelfUpdateOrchestrator {
     // `running` stays true: this process is now waiting to be replaced.
   }
 
-  /**
-   * Best-effort reclaim of leftovers from previous updates: finished
-   * upgrader containers, then dangling Rembric runtime images (that order —
-   * sweeping a zombie unpins the image it holds, making it reclaimable in
-   * the same pass). Runs while the current container still pins its own
-   * image, so the daemon can never prune it — the previous version always
-   * survives one cycle for rollback. Each step fails independently and
-   * never aborts the update: cleanup is an optimization, the update is the job.
-   */
   private async cleanupStaleUpdateArtifacts(engine: UpdateEngine): Promise<void> {
     this.log('  ↑ reclaiming stale update artifacts (finished upgraders, dangling images)');
     let swept = 0;

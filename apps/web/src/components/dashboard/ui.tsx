@@ -13,21 +13,6 @@ import {
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
-/**
- * The dashboard's presentation vocabulary, in one file: the numbered view head,
- * the stat card, the section bar, the data table, the key/value grid, the state
- * pill, the flash. Every colour is a semantic token the theme declares
- * (`bg-card`, `text-muted-foreground`, `border-border`, `text-primary`,
- * `text-warn`).
- *
- * Nothing here reads the request or the database.
- */
-
-/**
- * `fg` is a bright value over the default lime bullet. `amber` is the theme's
- * `--warn`; the key keeps its historical name so call sites outside this file do
- * not churn.
- */
 export type Tone = 'fg' | 'lime' | 'amber' | 'dim' | 'danger';
 
 const TONE_TEXT: Record<Tone, string> = {
@@ -54,7 +39,6 @@ const TONE_BORDER: Record<Tone, string> = {
   danger: 'border-destructive/40 text-destructive',
 };
 
-/** The square bullet that precedes a label, sized to the current text. */
 function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string }) {
   return (
     <span
@@ -64,17 +48,8 @@ function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string 
   );
 }
 
-/** The mono, tracked, uppercase label every page, panel and stat carries. */
 export const LABEL = 'font-mono text-[11px] uppercase tracking-[.14em]';
 
-/**
- * The page column. It takes the full width the shell's content column offers
- * rather than capping itself: a wide viewport has the rail on the left and real
- * estate to spare, and a cap here only re-created the void the shell stopped
- * leaving. Readable-content widths are owned by the content that needs them
- * (markdown panels, forms), not by the page. Vertical rhythm belongs to the
- * shell's content column, so a page nested in the shell never pays for both.
- */
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn('w-full min-w-0 px-5 md:px-8', className)}>{children}</div>;
 }
@@ -84,25 +59,10 @@ export function ViewHead({
   hl,
   titleVisible = false,
 }: {
-  /** No longer rendered: the per-page number was dropped. Kept so call sites stay put. */
   num?: string;
   title: string;
   hl?: string;
-  /**
-   * Accepted and deliberately not rendered. The top-right strip it described was
-   * removed from every page: a list's count already lives in its stat cards and
-   * its section bars, and the strip left a ruled gap above the content of a page
-   * whose own heading is not on screen. Kept in the props type because call sites
-   * still pass it, exactly like `num` above.
-   */
   meta?: ReadonlyArray<{ k: string; v: ReactNode }>;
-  /**
-   * Detail views pass `true`: the record's own title heads the page and there is
-   * no breadcrumb entry that names it. A listing or the overview leaves it
-   * `false` — the shell breadcrumb already names the page — and the heading
-   * stays in the DOM as the single `sr-only` `h1` instead of repeating on
-   * screen.
-   */
   titleVisible?: boolean;
 }) {
   const parts = hl && title.includes(hl) ? title.split(hl) : null;
@@ -124,13 +84,10 @@ export function ViewHead({
       )}
     </h1>
   );
-  // A page whose heading is off screen renders the heading and nothing else, so
-  // it never gains an empty bordered strip — or the vertical space one left.
   if (!titleVisible) return heading;
   return <header className="min-w-0 border-b border-border pb-4">{heading}</header>;
 }
 
-/** Back link rendered as the first element of a detail view's content. */
 export function BackLink({ href, label }: { href: string; label: string }) {
   return (
     <Link
@@ -146,7 +103,6 @@ export function BackLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-/** A section divider: a lime square, an uppercase name, and optional meta/action. */
 export function SectionBar({
   name,
   meta,
@@ -168,8 +124,6 @@ export function SectionBar({
   );
 }
 
-/* ── stat cards ─────────────────────────────────────────────────────── */
-
 export interface StatOpts {
   k: string;
   v: ReactNode;
@@ -180,10 +134,6 @@ export interface StatOpts {
   compact?: boolean;
 }
 
-/**
- * One metric: a labelled value with a mono sub line, the production
- * dashboard's `statCard` hierarchy. Renders as a link when `href` is set.
- */
 export function StatCard({ k, v, tone = 'dim', sub, href, className, compact }: StatOpts) {
   const inner = (
     <>
@@ -220,15 +170,6 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className, compact }: 
   );
 }
 
-/**
- * The stat strip: one contiguous grid, its cells separated by a 1px gap that
- * shows the grid's own background, so every divider is a single hairline and
- * the strip needs one border instead of one per cell.
- *
- * `variant="cards"` is the auto-fill kind grid: individually bordered
- * cards on the page background, so empty trailing slots stay invisible
- * instead of painting the frame grey.
- */
 export function StatGrid({
   children,
   className,
@@ -252,8 +193,6 @@ export function StatGrid({
     </div>
   );
 }
-
-/* ── key/value grid (detail views) ──────────────────────────────────── */
 
 export function Kv({
   k,
@@ -286,7 +225,6 @@ export function Kv({
   );
 }
 
-/** A bordered grid of `Kv` cells; pass the cells as children. */
 export function KvGrid({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
@@ -299,8 +237,6 @@ export function KvGrid({ children, className }: { children: ReactNode; className
     </div>
   );
 }
-
-/* ── panels ─────────────────────────────────────────────────────────── */
 
 export function Panel({
   children,
@@ -352,13 +288,6 @@ export function PanelHead({
   );
 }
 
-/* ── data table (the production `tbl-host` shape) ───────────────────── */
-
-/**
- * The one table frame every list view uses. The wrapper scrolls horizontally
- * on narrow screens; the header cells carry the mono, uppercase column labels
- * the production dashboard's `.tbl thead th` set.
- */
 export function DataTable({ children }: { children: ReactNode }) {
   return (
     <div className="w-full overflow-x-auto border border-border bg-card">
@@ -404,7 +333,6 @@ export function DataTd({ children, className }: { children?: ReactNode; classNam
   );
 }
 
-/** The empty state that sits where a table would be. */
 export function TableEmpty({ children }: { children: ReactNode }) {
   return (
     <div
@@ -418,9 +346,6 @@ export function TableEmpty({ children }: { children: ReactNode }) {
   );
 }
 
-/* ── pills ──────────────────────────────────────────────────────────── */
-
-/** The square bordered pill: an optional tone dot plus an uppercase label. */
 export function Pill({ children, tone = 'dim' }: { children: ReactNode; tone?: Tone }) {
   return (
     <span
@@ -453,7 +378,6 @@ export function ReviewPill() {
   return <Pill tone="amber">needs review</Pill>;
 }
 
-/** The square bordered chip — the shape for a scope or a tag. */
 export function Chip({ children, tone = 'lime' }: { children: ReactNode; tone?: Tone }) {
   return (
     <span
@@ -474,8 +398,6 @@ export function Tag({ children }: { children: ReactNode }) {
     </span>
   );
 }
-
-/* ── bars, notices, flash, timestamps ──────────────────────────────── */
 
 export function Bar({
   percent,
@@ -530,7 +452,6 @@ export function Notice({
   );
 }
 
-/** The flash banner the production `flash()` renders: a tone label + body. */
 export function Flash({
   tone = 'lime',
   label,

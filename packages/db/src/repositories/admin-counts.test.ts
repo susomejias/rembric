@@ -16,12 +16,6 @@ import {
 
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
-/**
- * Dashboard list-page TOTALs read the true filtered count, not the page
- * slice (PAGE_SIZE = 10). Each scenario seeds MORE than the page size so a
- * regression to the slice count (capped at 10) would fail loudly.
- */
-
 const ttlByType = Object.entries(REVIEW_TTL_MS).filter(
   (e): e is [MemoryType, number] => typeof e[1] === 'number',
 );
@@ -63,9 +57,6 @@ describe('admin list-page count methods', () => {
       .values({ id: 'tk1', name: 'tok', hash: 'h', scope: '*', createdAt: new Date(500) })
       .run();
 
-    // 12 active global memories matching FTS 'widget', + 1 active project row,
-    // + 2 archived rows used as relation endpoints. Plus a superseded and an
-    // archived 'widget' match so the FTS count must honour the status filter.
     const rows: NewMemory[] = [];
     for (let i = 0; i < 12; i++) rows.push(mem({ id: `G${i}`, content: `widget number ${i}` }));
     rows.push(mem({ id: 'PROJ', content: 'gadget one', projectId: 'p1' }));
@@ -121,8 +112,6 @@ describe('admin list-page count methods', () => {
   });
 
   it('memory.adminCountFts counts all matches in the filter set, not just the first page', () => {
-    // 12 active 'widget' rows; the superseded/archived 'widget' matches are
-    // excluded by the (default) active status filter, matching the list.
     expect(repos.memory.adminCountFts('widget', { status: 'active' })).toBe(12);
     expect(repos.memory.adminCountFts('zzznomatchzzz', { status: 'active' })).toBe(0);
   });
@@ -166,8 +155,6 @@ describe('admin list-page count methods', () => {
   });
 
   it('relations.adminPendingAdjudicableByProject counts only pending pairs with both endpoints active, grouped per project', () => {
-    // Control: the 12 seeded pending rows join two ARCHIVED endpoints →
-    // adjudicably zero, even though adminCountWithFilters sees 12.
     expect(repos.relations.adminCountWithFilters({ status: 'pending' })).toBe(12);
     expect(repos.relations.adminPendingAdjudicableByProject()).toEqual([]);
 

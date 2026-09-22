@@ -14,12 +14,6 @@ import { buildSessionHandlers } from '@rembric/mcp';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * 4.3 — Session-lifecycle MCP tools reject soft-deleted target rows
- * with `code='session_deleted'`. Cross-token requests on a deleted row
- * still receive the existing `session_not_found` mask.
- */
-
 const MCP_SESSION_ID = 'mcp-sess-test';
 const SCOPE: TokenScope = '*';
 
@@ -75,8 +69,6 @@ beforeEach(() => {
   const created = tokens.create({ name: 'other', scope: SCOPE });
   otherToken = created.token;
   defaultProjectId = defaultProject(db.handle).id;
-  // Pass deps via a variable (not a fresh literal) so the broad object is
-  // accepted by the narrower SessionToolDeps without excess-property errors.
   const deps = {
     repos: createRepositories(db.handle.db),
     logInternalError,

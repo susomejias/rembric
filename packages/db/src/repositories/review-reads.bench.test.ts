@@ -7,21 +7,6 @@ import { MemoryRepository, ProjectsRepository, type MemoryType, type NewMemory }
 
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
-/**
- * Measurement harness for the four review-axis reads, each of which derives its
- * answer from a correlated subquery over `confirmations`. It prints numbers and
- * asserts nothing, so it is gated off by default and costs `pnpm test` nothing:
- *
- *   REMBRIC_BENCH=1 pnpm vitest run src/db/repositories/review-reads.bench.test.ts
- *   REMBRIC_BENCH=1 REMBRIC_BENCH_SIZES=1000,20000 REMBRIC_BENCH_REPEATS=31 …
- *   REMBRIC_BENCH=1 REMBRIC_BENCH_CONFIRMS=4 …
- *
- * Each index-set variant gets its own database, seeded identically, and samples
- * are interleaved variant-by-variant within every round. Measuring one variant
- * to completion before starting the next lets machine drift land entirely on one
- * arm, which at these effect sizes exceeds the effect.
- */
-
 const ENABLED = process.env['REMBRIC_BENCH'] === '1';
 
 function envNumbers(name: string, fallback: number[]): number[] {
@@ -105,8 +90,6 @@ function seedCorpus(t: TestDb, repo: MemoryRepository, size: number): void {
   t.handle.db.transaction(() => {
     for (let i = 0; i < size; i++) {
       const id = memoryId(i);
-      // Ages spread across ~2 years so every per-type TTL and decay threshold
-      // has rows on both sides of it.
       const createdAt = new Date(NOW_MS - ((i * 7919) % 730) * DAY_MS);
       const row: NewMemory = {
         id,
@@ -144,8 +127,6 @@ function applyIndexes(raw: Database, wanted: readonly string[]): void {
   for (const name of wanted) {
     raw.exec(CONFIRMATION_INDEXES[name]!);
   }
-  // Mirrors the boot-time ANALYZE in db/client.ts, so the planner sees the
-  // statistics a running server would have rather than an empty sqlite_stat1.
   raw.pragma('analysis_limit = 1000');
   raw.exec('ANALYZE');
 }
@@ -192,11 +173,6 @@ interface CapturedQuery {
   params: unknown[];
 }
 
-/**
- * Records the SQL a repository method actually executes, so the plans printed
- * below explain the real query instead of a reconstruction that could drift
- * from the private predicate builder.
- */
 function capture(raw: Database, run: () => void): CapturedQuery[] {
   const sink: CapturedQuery[] = [];
   const bound = raw.prepare.bind(raw);
@@ -215,16 +191,11 @@ function capture(raw: Database, run: () => void): CapturedQuery[] {
         }
         return (...args: unknown[]) => {
           const result = method.apply(target, args);
-          // `raw()` / `pluck()` / `bind()` return the statement itself, and
-          // drizzle reaches the terminal all/get/run through them.
           return result === target ? wrap(target, sql) : result;
         };
       },
     });
 
-  // better-sqlite3 types `prepare` as generic over its row and parameter
-  // tuples; the interceptor observes only SQL text and bound values, so the
-  // generics are erased across this assignment.
   raw.prepare = ((sql: string) => wrap(bound(sql), sql)) as Database['prepare'];
   try {
     run();
@@ -326,24 +297,11 @@ describe.runIf(ENABLED)('review-axis read benchmark', () => {
     }, 900_000);
   }
 
-  /**
-   * The rewrite this change exists to reject: replace the two correlated
-   * subqueries with grouped derived tables joined once. Hand-written because
-   * the point is to measure the alternative the repository does NOT use.
-   *
-   * The TTL ladder is rebuilt from the same map the repository's predicate
-   * reads (`reviewTtlEntries`) rather than hard-coded, so the number of
-   * `WHEN m.type = ? THEN ?` branches is always the production count and the
-   * two forms cannot diverge on a TTL added or removed in `REVIEW_TTL_MS`.
-   */
   function countNeedsReviewAsJoin(t: TestDb, nowMs: number): number {
     const ttlEntries = reviewTtlEntries();
     const ttlLadder = ttlEntries.map(() => 'WHEN m.type = ? THEN ?').join(' ');
     const baseline = 'MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at))';
     const joinSql = `SELECT COUNT(*) AS v FROM memory m LEFT JOIN (SELECT memory_id, MAX(event_ts) AS affirmed_at FROM confirmations WHERE verdict = 'affirm' GROUP BY memory_id) af ON af.memory_id = m.id LEFT JOIN (SELECT memory_id, MAX(event_ts) AS refuted_at FROM confirmations WHERE verdict = 'refute' GROUP BY memory_id) rf ON rf.memory_id = m.id WHERE m.status = 'active' AND m.scope = 'project' AND m.project_id = ? AND (((CASE ${ttlLadder} ELSE NULL END) IS NOT NULL AND ${baseline} + (CASE ${ttlLadder} ELSE NULL END) <= ?) OR (rf.refuted_at IS NOT NULL AND rf.refuted_at > ${baseline}))`;
-    // Placeholder order matches the repository's where-clause: the scoped
-    // project_id leads, then the TTL ladder twice (type/ms per entry, in
-    // `reviewTtlEntries` order) with `nowMs` last.
     const ttlCaseParams = ttlEntries.flatMap(([type, ms]) => [type, ms]);
     const declared = (joinSql.match(/\?/g) ?? []).length;
     const bound = 1 + ttlCaseParams.length * 2 + 1;

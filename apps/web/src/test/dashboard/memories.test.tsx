@@ -304,8 +304,6 @@ describe('dashboard shell badge counters', () => {
     expect(html).toContain(
       'active memories past their review TTL across all projects — re-affirm with memory.confirm',
     );
-    // The pending pair's two endpoints are ancient 'project' rows too, so the
-    // needs-review count includes them on top of the seeded batch.
     expect(html).toContain(`project-zero: ${SEEDED + 2}`);
   });
 });

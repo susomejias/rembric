@@ -15,19 +15,6 @@ import { Separator } from '@/components/ui/separator';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { navEntryForPath } from '@/lib/nav';
 
-/**
- * The slim bar over the content column: the rail's trigger and the breadcrumb
- * that names the view.
- *
- * The trigger is the primitive's, so it routes to whatever the viewport makes
- * correct — the desktop rail's open state on a pointer device, the provider's
- * sheet on a narrow one — and it is visible at every width rather than only under
- * `md`: a trigger that disappears as the rail appears would leave the desktop
- * with the rail's hover edge and ⌘B as the only ways back to icons.
- *
- * The breadcrumb is a locator, not a title: every view renders its own `<ViewHead>`
- * with the numbered `h1`, and repeating that here would be the same sentence twice.
- */
 export function SiteHeader() {
   const entry = navEntryForPath(usePathname());
   const isRoot = !entry || entry.href === '/dashboard';

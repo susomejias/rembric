@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { buildAboutReport, createAboutHandler } from '@rembric/mcp';
 
-// The assertions below are self-consistent (`buildAboutReport(V).server.version === V`),
-// so a local literal stands in for the app's version constant.
 const TEST_VERSION = '0.0.0-test';
 const CANONICAL_INSTALLER = 'https://raw.githubusercontent.com/susomejias/rembric/main/install.sh';
 

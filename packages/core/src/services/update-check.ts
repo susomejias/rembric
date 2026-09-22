@@ -1,12 +1,3 @@
-/**
- * Release update check against the GitHub Releases API.
- *
- * Lazy: nothing runs at boot. `peek()` returns the cached result
- * synchronously and kicks a background refresh when the cache is stale.
- * Failures are silent by contract (air-gapped hosts must see zero noise);
- * see openspec/specs/self-update/spec.md.
- */
-
 const DEFAULT_RELEASES_URL = 'https://api.github.com/repos/susomejias/rembric/releases?per_page=30';
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** Server releases are tagged `server-v<semver>` (release-please multi-component). */
@@ -31,11 +22,6 @@ interface GithubRelease {
 }
 
 export interface UpdateCheckOptions {
-  /**
-   * The running server's own version, against which releases are compared.
-   * Injected rather than resolved here: it is the APPLICATION's `package.json`
-   * that carries it, and this module must not read the app's filesystem layout.
-   */
   currentVersion: string;
   /** `false` disables the check entirely (REMBRIC_UPDATE_CHECK=off). */
   enabled?: boolean;
@@ -97,10 +83,6 @@ export class UpdateCheckService {
     return this.lastCheckedAtMs ? new Date(this.lastCheckedAtMs) : null;
   }
 
-  /**
-   * Cached update info, refreshing in the background when stale. Returns
-   * `null` until a refresh has found a strictly newer version.
-   */
   peek(): UpdateInfo | null {
     if (!this.checkEnabled) return null;
     if (this.now() - this.lastCheckedAtMs >= this.intervalMs && !this.inflight) {
@@ -120,10 +102,6 @@ export class UpdateCheckService {
     return this.inflight;
   }
 
-  /**
-   * Operator-initiated check: bypasses the 24h window and, unlike the
-   * automatic path, reports whether GitHub was actually reached.
-   */
   async checkNow(): Promise<{ outcome: ManualCheckOutcome; info: UpdateInfo | null }> {
     if (!this.checkEnabled) return { outcome: 'none', info: null };
     const info = await this.refresh();
@@ -152,9 +130,6 @@ export class UpdateCheckService {
         return this.cache;
       }
       this.lastFetchFailed = false;
-      // GitHub's /releases ordering is not newest-first (observed: a release
-      // published hours later listed BELOW an older one), so never take the
-      // first match — pick the highest server semver in the page.
       const candidates = releases.flatMap((r) => {
         if (r.draft || r.prerelease || typeof r.tag_name !== 'string') return [];
         if (!r.tag_name.startsWith(SERVER_TAG_PREFIX)) return [];

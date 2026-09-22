@@ -127,9 +127,6 @@ describe('stop-report.sh', () => {
     ['a 200 body with no `lines` key', '{"ok":true,"sessionId":"s"}'],
     ['an empty `lines` array the fast path does not match', '{"ok":true,"lines": []}'],
   ])('still emits {} on Codex for %s', async (_label, body) => {
-    // `rembric_turn_report` returning non-zero trips `_api.sh`'s `trap 'exit 0'
-    // ERR` at this script's `LINES="$(…)"`, so `_emit_nothing` never runs and
-    // the Codex host is handed an empty stdout where it requires `{}`.
     turnResponse = { status: 200, body };
     const transcript = writeTranscript('t-rc.jsonl', '{"type":"user"}\n');
     const { stdout } = await run(
@@ -142,8 +139,6 @@ describe('stop-report.sh', () => {
       }),
     );
     expect(stdout).toBe('{}');
-    // Control: the report really was issued, so the `{}` is not the
-    // early-return path that skips the POST entirely.
     expect(requests.some((r) => r.path.endsWith('/turn'))).toBe(true);
   });
 
@@ -257,8 +252,6 @@ describe('stop-report.sh', () => {
   });
 
   it('caches nothing when the response carries an empty lines array', async () => {
-    // The empty-array fast path in rembric_turn_report skips the `jq` fork;
-    // its output must stay exactly what `jq` produced — nothing.
     const transcript = writeTranscript('t7b.jsonl', '{"type":"user"}\n');
     await run(
       'claude-code',
@@ -306,9 +299,6 @@ describe('stop-report.sh', () => {
 
   describe('the loop guard', () => {
     it('fires before any transcript read (assert ORDER, not just the outcome)', async () => {
-      // A transcript path that does not exist: if the script reads it before
-      // checking stop_hook_active, this would surface as a distinct failure
-      // mode from "guard checked first, transcript never touched".
       const missingPath = join(transcriptDir, 'does-not-exist.jsonl');
       const { stdout } = await run(
         'claude-code',
@@ -381,9 +371,6 @@ describe('stop-report.sh', () => {
   });
 
   it('the cold-offset path scans at most 256 KB', async () => {
-    // A transcript with no marker within the last 256 KB, but WITH one
-    // further back — only the bounded cold scan is exercised, so it must
-    // NOT be found.
     const filler = 'x'.repeat(300 * 1024);
     const transcript = join(transcriptDir, 't13.jsonl');
     writeFileSync(

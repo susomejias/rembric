@@ -4,21 +4,8 @@ import { AuthError, authenticate } from '../../lib/auth';
 import { getServices } from '../../lib/services';
 import { REMBRIC_VERSION } from '../../lib/version';
 
-// A health probe must read the live process; a cached response would report a
-// stale success forever.
 export const dynamic = 'force-dynamic';
 
-/**
- * The health probe. It is bearer-gated because the container HEALTHCHECK
- * (`apps/web/Dockerfile`), both compose files and `install.sh`'s post-up poll all
- * send `Authorization: Bearer $REMBRIC_ADMIN_TOKEN`: an unauthenticated probe
- * would let any local process read the release identity.
- *
- * Order matters: pre-auth lockout before the token-hash scan, so a bogus bearer
- * cannot force repeated scrypt on the single thread. The lockout key is the same
- * request-derived identity `lib/api.ts` uses, so a failure accrued here also
- * counts against the `/api` surface.
- */
 export async function GET(request: Request): Promise<Response> {
   const services = getServices();
   const identity = clientIdentity(request);
@@ -49,11 +36,6 @@ export async function GET(request: Request): Promise<Response> {
     });
     services.authLockout.recordSuccess(identity);
 
-    // Fails loudly if better-sqlite3's native binding did not load or the file
-    // could not be opened — the SELECT never reaches a statement otherwise. The
-    // statement itself lives in `packages/db` with every other one (data-access
-    // confinement): this is `diagnostics.ts::ping`, the same call the maintenance
-    // page reaches through `createDiagnostics`.
     ping(services.db);
 
     return Response.json({ ok: true, version: REMBRIC_VERSION });
@@ -65,19 +47,10 @@ export async function GET(request: Request): Promise<Response> {
         { status: err.status },
       );
     }
-    // A non-auth failure here is the database: authentication already resolved
-    // against it, so a throw from `ping` is the only other path. Answering 503
-    // (rather than letting it bubble to Next's HTML 500) keeps the probe's
-    // contract — the container reads `db_unavailable` and stays unhealthy.
     return Response.json({ ok: false, code: 'db_unavailable' }, { status: 503 });
   }
 }
 
-/**
- * Pre-auth lockout key. A route handler cannot reach the socket address, so the
- * first `x-forwarded-for` hop is the closest available substitute and a direct
- * request shares the `'unknown'` bucket.
- */
 function clientIdentity(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) {

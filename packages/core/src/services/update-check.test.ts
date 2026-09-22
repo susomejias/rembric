@@ -85,8 +85,6 @@ describe('UpdateCheckService', () => {
   });
 
   it('picks the highest server semver even when GitHub lists it out of order', async () => {
-    // Regression (2026-07-17): the API returned server-v0.24.9 ABOVE the
-    // hours-newer server-v0.24.10, so first-match reported "up to date".
     const { fetchImpl } = fakeFetch([
       {
         status: 200,

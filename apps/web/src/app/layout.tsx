@@ -4,14 +4,6 @@ import type { ReactNode } from 'react';
 
 import './globals.css';
 
-/**
- * The three brand faces, self-hosted through `next/font/local` and exposed as
- * the theme's font variables (`--font-space-grotesk` / `--font-inter` /
- * `--font-jetbrains-mono`, wired to `--font-display` / `--font-sans` /
- * `--font-mono` in `globals.css`). These are the same families the production
- * dashboard serves from `/dashboard/assets/fonts/`; `next/font` hashes and
- * preloads them instead of relying on a public path.
- */
 const spaceGrotesk = localFont({
   src: [
     { path: './fonts/space-grotesk-400.woff2', weight: '400', style: 'normal' },
@@ -58,13 +50,6 @@ export const viewport: Viewport = {
   themeColor: '#0a0a0a',
 };
 
-/**
- * `dark` is the document's *base* state and its only one: the class is
- * server-rendered and nothing removes it, so every route — the dashboard, the
- * login screen, the 404 — renders in the dark palette regardless of the OS or a
- * previously stored preference. That is also what makes the `dark:` utilities of
- * the generated `ui/*` primitives apply by default.
- */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html

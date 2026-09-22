@@ -11,9 +11,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const promptHintsSh = join(here, '..', 'scripts', 'prompt-hints.sh');
 const HINT = 'rembric: entity hint line';
 
-// The transport for `proactive-entity-recall` D1′: one bounded, best-effort
-// request at turn START, from a script kept separate from the fixed-line hook so
-// the published claude-code-plugin claims about that hook stay literally true.
 describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
   let hintServer: Server;
   let capturedBody = '';
@@ -152,10 +149,6 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
   });
 
   it('uses the 200ms start-of-turn deadline instead of the shared 3s POST default', async () => {
-    // A 260ms response is deliberately over the published 200ms budget but far
-    // below the 1s process-overhead allowance. A larger timeout accepts HINT;
-    // timing only bounds the child lifetime, so scheduler overhead cannot make
-    // the deadline assertion flaky.
     responseDelayMs = 260;
     const started = performance.now();
     const { stdout, status } = await run(

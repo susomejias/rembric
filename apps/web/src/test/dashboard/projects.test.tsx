@@ -25,14 +25,12 @@ async function renderProjects(): Promise<string> {
   return renderToHtml(await page({ searchParams: Promise.resolve({}) }));
 }
 
-/** One row's markup, keyed on the slug cell. */
 function row(html: string, slug: string): string {
   const chunk = html.split('<tr').find((c) => c.includes(`>${slug}<`));
   if (chunk === undefined) throw new Error(`no row for project ${slug}`);
   return chunk.split('</tr>')[0]!;
 }
 
-/** The `default` marker pill: the label cell's pill closes its bullet span right before it. */
 function markerRows(html: string): number {
   return (html.match(/<\/span>default<\/span>/g) ?? []).length;
 }
@@ -52,7 +50,6 @@ describe('the projects list marks the system default', () => {
   it('follows the column, not the spelling, when the marker moves', async () => {
     const own = projects.create({ slug: 'default-2', displayName: 'operator project' });
     const system = defaultProject(t.handle);
-    // The partial UNIQUE index admits one flagged row, so clear before setting.
     t.handle.raw.prepare('UPDATE projects SET is_default = 0 WHERE id = ?').run(system.id);
     t.handle.raw.prepare('UPDATE projects SET is_default = 1 WHERE id = ?').run(own.id);
 
@@ -60,7 +57,6 @@ describe('the projects list marks the system default', () => {
 
     expect(markerRows(html)).toBe(1);
     expect(row(html, own.slug)).toMatch(/<\/span>default<\/span>/);
-    // Still spelled `default`, no longer the default: a slug-keyed template fails here.
     expect(system.slug).toBe('default');
     expect(row(html, system.slug)).not.toMatch(/<\/span>default<\/span>/);
   });

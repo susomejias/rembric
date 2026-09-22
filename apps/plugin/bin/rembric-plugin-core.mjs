@@ -1,10 +1,3 @@
-// The single JS/TS implementation of the cross-client session protocol; the
-// bash and Python clients keep their own, held in agreement by the shared
-// fixtures in `apps/plugin/test/`. Enforced by apps/server/src/test/invariants.test.ts.
-//
-// Each client's install.sh rewrites the relative dev-time import of this file
-// to its installed path under ~/.config/rembric/bin/ while copying.
-
 export const POST_TIMEOUT_MS = 3000;
 // Turn-START path: it must resolve before the model's first token, so its budget is a fraction of the background POST timeout.
 const RECALL_HINTS_TIMEOUT_MS = 200;
@@ -25,18 +18,9 @@ export const SESSION_ID_NUDGE_TEMPLATE =
   'rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.';
 export const RESUMED_READ_NUDGE =
   'rembric: this session existed before this process attached to it — call memory.session_get before your next memory.session_summary write.';
-// Sending ONE section is a legitimate write only because a `##` section a
-// curated write omits keeps its stored text (`sessions`, section-wise merge).
-// "before you finish this turn" is load-bearing, not "now": it defers the
-// write past the user's actual work instead of asking for a summary of a
-// session that has not happened yet (session-nudges, D7).
 export const SESSION_OPENING_NUDGE_CORE =
   'New session — before you finish this turn, call memory.session_summary with a title and a single `## Goal` section describing what this session is for; the other five canonical headings are intentionally left out.';
 export const SESSION_OPENING_NUDGE = `rembric: ${SESSION_OPENING_NUDGE_CORE}`;
-// Unprefixed (no `rembric: `): opencode pushes this to output.context, not a
-// bash-style inline nudge, so it never carries that prefix. Byte-identical
-// to post-compact.sh's PROTOCOL heredoc minus that prefix — the ONE shared
-// implementation of the compaction-time protocol text (plugin-session-protocol).
 export const POST_COMPACT_NUDGE_CORE =
   'Resumed from a compaction. BEFORE continuing:\n' +
   '1. Call memory.session_get to read the stored summary.\n' +
@@ -46,9 +30,6 @@ export const POST_COMPACT_NUDGE_CORE =
   '3. Missing detail? memory.context or memory.search.\n' +
   '4. Then continue.';
 
-// `memory` and `project` are the server's two tool namespaces; a dotted word
-// outside them is prose or a filename and must be left alone. The Pi client's
-// test asserts this list still covers every tool the server publishes.
 const DOTTED_TOOL_NAME = /\b(memory|project)\.([a-z][a-z0-9_]*)/g;
 
 export function underscoreToolNames(text) {
@@ -64,9 +45,6 @@ export function diag(line) {
   process.stderr.write(`[rembric] ${line}\n`);
 }
 
-// An unclosed <private> redacts through end-of-text: fail closed for a privacy
-// marker, which also covers a closing tag cut off by the per-entry truncation
-// the call sites apply before this.
 export function stripPrivateTags(text) {
   if (!text) return '';
   return text
@@ -80,8 +58,6 @@ function truncate(text, max) {
 }
 
 export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd }) {
-  // No default: `sessions.agent` is append-only with no repair verb, so a
-  // defaulted value misattributes a miswired client's sessions forever.
   if (!agent) {
     throw new Error('rembric-plugin-core: createSessionProtocol requires an `agent`');
   }
@@ -105,27 +81,11 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const pendingFlush = new Map();
   const firstPromptEmitted = new Set();
   const resumedReadEmitted = new Set();
-  // Per-session outcome of THIS session's own ensure — independent of
-  // `processResumed` below, which only ever captures the process's FIRST
-  // session (see its own comment). Drives the session-opening line.
   const sessionCreated = new Map();
   const sessionOpeningEmitted = new Set();
-  // The server's returned notice, cached between the end-of-turn report and
-  // the next start-of-turn print. Only ever SET with a non-empty array — a
-  // report that returns no lines must never clear a pending one
-  // (`session-nudges`, `plugin-session-protocol`).
   const pendingLines = new Map();
   const turnTitleSent = new Set();
-  // The per-turn tool-observation latch (`session-nudges`, D4a). Armed by the
-  // client's own predicate through `markToolUsed`, disarmed at the turn
-  // boundary by `beginTurn`, read and cleared by `reportTurn`. It lives here
-  // rather than in each client because only the PREDICATE differs between
-  // hosts — the latch's lifecycle is identical, and when each client owned
-  // its own copy they drifted: one reset it at the turn boundary and one did
-  // not, and one had to remember a second `delete` beside `forgetSession`.
   const toolUsedSessions = new Set();
-  // null = not yet captured; set once, from the FIRST session-ensure of this
-  // protocol's lifetime, and never overwritten by a later session's ensure.
   let processResumed = null;
 
   async function doPost(path, body, timeoutMs = POST_TIMEOUT_MS) {
@@ -146,12 +106,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     }
   }
 
-  /**
-   * Reports delivery so a caller can skip a follow-up; never throws. Never
-   * reads the response body — every /summary and /end call goes through
-   * this function, and the contract in plugin-session-protocol forbids
-   * reading a *summary* response to learn summary state.
-   */
   async function rembricPost(path, body) {
     const res = await doPost(path, body);
     if (!res) return false;
@@ -163,13 +117,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return true;
   }
 
-  /**
-   * The ONE call site that reads a response body for the session-ensure:
-   * `created` gates the resumed-read line and the session-opening line
-   * (plugin-session-protocol, session-nudges). Kept separate from
-   * rembricPost above so the two can never converge into one function that
-   * could later be pointed at /summary or /end.
-   */
   async function postSessionEnsure(path, body) {
     const res = await doPost(path, body);
     if (!res || !res.ok) return { ok: false, created: null };
@@ -201,26 +148,12 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     const isFirstEnsureOfProcess = processResumed === null;
     const ensure = await postSessionEnsure(`/api/${slug}/sessions`, body);
     if (isFirstEnsureOfProcess) {
-      // An unknown outcome (failed ensure, or no `created` field) is
-      // "do not advise", never "advise anyway".
       processResumed = ensure.ok && ensure.created === false;
     }
     sessionCreated.set(sessionId, ensure.ok === true && ensure.created === true);
-    // Strictly after the ensure, which recreates a row the empty-session purge
-    // removed; skipped when it did not land, since that failure is also a
-    // resume failure.
     if (ensure.ok) await rembricPost(`/api/${slug}/sessions/${sessionId}/resume`, {});
   }
 
-  /**
-   * The lines to print at the START of a turn: the first-prompt relevance
-   * line (once per session), the recall line (any turn matching the
-   * keywords), the sessionId line (whenever it accompanies either the
-   * session opening or a cached server notice), the session opening OR the
-   * resumed-read line (mutually exclusive, each once per session), and
-   * finally the server-composed notice cached by the last `reportTurn`
-   * (session-nudges, plugin-session-protocol). No cadence, no counter.
-   */
   function nudgesForTurn(sessionId, prompt) {
     const lines = [];
     const isFirstPrompt = !firstPromptEmitted.has(sessionId);
@@ -265,8 +198,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return arr;
   }
 
-  // Returns what the per-session cap pushed out: a client keying per-message
-  // state off these entries can only bound it if told which ones left.
   function pushEntry(sessionId, entry) {
     const arr = entriesFor(sessionId);
     arr.push(entry);
@@ -330,43 +261,18 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     await rembricPost(`/api/${slug}/sessions/${sessionId}/summary`, body);
   }
 
-  /**
-   * Arm the tool-observation latch for this session. Called from whatever
-   * event the host uses to signal a tool invocation — the predicate is the
-   * client's (opencode: a `tool` message part; Pi: a `toolResult` message or
-   * a `toolCall` content part), the latch is not.
-   */
   function markToolUsed(sessionId) {
     if (!sessionId) return;
     toolUsedSessions.add(sessionId);
   }
 
-  /**
-   * Disarm it at the START of a turn, from the host's own start-of-turn
-   * surface. Required rather than redundant with the read-and-clear in
-   * `reportTurn`: an observation arriving after the previous turn's report
-   * would otherwise be attributed to this turn.
-   */
   function beginTurn(sessionId) {
     toolUsedSessions.delete(sessionId);
   }
 
-  /**
-   * The per-turn report (`session-nudges`). Issued from each client's own
-   * end-of-turn event (opencode: `session.idle`; Pi: `agent_settled`),
-   * alongside — never instead of — the existing debounced transcript flush.
-   * `usedTools` is read from the latch above and reported without
-   * interpretation; the server owns the interpretation. The title rides
-   * along at most once per session, derived from the transcript
-   * accumulator's first recorded user message (already `<private>`-redacted
-   * by `appendUserMessage`).
-   */
   async function reportTurn(sessionId) {
     if (subAgentSessions.has(sessionId)) return;
     if (!knownSessions.has(sessionId)) return;
-    // Read-and-clear below the guards, never above them: a report the guards
-    // drop sends nothing, so consuming the latch there would attribute the
-    // turn's tool use to no report at all and the next one would say `false`.
     const body = { usedTools: toolUsedSessions.delete(sessionId) };
     if (!turnTitleSent.has(sessionId)) {
       const title = deriveTitle(sessionId);
@@ -384,24 +290,9 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     }
     const json = await res.json().catch(() => null);
     const lines = Array.isArray(json?.lines) ? json.lines.filter((l) => typeof l === 'string') : [];
-    // Never overwrite a pending, non-empty cache with an empty result — a
-    // second report for the same turn must not swallow a pending notice.
     if (lines.length > 0) pendingLines.set(sessionId, lines);
   }
 
-  /**
-   * Proactive entity recall (`proactive-recall`, D1′): POST the current
-   * turn's prompt to the recall-hints endpoint at turn START and return
-   * the server-composed lines. Process-and-discard on the server side;
-   * here the prompt is `<private>`-redacted and cut to the 500-char
-   * window BEFORE it leaves the process, mirroring the title path.
-   *
-   * Best-effort by contract: every failure mode — disabled protocol,
-   * sub-agent/unknown session, non-2xx, timeout, malformed body —
-   * yields `[]` so the model's response is never blocked by recall.
-   * An absent prompt skips the request outright (the spec's
-   * "missing prompt omits the recall-hints call" scenario).
-   */
   async function recallHints(sessionId, prompt, timeoutMs = RECALL_HINTS_TIMEOUT_MS) {
     if (disabled) return [];
     if (!sessionId || !prompt) return [];
@@ -424,9 +315,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return Array.isArray(json?.lines) ? json.lines.filter((l) => typeof l === 'string') : [];
   }
 
-  // `{}` rather than a skip on an empty accumulator: a session with no turns
-  // must still reach `ended`. One request, never `/summary` then `/end` — each
-  // is bounded by POST_TIMEOUT_MS, so a pair doubles a quitting user's wait.
   async function endSession(sessionId) {
     if (subAgentSessions.has(sessionId)) return;
     if (!knownSessions.has(sessionId)) return;
@@ -443,9 +331,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     pendingFlush.set(sessionId, timer);
   }
 
-  // For a host that kills the process before async handlers settle (opencode's
-  // server.instance.disposed): no await and no AbortSignal, so landing is a
-  // race. A host that awaits its shutdown handler must use flushSessionSummary.
   function flushAllFireAndForget() {
     if (disabled) return;
     for (const sessionId of knownSessions) {
@@ -466,7 +351,6 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     }
   }
 
-  // Returns the entries it dropped, for the same reason pushEntry does.
   function forgetSession(sessionId) {
     knownSessions.delete(sessionId);
     subAgentSessions.delete(sessionId);

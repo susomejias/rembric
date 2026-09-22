@@ -3,18 +3,6 @@ import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-/**
- * Session-scoped MCP transport manager.
- *
- * The Streamable HTTP transport supports session resumption via the
- * `mcp-session-id` request header. The MCP SDK requires a fresh
- * `McpServer` per connected transport, so we keep `(server, transport)`
- * pairs keyed by session id and instantiate a new pair on first contact.
- *
- * The factory receives the URL path slug (or null) for the connection so
- * the emitted `initialize.instructions` block matches the scope.
- */
-
 interface Session {
   server: McpServer;
   transport: StreamableHTTPServerTransport;
@@ -55,9 +43,6 @@ export class McpTransportManager {
     const allowedOrigins = this.options.allowedOrigins ?? [];
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
-      // Defense-in-depth over the mandatory bearer: only engaged when an
-      // allow-list is configured (opt-in), so non-browser MCP clients that
-      // send no Origin/Host are unaffected by default.
       enableDnsRebindingProtection: allowedHosts.length > 0 || allowedOrigins.length > 0,
       allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
       allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : undefined,

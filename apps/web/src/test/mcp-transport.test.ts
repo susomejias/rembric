@@ -34,23 +34,6 @@ import { getServices } from '../lib/services';
 
 import { defaultProject } from './default-project.js';
 
-/**
- * The MCP protocol conformance suite, over the real Next route handlers.
- *
- * The transport underneath the official SDK `Client` is a seam: instead of a
- * listening TCP server, `routeFetch` hands each SDK request straight to
- * `/mcp/[[...path]]/route.ts`'s `POST`/`GET`/`DELETE` with the same `Request` the
- * network would carry. Everything above that seam — the auth gate, the
- * Streamable-HTTP session, `runWithContext`, the 20 tools, the `SessionRouter` —
- * is the production path, exactly as `api-router.test.ts` drives the `/api`
- * handlers.
- *
- * `loadEmbedder` is the one seam replaced: `lib/services.ts` wires the real ONNX
- * model with no injection point, and these tests depend on a deterministic,
- * offline embedder. The mock swaps the factory only, so every other `@rembric/core`
- * export stays real.
- */
-
 vi.mock('@rembric/core', async (importOriginal) => {
   const actual = await importOriginal<typeof CoreModule>();
   const { FakeEmbedder } = await import('./embedder.js');
@@ -69,9 +52,7 @@ const globalForApp = globalThis as MutableGlobal;
 function resetAppGlobals(): void {
   try {
     globalForApp.__rembricDb?.close();
-  } catch {
-    // ignore double-close of a fixture the process already closed
-  }
+  } catch {}
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
@@ -80,7 +61,6 @@ function resetAppGlobals(): void {
 
 const ORIGIN = 'http://127.0.0.1:8787';
 
-/** Drive the real route handler with the request the SDK would have sent. */
 function routeFetch(url: string | URL, init?: RequestInit): Promise<Response> {
   const pathname = new URL(url).pathname;
   const segments = pathname.split('/').filter((s) => s.length > 0);
@@ -123,8 +103,6 @@ describe('MCP protocol conformance', () => {
 
   afterAll(async () => {
     await globalForApp.__rembricMcpSurface?.close?.();
-    // The session-start consolidation sweep is fire-and-forget (`services.sweep`);
-    // let it run while the connection is still open.
     await new Promise((resolve) => setImmediate(resolve));
     resetAppGlobals();
     delete process.env['REMBRIC_DATA_DIR'];
@@ -161,7 +139,6 @@ describe('MCP protocol conformance', () => {
   });
 
   it('emits scope-aware instructions in the initialize result', async () => {
-    // Unscoped /mcp connection — instructions point at project.use.
     const globalClient = await connect();
     const globalInstructions = globalClient.getInstructions();
     expect(globalInstructions).toMatch(/project\.use/);
@@ -170,7 +147,6 @@ describe('MCP protocol conformance', () => {
     expect((globalInstructions ?? '').length).toBeLessThanOrEqual(1000);
     await globalClient.close();
 
-    // Path-scoped /mcp/<slug> connection — instructions name the slug.
     const projClient = await connect({ projectSlug: 'integration-proj' });
     const projInstructions = projClient.getInstructions();
     expect(projInstructions).toContain("'integration-proj'");
@@ -197,8 +173,6 @@ describe('MCP protocol conformance', () => {
     const client = await connect();
     const tools = await client.listTools();
     const names = tools.tools.map((t) => t.name).sort();
-    // The four legacy memory tools must remain present; new tools are
-    // verified separately by name.
     expect(names).toEqual(
       expect.arrayContaining(['memory.confirm', 'memory.get', 'memory.save', 'memory.search']),
     );
@@ -226,12 +200,9 @@ describe('MCP protocol conformance', () => {
     const search = tools.find((t) => t.name === 'memory.search');
     const desc = search?.description ?? '';
 
-    // Recall trigger (existing protocol-teaching contract).
     expect(desc).toMatch(/recall|remember|recuerda/i);
-    // Hybrid semantic + keyword ranking is advertised (not the stale "FTS5 keyword search").
     expect(desc).toMatch(/hybrid/i);
     expect(desc).toMatch(/semantic/i);
-    // Widen affordance: small default page, raise limit or page with offset.
     expect(desc).toMatch(/limit/i);
     expect(desc).toMatch(/offset/i);
 
@@ -246,22 +217,15 @@ describe('MCP protocol conformance', () => {
     const desc = search?.description ?? '';
     await client.close();
 
-    // The anti-confabulation clause the mcp-api scenario is written against,
-    // verbatim.
     expect(desc).toContain('not as a signal to invent or assume context');
     expect(desc).toContain('nothing relevant found');
-    // `ABSTENTION_FLOOR` ships `null`, so the description must not attribute
-    // abstention to it. This is the assertion whose absence let the shipped
-    // description name a mechanism that cannot fire.
     expect(ABSTENTION_FLOOR).toBeNull();
     expect(desc).not.toMatch(/relevance floor/i);
 
-    // The shortening flag, and what a short page and a full page each do not mean.
     expect(desc).toContain('gateShortened');
     expect(desc).toContain('a short page is not corpus exhaustion');
     expect(desc).toContain('a full page is not proof of relevance');
 
-    // Measured at the boundary the client reads, not off the constant.
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
     expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1873);
   });
@@ -272,15 +236,11 @@ describe('MCP protocol conformance', () => {
     const archive = tools.find((t) => t.name === 'memory.archive');
     const desc = archive?.description ?? '';
 
-    // Gated on explicit user request to retire/remove/forget.
     expect(desc).toMatch(/explicit/i);
     expect(desc).toMatch(/retire|remove|forget/i);
-    // Prefer supersede when a replacement exists (no-successor path).
     expect(desc).toMatch(/supersede/i);
     expect(desc).toMatch(/topic_key/i);
-    // No autonomous cleanup during recall/save.
     expect(desc).toMatch(/autonomous|cleanup|housekeeping/i);
-    // Reversible from the dashboard.
     expect(desc).toMatch(/revers|undo/i);
     expect(desc).toMatch(/dashboard/i);
 
@@ -378,8 +338,6 @@ describe('MCP protocol conformance', () => {
     expect(schema?.properties?.judgments?.maximum).toBe(50);
     expect(desc).toContain('pendingJudgmentsTotal');
     expect(desc).toContain('judgments');
-    // A size argument that silently changes WHICH rows qualify is not guessable
-    // from the argument name, so the description has to say so.
     expect(desc).toMatch(/lifts the age filter/i);
 
     await client.close();
@@ -389,14 +347,10 @@ describe('MCP protocol conformance', () => {
     const client = await connect();
     const { tools } = await client.listTools();
     const doctor = tools.find((t) => t.name === 'memory.doctor');
-    // Control: a missing tool leaves `desc` empty, and every negative assertion
-    // below then passes while proving nothing.
     expect(doctor, 'memory.doctor missing from tools/list').toBeDefined();
     const desc = doctor?.description ?? '';
     expect(desc.length).toBeGreaterThan(0);
 
-    // The report has no `llm` block, so advertising one invites a client to read
-    // its absence as a fault.
     expect(desc).not.toMatch(/llm/i);
 
     expect(desc).toMatch(/server-wide/i);
@@ -408,12 +362,8 @@ describe('MCP protocol conformance', () => {
     expect(desc).toContain('sessions');
     expect(desc).toContain('review');
 
-    // Client truncation is a tail cut, so the disclosure sits in the first
-    // sentence rather than after the usage hint.
     expect(desc.split('. ')[0]).toMatch(/server-wide/i);
 
-    // Asserting the string alone cannot catch the description drifting from the
-    // payload again, which is how the `llm` claim survived its own removal.
     const report = (await client.callTool({ name: 'memory.doctor', arguments: {} })) as ToolResult;
     expect(report.isError).toBeFalsy();
     const payload = readJson(report) as Record<string, unknown>;
@@ -432,8 +382,6 @@ describe('MCP protocol conformance', () => {
     const desc = stats?.description ?? '';
     expect(desc.length).toBeGreaterThan(0);
 
-    // memory.doctor's description sends the model here for the scoped
-    // equivalents, so a pointer that lands on silence is the failure mode.
     expect(desc).toContain('needsReviewTotal');
     expect(desc).toContain('pendingJudgmentsTotal');
     expect(desc).toMatch(/scoped to the active project/i);
@@ -453,8 +401,6 @@ describe('MCP protocol conformance', () => {
     expect(desc.length).toBeGreaterThan(0);
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
 
-    // The field name alone does not say which statuses count, so the
-    // description the model reads has to.
     expect(desc).toContain('activeMemoryCount');
     expect(desc).toMatch(/active/i);
     expect(desc).toMatch(/archived/i);
@@ -476,8 +422,6 @@ describe('MCP protocol conformance', () => {
       const desc = param?.description ?? '';
       expect(desc, name).toContain('default');
       expect(desc, name).toContain('relationsTotal');
-      // The whole mitigation: an ask of `relationsTotal` alone is what this
-      // schema rejects, so the recipe has to be the bounded one.
       expect(desc, name).toContain(`min(relationsTotal, ${RELATION_ANNOTATION_MAX})`);
       expect(desc, name).toMatch(/rejected, not clamped/i);
     }
@@ -504,11 +448,9 @@ describe('MCP protocol conformance', () => {
       const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
       expect(text, call.name).toContain('-32602');
       expect(text, call.name).toContain('relations_limit');
-      // No clamped payload rides along with the rejection.
       expect(text, call.name).not.toContain('relationsTotal');
     }
 
-    // The maximum itself is accepted, so the recipe the description teaches works.
     const atMax = (await client.callTool({
       name: 'memory.get',
       arguments: { id, relations_limit: RELATION_ANNOTATION_MAX },
@@ -520,15 +462,11 @@ describe('MCP protocol conformance', () => {
   });
 
   it("memory.get's batch form reports the same review metadata and replaces as the single-id form", async () => {
-    // Its own project: a refuted row is `needs_review`, which would otherwise
-    // show up in the global scope's needsReview channel other tests assert on.
     const projects = new ProjectsService(createRepositories(services.db.db));
     const project =
       projects.findBySlug('integration-batch-parity') ??
       projects.create({ slug: 'integration-batch-parity' });
     const client = await connect({ projectSlug: project.slug });
-    // listTools primes the SDK's output-schema validator, so every callTool
-    // below also asserts the payload against the published outputSchema.
     await client.listTools();
     const topicKey = 'batch-parity-topic';
     const save = async (title: string): Promise<string> => {
@@ -546,7 +484,6 @@ describe('MCP protocol conformance', () => {
     const predecessorId = await save('batch parity predecessor');
     const headId = await save('batch parity head');
 
-    // A refutation forces `needs_review` immediately, whatever the type's TTL.
     const refuted = (await client.callTool({
       name: 'memory.confirm',
       arguments: { id: headId, verdict: 'refute', reason: 'batch parity probe' },
@@ -577,8 +514,6 @@ describe('MCP protocol conformance', () => {
     expect(head, 'head missing from the batch page').toBeDefined();
     expect(predecessor, 'predecessor missing from the batch page').toBeDefined();
 
-    // The single-id call is the control: without it a batch carrying nothing
-    // is indistinguishable from a scope where no row needs review.
     expect(singleBody.reviewState).toBe('needs_review');
     expect(singleBody.reviewAfter).toEqual(expect.any(String));
     expect(singleBody.reviewEscalated).toBe(false);
@@ -588,14 +523,11 @@ describe('MCP protocol conformance', () => {
     expect(head!.replaces).toEqual([predecessorId]);
     expect(head!.replaces).toEqual(singleBody.memory.replaces);
 
-    // Status-driven, not form-driven: the superseded row in the same page
-    // carries none of the three.
     expect(predecessor!.status).toBe('superseded');
     for (const field of ['reviewState', 'reviewAfter', 'reviewEscalated']) {
       expect(field in predecessor!, `${field} on a superseded batch entry`).toBe(false);
     }
 
-    // The two deliberate asymmetries.
     expect('lastSeenAt' in head!).toBe(true);
     expect('lastSeenAt' in singleBody).toBe(false);
     for (const field of [
@@ -629,14 +561,7 @@ describe('MCP protocol conformance', () => {
       expect(r.isError).toBeFalsy();
     };
 
-    // One row carrying every query term, four carrying one common term: the
-    // relative filter cuts the four, leaving a page short of `limit`.
     const shortClient = await connect({ projectSlug: shortened.slug });
-    // Arms the CLIENT-side output-schema validator, which the SDK compiles only
-    // in `cacheToolMetadata` — reachable from `listTools` alone (client/index.js
-    // :540-563). The server validates its own output regardless; this puts the
-    // consumer's ajv pass in the loop too, so `structuredContent` is checked by
-    // both ends rather than only by the assertions below.
     await shortClient.listTools();
     await save(shortClient, 'Quetzal ledger', 'quetzal ledger obsidian marmot tessellate');
     for (let i = 0; i < 4; i++) await save(shortClient, `Marmot ${i}`, `marmot sighting ${i}`);
@@ -658,9 +583,6 @@ describe('MCP protocol conformance', () => {
       gateShortened: true,
     });
 
-    // Same gated pool, paged past the single survivor but still inside the
-    // five-row pool: the ungated page there holds rows, so the gate is why this
-    // one ran out. Empty here is not abstention — the pool was never empty.
     const gatedDeepResult = (await shortClient.callTool({
       name: 'memory.search',
       arguments: {
@@ -678,9 +600,6 @@ describe('MCP protocol conformance', () => {
       gateShortened: true,
     });
 
-    // Same gated pool again, now paged AT and PAST the pool's end. The ungated
-    // page is empty here too, so the gate is not the cause and the flag would
-    // promise a recovery paging cannot deliver.
     for (const offset of [5, 50]) {
       const pastPoolResult = (await shortClient.callTool({
         name: 'memory.search',
@@ -703,9 +622,6 @@ describe('MCP protocol conformance', () => {
     }
     await shortClient.close();
 
-    // Control: three equally-relevant rows, so the filter removes nothing. The
-    // page past the end is empty because the caller paged past the pool, and
-    // that is not the gate's doing.
     const deepClient = await connect({ projectSlug: untouched.slug });
     await deepClient.listTools();
     for (let i = 0; i < 3; i++)
@@ -736,9 +652,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     expect(saved.isError).toBeFalsy();
 
-    // No-query listing: the ranked pass never runs, so there is no verdict to
-    // forward — but `abstained` is REQUIRED by the published output schema, so
-    // the branch must still assert its own `false` rather than omit the field.
     const listing = (await client.callTool({
       name: 'memory.search',
       arguments: { limit: 5 },
@@ -749,9 +662,6 @@ describe('MCP protocol conformance', () => {
     expect(listing.structuredContent).toHaveProperty('abstained', false);
     expect(listed).not.toHaveProperty('abstainReason');
 
-    // A `type` filter matching no row empties the fused pool, which is the only
-    // abstention reachable with an embedder wired: sqlite-vec returns neighbours
-    // whatever their distance, so a populated scope never abstains on distance.
     const abstained = (await client.callTool({
       name: 'memory.search',
       arguments: { query: 'cinnabar rota kestrel', type: 'user' },
@@ -772,8 +682,6 @@ describe('MCP protocol conformance', () => {
     const { tools } = await client.listTools();
     await client.close();
 
-    // Derived from the whole response, so a newly registered tool inherits the
-    // guard; the floor stops an empty listing passing vacuously.
     const measured = tools.map((t) => ({ name: t.name, length: (t.description ?? '').length }));
     expect(measured.length, 'tools/list returned fewer tools than expected').toBeGreaterThanOrEqual(
       23,
@@ -790,22 +698,14 @@ describe('MCP protocol conformance', () => {
         'client truncation ceiling").',
     ).toEqual([]);
 
-    // Pins the GUARD's unit, not the string's: `memory.save`'s description holds
-    // `∈`, `·` and `≤`, so measuring bytes would report a different number, and
-    // an earlier exploration did exactly that while labelling it characters.
     const save = tools.find((t) => t.name === 'memory.save')?.description ?? '';
     const savesMeasured = measured.find((m) => m.name === 'memory.save')?.length;
     expect(savesMeasured).toBe(save.length);
     expect(savesMeasured).not.toBe(Buffer.byteLength(save, 'utf8'));
 
-    // The one behavioural lever `candidatesDetected` gives an agent. A future
-    // edit that trims the description for length must not quietly drop it and
-    // leave a bare number the agent can only read.
     expect(save).toContain('candidatesDetected');
     expect(save).toContain('memory.suggest_topic_key');
     expect(save).toContain('CANDIDATES_PER_SAVE_MAX');
-    // No request argument raises the surfaced count, so the description must
-    // not send the agent at one — the defect this repo already shipped once.
     expect(save).not.toMatch(/pass\s+`?candidatesDetected/i);
     expect(save).not.toMatch(/candidates_limit|candidates_max/i);
   });
@@ -825,8 +725,6 @@ describe('MCP protocol conformance', () => {
       expect(descriptions.size).toBeGreaterThanOrEqual(23);
     });
 
-    // Measured from the live `tools/list` string, never from the source
-    // constant — the boundary an external client truncates at.
     it.each([
       ['memory.context', 1432],
       ['memory.search_prompts', 428],
@@ -851,13 +749,8 @@ describe('MCP protocol conformance', () => {
       expect(desc).toMatch(/rejected, not clamped/i);
     });
 
-    // A first message states a goal almost by definition, so a trigger keyed on
-    // that fires once per session by construction — which is how this tool came
-    // to be called on nearly every opening turn.
     it('memory.save_prompt restrains WHEN it is called, not only what to pass', () => {
       const desc = descriptions.get('memory.save_prompt') ?? '';
-      // Anchored: an unanchored /reusable/i is also satisfied by "reusable
-      // artifact" further down, which left the opening claim uncovered.
       expect(desc).toMatch(/^Persist a REUSABLE prompt/);
       expect(desc).toMatch(/do NOT call it routinely/i);
       expect(desc).toContain('memory.save');
@@ -871,8 +764,6 @@ describe('MCP protocol conformance', () => {
       expect(desc).toContain('after');
       expect(desc).toContain('memory.search');
       expect(desc).toMatch(/not clamped/i);
-      // The description's literal is a fourth copy of the handler's bound; a
-      // bound change that misses the prose fails here.
       expect(desc).toContain(`must not exceed ${TIMELINE_WINDOW_MAX}`);
     });
 
@@ -889,9 +780,7 @@ describe('MCP protocol conformance', () => {
       expect(desc).toContain('memory.stats');
       expect(desc).toMatch(/unfiltered|every pending row/i);
       expect(desc).toMatch(/adjudicable/i);
-      // Scope alone is not the whole story, so it must not read as the only cause.
       expect(desc).not.toMatch(/and they will differ\.\s/);
-      // `:856` — truncation is a tail cut, so the disclosure precedes the hint.
       expect(desc.indexOf('SERVER-WIDE')).toBeLessThan(desc.indexOf('Use at session start'));
     });
 
@@ -912,8 +801,6 @@ describe('MCP protocol conformance', () => {
       }
       expect(desc).toMatch(/reused:true.*ADOPTED/i);
       expect(desc).toMatch(/agent.*MAY differ from the `agent` you passed/i);
-      // D3: the anti-ghost clause — a second call is never needed once a
-      // session is active on this connection.
       expect(desc).toMatch(/do NOT call this again/i);
       expect(desc).toMatch(/attach to it automatically/i);
     });
@@ -921,10 +808,6 @@ describe('MCP protocol conformance', () => {
     it('memory.session_resume names every field its outputSchema requires', () => {
       const desc = descriptions.get('memory.session_resume') ?? '';
       const required = requiredBySchema.get('memory.session_resume') ?? [];
-      // Read from the live schema rather than restated here, so a field added
-      // to it is covered on the day it lands. Two are named explicitly because
-      // they are the only report of a value the row does not retain, and the
-      // pins below would pass over an empty required list without them.
       expect(required).toContain('previousStatus');
       expect(required).toContain('previousEndedAt');
       for (const field of required) {
@@ -948,7 +831,6 @@ describe('MCP protocol conformance', () => {
   });
 
   it('a second memory.session_start adopts the first session and says so', async () => {
-    // Its own project, so no other test's active session can be adopted here.
     const projects = new ProjectsService(createRepositories(services.db.db));
     const project =
       projects.findBySlug('integration-session-reuse') ??
@@ -972,7 +854,6 @@ describe('MCP protocol conformance', () => {
     expect(b.sessionId).toBe(a.sessionId);
     expect(b.agent).toBe('rembric-test');
 
-    // The control: adoption, not a coincidence of ids — only one row exists.
     const rows = services.db.db
       .select({ id: agentSessions.id })
       .from(agentSessions)
@@ -995,7 +876,6 @@ describe('MCP protocol conformance', () => {
       services.db.db,
     );
 
-    // Start and write a summary to create a terminal row with summaryFinal:true
     const start = (await client.callTool({
       name: 'memory.session_start',
       arguments: { agent: 'rembric-test' },
@@ -1006,11 +886,8 @@ describe('MCP protocol conformance', () => {
       name: 'memory.session_summary',
       arguments: { sessionId, summary: '## Goal\nfirst curated summary' },
     });
-    // Mark as abandoned (terminal) — bypass token check since integration test
-    // uses a single token
     agentSessions.markAbandoned(sessionId, { adminBypass: true });
 
-    // Second summary on terminal row with summaryFinal=true should be discarded
     const second = (await client.callTool({
       name: 'memory.session_summary',
       arguments: { sessionId, summary: '## Goal\nsecond curated' },
@@ -1029,14 +906,12 @@ describe('MCP protocol conformance', () => {
       projects.create({ slug: 'integration-verdict-end' });
     const client = await connect({ projectSlug: project.slug });
 
-    // Start the session and capture the session ID
     const start = (await client.callTool({
       name: 'memory.session_start',
       arguments: { agent: 'rembric-test' },
     })) as ToolResult;
     const sessionId = (readJson(start) as { sessionId: string }).sessionId;
 
-    // End the session to make it terminal
     const firstEnd = (await client.callTool({
       name: 'memory.session_end',
       arguments: { sessionId },
@@ -1044,7 +919,6 @@ describe('MCP protocol conformance', () => {
     const body1 = readJson(firstEnd) as { applied: boolean };
     expect(body1.applied).toBe(true);
 
-    // Second end on already-terminal row should return applied:false
     const secondEnd = (await client.callTool({
       name: 'memory.session_end',
       arguments: { sessionId },
@@ -1056,15 +930,12 @@ describe('MCP protocol conformance', () => {
   });
 
   it("memory.doctor's pending count diverges from the scoped totals inside one project", async () => {
-    // One project for every call, so the population cannot explain the gap.
     const projects = new ProjectsService(createRepositories(services.db.db));
     const project =
       projects.findBySlug('integration-doctor-divergence') ??
       projects.create({ slug: 'integration-doctor-divergence' });
     const client = await connect({ projectSlug: project.slug });
 
-    // Deliberately unalike, so save-time candidate detection adds no second
-    // pending pair and the counts below are the one this test seeds.
     const save = async (title: string, content: string): Promise<string> => {
       const res = (await client.callTool({
         name: 'memory.save',
@@ -1099,7 +970,6 @@ describe('MCP protocol conformance', () => {
       )
       .run('01TESTRELDIVERGENCE000001', 'jdg-divergence-itest', sourceId, targetId, Date.now());
 
-    // doctor's counter is server-wide, so only its DELTA is meaningful here.
     const doctorWithPair = await doctorPending();
     expect(doctorWithPair).toBeGreaterThanOrEqual(1);
     expect(await statsPending()).toBe(1);
@@ -1111,8 +981,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     expect(archived.isError).toBeFalsy();
 
-    // Same project, same connection: the scoped totals drop because the pair is
-    // no longer adjudicable, doctor's unfiltered inventory count does not move.
     expect(await doctorPending()).toBe(doctorWithPair);
     expect(await statsPending()).toBe(0);
     expect(await contextPending()).toBe(0);
@@ -1129,9 +997,6 @@ describe('MCP protocol conformance', () => {
       return (await client.callTool({ name, arguments: args })) as ToolResult;
     }
 
-    // One test per argument, so a bound weakened by one constant reddens only
-    // the test that names it. The probe values are LITERAL: deriving max+1 from
-    // the constant under test would move with it and detect nothing.
     it.each([
       ['sessions', 25],
       ['prompts', 50],
@@ -1152,7 +1017,6 @@ describe('MCP protocol conformance', () => {
       const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
       expect(text, arg).toContain('-32602');
       expect(text, arg).toContain(arg);
-      // No payload rides along with the rejection.
       expect(text, arg).not.toContain('pendingJudgmentsTotal');
       expect(rejected.structuredContent, arg).toBeUndefined();
       await client.close();
@@ -1160,8 +1024,6 @@ describe('MCP protocol conformance', () => {
 
     it('accepts all four memory.context maxima and returns no clamp receipt', async () => {
       const client = await connect();
-      // The control: without it a rejection above the maximum cannot be told
-      // from a broken probe.
       const atMax = await callWith(client, 'memory.context', {
         sessions: 25,
         prompts: 50,
@@ -1170,7 +1032,6 @@ describe('MCP protocol conformance', () => {
       });
       expect(atMax.isError).toBeFalsy();
       expect(atMax.structuredContent).not.toHaveProperty('clamped');
-      // The nine remaining keys; `rankedPass` is the one conditional addition.
       const keys = Object.keys(atMax.structuredContent ?? {}).sort();
       expect(keys.filter((k) => k !== 'rankedPass')).toEqual([
         'needsReview',
@@ -1186,8 +1047,6 @@ describe('MCP protocol conformance', () => {
       await client.close();
     });
 
-    // Two-sided, and split so weakening `.max` and weakening `.min` redden
-    // different tests.
     it.each([
       ['above its maximum', 101],
       ['below its minimum', 0],
@@ -1228,7 +1087,6 @@ describe('MCP protocol conformance', () => {
       const text = rejected.content.find((c) => c.type === 'text')?.text ?? '';
       expect(text).toContain('invalid_input');
       expect(text).toContain(String(TIMELINE_WINDOW_MAX));
-      // The remedy the description names too, so the two stay in step.
       expect(text).toContain('memory.search');
 
       const control = await callWith(client, 'memory.timeline', {
@@ -1242,11 +1100,6 @@ describe('MCP protocol conformance', () => {
   });
 
   it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {
-    // Read tools never mutate. Every Rembric tool is non-destructive (rows are
-    // never deleted; supersede is a reversible status flip) and closed-world
-    // (single local store) — so destructiveHint/openWorldHint are false for ALL
-    // tools. The name sets below are exhaustive against the registered tools;
-    // a newly-registered tool with no entry fails the partition assertion.
     const READ_TOOLS = new Set([
       'memory.search',
       'memory.get',
@@ -1279,8 +1132,6 @@ describe('MCP protocol conformance', () => {
     const client = await connect();
     const { tools } = await client.listTools();
 
-    // Every registered tool is partitioned into exactly one of the two sets —
-    // catches an un-annotated new tool.
     const registered = tools.map((t) => t.name).sort();
     expect(registered).toEqual([...READ_TOOLS, ...WRITE_TOOLS].sort());
 
@@ -1306,11 +1157,6 @@ describe('MCP protocol conformance', () => {
   });
 
   it('returns conforming structuredContent for the tools not exercised elsewhere', async () => {
-    // The SDK validates structuredContent against the registered outputSchema
-    // on every call, so a non-throwing call with structuredContent present IS
-    // the schema conformance test. The save→search→get→confirm/context/session/
-    // timeline/judge/compare/doctor/suggest_topic_key paths are covered by other
-    // tests in this file; this fills the gap for the rest.
     const client = await connect();
 
     const about = await client.callTool({ name: 'memory.about', arguments: {} });
@@ -1397,8 +1243,6 @@ describe('MCP protocol conformance', () => {
   it('reads the default project from a path-less /mcp, with the path-scoped read as control', async () => {
     const dflt = defaultProject(services.db);
 
-    // Write through a path-scoped connection, so the row lands in the default
-    // project exactly where the migration leaves the previously-global corpus.
     const scoped = await connect({ projectSlug: dflt.slug });
     const saved = readJson(
       (await scoped.callTool({
@@ -1412,7 +1256,6 @@ describe('MCP protocol conformance', () => {
     ) as { id: string };
     expect(saved.id).toMatch(/^[0-9A-Z]+$/);
 
-    // Control — must hold on both sides of the resolver change.
     const scopedCtx = readJson(
       (await scoped.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
     ) as { scope: string; recentMemories: { id: string }[] };
@@ -1420,7 +1263,6 @@ describe('MCP protocol conformance', () => {
     expect(scopedCtx.recentMemories.map((m) => m.id)).toContain(saved.id);
     await scoped.close();
 
-    // Subject: the same corpus, read from `/mcp` with no slug.
     const pathless = await connect();
     const pathlessCtx = readJson(
       (await pathless.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
@@ -1445,10 +1287,6 @@ describe('MCP protocol conformance', () => {
 
   it('project.list returns the default project as an ordinary entry, and project.use activates it', async () => {
     const dflt = defaultProject(services.db);
-    // Own sibling, so the "listed alongside others" control does not depend on
-    // which other tests in this file happened to run first. Minted on its own
-    // connection: a pinned router entry would make the `project.use` below a
-    // switch, which is a different gate from the one under test.
     const sibling = await connect();
     await sibling.callTool({
       name: 'project.use',
@@ -1478,7 +1316,6 @@ describe('MCP protocol conformance', () => {
     expect(entry!.archived).toBe(false);
     expect(typeof entry!.displayName).toBe('string');
     expect(typeof entry!.activeMemoryCount).toBe('number');
-    // Non-vacuity: it is listed alongside others, not the only entry.
     expect(listed.projects.length).toBeGreaterThan(1);
 
     const used = readJson(
@@ -1537,8 +1374,6 @@ describe('MCP protocol conformance', () => {
     const bId = await seed('closed-b', 'in-b');
 
     const client = await connect();
-    // Step one, then the confirmed switch: `project.use` moves the single closed
-    // scope, so the reads below must see project B alone at the end of it.
     expect(
       readJson(
         (await client.callTool({
@@ -1625,9 +1460,6 @@ describe('MCP protocol conformance', () => {
     ) as { sessionId: string };
     expect(started.sessionId).toMatch(/^[0-9A-Z]+$/);
 
-    // The flow `instructions.ts` documents verbatim: pin (and create) after the
-    // session is open. A default-project resolution is not an activation, so it
-    // must not make this look like a project switch.
     const used = (await client.callTool({
       name: 'project.use',
       arguments: { slug: 'pin-after-start-a', autocreate: true },
@@ -1640,8 +1472,6 @@ describe('MCP protocol conformance', () => {
       source: 'tool-explicit',
     });
 
-    // Control — the gates are not globally weakened: moving off a DELIBERATE
-    // pin still demands confirmation.
     const unconfirmed = (await client.callTool({
       name: 'project.use',
       arguments: { slug: 'pin-after-start-b', autocreate: true },
@@ -1653,8 +1483,6 @@ describe('MCP protocol conformance', () => {
       targetSlug: 'pin-after-start-b',
     });
 
-    // Control — and with a session open, a confirmed switch away from a
-    // deliberate pin is still refused.
     const confirmed = (await client.callTool({
       name: 'project.use',
       arguments: { slug: 'pin-after-start-b', autocreate: true, confirmSwitch: true },
@@ -1689,8 +1517,6 @@ describe('MCP protocol conformance', () => {
     expect(body.message).toContain("reconnect at '/mcp/pinned-remedy-proj'");
     await pathless.close();
 
-    // Control — the remedy names a reachable path: the same token on its own
-    // slug is authorized.
     const scoped = await connect({ token: pinned.plaintext, projectSlug: own.slug });
     const allowed = (await scoped.callTool({
       name: 'memory.search',
@@ -1709,8 +1535,6 @@ describe('MCP protocol conformance', () => {
     const save = tools.find((t) => t.name === 'memory.save');
     expect(save, 'memory.save missing from tools/list').toBeDefined();
     const properties = (save?.inputSchema.properties ?? {}) as Record<string, unknown>;
-    // Non-vacuity: the schema IS published, so the absence below is a removed
-    // property rather than an empty manifest.
     expect(Object.keys(properties)).toContain('type');
     expect(Object.keys(properties)).not.toContain('scope');
 
@@ -1729,8 +1553,6 @@ describe('MCP protocol conformance', () => {
     expect(message).toContain('memory.save');
     expect(message).toContain('scope');
 
-    // Control: the same call without the retired argument succeeds, so the
-    // rejection above is the unknown key and not a broken save path.
     const accepted = (await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -1780,9 +1602,6 @@ describe('MCP protocol conformance', () => {
     expect(message).toContain('memory.search');
     expect(message).toContain('include_global');
 
-    // Control: the same query without the retired argument is accepted, sees
-    // the in-scope row and not the other project's — so the rejection above is
-    // the unknown key, and the scope closure it used to prove still holds.
     const accepted = (await client.callTool({
       name: 'memory.search',
       arguments: { query: 'widenprobeaaa', limit: 20 },
@@ -1793,8 +1612,6 @@ describe('MCP protocol conformance', () => {
     expect(ids).not.toContain(outside.id);
     await client.close();
 
-    // The excluded row is findable by the same query on the connection that
-    // owns it, so the exclusion is the scope, not the index.
     const pathless = await connect();
     const own2 = (await pathless.callTool({
       name: 'memory.search',
@@ -1809,7 +1626,6 @@ describe('MCP protocol conformance', () => {
   it('refuses an unknown property on every registered tool', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    // Without this the loop below would pass over an empty manifest.
     expect(tools.length).toBeGreaterThan(15);
 
     for (const tool of tools) {
@@ -1935,8 +1751,6 @@ describe('MCP protocol conformance', () => {
     expect(save).not.toMatch(/scope=global|user-wide/i);
 
     const search = desc('memory.search');
-    // Reclaimed to pay for the widening clause, and false once a search can
-    // read more than one project. The successor sentence is what replaced it.
     expect(search).not.toContain("Every connection sees exactly one project's memories.");
     expect(search).toContain('`across_projects:true` also reads the other projects');
     expect(search).not.toContain('unscoped see globals only');
@@ -1962,8 +1776,6 @@ describe('MCP protocol conformance', () => {
     const { tools } = await client.listTools();
     await client.close();
 
-    // Without this the negative assertions below all pass over an empty
-    // manifest, which is the only way this test can lie.
     expect(tools.length).toBeGreaterThanOrEqual(23);
 
     const RETIRED = /global|include_global|user-wide/i;
@@ -1976,12 +1788,9 @@ describe('MCP protocol conformance', () => {
       for (const [property, spec] of Object.entries(schema.properties ?? {})) {
         propertiesChecked += 1;
         expect(property, `${tool.name} property name`).not.toMatch(RETIRED);
-        // `describe()` lands here, the only place a per-argument string reaches
-        // the model.
         expect(spec.description ?? '', `${tool.name}.${property} describe()`).not.toMatch(RETIRED);
       }
     }
-    // Second non-vacuity control: the property loop ran over real properties.
     expect(propertiesChecked).toBeGreaterThan(20);
   });
 
@@ -2039,12 +1848,6 @@ describe('MCP protocol conformance', () => {
 
     expect(refusals.length).toBe(7);
 
-    // Verbatim pins, not a deny-list of prohibited words. Measured: a deny-list
-    // stays green on `Open a second connection with no project in the URL to
-    // store this for every project at once.`, which is the prohibited
-    // instruction paraphrased. Pinning the whole message means any edit to a
-    // refusal reds this test and a human re-approves it, which is what
-    // `mcp-api`'s no-false-remedy requirement actually needs.
     const expected: Record<string, { code: string; message: string }> = {
       'unresolvable slug / save': {
         code: 'project_not_found',
@@ -2086,8 +1889,6 @@ describe('MCP protocol conformance', () => {
       expect({ where, code, message }).toEqual({ where, ...expected[where] });
     }
 
-    // Cheap second layer over the whole payload, which the pins above cover
-    // only for `code` and `message`.
     for (const { where, body } of refusals) {
       expect(body, `${where}: names a scope`).not.toMatch(/global|user-wide/i);
       expect(body, `${where}: offers a path-less entry`).not.toMatch(
@@ -2095,14 +1896,10 @@ describe('MCP protocol conformance', () => {
       );
       expect(body, `${where}: tells the agent to set a scope`).not.toMatch(/set scope|scope=/i);
     }
-    // `scope_locked` survives on the two switch paths and is deliberately kept:
-    // it locks switching, not a scope.
     expect(refusals.filter((r) => r.code === 'scope_locked').map((r) => r.where)).toEqual([
       'path-scoped / switch away',
       'path-scoped / session_start elsewhere',
     ]);
-    // Control: the remedy that IS reachable is still offered where it applies,
-    // so the loop above is not passing over messages stripped of everything.
     expect(refusals.some((r) => /project\.use\(\{slug/.test(r.body))).toBe(true);
   });
 
@@ -2113,7 +1910,6 @@ describe('MCP protocol conformance', () => {
   it('session lifecycle: start → save (stamps session_id) → summary → end → context returns it', async () => {
     const client = await connect();
 
-    // 1. Start a session.
     const started = (await client.callTool({
       name: 'memory.session_start',
       arguments: { agent: 'rembric-test', description: 'wiring the lifecycle test' },
@@ -2122,7 +1918,6 @@ describe('MCP protocol conformance', () => {
     const startedPayload = readJson(started) as { sessionId: string };
     expect(startedPayload.sessionId).toMatch(/^[0-9A-Z]+$/);
 
-    // 2. Save a memory; server should auto-stamp session_id.
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -2134,25 +1929,18 @@ describe('MCP protocol conformance', () => {
     expect(saved.isError).toBeFalsy();
     const savedPayload = readJson(saved) as { id: string };
 
-    // 3. Summarise the session (writes summary but does NOT end the session
-    //    under the new contract — session stays `active`).
     const summarised = (await client.callTool({
       name: 'memory.session_summary',
       arguments: { summary: 'Goal: wire test. Accomplished: done.', title: 'Wire test' },
     })) as ToolResult;
     expect(summarised.isError).toBeFalsy();
 
-    // 4. Explicitly end the session — sole transition path.
     const ended = (await client.callTool({
       name: 'memory.session_end',
       arguments: {},
     })) as ToolResult;
     expect(ended.isError).toBeFalsy();
 
-    // 5. memory.context should include the session as recent and `ended`.
-    //    The session was anchored to a saved memory AND received a summary,
-    //    so it satisfies the `sessionHasContent` predicate and survives the
-    //    content filter applied by recentForContext.
     const ctx = (await client.callTool({
       name: 'memory.context',
       arguments: { sessions: 5, memories: 5 },
@@ -2217,7 +2005,6 @@ describe('MCP protocol conformance', () => {
   it('memory.context backfills past empty sessions to return useful older ones', async () => {
     const client = await connect();
 
-    // First: a session WITH content (will be the oldest).
     const usefulStart = (await client.callTool({
       name: 'memory.session_start',
       arguments: { agent: 'rembric-test', description: 'useful session' },
@@ -2233,7 +2020,6 @@ describe('MCP protocol conformance', () => {
     });
     await client.callTool({ name: 'memory.session_end', arguments: {} });
 
-    // Then: three empty sessions in newer-than-useful order.
     for (let i = 0; i < 3; i++) {
       await client.callTool({
         name: 'memory.session_start',
@@ -2253,11 +2039,6 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  // Snippet tests run in global scope and END their session before closing.
-  // session_start resumes the transport's active session, and a lingering
-  // active session would pollute the global auto-stamp used by later tests —
-  // so each test cleans up. end() does not auto-curate a summary, so the
-  // null-summary case stays null after ending.
   it('memory.context truncates a long session summary to ≤350 chars while storage stays full', async () => {
     const client = await connect();
 
@@ -2286,7 +2067,6 @@ describe('MCP protocol conformance', () => {
     expect(seen?.summary?.length).toBeLessThanOrEqual(350);
     expect(seen?.summary?.endsWith('…')).toBe(true);
 
-    // Storage is unaffected: the row still holds the full, untruncated summary.
     const stored = createRepositories(services.db.db).agentSessions.getById(sessionId);
     expect(stored?.summary).toBe(fullSummary);
 
@@ -2333,8 +2113,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    // Anchor a memory so the session is content-bearing without a summary.
-    // memory.save auto-stamps the active session_id, so no summary is written.
     const saved = (await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -2368,7 +2146,7 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    const title = 'T'.repeat(100); // max title length — proves it is emitted whole, never snippet-truncated
+    const title = 'T'.repeat(100);
     await client.callTool({
       name: 'memory.session_summary',
       arguments: { summary: 'Goal: titled session test.', title },
@@ -2396,8 +2174,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    // Content-bearing via an anchored memory; never summarized with a title → titleFinal stays
-    // false, so the placeholder title must not leak into agent-facing context.
     await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -2430,7 +2206,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const { sessionId } = readJson(started) as { sessionId: string };
 
-    // Content-bearing via an anchored memory, not via a curated summary.
     await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -2440,7 +2215,6 @@ describe('MCP protocol conformance', () => {
       },
     });
 
-    // A per-turn raw sync (summary_final=0), never curated.
     services.db.db
       .update(agentSessions)
       .set({ summary: 'raw transcript dump, never curated', summaryFinal: false })
@@ -2477,7 +2251,6 @@ describe('MCP protocol conformance', () => {
       arguments: { summary: fullSummary },
     });
 
-    // memory.context truncates to the snippet bound...
     const ctx = (await client.callTool({
       name: 'memory.context',
       arguments: { sessions: 25 },
@@ -2488,7 +2261,6 @@ describe('MCP protocol conformance', () => {
     const seen = ctxPayload.recentSessions.find((s) => s.id === sessionId);
     expect(seen?.summary?.length).toBeLessThanOrEqual(350);
 
-    // ...while memory.session_get returns the full, untruncated summary.
     const got = (await client.callTool({
       name: 'memory.session_get',
       arguments: { sessionId },
@@ -2549,12 +2321,9 @@ describe('MCP protocol conformance', () => {
   });
 
   it('memory.session_get returns not_found for a cross-scope session', async () => {
-    // Create the project directly on the shared DB (single better-sqlite3
-    // connection) so the path-scoped connection resolves ctx.project to it.
     const projects = new ProjectsService(createRepositories(services.db.db));
     projects.create({ slug: 'getsession-proj' });
 
-    // Start a session INSIDE the project (path-scoped → project scope).
     const pinned = await connect({ projectSlug: 'getsession-proj' });
     const started = (await pinned.callTool({
       name: 'memory.session_start',
@@ -2562,13 +2331,11 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const startedPayload = readJson(started) as { sessionId: string; scope: string };
     const { sessionId } = startedPayload;
-    // Guard: confirm the session really is project-scoped (not global).
     expect(startedPayload.scope).toBe('project');
     await pinned.callTool({
       name: 'memory.session_summary',
       arguments: { summary: 'Goal: lives in a project.' },
     });
-    // In-scope session_get finds it.
     const inScope = (await pinned.callTool({
       name: 'memory.session_get',
       arguments: { sessionId },
@@ -2577,7 +2344,6 @@ describe('MCP protocol conformance', () => {
     await pinned.callTool({ name: 'memory.session_end', arguments: {} });
     await pinned.close();
 
-    // Fetch from global scope → the project session is out of scope.
     const globalClient = await connect();
     const got = (await globalClient.callTool({
       name: 'memory.session_get',
@@ -2600,7 +2366,6 @@ describe('MCP protocol conformance', () => {
       arguments: { summary: 'Goal: about to be soft-deleted.' },
     });
 
-    // Soft-delete the row directly (operator action; no agent-facing tool).
     services.db.db
       .update(agentSessions)
       .set({ deletedAt: new Date() })
@@ -2616,10 +2381,6 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  // `status` and `ended_at` are one fact read from two columns: a reader may
-  // rely on `ended_at IS NOT NULL` iff `status <> 'active'`, before and after a
-  // resume alike. `memory.timeline` reports neither, so what it must not break
-  // is the session thread the pair belongs to.
   it('a resumed session reads back as active with no endedAt, and its memory timeline stays one thread', async () => {
     const projects = new ProjectsService(createRepositories(services.db.db));
     const project =
@@ -2641,8 +2402,6 @@ describe('MCP protocol conformance', () => {
 
     await client.callTool({ name: 'memory.session_end', arguments: { sessionId } });
 
-    // Control: the pair moves together, so it must read `ended` + a timestamp
-    // here for the post-resume read to be evidence of anything.
     const closed = (await client.callTool({
       name: 'memory.session_get',
       arguments: { sessionId },
@@ -2651,10 +2410,6 @@ describe('MCP protocol conformance', () => {
     expect(closedPayload.status).toBe('ended');
     expect(closedPayload.endedAt).toEqual(expect.any(String));
 
-    // Saved while nothing is bound: `memory.session_end` cleared the transport
-    // binding, so this one belongs to no session — the control that the thread
-    // below is keyed on the session and not on recency. `fallback` is how the
-    // wire reports that, since no read surface publishes a memory's session id.
     const orphan = (await client.callTool({
       name: 'memory.save',
       arguments: { type: 'feedback', title: 'between stints', content: 'resume-thread-orphan' },
@@ -2686,9 +2441,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const secondSaved = readJson(second) as { id: string };
 
-    // The neighbours of a session-attached pivot are queried by that session's
-    // id, so the post-resume save appearing here — carrying `<S>` — is the two
-    // stints reading as one thread, with the orphan excluded.
     const tl = (await client.callTool({
       name: 'memory.timeline',
       arguments: { memoryId: firstSaved.id, before: 5, after: 5 },
@@ -2735,7 +2487,6 @@ describe('MCP protocol conformance', () => {
     const secondPayload = readJson(second) as { id: string };
     expect(secondPayload.id).not.toBe(firstPayload.id);
 
-    // The prior row should now be superseded; memory.get on it reflects that.
     const got = (await client.callTool({
       name: 'memory.get',
       arguments: { id: firstPayload.id },
@@ -2743,7 +2494,6 @@ describe('MCP protocol conformance', () => {
     const gotPayload = readJson(got) as { memory: { status: string } };
     expect(gotPayload.memory.status).toBe('superseded');
 
-    // include_relations co-surfaces the successor as an `expanded` entry.
     const searched = (await client.callTool({
       name: 'memory.search',
       arguments: {
@@ -2762,7 +2512,6 @@ describe('MCP protocol conformance', () => {
     expect(head?.id).toBe(secondPayload.id);
     expect(head?.relationKind).toBe('superseded_by');
 
-    // Without include_relations, the response carries no `expanded` field.
     const searchedNoExpand = (await client.callTool({
       name: 'memory.search',
       arguments: { query: 'auth model JWT', status: 'superseded' },
@@ -2775,8 +2524,6 @@ describe('MCP protocol conformance', () => {
 
   it('memory.save surfaces candidates[] when similar content already exists', async () => {
     const client = await connect();
-    // Plant two rows with overlapping content so the third save has
-    // strong FTS5 BM25 scores.
     for (let i = 0; i < 3; i++) {
       await client.callTool({
         name: 'memory.save',
@@ -2787,7 +2534,6 @@ describe('MCP protocol conformance', () => {
         },
       });
     }
-    // Save a near-duplicate.
     const second = (await client.callTool({
       name: 'memory.save',
       arguments: {
@@ -2804,12 +2550,8 @@ describe('MCP protocol conformance', () => {
     };
     expect(payload.candidates.length).toBeGreaterThanOrEqual(1);
     expect(payload.judgmentRequired).toBe(true);
-    // The harness embedder is always warm, so the identical-content match
-    // arrives through the vec pass (embedNow gives the new row its vector
-    // before detection; vec wins ties over fts).
     expect(payload.candidates[0]!.source).toBe('vec');
 
-    // Close the pending judgment via memory.judge.
     const judgmentId = payload.candidates[0]!.judgmentId;
     const judgement = (await client.callTool({
       name: 'memory.judge',
@@ -2896,8 +2638,6 @@ describe('MCP protocol conformance', () => {
       review: { needsReview: number; pendingJudgments: number };
       warnings: string[];
     };
-    // `open` had one reachable value: the report cannot be produced without a
-    // database read, so its `false` was never observable.
     expect(Object.keys(payload.db).sort()).toEqual(['integrity', 'journalMode', 'sizeBytes']);
     const { tools } = await client.listTools();
     const dbSchema = (
@@ -2914,25 +2654,17 @@ describe('MCP protocol conformance', () => {
     expect(payload.db.journalMode).toMatch(/wal/i);
     expect(payload.db.integrity).toMatch(/ok/i);
     expect(typeof payload.db.sizeBytes).toBe('number');
-    // The llm block was removed by `remove-llm-consolidation`.
     expect('llm' in payload).toBe(false);
     expect(payload.embeddings.model).toContain('gte-multilingual-base');
     expect('enabled' in payload.embeddings).toBe(false);
     expect(typeof payload.review.needsReview).toBe('number');
     expect(typeof payload.review.pendingJudgments).toBe('number');
-    // Neither had a runtime assertion. A rename consistent across the
-    // interface, the zod schema and the producing closure yields a payload
-    // that passes output validation, so the SDK does not catch it either —
-    // only a read of the field does.
     expect(typeof payload.sessions.active).toBe('number');
     expect(typeof payload.entities.backlog).toBe('number');
     expect(Array.isArray(payload.warnings)).toBe(true);
     await client.close();
   });
 
-  // memory.archive journals a `maintenance` run whose summary carries a `kind`
-  // string next to the counters, so a doctor output contract that admits only
-  // numbers makes the tool fail from the first archive onwards.
   it('memory.doctor passes output validation after an archive has been journaled', async () => {
     const client = await connect();
     const saved = (await client.callTool({
@@ -2987,8 +2719,6 @@ describe('MCP protocol conformance', () => {
       arguments: { id: savedPayload.id },
     })) as ToolResult;
     expect(got.isError).toBeFalsy();
-    // Server side: the row is present and the timeline tool falls back to
-    // the time-window mode since session_id is null.
     const tl = (await client.callTool({
       name: 'memory.timeline',
       arguments: { memoryId: savedPayload.id, before: 1, after: 1 },
@@ -3008,15 +2738,11 @@ describe('MCP protocol conformance', () => {
       name: 'memory.get',
       arguments: { id: 'definitely-not-an-id' },
     })) as ToolResult;
-    // Memory not found surfaces as a non-OK MCP tool error with a known code.
     expect(result.isError).toBe(true);
     const payload = readJson(result) as { code?: string };
     expect(payload.code).toBe('not_found');
     await client.close();
   });
-  // NOTE: runs after the candidates[] test — the FTS similarity proxy
-  // (1/(1+|bm25|)) is corpus-size sensitive, so saves made here would
-  // shift BM25 IDF for earlier saves. Recalibrated in change B.
   it('memory.context exposes aged pending judgments and memory.judge clears them', async () => {
     const client = await connect();
 
@@ -3039,8 +2765,6 @@ describe('MCP protocol conformance', () => {
     const sourceId = (readJson(saveOne) as { id: string }).id;
     const targetId = (readJson(saveTwo) as { id: string }).id;
 
-    // Aged pending (2 days > JUDGMENT_ORPHAN_AFTER_MS default 24h) and a
-    // fresh one; only the aged row may surface.
     const insert = services.db.raw.prepare(
       `INSERT INTO memory_relations (id, judgment_id, source_id, target_id, status, created_at)
        VALUES (?, ?, ?, ?, 'pending', ?)`,
@@ -3072,13 +2796,8 @@ describe('MCP protocol conformance', () => {
     expect(payload.pendingJudgments[0]?.sourceSnippet).toContain('pending-source-marker');
     expect(payload.pendingJudgments[0]?.targetSnippet).toContain('pending-target-marker');
     expect(payload.pendingJudgments[0]?.ageMs).toBeGreaterThan(86_400_000);
-    // The fresh row is hidden from the list but counted — that gap is the whole
-    // point of the total. Bounded loosely because earlier saves in this shared
-    // server may have left their own pendings behind.
     expect(payload.pendingJudgmentsTotal).toBeGreaterThanOrEqual(2);
 
-    // Asking for a size lifts the age filter, so the fresh row becomes
-    // judgeable instead of waiting out JUDGMENT_ORPHAN_AFTER_MS.
     const inventory = (await client.callTool({
       name: 'memory.context',
       arguments: { judgments: 50 },
@@ -3123,7 +2842,6 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     const id = (readJson(saved) as { id: string }).id;
 
-    // Age it past the `project` shelf life (3 months) via created_at.
     services.db.raw
       .prepare(`UPDATE memory SET created_at = ? WHERE id = ?`)
       .run(Date.now() - 100 * 86_400_000, id);
@@ -3145,7 +2863,6 @@ describe('MCP protocol conformance', () => {
     expect(payload.needsReview[0]?.snippet).toContain('needsreviewmarkeraaa');
     expect(payload.needsReview[0]?.ageMs).toBeGreaterThan(0);
     expect(typeof payload.needsReview[0]?.reviewAfter).toBe('string');
-    // Unary needsReview is disjoint from pairwise pendingJudgments.
     expect(payload.pendingJudgments).toHaveLength(0);
     expect(payload.needsReviewTotal).toBe(1);
 
@@ -3178,9 +2895,6 @@ describe('MCP protocol conformance', () => {
   });
 
   it('memory.stats totals (needsReviewTotal, pendingJudgmentsTotal) are scope-isolated (task 5.3)', async () => {
-    // Two fresh, never-before-used project slugs: the shared global scope
-    // accumulates state across every `it()` in this file, so isolation can
-    // only be asserted against scopes nothing else has touched.
     const projA = await connect({ projectSlug: 'stats-totals-proj-a' });
     const projB = await connect({ projectSlug: 'stats-totals-proj-b' });
     await projA.callTool({
@@ -3226,8 +2940,6 @@ describe('MCP protocol conformance', () => {
     expect(statsAPayload.pendingJudgmentsTotal).toBe(1);
     expect(statsAPayload.needsReviewTotal).toBe(0);
 
-    // A different, untouched project scope sees neither the pending relation
-    // nor any review debt.
     const statsB = (await projB.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult;
     const statsBPayload = readJson(statsB) as {
       needsReviewTotal: number;
@@ -3241,9 +2953,6 @@ describe('MCP protocol conformance', () => {
   });
 
   it("project.list's activeMemoryCount drops when a memory is archived, and is per-project", async () => {
-    // Two never-before-used slugs: the shared server accumulates rows across
-    // every `it()` in this file, so an exact count is only assertable in a
-    // scope nothing else has written to.
     const P = 'active-count-proj-p';
     const Q = 'active-count-proj-q';
     const pClient = await connect({ projectSlug: P });
@@ -3270,7 +2979,6 @@ describe('MCP protocol conformance', () => {
     };
     const entryFor = (projects: ListEntry[], slug: string): ListEntry => {
       const entry = projects.find((e) => e.slug === slug);
-      // A missing entry makes every count assertion below vacuous.
       expect(entry, `project.list has no entry for ${slug}`).toBeDefined();
       return entry as ListEntry;
     };
@@ -3288,11 +2996,8 @@ describe('MCP protocol conformance', () => {
     await save(qClient, 'active count q second row');
 
     const before = await listProjects();
-    // Non-zero before the archive: without this the post-archive `0` below
-    // would also pass on an empty corpus.
     expect(entryFor(before, P).activeMemoryCount).toBe(1);
     expect(entryFor(before, Q).activeMemoryCount).toBe(2);
-    // The old key must be gone from every entry, not merely absent on P.
     for (const entry of before) expect('memoryCount' in entry).toBe(false);
 
     const archived = (await pClient.callTool({
@@ -3303,11 +3008,8 @@ describe('MCP protocol conformance', () => {
 
     const after = await listProjects();
     expect(entryFor(after, P).activeMemoryCount).toBe(0);
-    // Control: the archive in P moves no number in Q.
     expect(entryFor(after, Q).activeMemoryCount).toBe(2);
 
-    // A row written on a path-less connection lands in the default project, so
-    // it must move neither P's nor Q's number.
     const defaultClient = await connect();
     const defaultSave = (await defaultClient.callTool({
       name: 'memory.save',
@@ -3323,9 +3025,6 @@ describe('MCP protocol conformance', () => {
     expect(entryFor(withDefault, Q).activeMemoryCount).toBe(2);
     await defaultClient.close();
 
-    // P now holds one active and one archived row, so the status filter is
-    // observable: the count must equal what the same scope reports as active
-    // and must be strictly below P's total row count.
     await save(pClient, 'active count p replacement row');
     const stats = (await pClient.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult;
     expect(stats.isError, 'memory.stats').toBeFalsy();
@@ -3340,14 +3039,6 @@ describe('MCP protocol conformance', () => {
     await qClient.close();
   });
 
-  // Regression coverage for enforce-mcp-authorization: every scope-sensitive
-  // tool (not just save/search/get/confirm) now shares the async,
-  // roots-discovery-aware resolver, so the FIRST call on a fresh transport
-  // sees the same project scope a later call would.
-  //
-  // This is the WARM arm: ~90 prior connections to this server precede it, and
-  // it runs with retries disabled (mcp-api spec — a retried test asserts only
-  // that one attempt of several passed).
   it('memory.context as the FIRST call on an unscoped connection with a discoverable root returns project scope', async () => {
     const repos = createRepositories(services.db.db);
     const projectsSvc = new ProjectsService(repos);
@@ -3378,10 +3069,6 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  // Premise changed: an unminted roots suggestion no longer blocks the write —
-  // the connection has a project (the default one), so the gate that refused a
-  // scopeless write has no state left to fire in. `project.current` still
-  // surfaces the suggestion, so the agent can move the row with `project.use`.
   it('memory.capture_passive writes to the default project when roots surface an unminted slug', async () => {
     const dflt = defaultProject(services.db);
     const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });

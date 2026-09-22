@@ -4,12 +4,6 @@ import { createContext, useActionState, useContext, useId, type ReactNode } from
 
 import { Flash } from '@/components/dashboard/ui';
 
-/**
- * A refused mutation has to surface somewhere: a Server Action returns the message
- * instead of redirecting, and every form renders it as a `Flash` above its own
- * fields. The provider also publishes the form's id so `ConfirmSubmit` can reach
- * it from a Radix portal.
- */
 export interface ActionState {
   error: string | null;
 }

@@ -16,23 +16,9 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
-/**
- * The URL-driven filter bar and pager, mirroring the production dashboard's
- * `.filters` pattern: each control is `LABEL · <input>` on one wrapping row,
- * with FILTER/CLEAR pinned to the end. The server does the filtering and the
- * paginating, and the browser's back button is the filter's undo.
- */
-
-/** The bottom-ruled "ink" control the production filter bar uses for native inputs. */
 export const FIELD_INK =
   'min-h-7 min-w-24 border-b border-border bg-transparent px-0 pr-4 font-mono text-xs uppercase tracking-[.08em] text-foreground outline-none transition-colors placeholder:text-muted-foreground placeholder:text-[.72rem] focus:border-primary disabled:cursor-not-allowed disabled:opacity-50';
 
-/**
- * `Select` refuses an empty-string item value, and this vocabulary spells
- * "unset" as exactly that. The sentinel is the display value only: the hidden
- * input below submits the real one, so the URL keeps the contract the pages
- * read (`status=` absent, `type=` empty) instead of gaining a new spelling.
- */
 const UNSET = '__unset__';
 
 export function FilterForm({
@@ -140,7 +126,6 @@ export function FilterSelect({
           ))}
         </SelectContent>
       </Select>
-      {/* The submitted value, so an unset filter still round-trips as `''`. */}
       <input type="hidden" name={name} value={selected} />
     </>
   );
@@ -162,11 +147,6 @@ export function FilterActions({ clearHref }: { clearHref: string }) {
   );
 }
 
-/**
- * The pager. `total` is a *lower bound* wherever the listing cannot count its
- * filtered set cheaply (`undefined`), and it says so with a `+` rather than
- * printing a total it does not know.
- */
 export function Pager({
   page,
   hasMore,

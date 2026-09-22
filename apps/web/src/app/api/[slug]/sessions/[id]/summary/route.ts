@@ -16,7 +16,6 @@ import { parseSessionSummary } from '../../../../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 
-/** `POST /api/:slug/sessions/:id/summary` — mirrors `api-router.ts`'s summary handler. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string; id: string }> },
@@ -36,9 +35,6 @@ export async function POST(
   const parsed = parseSessionSummary(await readJson(request));
   if (!parsed.ok) return invalidInput(parsed.message);
   try {
-    // The HTTP path truncates server-side: bash / Python / opencode writers
-    // cannot react to `invalid_input`, unlike the MCP path which rejects so the
-    // agent can retry.
     const { row: updated } = deps.agentSessions.writeSummary(sessionId, {
       tokenId: ctx.token.id,
       summary: truncateSummary(parsed.data.summary),

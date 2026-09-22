@@ -8,13 +8,6 @@ import { QUERIES } from './queries.js';
 import { resolveScope } from './resolve.js';
 import { hybridRetriever } from './retrievers/hybrid.js';
 
-/**
- * Per-query result composition of the production ranked path, keyed
- * `<queryId>@<limit>` and projected to the corpus's STABLE fixture ids so two
- * runs are comparable across ingestions (the DB ids are ULIDs minted per run).
- *
- * Written to the path given as the first argument.
- */
 const LIMITS = [5, 8, 200] as const;
 
 async function main(): Promise<void> {
@@ -31,8 +24,6 @@ async function main(): Promise<void> {
     for (const q of QUERIES) {
       const resolved = resolveScope(corpus, q);
       for (const limit of LIMITS) {
-        // Through the retriever the harness scores, so the dump cannot drift
-        // onto a different entry point than the one the eval measures.
         const { ids: rowIds } = await hybridRetriever.query(q.text, corpus, limit, resolved);
         const ids = rowIds.map((id) => stableIdById.get(id) ?? id);
         dump[`${q.id}@${limit}`] = ids;

@@ -65,7 +65,6 @@ export function ConsentShell({
   rest,
   children,
 }: {
-  /** The accented first word of the heading. */
   hl: string;
   rest: string;
   children: ReactNode;

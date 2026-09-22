@@ -4,10 +4,6 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
-/**
- * The clipboard API is absent on a non-secure origin, so the button stays `COPY`
- * rather than claiming a copy that did not happen.
- */
 export function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
 

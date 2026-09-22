@@ -2,43 +2,6 @@ import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-or
 
 import { memory } from './memory.js';
 
-/**
- * Memory relations — the judgment graph between memories.
- *
- * Each row represents either:
- *   - a CANDIDATE detected at `memory.save` time and pending agent judgment
- *     (status='pending', relation=null)
- *   - a JUDGED verdict, either from the agent (memory.judge / memory.compare)
- *     or from the consolidator's orphan-promotion pass
- *     (status='judged', relation set, markedBy* set)
- *   - an ORPHANED candidate that neither the agent nor the consolidator
- *     could resolve (status='orphaned', relation=null)
- *
- * Append-only at the row level: a row's `source_id`, `target_id`,
- * `judgment_id`, and `created_at` never change. The status FSM is:
- *
- *   pending  → judged   (agent or consolidator wrote a verdict)
- *   pending  → orphaned (consolidator gave up)
- *   judged   → (terminal — re-judging overwrites the same row in-place)
- *   orphaned → (terminal)
- *
- * Source and target MUST share `(scope, project_id)` — enforced at the
- * service layer (`RelationsService`) and asserted by tests.
- *
- * The six `relation` values cover the full space of verdicts an agent
- * can issue over a candidate–target pair. The set is closed: new
- * verdict kinds require an OpenSpec change to `memory`:
- *   supersedes      → target is replaced by source; target row goes
- *                     `status='superseded'`, source's `replaces[]` is
- *                     extended with the target id
- *   conflicts_with  → mutually incompatible; both stay active
- *   related         → informational tag
- *   compatible      → both valid in different contexts
- *   scoped          → applies to different scopes / sub-contexts
- *   not_conflict    → false positive; row updated but not surfaced as
- *                     an annotation in `memory.search`
- */
-
 export const RELATION_VALUES = [
   'supersedes',
   'conflicts_with',

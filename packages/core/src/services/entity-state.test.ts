@@ -156,8 +156,6 @@ describe('ensureEntityExtractor', () => {
       pending?: boolean;
     };
     expect(unsettled.pending).toBe(true);
-    // The rollback restored the scan rows, so the backlog alone reads drained:
-    // the unsettled marker is the only thing left that knows a reset is owed.
     expect(scanCount()).toBe(1);
     expect(repos.entities.adminBacklogCount()).toBe(0);
 
@@ -196,16 +194,12 @@ describe('resetEntityIndex', () => {
     memory.save({ type: 'project', title: 'A', content: 'apps/a.ts' }, projectScope(projectId));
     const worker = new EntityBackfillWorker({ repos, tx: db.handle.db });
     worker.processBatch({ force: true });
-    // A second pass is what clears the flag: it goes false only when
-    // `findMissingScans` comes back empty.
     worker.processBatch({ force: true });
     expect(worker.hasPendingWork).toBe(false);
 
     worker.resetIndex();
 
     expect(worker.hasPendingWork).toBe(true);
-    // No `force`: the flag alone has to be enough, or a rebuild silently
-    // leaves the index empty until the hourly forced fallback.
     expect(worker.processBatch().processed).toBe(1);
   });
 });

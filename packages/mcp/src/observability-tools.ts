@@ -21,16 +21,6 @@ import { errToMcp, type ErrorReportingDeps } from './errors.js';
 import { candidate, saveMemoryWithCandidates, type SaveTimeCandidateView } from './memory-tools.js';
 import { ok } from './result.js';
 
-/**
- * Observability + read-back MCP tools: doctor / stats / capture_passive.
- */
-
-// `parseRunSummary`, `DoctorReport` and the stored-summary shape now live in
-// `@rembric/core` (`doctor.js`), which owns `memory.doctor`'s reads and its
-// factory. Re-exported here because the mcp barrel is what consumers import
-// them from. The summary keeps its historical name at this surface; core calls
-// it `DoctorRunSummary` (it already had a `ConsolidationRunSummary` of its own,
-// with an unrelated shape).
 export { parseRunSummary } from '@rembric/core';
 export type { DoctorReport, DoctorRunSummary as ConsolidationRunSummary } from '@rembric/core';
 
@@ -47,11 +37,6 @@ export const capturePassiveSchema = {
 
 const counts = z.record(z.string(), z.number());
 
-/**
- * `consolidation_runs.summary` is free-form JSON with two writer families: the
- * sweep writes bare counters (`{archives,orphaned}`), maintenance-journal runs
- * add a `kind` discriminator (`{kind:'agent_memory_archive',archived:1}`).
- */
 const runSummary = z.object({ kind: z.string().optional() }).catchall(z.number());
 
 export const doctorOutput = {
@@ -119,9 +104,6 @@ export function buildObservabilityHandlers(deps: ObservabilityToolDeps) {
   };
 }
 
-// Case-insensitive H2 or H3, colon optional, so ordinary formatting
-// variation ("### key learnings", "## Key Learnings") is not silently
-// discarded — see openspec/changes/fix-audited-defects.
 export const KEY_LEARNINGS_HEADING_HINT = '## Key Learnings' as const;
 const KEY_LEARNINGS_RE = /^(#{2,3})[ \t]*key learnings:?[ \t]*$/im;
 const NEXT_HEADING_RE = /^#{2,3}[ \t]/m;
@@ -178,9 +160,6 @@ async function handleCapturePassive(
   const candidates: SaveTimeCandidateView[] = [];
   let candidatesDetected = 0;
   for (const content of items) {
-    // Same curation pipeline as memory.save: convergent-topic handling,
-    // inline embedding before candidate detection, and save-time candidate
-    // detection — so bulk-captured rows are never unlinked/unembedded.
     const saved = await saveMemoryWithCandidates(
       deps,
       {
@@ -222,8 +201,6 @@ async function handleStats(deps: ObservabilityToolDeps) {
   }
   const { byStatus, byType } = deps.repos.memory.countByStatusAndTypeInScope(scope.projectId);
 
-  // Scoped — NOT adminCountByStatus. See openspec/changes/fix-audited-defects
-  // ("memory.stats.sessionsByStatus bypasses scope enforcement").
   const sessionsByStatus = deps.agentSessions.countByStatus(scope);
   const needsReviewTotal = deps.memory.countNeedsReview(scope);
   const pendingJudgmentsTotal = deps.relations ? deps.relations.countPendingInScope(scope) : 0;

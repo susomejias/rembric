@@ -80,14 +80,6 @@ describe('prompts dashboard totals and page slice', () => {
 });
 
 describe('prompts row actions', () => {
-  /**
-   * The first `<tr>` of the rendered table body. Asserting against a single row
-   * rather than the whole document is what makes "this row offers Undelete" mean
-   * that row — a document-wide `toContain` is satisfied by any other row's
-   * control, which is how a `deleted`-branch inversion once passed the wrong
-   * assertion. The deleted fixture rows carry the newest `created_at`, so under
-   * `include_deleted=1` the first body row is a deleted one.
-   */
   function firstBodyRow(html: string): string {
     const bodyAt = html.indexOf('</thead>');
     if (bodyAt === -1) throw new Error('rendered table has no thead');
@@ -118,15 +110,10 @@ describe('prompts row actions', () => {
   it('gates the Delete control behind the confirmation dialog and leaves Undelete ungated', async () => {
     const liveRow = firstBodyRow(await renderPrompts());
     const deleteAt = liveRow.indexOf('>Delete<');
-    // `ConfirmSubmit` composes the dialog trigger onto the Delete button itself
-    // (Radix `asChild`), and the trigger's `type="button"` keeps the click from
-    // submitting before the dialog is confirmed.
     const deleteTag = liveRow.slice(liveRow.lastIndexOf('<button', deleteAt), deleteAt);
     expect(deleteTag).toContain('data-slot="alert-dialog-trigger"');
     expect(deleteTag).toContain('type="button"');
 
-    // Undelete is reversible and was bare in the baseline: no dialog trigger, and
-    // its button submits the action directly.
     const deletedRow = firstBodyRow(await renderPrompts({ include_deleted: '1' }));
     const undeleteAt = deletedRow.indexOf('>Undelete<');
     const undeleteTag = deletedRow.slice(deletedRow.lastIndexOf('<button', undeleteAt), undeleteAt);

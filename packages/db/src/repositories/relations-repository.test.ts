@@ -306,8 +306,6 @@ describe('RelationsRepository scoped pending reads', () => {
     const dead = pendingAt(a, inProject('pa'), new Date(1_000));
     const b = inProject('B on p', 'p');
     const live = pendingAt(b, inProject('pb'), new Date(9_000));
-    // A global pair too, so the assertion below distinguishes scope filtering
-    // from lifecycle filtering rather than passing on either alone.
     pendingAt(save('G on t', 'g'), save('gt'), new Date(2_000));
 
     expect(repos.memory.unsafeGetById(a)?.status).toBe('superseded');

@@ -6,21 +6,6 @@ import { MemoryService } from '@rembric/core';
 
 import { createTestDb, defaultProjectScope } from '../test-support/index.js';
 
-/**
- * 13.18 — concurrency invariant for the new save path (topic-key
- * upsert + atomic insert). Verifies the new transaction-wrapped save
- * still keeps the row count consistent under fan-out load.
- *
- * The legacy v0.1 consolidator correctness/idempotency/reversibility
- * tests were removed by this change: those code paths
- * (findRedundancyCandidates / findDriftCandidates /
- * findContradictionCandidates + applyMerge / applySupersede driven
- * from the nightly cron) are no longer the canonical model. Save-time
- * candidate detection + memory.judge replaces them, and the
- * orphan-promotion path has its own dedicated test in
- * `consolidation/orphan-promotion.test.ts`.
- */
-
 describe('13.18 concurrency — 100 concurrent memory.save calls leave DB consistent', () => {
   it('persists exactly 100 rows with the correct scope', async () => {
     const test = createTestDb();

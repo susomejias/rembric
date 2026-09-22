@@ -50,11 +50,6 @@ const LEGACY_IDS_QUERY = `SELECT m.id FROM memory m WHERE m.status = 'archived'
               WHERE r.source_id = m.id OR r.target_id = m.id)
          AND NOT EXISTS (
              SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)`;
-/**
- * Explains the SQL a repository call actually executes. Reconstructing the
- * query in the test instead would let an assertion pass against a query the
- * production path no longer runs.
- */
 function explainWhileRunning(t: TestDb, run: () => void): string[] {
   const raw = t.handle.raw;
   const bound = raw.prepare.bind(raw);
@@ -77,15 +72,10 @@ function explainWhileRunning(t: TestDb, run: () => void): string[] {
         }
         return (...args: unknown[]) => {
           const result = method.apply(target, args);
-          // `raw()` / `pluck()` return the statement itself, and drizzle
-          // reaches the terminal all/get/run through them.
           return result === target ? wrap(target, text) : result;
         };
       },
     });
-  // better-sqlite3 types `prepare` as generic over its row and parameter
-  // tuples; the interceptor observes only SQL text and bound values, so the
-  // generics are erased across this assignment.
   raw.prepare = ((text: string) => wrap(bound(text), text)) as typeof raw.prepare;
   try {
     run();
@@ -245,8 +235,6 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
         for (let i = 0; i < OVER_BIND_CEILING; i++) insert.run(`m-${i}`);
       })();
 
-      // Derived rows on a subset, so the entity DELETEEs (which must precede the
-      // memory DELETEE — no ON DELETEE CASCADE) are actually exercised.
       t.handle.raw
         .prepare(
           `INSERT INTO memory_entities (id, scope, project_id, kind, value, created_at) VALUES ('e1','global',NULL,'path','/tmp/x',1000)`,
@@ -355,8 +343,6 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       const elapsedMs = performance.now() - started;
 
       expect(repo.findSuccessorId('HEAD')).toBe('TAIL');
-      // A PK-indexed join stays sub-millisecond per call even repeated 100x;
-      // the pre-rewrite json_each scan measured ~11ms per call on its own.
       expect(elapsedMs).toBeLessThan(200);
     });
   });
@@ -414,9 +400,6 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       const detail = explainWhileRunning(t, () =>
         repo.textByIds({ ids: ['a', 'b', 'c'], scope: projectScope('p0') }),
       ).join(' | ');
-      // One seek per id against `memory`'s TEXT primary-key autoindex. The
-      // rejected plan drove from memory_scope_seen_idx and bloom-filtered the
-      // whole scope, whose cost grows with the corpus rather than the id list.
       expect(detail).toContain('SEARCH m USING INDEX sqlite_autoindex_memory_1 (id=?)');
       expect(detail).not.toContain('memory_scope_seen_idx');
       expect(detail).not.toContain('SCAN m ');
@@ -431,12 +414,6 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       }
     });
 
-    // Asserted as a GROWTH RATIO, not an absolute budget. An absolute budget does
-    // not discriminate here: the rejected corpus-proportional plan still runs in
-    // ~0.16 ms at this scale, so any budget loose enough not to be flaky also
-    // passes the plan this test exists to reject. Cost tracking the id list
-    // rather than the corpus is the actual property, and quadrupling the table
-    // is what measures it.
     it('does not get more expensive as the table grows', () => {
       const insertRange = (from: number, to: number) => {
         const rows = Array.from({ length: to - from }, (_, i) =>
@@ -525,9 +502,6 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
           line.includes('confirmations'),
         );
 
-        // A CREATE INDEX the planner ignores is pure write cost on an
-        // append-only table, so the plan is the assertion. COVERING is the
-        // second half: `event_ts` in the index means no table lookup at all.
         expect(touchesConfirmations.length).toBeGreaterThan(0);
         for (const line of touchesConfirmations) {
           expect(line).toContain('USING COVERING INDEX confirmations_memory_verdict_ts_idx');

@@ -17,16 +17,6 @@ import {
 import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
 import { ok } from './result.js';
 
-/**
- * Tool handlers for the `project.*` MCP namespace introduced in change
- * `add-sessions-and-research-tools`.
- *
- * The defaults are conservative:
- *   - `project.use` never auto-creates unless `autocreate: true`
- *   - `project.use` never switches mid-session unless `confirmSwitch: true`
- *   - `project.use` never switches while a session is active (must end first)
- */
-
 export const projectUseSchema = {
   slug: z.string().min(1).max(128),
   autocreate: z.boolean().optional(),
@@ -102,10 +92,6 @@ function handleUse(
   let created = false;
   if (!project) {
     if (args.autocreate === true) {
-      // Minting a project row is a write, even though project.use is
-      // otherwise a read action. A project minted here can never match a
-      // project-pinned token id, so gate on an anonymous project target
-      // BEFORE creating the row.
       if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: null })) {
         return mcpError(
           'forbidden',
@@ -193,9 +179,6 @@ function handleUse(
 }
 
 function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) {
-  // Filtered to what the token may read: `*`/`read:*` see all projects,
-  // `project:<id>`/`read:project:<id>` see only that project, and a set arm
-  // sees exactly its members.
   const rows = readableProjects(deps.projects, args.includeArchived === true);
 
   return ok({
@@ -211,8 +194,6 @@ function handleList(deps: ProjectToolDeps, args: { includeArchived?: boolean }) 
 async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>) {
   void _args;
 
-  // The resolver awaits (or lazily triggers) roots discovery, so the router
-  // entry read below is populated by the time we read its suggestion list.
   let resolved: EffectiveScope | null;
   try {
     resolved = await resolveEffectiveScopeOrNull(deps);
@@ -227,8 +208,6 @@ async function handleCurrent(deps: ProjectToolDeps, _args: Record<string, never>
   return ok({
     slug: resolved?.project?.slug ?? null,
     projectId: resolved?.project?.id ?? null,
-    // Null only when a URL slug named no project, which is the one case the
-    // resolver declines to answer.
     source: resolved?.source ?? 'url-path',
     suggestedSlugs: entry?.pendingSuggestedSlugs ?? [],
   });

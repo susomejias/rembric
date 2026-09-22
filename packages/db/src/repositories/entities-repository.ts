@@ -46,17 +46,6 @@ const LOOKUP_CHUNK = 200;
 export class EntitiesRepository {
   constructor(private readonly db: Db) {}
 
-  /**
-   * Get-or-create each entity by its (scope, project, kind, value) identity,
-   * link them all to `memoryId`, and record the scan. Idempotent — safe to
-   * call twice for the same memory. `ulid()` generation lives here rather
-   * than in the caller because get-or-create is fundamentally a single
-   * repository-internal transaction: the caller never needs to know which
-   * ids were reused versus newly minted. One SELECT (existing entities) plus
-   * one batched INSERT (new entities) plus one batched INSERT (links) —
-   * O(1) round trips regardless of how many entities a memory has, matching
-   * `findEntitiesForMemories`'s "no N+1" bar.
-   */
   linkMemory(memoryId: string, projectId: string, entities: EntityRef[], scannedAt: Date): void {
     if (entities.length > 0) {
       const idByKey = new Map<string, string>();
@@ -109,32 +98,12 @@ export class EntitiesRepository {
     this.db.insert(memoryEntityScan).values({ memoryId, scannedAt }).onConflictDoNothing().run();
   }
 
-  /**
-   * Exact-address retrieval: every memory linked to this (scope, kind,
-   * value), chronological, no ranking. `kind` narrows further when the
-   * caller knows it; omitted, it matches the value across all kinds (rare
-   * in practice since values don't collide across kinds by construction).
-   *
-   * The `status`/`type`/`tag`/`topicKey` filters are the same predicates the
-   * ranked branches apply, so `memory.search`'s documented filters mean the
-   * same thing on both paths. An omitted `status` means "any but archived",
-   * not "active" — the entity path is specified as complete within scope.
-   *
-   * Widened, `limit` stays a bound on the RESPONSE rather than a per-project
-   * quota, and the chronological order is taken over the union.
-   */
   findMemoriesByEntity(opts: {
     scope: SearchScope;
     kind?: EntityKind;
     value: string;
     status?: MemoryStatus;
     type?: MemoryType;
-    /**
-     * Admitted type SET, applied with `inArray` ahead of `limit` — unlike
-     * `type` above, which narrows to one. A caller that needs the filter to
-     * bound which rows `limit` counts (rather than post-filtering an
-     * already-bounded page) MUST pass this, not filter the returned array.
-     */
     types?: readonly MemoryType[];
     tag?: string;
     topicKey?: string;
@@ -154,33 +123,17 @@ export class EntitiesRepository {
     }
     if (opts.topicKey) conditions.push(eq(memory.topicKey, opts.topicKey));
 
-    return (
-      this.db
-        .select(getTableColumns(memory))
-        .from(memoryEntityLinks)
-        .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
-        .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
-        .where(and(...conditions))
-        // `id` (a ULID) is a required tiebreaker, not decoration: `created_at` is
-        // millisecond-resolution, so a batch save ties and the caller pages by
-        // slicing — page 2 could then repeat or skip a row page 1 showed.
-        .orderBy(sql`${memory.createdAt} desc`, sql`${memory.id} desc`)
-        .limit(opts.limit)
-        .all()
-    );
+    return this.db
+      .select(getTableColumns(memory))
+      .from(memoryEntityLinks)
+      .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
+      .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
+      .where(and(...conditions))
+      .orderBy(sql`${memory.createdAt} desc`, sql`${memory.id} desc`)
+      .limit(opts.limit)
+      .all();
   }
 
-  /**
-   * The `entities[]` projection for a single memory's read/search result.
-   * Ordered because the caller bounds the list at `ENTITIES_PROJECTION_CAP`:
-   * without a total order, WHICH entities survive is whatever SQLite's scan
-   * produced, so two identical reads of the same memory could show different
-   * subsets. `(kind, value)` is unique per memory, so the order is total.
-   *
-   * This clause is now load-bearing twice over: `projectEntities` fair-shares the
-   * bound across kinds, and this order is the within-kind order it preserves.
-   * Dropping it makes the projection non-deterministic, not merely unsorted.
-   */
   findEntitiesForMemory(memoryId: string): MemoryEntityView[] {
     return this.db
       .select({ kind: memoryEntities.kind, value: memoryEntities.value })
@@ -191,12 +144,6 @@ export class EntitiesRepository {
       .all();
   }
 
-  /**
-   * Batched form of `findEntitiesForMemory` — one JOIN, no N+1, for a search
-   * result page. Same total order, for the same reason, and equally load-bearing
-   * as `projectEntities`' within-kind input: the caller bounds each memory's
-   * list, so neither the surviving subset nor its order may depend on the scan.
-   */
   findEntitiesForMemories(memoryIds: string[]): Map<string, MemoryEntityView[]> {
     const out = new Map<string, MemoryEntityView[]>();
     if (memoryIds.length === 0) return out;
@@ -219,15 +166,6 @@ export class EntitiesRepository {
     return out;
   }
 
-  /**
-   * The scope's total active-memory count — the denominator the save-time
-   * candidate channel's rarity gate needs (a proportion, not an absolute
-   * count; see `save-time-candidates.ts`). Split out from the per-entity
-   * link count below so a save with several extracted entities computes
-   * this once, not once per entity — it depends only on `(scope, projectId)`.
-   * `excludeMemoryId` lets a caller exclude the memory it just saved even if
-   * linking has already run, rather than relying solely on call order.
-   */
   scopeActiveMemoryCount(opts: { projectId: string; excludeMemoryId?: string }): number {
     const conditions = [scopeCondition(projectScope(opts.projectId)), eq(memory.status, 'active')];
     if (opts.excludeMemoryId) conditions.push(sql`${memory.id} != ${opts.excludeMemoryId}`);
@@ -265,11 +203,6 @@ export class EntitiesRepository {
     );
   }
 
-  /**
-   * Other active memories sharing this entity — the candidate source for
-   * the entity-overlap save-time channel. Excludes `excludeMemoryId`
-   * (the memory just saved) and anything in `excludeIds`.
-   */
   findOtherMemoriesForEntity(opts: {
     projectId: string;
     kind: EntityKind;
@@ -299,15 +232,6 @@ export class EntitiesRepository {
       .all();
   }
 
-  /**
-   * Resumable backfill: memories never scanned for entities, whatever their
-   * status. Archived rows are indexed deliberately — excluding them made
-   * `memory.search({entity, status:'archived'})` structurally always empty
-   * while the filter advertised otherwise, and made every recipe bump drop
-   * archived links permanently, since a row archived before the bump would
-   * never be re-scanned. Extraction is pure and synchronous, so the only cost
-   * is a longer first drain on a corpus with many archived rows.
-   */
   findMissingScans(limit: number): PendingEntityScan[] {
     return this.db
       .select({
@@ -324,15 +248,7 @@ export class EntitiesRepository {
       .all();
   }
 
-  /**
-   * Unscoped — `admin`-prefixed so the data-access confinement grep gate
-   * confines it to the dashboard and doctor, never a per-request MCP tool.
-   * Must filter exactly as `findMissingScans` does, or the operator watches a
-   * backlog that never reaches zero.
-   */
   adminBacklogCount(): number {
-    // A subtract-two-counts shortcut undercounts here: it would take the scan
-    // count over every row while the total excludes project-less ones.
     return (
       this.db
         .select({ n: sql<number>`count(*)` })
@@ -343,12 +259,6 @@ export class EntitiesRepository {
     );
   }
 
-  /**
-   * In-scope memories still awaiting their first entity scan. Distinguishes
-   * "this entity is not in the index" from "the index has not caught up",
-   * which an empty entity lookup cannot do on its own. Scoped, so it is safe
-   * on an agent-facing read.
-   */
   countPendingScans(opts: { scope: SearchScope }): number {
     const scoped = scopeCondition(opts.scope);
     return (
@@ -369,12 +279,6 @@ export class EntitiesRepository {
       .all();
   }
 
-  /**
-   * The dashboard entities view's row source. `singleReferenceOnly` is the
-   * thinly-documented-area proxy: an entity mentioned by exactly one memory
-   * is the closest signal to "which files have accumulated no real
-   * knowledge yet" the server can compute without filesystem access.
-   */
   adminListEntities(
     filters: { kind?: EntityKind; singleReferenceOnly?: boolean },
     limit: number,
@@ -436,16 +340,6 @@ export class EntitiesRepository {
     );
   }
 
-  /**
-   * Truncate-and-rebuild support: wipe all three derived tables. Callers MUST
-   * wrap this in a transaction (`resetEntityIndex` is the one that does) —
-   * three statements are three failure points, and the marker is already on
-   * disk by the time this runs. The scan table goes FIRST so that the only
-   * partial state a failure can leave is "bookkeeping cleared, links intact":
-   * the drain then re-scans everything and `linkMemory`'s `onConflictDoNothing`
-   * makes the relinking idempotent. The reverse order leaves scan rows without
-   * links, which reads as a drained backlog over a permanently empty index.
-   */
   truncateAll(): void {
     this.db.delete(memoryEntityScan).run();
     this.db.delete(memoryEntityLinks).run();

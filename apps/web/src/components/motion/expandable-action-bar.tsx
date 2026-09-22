@@ -1,5 +1,4 @@
 'use client';
-// beui.dev/components/blocks/expandable-action-bar
 
 import { LayoutGroup, motion, type Transition, useReducedMotion } from 'motion/react';
 import {
@@ -52,12 +51,6 @@ export interface ExpandableActionBarProps {
   activeId?: string;
   onAction?: (item: ExpandableActionBarItem) => void;
   size?: ExpandableActionBarSize;
-  /**
-   * Expand when a pointer that hovers rests on the bar. Default true. It also
-   * governs the touch equivalent: with no hover to reveal the labels, the
-   * first tap expands the bar and runs no action, and the second one acts.
-   * Set false to make every tap and click act immediately.
-   */
   expandOnHover?: boolean;
   expandOnFocus?: boolean;
   collapseDelay?: number;
@@ -145,13 +138,9 @@ export function ExpandableActionBar({
     onExpandedChange,
   });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  // Set by the tap that expands the bar, and the reason the outside-tap
-  // dismisser exists at all — a hovering pointer has its own way out.
   const [tapExpanded, setTapExpanded] = useState(false);
   const collapseTimer = useRef<number | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
-  // What the last gesture on an action was, and whether the bar was already
-  // expanded when it started. A click reports neither.
   const tap = useTapGesture<boolean>();
   const hover = useHoverGesture();
 
@@ -177,29 +166,17 @@ export function ExpandableActionBar({
 
   useEffect(() => clearCollapseTimer, [clearCollapseTimer]);
 
-  // A collapse from outside takes the labels with it, so the arm the tap that
-  // expanded the bar left behind has to go too — otherwise the next tap runs
-  // an action whose label nobody can read. Only on the way down from expanded:
-  // a controlled bar that declined to expand at all keeps its arm, which is
-  // what lets its second tap act.
   const wasExpanded = useRef(isExpanded);
   useEffect(() => {
     if (wasExpanded.current && !isExpanded) setTapExpanded(false);
     wasExpanded.current = isExpanded;
   }, [isExpanded]);
 
-  // A finger never hovers and Safari does not focus a button on tap, so a bar a
-  // tap expanded would have nothing to close it. The tap that lands elsewhere
-  // stands in for the pointer leaving — and it is consumed rather than passed
-  // through, because the labelled bar is exactly the kind of surface people
-  // dismiss by tapping just past it, over whatever control is there.
   useDismiss(tapExpanded && isExpanded, close, trackRef, {
     behavior: 'consume',
   });
 
   const onRootPointerEnter = (event: PointerEvent<HTMLDivElement>) => {
-    // The gesture is told about every enter, `expandOnHover` or not: it is
-    // what the matching leave is read against.
     if (hover.enter(event) && expandOnHover) open();
   };
 
@@ -226,10 +203,6 @@ export function ExpandableActionBar({
     <LayoutGroup id={layoutId}>
       <motion.div
         layout="size"
-        // Pointer events, not the mouse pair: a tap fires compatibility
-        // mouseenter/mouseleave that carry no pointerType, and the bar growing
-        // under a stationary finger fired the leave before the click ever
-        // landed — so one tap expanded, collapsed and ran nothing.
         onPointerEnter={onRootPointerEnter}
         onPointerLeave={onRootPointerLeave}
         onFocus={onRootFocus}
@@ -241,9 +214,6 @@ export function ExpandableActionBar({
           ref={trackRef}
           layout="size"
           className={cn(
-            // Labelled actions can outgrow the space the bar sits in — the pill
-            // stays inside it and scrolls its rail rather than running off the
-            // edge, where the last action is unreachable.
             'scrollbar-hide relative inline-flex max-w-full items-center overflow-x-auto overflow-y-hidden rounded-full border border-border bg-card',
             SIZE_CLASS[size],
             classNames?.track,
@@ -269,23 +239,11 @@ export function ExpandableActionBar({
                 onPointerDown={(event: PointerEvent<HTMLButtonElement>) => {
                   tap.start(event, isExpanded);
                 }}
-                // A gesture the platform takes away sends no click, and a key
-                // press starts an activation that never had a pointer behind
-                // it: either one would otherwise leave the finger in place for
-                // the next click to spend.
                 onPointerCancel={tap.drop}
                 onKeyDown={tap.drop}
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.currentTarget.blur();
                   const gesture = tap.take();
-                  // Nothing reveals the labels to a finger, so the first tap
-                  // expands the bar and the next one runs the action. The bar
-                  // state is read from the gesture's start: a browser that
-                  // focuses the button on contact expands it mid-tap, and that
-                  // first tap would otherwise fire the action it was meant to
-                  // reveal. `tapExpanded` arms the second tap, so a controlled
-                  // bar that declines to expand still runs the action rather
-                  // than swallowing every tap.
                   const firstTap =
                     gesture !== null &&
                     gesture.pointerType !== 'mouse' &&

@@ -9,26 +9,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { domainErr } from '../lib/api';
 import { getMcpSurface, type McpHttpSurface } from '../lib/mcp-server';
 
-/**
- * The "unexpected failure" contract shared by the two HTTP surfaces: the real
- * message and stack belong in the server log, and the caller gets a generic
- * message plus a correlatable `errorId` — never the raw text.
- *
- * On the `/api` side that is `lib/api.ts`'s private `internalError`; the exported
- * `domainErr` is the real code path that reaches it, so the shape is asserted
- * through the function the route handlers actually call. The domain-error
- * branch is the control: a `DomainError` keeps its own code and status, which
- * is what keeps `internal_error` an exception rather than the default.
- *
- * On the MCP side the same contract lives in `lib/mcp-server.ts`'s
- * `logInternalError`, which is module-private and reaches the wire only through
- * a tool failure. It is driven here end to end: a real `initialize` handshake
- * against the real Streamable-HTTP surface, then a real `memory.search` call
- * that fails before it can resolve a request context. That the tool answers
- * `internal_error` with an id the log carries proves the callback is wired into
- * the tool path, not merely that a standalone helper returns the right shape.
- */
-
 type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { raw: { close: () => void }; close: () => void };
@@ -40,9 +20,7 @@ const globalForApp = globalThis as MutableGlobal;
 function resetAppGlobals(): void {
   try {
     globalForApp.__rembricDb?.close();
-  } catch {
-    // ignore double-close of a fixture the process already closed
-  }
+  } catch {}
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
@@ -100,11 +78,6 @@ describe("httpInternalError shape (via the /api surface's domainErr)", () => {
   });
 });
 
-/**
- * The MCP leg. `getMcpSurface()` builds its server from `getServices()`, and
- * `initialize` succeeds without a request context — the context is installed by
- * the `/mcp` route, and its absence is what the failing tool call exercises.
- */
 describe('MCP internal_error shape (logInternalError over the real surface)', () => {
   const ORIGIN = 'http://127.0.0.1:8787';
   const AUTH_INFO: AuthInfo = {
@@ -154,7 +127,6 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
     );
   }
 
-  /** The legacy leg answers a POST with either JSON or a single SSE frame. */
   async function rpcJson(
     body: unknown,
     sessionId?: string,
@@ -178,7 +150,6 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
     return { response, json };
   }
 
-  /** A live 2025-era session, exactly as a client establishes one. */
   async function openSession(): Promise<string> {
     const init = await rpcJson({
       jsonrpc: '2.0',
@@ -200,9 +171,6 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
   it('answers a failing tool with a generic message plus an id, and logs the real error under it', async () => {
     const sessionId = await openSession();
 
-    // No `runWithContext` was installed, so the handler's scope resolution
-    // throws a plain Error — the non-DomainError branch, which is the one under
-    // test.
     const { json } = await rpcJson(
       {
         jsonrpc: '2.0',
@@ -228,8 +196,6 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
     expect(typeof errorId).toBe('string');
     expect(JSON.stringify(json)).not.toContain('request context missing');
 
-    // The log carries that same id together with the real message and stack —
-    // which the client never sees.
     const logged = errorCalls.find(
       (args) =>
         typeof args[1] === 'object' &&
@@ -256,9 +222,6 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
       sessionId,
     );
 
-    // The failure was the tool's, not the transport's: the same session answers
-    // the next request, which is what makes the assertion above evidence about
-    // `logInternalError` rather than about a broken handshake.
     const { response, json } = await rpcJson(
       { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} },
       sessionId,

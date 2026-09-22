@@ -147,10 +147,6 @@ describe('topic_key upsert path', () => {
 });
 
 describe('findSaveTimeCandidates', () => {
-  // A 2-row corpus drives FTS5 IDF to ~1e-6, so the old inverted-similarity
-  // gate passed by scoring the "true match" as noise — a fix validated
-  // against a fixture that small proves nothing. These use >=50 heterogeneous
-  // rows so the pool genuinely competes (fix-retrieval-ranking-math).
   function fillHeterogeneousCorpus(n: number): void {
     for (let i = 0; i < n; i++) {
       memorySvc.save(
@@ -221,8 +217,6 @@ describe('findSaveTimeCandidates', () => {
   );
 
   it('a row sharing only a near-universal term is not reported near 1.0 and does not consume the candidate budget', () => {
-    // Every filler row shares the word "rollout" (near-universal here) with
-    // the saved row, but only the genuine match shares its distinctive terms.
     fillHeterogeneousCorpus(55);
     const genuine = memorySvc.save(
       {
@@ -255,8 +249,6 @@ describe('findSaveTimeCandidates', () => {
   });
 
   it('surfaces FTS candidates for non-ASCII content (Unicode-aware MATCH builder)', () => {
-    // No embedder is wired here, so any candidate MUST come from FTS — which the
-    // old ASCII-only builder could never produce for CJK content (it returned '').
     const a = memorySvc.save(
       { type: 'feedback', title: '認証 トークン 設計', content: '認証 トークン 設計 の メモ' },
       defaultProjectScope(db.handle),
@@ -374,9 +366,6 @@ describe('findSaveTimeCandidates', () => {
     expect(ids).toContain(y.id); // conflicts_with → still surfaces
   });
 
-  // `saveWithTopicKey` sets a single-element `replaces`, so reading only the
-  // just-saved row's own `replaces` sees one hop and loses a dismissal made
-  // two or more saves back on the same topic.
   it('carries a not_conflict dismissal forward across two saves of the same topic', () => {
     const x = memorySvc.save(
       { type: 'feedback', title: 'shared dedup marker', content: 'shared dedup marker token' },
@@ -409,8 +398,6 @@ describe('findSaveTimeCandidates', () => {
 
     const v2 = saveTopic('v2');
     const v3 = saveTopic('v3');
-    // Two hops from the dismissal: v3 -> v2 -> base, and no relation row
-    // anywhere references v3 as a source.
     expect(v3.replaces).toEqual([v2.id]);
     expect(v2.replaces).toEqual([base.id]);
 
@@ -440,8 +427,6 @@ describe('findSaveTimeCandidates', () => {
       },
       defaultProjectScope(db.handle),
     );
-    // second.memory.replaces contains first.memory.id; candidate
-    // detection must not re-surface it.
     const cands = findSaveTimeCandidates(createRepositories(db.handle.db), second.memory, {
       perSaveMax: 5,
     }).candidates;
@@ -504,8 +489,6 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
 
   it('the count MAY exceed CANDIDATE_POOL_SIZE — each rare entity contributes its own pool', () => {
     const repos = createRepositories(db.handle.db);
-    // Four rare entities, each on distinct targets, each pool bounded by 5.
-    // No target overlaps, so the merged list exceeds any single channel's bound.
     const entities = ['a.ts', 'b.ts', 'c.ts', 'd.ts'];
     for (let i = 0; i < 40; i++) {
       const m = memorySvc.save(
@@ -536,9 +519,6 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
       { perSaveMax: 100 },
       entities.map((value) => ({ kind: 'path' as const, value })),
     );
-    // 4 entities × 10 links each, all distinct targets: 40 pairs from a
-    // per-channel bound of 20. This is what makes the reported count a lower
-    // bound that MAY exceed the pool size, rather than one capped by it.
     expect(res.detected).toBe(40);
     expect(res.detected).toBeGreaterThan(CANDIDATE_POOL_SIZE);
   });
@@ -547,8 +527,6 @@ describe('findSaveTimeCandidates — the pre-cap detected count', () => {
 describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)', () => {
   it('surfaces a low-vocabulary-overlap contradiction about the same rare file', () => {
     const repos = createRepositories(db.handle.db);
-    // Dilute the scope so the entity's single existing link stays well
-    // under the 15% rarity gate (1 link / 12 memories ≈ 8%).
     for (let i = 0; i < 10; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
@@ -581,13 +559,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
   it('a very common entity surfaces nothing — exactly AT the link floor', () => {
     const repos = createRepositories(db.handle.db);
-    // 5 of 6 scope memories link the same entity — well over the 15% rarity
-    // gate, so it must generate zero candidates despite being an exact match.
-    //
-    // This fixture sits exactly AT ENTITY_RARITY_MIN_LINKS, so it is the accidental
-    // guard on that constant's value: it passes at 5 and would break at 6. Asserted
-    // rather than left implicit, so a future bump fails loudly here instead of
-    // being absorbed by re-diluting the fixture.
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Note ${i}`, content: `note number ${i}` },
@@ -622,8 +593,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
   it('the per-save cap holds across vec/fts/entity channels combined', () => {
     const repos = createRepositories(db.handle.db);
-    // Dilute the scope so 3 entity links stay under the 15% rarity gate
-    // (3 / 24 = 12.5%) while still producing more raw matches than the cap.
     for (let i = 0; i < 20; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
@@ -664,10 +633,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
   it('reports containment, not rarity, and still leads the merged list', () => {
     const repos = createRepositories(db.handle.db);
-    // A near-duplicate the lexical pass scores ~1.0, plus an entity match that
-    // shares the path and no vocabulary at all. Under the old rarity score the
-    // entity row reported ~0.95 purely because the scope was large; it must now
-    // report its (near-zero) containment and lead on precedence instead.
     for (let i = 0; i < 18; i++) {
       memorySvc.save(
         { type: 'project', title: `Filler ${i}`, content: `filler note ${i}` },
@@ -697,8 +662,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
       { kind: 'path', value: 'docs/docker.md' },
     ]).candidates;
 
-    // perSaveMax of 1 is the whole point: the entity row must occupy it even
-    // though the near-duplicate scores far higher on the shared quantity.
     expect(cands.map((c) => c.targetId)).toEqual([entityOnly.id]);
     expect(cands[0]!.similarity).toBeLessThan(0.2);
 
@@ -743,8 +706,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
       );
       chain.push(m.id);
     }
-    // The five superseded rows carry the entity; the still-active head does not,
-    // so the active numerator stays at 1 (the target) rather than 2.
     for (const id of chain.slice(0, -1)) {
       repos.entities.linkMemory(
         id,
@@ -753,9 +714,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
         new Date(),
       );
     }
-    // `findOtherMemoriesForEntity` is `ORDER BY created_at DESC LIMIT n`, so the
-    // one active target is backdated behind the whole chain: a fixture with it
-    // newest would surface first under any predicate.
     db.handle.db
       .update(memory)
       .set({ createdAt: new Date(1_000) })
@@ -781,10 +739,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
   it('a young scope is not gated into silence: one link below the floor still surfaces', () => {
     const repos = createRepositories(db.handle.db);
-    // 1/2 = 0.50 far exceeds the 0.15 threshold and blocked outright before the
-    // floor — the young-project convergence case the entity channel exists for.
-    // 1 < ENTITY_RARITY_MIN_LINKS, so the gate does not apply and the target
-    // surfaces. This test fails without the floor condition.
     const target = memorySvc.save(
       { type: 'project', title: 'Auth module note', content: 'the auth module retries twice' },
       defaultProjectScope(db.handle),
@@ -829,13 +783,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
   it('several separately-exempt entities CAN together fill the budget — recorded, not claimed away', () => {
     const repos = createRepositories(db.handle.db);
-    // The floor's justification is per entity: one sub-floor entity cannot occupy
-    // the budget. The budget is shared and entity candidates lead, so five of them
-    // can. Each is blocked before the floor (1/6 = 0.167 > 0.15) and exempt after,
-    // and together they displace an FTS hit on a byte-identical duplicate.
-    //
-    // Pinned so the consequence is contracted rather than discovered. Bounding the
-    // entity channel's share of the budget is the deferred composition follow-up.
     const DUP = 'The deploy pipeline retries three times before giving up entirely.';
     const original = memorySvc.save(
       { type: 'project', title: 'Deploy retries', content: DUP },
@@ -865,16 +812,11 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
       'entity',
       'entity',
     ]);
-    // The exact duplicate is what gets pushed out. Before the floor this save
-    // returned exactly one candidate, `fts`, and it was this row.
     expect(result.candidates.some((c) => c.targetId === original.id)).toBe(false);
   });
 
   it('the floor is an exemption for entities that cannot saturate, not a small-scope bypass', () => {
     const repos = createRepositories(db.handle.db);
-    // La = 5 AT the floor in a small scope, 5/8 = 0.625 over the threshold: still
-    // blocked. The floor exempts entities too sparse to occupy the per-save budget,
-    // not every entity in a small scope.
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Ticketed ${i}`, content: `ticketed note ${i}` },
@@ -920,11 +862,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
 
   it('an entity concentrated on the active population is gated even where superseded rows dilute it', () => {
     const repos = createRepositories(db.handle.db);
-    // RESCALED, not relaxed: the old fixture used La = 2, which the link floor now
-    // admits, so it would have stopped pinning the population fix. All three must
-    // hold at once — La >= ENTITY_RARITY_MIN_LINKS so the gate applies at all,
-    // active 5/20 = 0.25 over the threshold so it blocks, and non-archived
-    // 5/34 = 0.147 UNDER it so reverting the predicate admits.
     for (let i = 0; i < 5; i++) {
       const m = memorySvc.save(
         { type: 'project', title: `Retry note ${i}`, content: `retry note ${i} on the queue` },
@@ -943,8 +880,6 @@ describe('findSaveTimeCandidates — entity overlap channel (add-entity-index)',
         defaultProjectScope(db.handle),
       );
     }
-    // 15 saves on one topic_key leave 1 active and 14 superseded, which is the
-    // dilution the reverted predicate would count.
     for (let i = 0; i < 15; i++) {
       memorySvc.saveWithTopicKey(
         {
