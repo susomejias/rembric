@@ -1,4 +1,3 @@
-// Duplicated from apps/server/src/test/tokens.ts.
 import { TokensService, type CreatedToken, type TokenGrant } from '@rembric/core';
 import { createRepositories, type DbHandle } from '@rembric/db';
 

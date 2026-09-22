@@ -1,13 +1,9 @@
 /**
- * `@rembric/db` barrel — the package's public entry point, and the only import
- * surface consumers use (`apps/server` compiles and runs against `dist/`, and
- * type-checks and tests against `src/` — see the package README).
+ * `@rembric/db` barrel — the package's public entry point.
  *
- * The named `export *` list below is deliberate: consumers used to reach into
- * `db/schema/<table>.js`, `db/repositories/<aggregate>-repository.js` and
- * `db/diagnostics.js` directly, so every symbol those modules export is part of
- * the contract this move has to keep. Keep it that way — an ambiguity here
- * fails loudly as TS2308 rather than silently dropping an export.
+ * The named `export *` list below is deliberate: every symbol those modules
+ * export is part of the contract, and an ambiguity fails loudly as TS2308
+ * rather than silently dropping an export.
  */
 
 export { createDb, defaultMigrationsDir } from './client.js';

@@ -14,21 +14,19 @@ import type { Services } from './services';
 import { getServices } from './services';
 
 /**
- * The web app's process-level responsibilities — the part of
- * `apps/server/src/server/bootstrap.ts` that belongs to the running process
- * rather than to a listener: the eager database open, the admin-token
- * bootstrap, the stale-session reaper, the embedder drain worker and the
- * resumable entity-extraction backfill.
+ * The web app's process-level responsibilities: the eager database open, the
+ * admin-token bootstrap, the stale-session reaper, the embedder drain worker and
+ * the resumable entity-extraction backfill.
  *
  * `instrumentation.ts`'s `register()` is the only caller. `register()` may not
  * throw (Next treats a throwing hook as a fatal boot error), so every timer
  * below owns its own error handling and this module never propagates.
  */
 
-/** `apps/server/src/config.ts` requires at least this much entropy. */
+/** Minimum length for a bootstrap admin token. */
 const ADMIN_TOKEN_MIN_LENGTH = 16;
 
-/** `bootstrap.ts`: reap every 30 min, hourly forced embedding pass, 30 s tick. */
+/** Reap every 30 min, hourly forced embedding pass, 30 s tick. */
 const REAP_INTERVAL_MS = 30 * 60_000;
 const EMBED_TICK_MS = 30_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
@@ -110,15 +108,14 @@ export function startProcess(): void {
 }
 
 /**
- * Port of `bootstrap.ts`'s `tokens.bootstrapAdmin(config.adminToken)` call,
- * which is a no-op once any token row exists (the env var is authoritative
- * only at first run).
+ * Mints an admin token on first run, once, and prints it. The env var is
+ * authoritative only at first run; the call is a no-op once any token row
+ * exists.
  *
- * One deliberate divergence: the server refuses to boot (exit 78) when
- * `REMBRIC_ADMIN_TOKEN` is unset on first run, while `register()` may not
- * terminate the process. An operator who never set the variable would then own
- * a database nobody can sign in to, so the token is minted and printed once
- * instead — and the log says where it went.
+ * Deliberately diverges from a boot path that exits 78 when
+ * `REMBRIC_ADMIN_TOKEN` is unset on first run: `register()` may not terminate
+ * the process, so an operator who never set the variable would own a database
+ * nobody can sign in to.
  */
 function bootstrapAdminToken(services: Services): void {
   const configured = process.env['REMBRIC_ADMIN_TOKEN'];
@@ -181,17 +178,16 @@ function bootstrapAdminToken(services: Services): void {
 }
 
 /**
- * Publish the admin token as this process's session-signing key.
+ * Publishes the admin token as this process's session-signing key.
  *
- * `bootstrap.ts` resolves `REMBRIC_SESSION_SECRET ?? REMBRIC_ADMIN_TOKEN` once at
- * boot; this process may have neither, because Next loads `.env` from
- * `apps/web/`, never from the repository root, while the server's config does.
- * `lib/session.ts` reads the same two variables, so writing the resolved value
- * back into the environment is what makes a session minted here verify there and
- * vice versa — the key is the only thing the two must agree on.
+ * Next loads `.env` from `apps/web/`, never from the repository root, so this
+ * process may resolve neither variable while `lib/session.ts` reads the same
+ * two. Writing the resolved value back into the environment is what makes a
+ * session minted here verify there and vice versa — the key is the only thing
+ * the two must agree on.
  *
- * An explicit `REMBRIC_SESSION_SECRET` is never overwritten: it is the operator's
- * override, and the server gives it the same precedence.
+ * An explicit `REMBRIC_SESSION_SECRET` is never overwritten: it is the
+ * operator's override.
  *
  * Returns whether a usable key is now in the environment.
  */
@@ -205,11 +201,10 @@ function threadSessionSecret(candidate: string | null): boolean {
 }
 
 /**
- * Port of `bootstrap.ts`'s boot sweep plus its periodic reaper. The boot sweep
- * catches rows leaked by a PRIOR run; the interval catches a client killed
- * mid-session while THIS process keeps running, which would otherwise block
- * `findActiveForTransport` for the next session on the same (token, project)
- * for as long as the server stays up.
+ * The boot sweep catches rows leaked by a PRIOR run; the interval catches a
+ * client killed mid-session while THIS process keeps running, which would
+ * otherwise block `findActiveForTransport` for the next session on the same
+ * (token, project) for as long as the server stays up.
  */
 function startSessionReaper(services: Services): void {
   const { agentSessions, sessionAbandonAfterMs } = services;
@@ -243,16 +238,12 @@ function startSessionReaper(services: Services): void {
 }
 
 /**
- * Port of `bootstrap.ts`'s embedder drain: an immediate first pass, a 30 s
- * tick, and an hourly forced full re-scan in case some insert path forgets to
- * signal the worker.
+ * An immediate first pass, a 30 s tick, and an hourly forced full re-scan in
+ * case some insert path forgets to signal the worker.
  *
- * The one deliberate difference is the embedder. The server loads the model
- * eagerly at boot and treats a load failure as fatal; this app loads it lazily
- * (the recorded process-model decision for `apps/web`), so a pass with no
- * backlog returns before `embeddingWorker()` — an idle boot never pays for the
- * model, while the first pending row makes the drain behave exactly as the
- * server's.
+ * The embedder loads lazily (the recorded process-model decision for
+ * `apps/web`): a pass with no backlog returns before `embeddingWorker()`, so an
+ * idle boot never pays for the model while the first pending row starts it.
  */
 function startEmbeddingDrain(services: Services): void {
   let inFlight = false;
@@ -291,8 +282,8 @@ function message(err: unknown): string {
 }
 
 /**
- * Port of `bootstrap.ts`'s resumable entity-extraction backfill: the extractor
- * identity check, an immediate forced batch, and a self-scheduling drain.
+ * The extractor identity check, an immediate forced batch, and a
+ * self-scheduling drain.
  *
  * `ensureEntityExtractor` is boot work, not drain work, and it is what makes
  * `entityIndexResetWarning` resolvable: `lib/mcp-server.ts` reports "the next
@@ -305,9 +296,9 @@ function message(err: unknown): string {
  * process actually opened, or a deployment whose env disagrees with the file it
  * is serving would reset a marker next to a database it never touches.
  *
- * One deliberate omission: `bootstrap.ts` also clears its pending `setTimeout`
- * on shutdown, but Next's `register()` has no teardown counterpart and the
- * process is killed rather than drained, so the timer is only ever `unref`'d.
+ * No shutdown path clears the pending `setTimeout`: Next's `register()` has no
+ * teardown counterpart and the process is killed rather than drained, so the
+ * timer is only ever `unref`'d.
  */
 function startEntityBackfill(services: Services): void {
   const dataDir = dirname(services.db.raw.name);

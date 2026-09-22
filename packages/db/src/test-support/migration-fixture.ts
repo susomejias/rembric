@@ -1,4 +1,3 @@
-// Duplicated from apps/server/src/test/migration-fixture.ts.
 import {
   copyFileSync,
   mkdtempSync,

@@ -16,10 +16,10 @@ export type RelationKindFilter = NonNullable<AdminRelationFilters['kind']>;
 export const RELATION_KIND_FILTERS: readonly RelationKindFilter[] = [...RELATION_VALUES, 'pending'];
 
 /**
- * The judgments list's filter model. Both filters are optional by design: the
- * Hono handler (`apps/server/src/dashboard/judgments.ts`) only applies a filter
- * whose value is in the schema-derived vocabulary, so an unknown or empty value
- * leaves the queue unfiltered rather than filtering it to nothing.
+ * The judgments list's filter model. Both filters are optional by design: a
+ * filter is applied only when its value is in the schema-derived vocabulary, so
+ * an unknown or empty value leaves the queue unfiltered rather than filtering it
+ * to nothing.
  */
 export interface JudgmentsFilters {
   status: string;

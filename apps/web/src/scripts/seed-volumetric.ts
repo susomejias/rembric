@@ -622,10 +622,9 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
 
   clockMs = CORPUS_EPOCH_MS - CORPUS_SPAN_MS;
-  // Slot 0 held the global scope until that scope was retired. It is a project
-  // now, and it keeps slot 0 with a slug of its own so that `vol-0`..`vol-4`
-  // stay on slots 1..5: a corpus's numbered projects hold the same rows before
-  // and after the move, which is what the narrow-path baseline is measured on.
+  // Slot 0 is a project of its own so that `vol-0`..`vol-4` stay on slots 1..5:
+  // a corpus's numbered projects must hold stable rows, which is what the
+  // narrow-path baseline is measured on.
   const projects = [
     projectsSvc.create({ slug: 'vol-shared', displayName: 'Volumetric shared' }),
     ...Array.from({ length: VOLUMETRIC_SHAPE.projectCount - 1 }, (_, i) =>

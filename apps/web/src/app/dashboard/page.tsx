@@ -24,8 +24,7 @@ import { cn } from '@/lib/utils';
  * recent-sessions rows, the consolidation-health strip, and the activity and
  * system cards.
  *
- * Every read is the retired Hono home's own (`apps/server/src/server/dashboard-
- * router.ts`'s `GET /`): the same repository methods, the same limits, the same
+ * Every read uses the same repository methods, the same limits and the same
  * unfiltered scope.
  */
 export const dynamic = 'force-dynamic';
@@ -351,7 +350,7 @@ function OpenAll({ href }: { href: string }) {
   );
 }
 
-/** Main's `.stat-n` sparkline: the same 64x16 polyline over the seven real buckets. */
+/** The 64x16 sparkline over the seven real buckets. */
 function Sparkline({ data }: { data: ReadonlyArray<number> }) {
   if (data.length === 0) return <span>·</span>;
   const width = 64;

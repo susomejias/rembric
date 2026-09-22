@@ -215,7 +215,7 @@ describe('authorization-server metadata', () => {
     expect(response.status).toBe(200);
     const metadata = (await response.json()) as Record<string, unknown>;
     // The issuer is the URL form of REMBRIC_PUBLIC_URL — `new URL(issuer).href`
-    // normalises the trailing slash, which is what `apps/server` publishes too.
+    // normalises the trailing slash.
     expect(metadata.issuer).toBe(`${ISSUER}/`);
     expect(metadata.authorization_endpoint).toBe(`${ISSUER}/authorize`);
     expect(metadata.token_endpoint).toBe(`${ISSUER}/token`);
@@ -361,9 +361,8 @@ describe('client registration and the consent dance', () => {
     expect(tokens.refresh_token).toBeTruthy();
 
     // 4. The provider the router serves with accepts the token it issued.
-    //    `AuthInfo.scopes` carries the INTERNAL authz scope the grant derives to
-    //    (`apps/server`'s provider reports the same), not the OAuth vocabulary
-    //    the token endpoint echoes back to the client.
+    //    `AuthInfo.scopes` carries the INTERNAL authz scope the grant derives to,
+    //    not the OAuth vocabulary the token endpoint echoes back to the client.
     const info = await getOAuthProvider()?.verifyAccessToken(tokens.access_token);
     expect(info).toMatchObject({ token: tokens.access_token, clientId: id, scopes: ['*'] });
     expect(info?.expiresAt ?? 0).toBeGreaterThan(Math.floor(Date.now() / 1000));

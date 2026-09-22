@@ -9,11 +9,10 @@ import { reviewTtlEntries } from './services/review.js';
 /**
  * `memory.doctor`'s payload and its production factory.
  *
- * The factory moved here from the deleted `apps/server/src/server/bootstrap.ts`,
- * and the report shape + summary parser moved from `@rembric/mcp`'s
- * `observability-tools.ts` (which still re-exports them for compatibility): the
- * domain layer owns the reads, so the app layer only has to hand it the
- * diagnostics handle, the repositories and the data dir.
+ * The domain layer owns the reads, so `@rembric/mcp`'s `observability-tools.ts`
+ * re-exports the shape and the summary parser for compatibility while the app
+ * layer only hands the factory the diagnostics handle, the repositories and the
+ * data dir.
  */
 
 export interface DoctorRunSummary {

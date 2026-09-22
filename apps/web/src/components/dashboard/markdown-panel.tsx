@@ -11,8 +11,7 @@ import { LABEL } from './ui';
  *
  * `react-markdown` is safe by construction for this boundary — raw HTML in a
  * memory's content is never rendered as markup, every text node is escaped, and
- * no `rehype-raw` is installed — which is the same guarantee the retired
- * `markdown-it`-with-`html:false` renderer gave.
+ * no `rehype-raw` is installed.
  *
  * The element mapping is explicit rather than the mockup's `prose prose-invert`
  * classes: `prose` comes from `@tailwindcss/typography`, which this workspace

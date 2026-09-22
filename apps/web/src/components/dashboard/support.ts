@@ -1,15 +1,14 @@
 /**
- * Pure URL and formatting helpers the dashboard views share. They are the
- * surviving half of the retired `components/dashboard/format.ts`: the same
+ * Pure URL and formatting helpers the dashboard views share: the
  * `PAGE_SIZE`/`singleParam`/`pageParam`/`queryWithPage` contract the listing
- * routes' `filters.ts` modules were written against, with no JSX and no
- * request- or database-aware code.
+ * routes' `filters.ts` modules are written against, with no JSX and no request-
+ * or database-aware code.
  */
 
 /** Standard page size for every paginated dashboard listing. */
 export const PAGE_SIZE = 50;
 
-/** The `project` filter value the dashboard retired; normalised away on read. */
+/** The legacy `project` filter value, normalised away on read. */
 export const RETIRED_PROJECT_FILTER = '__global__';
 
 export function truncate(s: string | null | undefined, max: number): string {

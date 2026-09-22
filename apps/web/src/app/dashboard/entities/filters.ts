@@ -3,9 +3,8 @@ import { pageParam, singleParam } from '@/components/dashboard/support';
 export type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
- * The entities list's filter model, read the same way the Hono handler read it
- * (`apps/server/src/dashboard/entities.ts`): `kind` is passed through as sent so
- * an unknown kind matches no row in SQL, and `single_ref=1` is the only truthy
+ * The entities list's filter model: `kind` is passed through as sent so an
+ * unknown kind matches no row in SQL, and `single_ref=1` is the only truthy
  * spelling of the checkbox.
  */
 export interface EntitiesFilters {

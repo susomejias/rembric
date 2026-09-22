@@ -8,20 +8,17 @@ import { startProcess } from '../lib/process';
 
 /**
  * The startup banner `instrumentation.ts::register()` produces through
- * `startProcess` — the app's replacement for `apps/server`'s
- * `bootstrap.ts` banner, and the only place an operator sees the resolved data
+ * `startProcess` — the only place an operator sees the resolved data
  * directory, the migration narration and the boot's row counts.
  *
  * Driven through the real entry point over a real migrated SQLite file: the
  * banner is a side effect of the boot, so asserting it any other way would test
  * the logger rather than the boot.
  *
- * NOTE (parallel work): the `[bootstrap] counts:` line and the
- * `[bootstrap] no prior state marker` line are produced by the data-loss guard
- * and state-marker work landing in `lib/process.ts` / `packages/db` alongside
- * this suite. The regexes below are the ones `apps/server`'s retired
- * `bootstrap-banner.test.ts` asserted, so they pin the banner's contract rather
- * than one implementation of it.
+ * The `[bootstrap] counts:` line and the `[bootstrap] no prior state marker` line
+ * are produced by the data-loss guard and state-marker work in `lib/process.ts` /
+ * `packages/db`. The regexes below pin the banner's contract rather than one
+ * implementation of it.
  *
  * `startProcess` caches its "already started" flag and the service graph on
  * `globalThis` (Next re-evaluates modules on HMR), so each case resets those

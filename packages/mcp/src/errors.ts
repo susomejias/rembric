@@ -4,10 +4,10 @@ import type { DomainError } from '@rembric/core';
  * Server-side error logging for the non-domain branch below, injected at the
  * application boundary (`CreateMcpServerOptions.logInternalError`). It mints
  * the correlatable error id returned to the client and writes the real message
- * and stack to the server log. The implementation stays application-side
- * (`apps/server/src/server/error-response.ts`) so the "log server-side, return
- * a generic message + errorId" contract cannot drift between the MCP and HTTP
- * surfaces — and so this package never reaches for a logger it does not own.
+ * and stack to the server log. The implementation stays application-side so the
+ * "log server-side, return a generic message + errorId" contract cannot drift
+ * between the MCP and HTTP surfaces — and so this package never reaches for a
+ * logger it does not own.
  */
 export type LogInternalError = (err: unknown, context: string) => string;
 

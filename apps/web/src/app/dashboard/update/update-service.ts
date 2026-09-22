@@ -13,15 +13,11 @@ import { REMBRIC_VERSION } from '@/lib/version';
  *
  * `globalThis` rather than a module-local is the same choice `lib/db.ts` makes
  * and for the same reason: Next re-evaluates modules on every HMR edit, and a
- * second instance over one release feed holds a second, disagreeing cache. Its
- * permanent home is `lib/services.ts` beside the other singletons; this slice's
- * edit surface does not include that file.
+ * second instance over one release feed holds a second, disagreeing cache.
  *
  * `currentVersion` is injected, not resolved inside the service: the running
- * version lives in the application's manifest
- * (`apps/server/src/version.ts` owns the same read), and the domain package must
- * not know this app's filesystem layout. This mirrors
- * `bootstrap.ts`'s construction, including the `REMBRIC_UPDATE_CHECK_URL` smoke
+ * version lives in the application's manifest, and the domain package must not
+ * know this app's filesystem layout. `REMBRIC_UPDATE_CHECK_URL` stays a smoke
  * seam.
  */
 

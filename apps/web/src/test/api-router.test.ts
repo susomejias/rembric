@@ -18,10 +18,10 @@ import { POST as sessionsPost, GET as sessionsGet } from '../app/api/[slug]/sess
 import { getServices } from '../lib/services';
 
 /**
- * The `/api/[slug]` session-lifecycle surface — the App Router counterpart of
- * `apps/server`'s Hono `api-router.ts`. This drives the REAL route handlers over
- * a real migrated database: the auth pipeline, validation, service calls,
- * status codes and `{ ok: false, code }` bodies are all the production path.
+ * The `/api/[slug]` session-lifecycle surface. This drives the REAL route
+ * handlers over a real migrated database: the auth pipeline, validation, service
+ * calls, status codes and `{ ok: false, code }` bodies are all the production
+ * path.
  *
  * Two things are deliberately outside this suite:
  *   - a successful `POST /memory/recall`, because `lib/services.ts` wires the

@@ -6,9 +6,8 @@ export type SearchParams = Record<string, string | string[] | undefined>;
 export const DEFAULT_PROJECT_STATUS = 'all' as const;
 
 /**
- * The projects list's filter model. The retired Hono view rendered two tables
- * (active + archived) with no filter at all; the port collapses them into one
- * URL-driven table, so `status` is the axis that replaces the two headings.
+ * The projects list's filter model: `status` collapses an active and an archived
+ * table into one URL-driven table.
  */
 export interface ProjectsFilters {
   status: string;

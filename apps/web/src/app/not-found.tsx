@@ -5,8 +5,7 @@ import { NAV, NAV_GROUPS } from '@/lib/nav';
 
 /**
  * The 404 every dashboard view falls through to. `memories/[id]/page.tsx` calls
- * `notFound()` for an unknown id (the retired view answered 404 there too), and
- * any path with no route lands here.
+ * `notFound()` for an unknown id, and any path with no route lands here.
  *
  * It lives at the app root rather than under `dashboard/` on purpose: Next
  * renders the nearest `not-found.tsx` to the segment that failed, and a root

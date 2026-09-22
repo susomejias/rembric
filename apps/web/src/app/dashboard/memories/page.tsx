@@ -73,7 +73,7 @@ export default async function MemoriesPage({
   const params = await searchParams;
   const filters = readMemoriesFilters(params);
   // The params the pager and the filter form round-trip, as the browser sent
-  // them (minus `page` and the retired sentinel).
+  // them (minus `page` and the `__global__` sentinel).
   const roundTripQuery = memoriesQuery(params);
 
   const { repos } = getServices();

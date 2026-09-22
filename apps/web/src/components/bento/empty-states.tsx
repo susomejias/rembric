@@ -9,8 +9,7 @@ import { cn } from '@/lib/utils';
 
 /**
  * The empty states the dashboard shows when a table (or a search) has nothing
- * to put in it, ported from the Spectrum UI `empty-states` blocks so the copy
- * and the anatomy survive the move:
+ * to put in it:
  *
  *  - `TableNoResults` (registry `filter-empty`) is the filtered-out case. The
  *    reader can act on it, so it leads with the filter chips that narrowed the
@@ -611,7 +610,7 @@ export interface Destination {
  * The filtered case. The chips are the filters that are live on the URL; each
  * one links to the same list with that filter dropped, so the action is a real
  * navigation and not a local `useState` that pretends to re-query. `clearHref`
- * is the CTA the retired `TableNoResults` carried — the unfiltered list.
+ * clears to the unfiltered list.
  */
 export function TableNoResults({
   filters = [],
@@ -929,7 +928,7 @@ export function EmptyPanel({
 }
 
 /**
- * The failure case, ported from the registry's `error-empty`. The request id is
+ * The failure case. The request id is
  * the one string support asks for, so it is copyable; the technical detail is
  * behind a disclosure because it is only ever read on the way to a bug report.
  */
@@ -1055,7 +1054,7 @@ export function ErrorEmpty({
 }
 
 /**
- * The 404, ported from the registry's `not-found-empty`. Two things are load
+ * The 404. Two things are load
  * bearing and kept from the original: the path that was tried is printed (people
  * mistype and want to see what they asked for), and the destination list filters
  * as the reader types, so the search box is a way out rather than decoration.

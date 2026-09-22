@@ -64,7 +64,7 @@ is pure write cost.
 
 Added by `0027_tune_hot_query_paths.sql`:
 
-```
+```sql
 memory (scope, project_id, status, created_at)
 memory (scope, project_id, type)
 memory (status, created_at)
@@ -84,7 +84,7 @@ no query — its reader filters by scope and is served by `memory_scope_seen_idx
 Removed by `0028_drop_unusable_indexes.sql`, in a **separate migration and
 commit** so a bisect can tell a removal from an addition:
 
-```
+```sql
 confirmations_event_ts_idx
 consolidation_ops_reverted_at_idx
 oauth_tokens_expires_at_idx

@@ -20,7 +20,7 @@ const PROMPT_PURGE_REASONING = 'operator purge of soft-deleted prompts';
  *   - Lifecycle = `deleted_at` flips (operator soft-delete OR atomic refine
  *     via `replaces`) plus the `replaces` link itself.
  *   - This file is the ONLY emitter allowed of `DELETE FROM prompts`
- *     (via `purgeDeleted`); enforced by `apps/server/src/test/invariants.test.ts`.
+ *     (via `purgeDeleted`); enforced by the invariants test.
  */
 
 export interface SavePromptInput {

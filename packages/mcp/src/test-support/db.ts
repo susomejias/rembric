@@ -1,5 +1,3 @@
-// Duplicated from apps/server/src/test/db.ts (see also packages/db/src/test-support/db.ts
-// and packages/core/src/test-support/db.ts).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

@@ -17,15 +17,15 @@ import { getServices } from '../lib/services';
 import { defaultProject } from './default-project.js';
 
 /**
- * Routing-level coverage for roots discovery, ported off `apps/server` onto the
- * real Next `/mcp` route handler.
+ * Routing-level coverage for roots discovery, over the real Next `/mcp` route
+ * handler.
  *
  * The arm below that asserts the client's optional standalone GET stream never
- * reaches the server needs a server-side request log. The real server recorded
- * `server.http.server.on('request')`; here the same boundary is the adapter that
+ * reaches the server needs a server-side request log. That boundary is the
+ * adapter that
  * hands the SDK's request to `route.ts`, so `httpLog` records exactly what the
- * handler received (and, unlike the original, could not be confused by a GET
- * Next itself answered before the handler).
+ * handler received (and, unlike a socket-level log, could not be confused by a
+ * GET Next itself answered before the handler).
  *
  * `loadEmbedder` is replaced as in `mcp-transport.test.ts`: the service graph is
  * the production one, only the ONNX factory is swapped for the deterministic,

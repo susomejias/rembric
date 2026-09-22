@@ -6,11 +6,9 @@ export type SearchParams = Record<string, string | string[] | undefined>;
 export const DEFAULT_STATUS = 'active' as const;
 
 /**
- * The memories list's filter model. Reading is deliberately the same shape the
- * Hono handler used (`apps/server/src/dashboard/memories.ts`): `status` defaults
- * to `active` only when the param is absent, the retired `__global__` project
- * sentinel normalises to "no filter", and every other filter is empty-string
- * "unset".
+ * The memories list's filter model: `status` defaults to `active` only when the
+ * param is absent, the legacy `__global__` project sentinel normalises to "no
+ * filter", and every other filter is empty-string "unset".
  */
 export interface MemoriesFilters {
   project: string;
@@ -35,7 +33,7 @@ export function readMemoriesFilters(searchParams: SearchParams): MemoriesFilters
 }
 
 /**
- * Every param the current URL carries, except `page` and the retired project
+ * Every param the current URL carries, except `page` and the `__global__`
  * sentinel — the set the pager and the filter form round-trip. Rebuilt from the
  * raw params (not from the normalised filters) so a submitted `status=active`
  * survives into the next page's href exactly as the browser sent it.
@@ -54,8 +52,7 @@ export function memoriesQuery(searchParams: SearchParams): Record<string, string
 /**
  * A project slug that names no live project filters to NOTHING rather than
  * silently dropping the filter: it is a stale or hand-edited URL, and the
- * operator should see the emptiness. Same rule every list view in the retired
- * dashboard shared.
+ * operator should see the emptiness.
  */
 export function resolveProjectFilter(
   slug: string,

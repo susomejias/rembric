@@ -52,15 +52,13 @@ const dbRoot = join(repoRoot, 'packages/db/src');
 /**
  * `packages/core/src` — the extracted domain layer. Scanned with the app tree:
  * it holds the services, the consolidation engine and the embeddings pipeline,
- * so every rule below that used to police `apps/server/src/<dir>` must still
- * police them where they now live.
+ * so the rules below must police them too.
  */
 const coreRoot = join(repoRoot, 'packages/core/src');
 /**
  * `packages/mcp/src` — the extracted protocol layer (tool definitions, the
- * server factory, scope resolution, instructions). Scanned with the app tree:
- * it used to be `apps/server/src/mcp`, so every rule below that policed the MCP
- * handlers must still police them where they now live.
+ * server factory, scope resolution, instructions). Scanned with the app tree, so
+ * the rules below must police the MCP handlers too.
  */
 const mcpRoot = join(repoRoot, 'packages/mcp/src');
 
@@ -78,10 +76,7 @@ function relToRepo(file: string): string {
  * Every scanned non-test, non-migration source file: the application tree, the
  * domain layer AND the data layer. All three, because the rules below police
  * statements that live in the db package and are called from the application —
- * a scan that dropped any side would stop enforcing half of each contract. The
- * domain layer moved out of the app tree, so leaving it unscanned would have
- * silently exempted every service from the append-only, scope-leak and
- * admin-method rules they were written for.
+ * a scan that dropped any side would stop enforcing half of each contract.
  */
 function scanRoots(): string[] {
   return [
@@ -427,12 +422,10 @@ describe('install-time code-execution surface', () => {
 });
 
 /**
- * `apps/web/Dockerfile`'s deployable stage — `runner` — is the only one left:
- * the retired server image's `runtime` stage went with `apps/server`. Everything
- * the image assertions pin about it (it is LAST, so a bare `docker build`
- * produces the production image; it is distroless; it carries
- * `rembric.stage=runtime`) is what makes the PUBLISHED artifact correct, and the
- * published artifact is the web image.
+ * `apps/web/Dockerfile`'s deployable stage — `runner`. Everything the image
+ * assertions pin about it (it is LAST, so a bare `docker build` produces the
+ * production image; it is distroless; it carries `rembric.stage=runtime`) is what
+ * makes the published artifact correct.
  */
 const PROD_STAGE = 'runner';
 const prodDockerfile = (): string => readFileSync(join(repoRoot, 'apps/web/Dockerfile'), 'utf8');
@@ -602,9 +595,7 @@ const SCOPE_BYPASS_ALLOWED_PREFIXES = [
   'packages/core/src/consolidation/',
   'apps/web/src/app/dashboard/',
   // Eval harness ingest re-reads its own throwaway corpus across scopes
-  // post-ingest — see add-retrieval-eval-harness. One copy: the harness is
-  // co-located in `packages/core` and the app-side duplicate went with
-  // `apps/server`.
+  // post-ingest — see add-retrieval-eval-harness.
   'packages/core/src/test-support/retrieval/ingest.ts',
 ];
 
@@ -732,10 +723,7 @@ const ADMIN_CALL_PATTERN = /\.(admin[A-Z]\w*)\(/g;
 const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
   // The doctor surface in `mcp-server.ts` is the factory in
   // `packages/core/src/doctor.ts`'s admin reads, and the dashboard views under
-  // `app/dashboard/` (exempt by prefix) are the retired server
-  // `dashboard-router.ts`'s. Both app-side call sites that used to carry those
-  // reads (the Hono dashboard router and `bootstrap.ts`) went with
-  // `apps/server`.
+  // `app/dashboard/` (exempt by prefix) carry the rest.
   'apps/web/src/lib/mcp-server.ts': [
     'adminBacklogCount',
     'adminCountByStatus',
@@ -1935,8 +1923,7 @@ describe('derived-table reproducibility invariant', () => {
   it('every named rebuild entry point is still exported by the module it names', () => {
     for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
       if (!entry.rebuild) continue;
-      // `rebuild.module` is relative to the domain layer's source root, where
-      // every rebuild module now lives.
+      // `rebuild.module` is relative to the domain layer's source root.
       const src = readFileSync(join(coreRoot, entry.rebuild.module), 'utf8');
       const exported = new RegExp(
         `export\\s+(?:async\\s+)?(?:function|const)\\s+${entry.rebuild.entryPoint}\\b`,
@@ -2030,8 +2017,8 @@ function scanForPattern(
 }
 
 describe('scope-is-one-arm invariant', () => {
-  // The protocol layer is scanned here too: it builds scopes (`projectScope`) and
-  // used to be an app-internal tree, so leaving it out would exempt it.
+  // The protocol layer is scanned here too: it builds scopes (`projectScope`),
+  // so leaving it out would exempt it.
   const files = [
     ...listAllTsFiles(srcRoot),
     ...listAllTsFiles(coreRoot),

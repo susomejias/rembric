@@ -2,11 +2,6 @@
  * Failed-authentication lockout, keyed on a pre-auth identity (source IP or a
  * trusted-proxy forwarded hop).
  *
- * Port of `apps/server/src/server/rate-limit.ts::AuthLockout` — same semantics,
- * same constants. Duplicated rather than imported because `apps/server` is not
- * a dependency of this workspace (and must not become one while both servers
- * coexist).
- *
  * Consulted BEFORE token-hash verification so an unauthenticated caller cannot
  * force repeated expensive hashing (the scrypt scan blocks the single Node
  * thread). Only *failed* attempts accrue; a success clears the record, so

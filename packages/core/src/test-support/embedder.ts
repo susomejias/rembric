@@ -1,4 +1,3 @@
-// Duplicated from apps/server/src/test/embedder.ts.
 import { createHash } from 'node:crypto';
 
 import { EMBEDDING_DIMS, type Embedder } from '../embeddings/embedder.js';

@@ -16,10 +16,9 @@ import { mintTestToken } from './tokens';
  * HEALTHCHECK (and both compose files) fetch this URL, so a route that answered
  * from a cache or from a dead connection would report a healthy process forever.
  *
- * The probe is bearer-gated, exactly as `apps/server`'s `createHealthzHandler`
- * is: the container probe, `install.sh`'s post-up poll and the CI boot smoke all
- * send `Authorization: Bearer $REMBRIC_ADMIN_TOKEN`, so the gate costs nothing
- * they do not already provide and closes the one surface that had dropped it.
+ * The probe is bearer-gated: the container probe, `install.sh`'s post-up poll
+ * and the CI boot smoke all send `Authorization: Bearer $REMBRIC_ADMIN_TOKEN`, so
+ * the gate costs nothing they do not already provide.
  *
  * The route opens the live database through `lib/db.ts`, which caches its handle
  * on `globalThis` (Next re-evaluates modules on HMR), and the service graph on

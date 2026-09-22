@@ -1,4 +1,3 @@
-// Duplicated from apps/server/src/test/schema-inventory.ts (see also apps/web/src/test/schema-inventory.ts).
 /**
  * The one classification of every table this schema owns, shared by
  * `invariants.test.ts` (which asserts the source/derived partition and each

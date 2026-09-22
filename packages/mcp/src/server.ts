@@ -127,9 +127,9 @@ export interface CreateMcpServerOptions {
   /**
    * Server-side logging for an unexpected (non-`DomainError`) tool failure.
    * Injected rather than imported: the one implementation lives
-   * application-side (`apps/server/src/server/error-response.ts`), so the
-   * "log server-side, return a generic message + errorId" contract is shared
-   * with the HTTP surfaces instead of duplicated in this package.
+   * application-side, so the "log server-side, return a generic message +
+   * errorId" contract is shared with the HTTP surfaces instead of duplicated in
+   * this package.
    */
   logInternalError: LogInternalError;
 }

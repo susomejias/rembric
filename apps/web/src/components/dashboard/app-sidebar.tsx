@@ -39,11 +39,11 @@ import { cn } from '@/lib/utils';
  * The dashboard frame: the vertical rail, the content column beside it, and the
  * one route that renders with neither.
  *
- * It owns the content column for the same reason its predecessor did: no layout
- * can opt out of its parent or read the pathname, and `/dashboard/login` is a
- * full-bleed screen that must keep rendering without the frame, so the only place
- * that exception can live is a client component above the column. `lib/nav` names
- * the path once; this is its only reader.
+ * It owns the content column because no layout can opt out of its parent or read
+ * the pathname, and `/dashboard/login` is a full-bleed screen that must keep
+ * rendering without the frame, so the only place that exception can live is a
+ * client component above the column. `lib/nav` names the path once; this is its
+ * only reader.
  *
  * `TooltipProvider` is here because the rail's icons-only mode is the only
  * tooltip surface in the app, and the primitive's tooltips need a provider above
@@ -52,13 +52,11 @@ import { cn } from '@/lib/utils';
  * `min-w-0` on both the inset and its content column is load-bearing: the inset
  * is a flex item, so its default `min-width: auto` refuses to shrink below the
  * column's min-content width and a wide child would push the whole page past the
- * viewport. Main expressed the same rule as `min-width: 0` on `.main` (and on
- * `.app > .main`) rather than hiding the overflow.
+ * viewport.
  *
  * The content column takes the full width the inset offers — no `max-w` and no
  * `mx-auto`. A cap here left a several-hundred-pixel void on the right at a wide
- * viewport with the rail collapsed, and main's `.main` was never capped: it
- * simply filled what the rail left. Readable-content widths belong to the content
+ * viewport with the rail collapsed. Readable-content widths belong to the content
  * that needs them (markdown panels, forms), not to the dashboard frame.
  *
  * This column also owns the vertical rhythm, and owns it alone: `oauth-consent`
@@ -107,14 +105,15 @@ export function SidebarFrame({
  * from a second implementation.
  *
  * What is tuned is deliberately two things: the row labels wear the rail's
- * identity type (`font-mono uppercase`, main's own treatment) and the badge keeps
- * main's `--warn` ink. Everything else is the primitive's own presentation — the
+ * identity type (`font-mono uppercase`) and the badge keeps the `--warn` ink.
+ * Everything else is the primitive's own presentation — the
  * group captions are the stock `SidebarGroupLabel`, the rows are its default
- * size, and the active row is its `data-active` fill. Main's 3px lime rule and
- * its `size="lg"` rows are gone: a 3px border on the primitive's rounded row read
- * as a bracket, and the tall rows made a ten-item rail read as a list of panels.
+ * size, and the active row is its `data-active` fill. A 3px lime rule and
+ * `size="lg"` rows are deliberately avoided: a 3px border on the primitive's
+ * rounded row reads as a bracket, and tall rows make a ten-item rail read as a
+ * list of panels.
  *
- * The order of the three regions is main's: brand block and update slot, then
+ * The order of the three regions: brand block and update slot, then
  * `MAIN` / `ADMIN`, then the sign-out and the collapse toggle in the footer.
  */
 export function AppSidebar({
@@ -177,8 +176,8 @@ export function AppSidebar({
 }
 
 /**
- * The rail's brand block — the mark, the wordmark and the running version, the
- * trio main's `.sb-brand` opens with. The mark is the transparent logo the login
+ * The rail's brand block — the mark, the wordmark and the running version. The
+ * mark is the transparent logo the login
  * card also wears; the wordmark and the version drop out in icons-only mode, where
  * only the mark has room.
  *
@@ -252,14 +251,13 @@ export function updaterReadState(input: UpdaterInput): UpdaterReadState {
 }
 
 /**
- * The update slot under the brand — main's `.sb-update` in the theme's utilities,
+ * The update slot under the brand, in the theme's utilities,
  * and a link in every state, including a disabled check, so `/dashboard/update`
  * stays reachable even when the rail has nothing to announce. An available
  * release wears the accent; the no-news states are quiet so a working rail is not
  * permanently shouting.
  *
- * In icons-only mode the label drops to `sr-only` and the box keeps its dot, the
- * same trade main makes when it hides `.sb-update .label`.
+ * In icons-only mode the label drops to `sr-only` and the box keeps its dot.
  */
 function UpdaterSlot({ updater }: { updater: UpdaterInput }) {
   const state = updaterReadState(updater);
@@ -315,13 +313,11 @@ function badgeFor(entry: NavEntry, counters: NavBadgeCounters): NavItemBadge | n
  * the accent ink (`data-active:text-primary` — the icon inherits it), plus a
  * straight lime rule at the row's left edge.
  *
- * The type and icon sizes are main's, not the primitive's defaults: main's rail
- * label is ~11.5px over an 18px icon (`.sb-item` in `styles/core/layout.css`),
- * where the stock row is 14px over 16px. `h-9` is the one addition to the
- * primitive's 32px row — main's own is 44px, which is the row this rail was
- * already trimmed away from, and the taller target is what the mobile sheet's
- * rows get too. The icons-only size is untouched: the primitive pins it with
- * `group-data-[collapsible=icon]:size-8!`.
+ * The type and icon sizes are deliberate, not the primitive's defaults: the
+ * label is ~11.5px over an 18px icon, where the stock row is 14px over 16px.
+ * `h-9` is the one addition to the primitive's 32px row; the taller target is what
+ * the mobile sheet's rows get too. The icons-only size is untouched: the primitive
+ * pins it with `group-data-[collapsible=icon]:size-8!`.
  *
  * The rule is a detached element rather than a `border-l` on the row because the
  * stock row is rounded: a left border follows the corner radius into a bracket.

@@ -9,18 +9,15 @@ import { REMBRIC_VERSION } from '../../lib/version';
 export const dynamic = 'force-dynamic';
 
 /**
- * `apps/server/src/server/http.ts::createHealthzHandler`, ported. The probe is
- * bearer-gated exactly as the server's is — same statuses, same codes, same
- * copy — because the container HEALTHCHECK (`apps/web/Dockerfile`), both compose
- * files and `install.sh`'s post-up poll all send
- * `Authorization: Bearer $REMBRIC_ADMIN_TOKEN`. An unauthenticated probe would
- * let any local process read the release identity, and made this endpoint the
- * one surface that diverged from the server's gate.
+ * The health probe. It is bearer-gated because the container HEALTHCHECK
+ * (`apps/web/Dockerfile`), both compose files and `install.sh`'s post-up poll all
+ * send `Authorization: Bearer $REMBRIC_ADMIN_TOKEN`: an unauthenticated probe
+ * would let any local process read the release identity.
  *
- * Order matters and mirrors the server: pre-auth lockout before the token-hash
- * scan, so a bogus bearer cannot force repeated scrypt on the single thread.
- * The lockout key is the same request-derived identity `lib/api.ts` uses, so a
- * failure accrued here also counts against the `/api` surface.
+ * Order matters: pre-auth lockout before the token-hash scan, so a bogus bearer
+ * cannot force repeated scrypt on the single thread. The lockout key is the same
+ * request-derived identity `lib/api.ts` uses, so a failure accrued here also
+ * counts against the `/api` surface.
  */
 export async function GET(request: Request): Promise<Response> {
   const services = getServices();
@@ -77,10 +74,9 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 /**
- * Pre-auth lockout key. `apps/server` reads the socket address; a route handler
- * cannot reach it, so the first `x-forwarded-for` hop is the closest available
- * substitute and a direct request shares the `'unknown'` bucket — the same
- * decision `lib/api.ts::networkIdentity` and the `/mcp` route document.
+ * Pre-auth lockout key. A route handler cannot reach the socket address, so the
+ * first `x-forwarded-for` hop is the closest available substitute and a direct
+ * request shares the `'unknown'` bucket.
  */
 function clientIdentity(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');

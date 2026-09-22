@@ -25,10 +25,8 @@ import { AuthLockout } from './auth-lockout';
 import { getDb } from './db';
 
 /**
- * The services the session-lifecycle HTTP API's handlers call, wired the way
- * `apps/server/src/server/bootstrap.ts` wires them for the same router. This
- * module is the web app's counterpart of that bootstrapper: it owns the
- * service graph, the embedder memo and the two background workers (embedding
+ * The services the session-lifecycle HTTP API's handlers call. This module owns
+ * the service graph, the embedder memo and the two background workers (embedding
  * drain, entity backfill), while `lib/process.ts` owns the process-level pieces
  * that need timers or the boot-time admin-token bootstrap.
  *

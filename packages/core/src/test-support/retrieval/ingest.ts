@@ -19,8 +19,7 @@ const DAY_MS = 86_400_000;
  * Mirror of the shipping `CANDIDATES_PER_SAVE_MAX` default
  * (`apps/web/src/lib/mcp-server.ts` reads the same 5). Inlined instead of read
  * from a config module: the harness measures the shipping SAVE PATH, not the
- * deployment's environment, and `apps/server/src/config.ts` — the only module
- * that exported it — retires with the server image.
+ * deployment's environment.
  */
 const CANDIDATES_PER_SAVE_MAX_DEFAULT = 5;
 

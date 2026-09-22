@@ -22,9 +22,8 @@ import { navEntryForPath } from '@/lib/nav';
  * The trigger is the primitive's, so it routes to whatever the viewport makes
  * correct — the desktop rail's open state on a pointer device, the provider's
  * sheet on a narrow one — and it is visible at every width rather than only under
- * `md`: main puts an explicit, labelled collapse control in its rail foot, and a
- * trigger that disappears as the rail appears would leave the desktop with the
- * rail's hover edge and ⌘B as the only ways back to icons.
+ * `md`: a trigger that disappears as the rail appears would leave the desktop
+ * with the rail's hover edge and ⌘B as the only ways back to icons.
  *
  * The breadcrumb is a locator, not a title: every view renders its own `<ViewHead>`
  * with the numbered `h1`, and repeating that here would be the same sentence twice.

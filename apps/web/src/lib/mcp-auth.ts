@@ -13,8 +13,7 @@ import { type Token } from '@rembric/db';
 import type { Services } from './services';
 
 /**
- * Bearer authentication for the MCP HTTP surface — the port of
- * `apps/server/src/server/http.ts::handleMcpRequest`'s steps 1 and 1a.
+ * Bearer authentication for the MCP HTTP surface.
  *
  * The gate is SDK v2's `verifyBearerToken`: the SDK owns the `Authorization`
  * header syntax, the `WWW-Authenticate` challenge (RFC 6750 / RFC 9728) and the
@@ -71,8 +70,7 @@ export type McpAuthOutcome =
  *
  * `identity` is the pre-auth lockout key (see the route's `clientIdentity`), and
  * the lockout is consulted BEFORE the token lookup and before the SDK gate, so
- * a flood of bogus bearers cannot spend the single Node thread hashing secrets
- * — the same ordering `apps/server` and `/api` use.
+ * a flood of bogus bearers cannot spend the single Node thread hashing secrets.
  */
 export async function verifyMcpBearerToken(input: {
   authorization: string | null;
@@ -98,8 +96,7 @@ export async function verifyMcpBearerToken(input: {
 
   // `project_archived` is a domain refusal (403), not an authentication
   // failure: the v2 gate can only answer 401/403 as an OAuth error object, so
-  // the refusal is captured here and answered verbatim in the caller's own
-  // shape — the same body `apps/server` returns for that code.
+  // the refusal is captured here and answered verbatim in the caller's own shape.
   let domainRefusal: Response | null = null;
   let requestContext: RequestContext | null = null;
 
@@ -246,7 +243,7 @@ function syntheticOAuthToken(clientId: string, scope: TokenScope, projectId: str
  * The RFC 9728 protected-resource metadata URL advertised on a 401, so an OAuth
  * client can discover the authorization server. Emitted only when OAuth is
  * enabled (i.e. `REMBRIC_PUBLIC_URL` is set — the same gate `lib/services.ts`
- * builds `OAuthService` behind), exactly as `apps/server` emits it.
+ * builds `OAuthService` behind).
  */
 function protectedResourceMetadataUrl(services: Services): string | undefined {
   const issuer = process.env['REMBRIC_PUBLIC_URL'];

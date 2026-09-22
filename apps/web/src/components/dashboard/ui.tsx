@@ -14,21 +14,19 @@ import {
 import { cn } from '@/lib/utils';
 
 /**
- * The dashboard's presentation vocabulary, in one file, mirroring the
- * production dashboard's component helpers (`apps/server/src/dashboard/
- * components.ts` + `styles/core/patterns.css`) as React: the numbered view
- * head, the stat card, the section bar, the data table, the key/value grid,
- * the state pill, the flash. Every colour is a semantic token the theme
- * declares (`bg-card`, `text-muted-foreground`, `border-border`, `text-primary`,
+ * The dashboard's presentation vocabulary, in one file: the numbered view head,
+ * the stat card, the section bar, the data table, the key/value grid, the state
+ * pill, the flash. Every colour is a semantic token the theme declares
+ * (`bg-card`, `text-muted-foreground`, `border-border`, `text-primary`,
  * `text-warn`).
  *
  * Nothing here reads the request or the database.
  */
 
 /**
- * `fg` is main's neutral tone: a bright value over the default lime bullet
- * (`.bn` in `styles/core/atoms.css`). `amber` is the theme's `--warn`; the key
- * keeps its historical name so call sites outside this file do not churn.
+ * `fg` is a bright value over the default lime bullet. `amber` is the theme's
+ * `--warn`; the key keeps its historical name so call sites outside this file do
+ * not churn.
  */
 export type Tone = 'fg' | 'lime' | 'amber' | 'dim' | 'danger';
 
@@ -227,7 +225,7 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className, compact }: 
  * shows the grid's own background, so every divider is a single hairline and
  * the strip needs one border instead of one per cell.
  *
- * `variant="cards"` is main's auto-fill kind grid: individually bordered
+ * `variant="cards"` is the auto-fill kind grid: individually bordered
  * cards on the page background, so empty trailing slots stay invisible
  * instead of painting the frame grey.
  */
