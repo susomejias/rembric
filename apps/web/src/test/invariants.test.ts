@@ -578,6 +578,57 @@ describe('distroless runtime node-path invariants', () => {
 });
 
 /**
+ * Standalone listen-port invariant.
+ *
+ * The image must listen on the port `REMBRIC_PORT` names, because
+ * `docker-compose.yml` maps `${REMBRIC_PORT}:${REMBRIC_PORT}` and existing
+ * installations set that variable in `.env` without editing their Compose file.
+ * The Next-generated standalone server reads only `PORT`, so the entrypoint is a
+ * launcher that resolves `REMBRIC_PORT` first and the HEALTHCHECK probes through
+ * the same launcher. A renamed generated server or a hard-coded probe port is the
+ * migration regression these assertions pin.
+ */
+describe('standalone listen-port invariants', () => {
+  function runtimeStage(): string {
+    const dockerfile = prodDockerfile();
+    const runtimeIdx = dockerfile.search(
+      new RegExp(`^FROM\\s+\\S+\\s+AS\\s+${PROD_STAGE}\\b`, 'm'),
+    );
+    expect(runtimeIdx).toBeGreaterThan(-1);
+    return dockerfile.slice(runtimeIdx);
+  }
+
+  function entrypoint(runtime: string): string {
+    const match = runtime.match(/^ENTRYPOINT\s+(\[.*\])/m);
+    expect(match).not.toBeNull();
+    return match![1]!;
+  }
+
+  it('the entrypoint runs the port-deriving launcher at apps/web/server.js', () => {
+    expect(entrypoint(runtimeStage())).toContain('/app/apps/web/server.js');
+  });
+
+  it('the launcher starts the renamed generated server, and the assembly does rename it', () => {
+    const launcher = readFileSync(join(srcRoot, '..', 'server.js'), 'utf8');
+    expect(launcher).toContain('next-server.js');
+    // The rename (a builder-stage step) is what lets the launcher occupy the
+    // entrypoint path without deleting the generated server it imports.
+    expect(prodDockerfile()).toMatch(
+      /mv\s+\/runtime\/apps\/web\/server\.js\s+\/runtime\/apps\/web\/next-server\.js/,
+    );
+  });
+
+  it('the HEALTHCHECK probes the env-derived port through the launcher, never a hard-coded 8787', () => {
+    const runtime = runtimeStage();
+    const health = runtime.match(/HEALTHCHECK[\s\S]*?CMD\s+(\[.*\])/);
+    expect(health).not.toBeNull();
+    expect(health![1]).toContain('/app/apps/web/server.js');
+    expect(health![1]).toContain('--healthcheck');
+    expect(health![1]).not.toMatch(/127\.0\.0\.1:8787/);
+  });
+});
+
+/**
  * Scope-leak invariant.
  *
  * Application-level RLS is enforced by passing a `Scope` argument into
