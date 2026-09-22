@@ -1,3 +1,5 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   agentSessions,
   AgentSessionsRepository,
@@ -5,9 +7,8 @@ import {
   tokens,
   type NewAgentSession,
 } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../db.js';
+import { createTestDb, type TestDb } from '../test-support/db.js';
 
 function row(overrides: Partial<NewAgentSession> & { id: string }): NewAgentSession {
   return {

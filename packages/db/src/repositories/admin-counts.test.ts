@@ -1,5 +1,7 @@
 import { deriveTitle } from '@rembric/core';
 import { REVIEW_TTL_MS } from '@rembric/core';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   agentSessions,
   createRepositories,
@@ -11,9 +13,8 @@ import {
   type NewMemory,
   type Repositories,
 } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../db.js';
+import { createTestDb, type TestDb } from '../test-support/db.js';
 
 /**
  * Dashboard list-page TOTALs read the true filtered count, not the page

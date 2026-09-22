@@ -1,6 +1,9 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   countTableRows,
   quickCheck,
@@ -9,10 +12,8 @@ import {
   readJournalMode,
   vacuumInto,
 } from '@rembric/db';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../db.js';
+import { createTestDb, type TestDb } from './test-support/db.js';
 
 describe('db/diagnostics', () => {
   let t: TestDb;

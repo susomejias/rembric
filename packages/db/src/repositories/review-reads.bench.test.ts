@@ -1,10 +1,11 @@
 import { DEFAULT_DECAY } from '@rembric/core';
 import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '@rembric/core';
-import { MemoryRepository, ProjectsRepository, type MemoryType, type NewMemory } from '@rembric/db';
 import type { Database } from 'better-sqlite3';
 import { afterEach, describe, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../db.js';
+import { MemoryRepository, ProjectsRepository, type MemoryType, type NewMemory } from '@rembric/db';
+
+import { createTestDb, type TestDb } from '../test-support/db.js';
 
 /**
  * Measurement harness for the four review-axis reads, each of which derives its

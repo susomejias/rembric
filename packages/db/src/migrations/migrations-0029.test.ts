@@ -1,7 +1,11 @@
-import { type DbHandle } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createMigrationFixture, type MigrationFixture } from '../migration-fixture.js';
+import { type DbHandle } from '@rembric/db';
+
+import {
+  createMigrationFixture,
+  type MigrationFixture,
+} from '../test-support/migration-fixture.js';
 
 /**
  * 0029 rebuilds a table that is an FK parent of two populated children, so

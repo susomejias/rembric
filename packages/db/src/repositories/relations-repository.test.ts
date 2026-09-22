@@ -1,6 +1,8 @@
 import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   createRepositories,
   memory,
@@ -11,10 +13,9 @@ import {
   type NewMemoryRelation,
   type Repositories,
 } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../db.js';
-import { defaultProjectScope, seedProject } from '../../default-project.js';
+import { createTestDb, type TestDb } from '../test-support/db.js';
+import { defaultProjectScope, seedProject } from '../test-support/default-project.js';
 
 function mem(id: string, content: string): NewMemory {
   return {

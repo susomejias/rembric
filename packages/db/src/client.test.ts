@@ -2,8 +2,9 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
-import { createDb, type DbHandle } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createDb, type DbHandle } from '@rembric/db';
 
 describe('createDb connection tuning', () => {
   let dataDir: string;

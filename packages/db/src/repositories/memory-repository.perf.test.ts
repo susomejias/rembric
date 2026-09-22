@@ -1,5 +1,8 @@
 import { DEFAULT_DECAY } from '@rembric/core';
 import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '@rembric/core';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   confirmations,
   consolidationOps,
@@ -11,11 +14,9 @@ import {
   type MemoryType,
   type NewMemory,
 } from '@rembric/db';
-import { and, eq, isNull, sql } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../db.js';
-import { seedProject } from '../../default-project.js';
+import { createTestDb, type TestDb } from '../test-support/db.js';
+import { seedProject } from '../test-support/default-project.js';
 
 function mem(overrides: Partial<NewMemory> & { id: string }): NewMemory {
   return {

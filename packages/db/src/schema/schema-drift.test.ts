@@ -1,10 +1,11 @@
-import { schema } from '@rembric/db';
 import { is } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
 
-import { createTestDb } from './db.js';
-import { ALL_TABLES } from './schema-inventory.js';
+import { schema } from '@rembric/db';
+
+import { createTestDb } from '../test-support/db.js';
+import { ALL_TABLES } from '../test-support/schema-inventory.js';
 
 /**
  * 13.12 — migration round-trip + 13.13 — schema-drift detection.

@@ -2,12 +2,13 @@ import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { defaultMigrationsDir, migrate, partitionKeyFor, type MemoryScope } from '@rembric/db';
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../index.js';
+import { defaultMigrationsDir, migrate, partitionKeyFor, type MemoryScope } from '@rembric/db';
+
+import { createTestDb, type TestDb } from '../test-support/db.js';
 
 const fullMigrationsDir = defaultMigrationsDir();
 
@@ -453,22 +454,22 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
       )
       .run();
 
-    const TABLES = [
-      'tokens',
-      'projects',
-      'sessions',
-      'prompts',
-      'memory',
-      'confirmations',
-      'memory_vec',
-      'consolidation_runs',
-      'consolidation_ops',
-    ];
+    const COUNT_SQL = {
+      tokens: 'SELECT COUNT(*) AS n FROM tokens',
+      projects: 'SELECT COUNT(*) AS n FROM projects',
+      sessions: 'SELECT COUNT(*) AS n FROM sessions',
+      prompts: 'SELECT COUNT(*) AS n FROM prompts',
+      memory: 'SELECT COUNT(*) AS n FROM memory',
+      confirmations: 'SELECT COUNT(*) AS n FROM confirmations',
+      memory_vec: 'SELECT COUNT(*) AS n FROM memory_vec',
+      consolidation_runs: 'SELECT COUNT(*) AS n FROM consolidation_runs',
+      consolidation_ops: 'SELECT COUNT(*) AS n FROM consolidation_ops',
+    } as const;
     const countAll = () =>
       Object.fromEntries(
-        TABLES.map((t) => [
+        Object.entries(COUNT_SQL).map(([t, sql]) => [
           t,
-          raw.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM ${t}`).get()!.n,
+          raw.prepare<[], { n: number }>(sql).get()!.n,
         ]),
       );
     const before = countAll();

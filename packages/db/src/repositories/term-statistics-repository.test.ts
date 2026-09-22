@@ -1,7 +1,8 @@
-import { createRepositories, QUERY_TERMS_VOCAB_TABLE, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../index.js';
+import { createRepositories, QUERY_TERMS_VOCAB_TABLE, type Repositories } from '@rembric/db';
+
+import { createTestDb, type TestDb } from '../test-support/db.js';
 
 let db: TestDb;
 let repos: Repositories;
