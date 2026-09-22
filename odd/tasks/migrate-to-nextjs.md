@@ -301,6 +301,9 @@ Note: phase 1 creates the dependency graph that makes phase 2 meaningful. `apps/
 ### Close
 
 - [ ] C.1 Full suite green, image builds, installer e2e passes.
+  - [x] Remove the temporary `@rembric/*` source mappings from `apps/web/tsconfig.json`.
+  - [x] Build workspace package declarations before CI lint without duplicating typecheck.
+  - [x] Verify lint/typecheck from a no-`dist` checkout and build the web Docker runtime.
 - [ ] C.2 Update `AGENTS.md` and the affected specs.
 - [ ] C.3 Archive the OpenSpec change.
 

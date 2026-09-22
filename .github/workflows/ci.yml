@@ -110,14 +110,14 @@ jobs:
         working-directory: packages/core
         run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
 
+      - name: Typecheck
+        run: pnpm run typecheck
+
       - name: Lint
         run: pnpm run lint
 
       - name: Format
         run: pnpm run format:check
-
-      - name: Typecheck
-        run: pnpm run typecheck
 
       # A working-tree property, so it runs here on the shallow checkout rather
       # than in `spec-provenance`, which needs fetch-depth: 0 for its diff.

@@ -137,9 +137,10 @@ function seedCorpus(t: TestDb, repo: MemoryRepository, size: number): void {
 }
 
 function applyIndexes(raw: Database, wanted: readonly string[]): void {
-  for (const name of Object.keys(CONFIRMATION_INDEXES)) {
-    raw.exec(`DROP INDEX IF EXISTS "${name}"`);
-  }
+  raw.exec('DROP INDEX IF EXISTS confirmations_memory_id_idx');
+  raw.exec('DROP INDEX IF EXISTS confirmations_event_ts_idx');
+  raw.exec('DROP INDEX IF EXISTS confirmations_session_idx');
+  raw.exec('DROP INDEX IF EXISTS confirmations_memory_verdict_ts_idx');
   for (const name of wanted) {
     raw.exec(CONFIRMATION_INDEXES[name]!);
   }
