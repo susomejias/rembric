@@ -818,11 +818,16 @@ describe('stdio to HTTP transport', () => {
     client.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: {} });
     expect(await client.nextLine()).toMatchObject({ id: 4, result: { id: 4 } });
 
-    expect(requests).toEqual([
+    expect(requests.slice(0, 2)).toEqual([
       { id: 1, method: 'initialize', session: undefined },
       { id: undefined, method: 'notifications/initialized', session: 's1' },
+    ]);
+    expect(requests.slice(2, 4)).toHaveLength(2);
+    expect(requests.slice(2, 4).sort((left, right) => Number(left.id) - Number(right.id))).toEqual([
       { id: 2, method: 'tools/call', session: 's1' },
       { id: 3, method: 'tools/call', session: 's1' },
+    ]);
+    expect(requests.slice(4)).toEqual([
       { id: 1, method: 'initialize', session: undefined },
       { id: undefined, method: 'notifications/initialized', session: 's2' },
       { id: 3, method: 'tools/call', session: 's2' },
@@ -872,8 +877,12 @@ describe('stdio to HTTP transport', () => {
     client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     client.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {} });
     client.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {} });
-    expect(await client.nextLine()).toMatchObject({ id: 3, result: { id: 3 } });
-    expect(await client.nextLine()).toMatchObject({ id: 2, result: { id: 2 } });
+    // Concurrent requests may reach the server in any order; the bridge guarantees response correlation, not arrival order.
+    const responses = [await client.nextLine(), await client.nextLine()];
+    const byId = new Map(responses.map((response) => [response.id, response] as const));
+    expect([...byId.keys()].sort((left, right) => Number(left) - Number(right))).toEqual([2, 3]);
+    expect(byId.get(2)).toMatchObject({ id: 2, result: { id: 2 } });
+    expect(byId.get(3)).toMatchObject({ id: 3, result: { id: 3 } });
     client.child.stdin.end();
     server.close();
   });
