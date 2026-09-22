@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest';
+
 import {
   memory,
   MemoryRepository,
@@ -6,10 +8,9 @@ import {
   type NewMemory,
   type NewPrompt,
 } from '@rembric/db';
-import { describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../db.js';
-import { seedProject } from '../default-project.js';
+import { createTestDb, type TestDb } from '../test-support/db.js';
+import { seedProject } from '../test-support/default-project.js';
 
 /**
  * 0020_fix_fts_delete_triggers — dangling-posting fix + memory_au write-amp fix.
@@ -40,9 +41,11 @@ function prompt(overrides: Partial<NewPrompt> & { id: string; content: string })
 }
 
 function ftsMatchCount(t: TestDb, table: 'memory_fts' | 'prompts_fts', term: string): number {
-  const row = t.handle.raw
-    .prepare<[string], { c: number }>(`SELECT count(*) c FROM ${table} WHERE ${table} MATCH ?`)
-    .get(term);
+  const query =
+    table === 'memory_fts'
+      ? 'SELECT count(*) c FROM memory_fts WHERE memory_fts MATCH ?'
+      : 'SELECT count(*) c FROM prompts_fts WHERE prompts_fts MATCH ?';
+  const row = t.handle.raw.prepare<[string], { c: number }>(query).get(term);
   return row?.c ?? 0;
 }
 

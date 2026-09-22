@@ -1,8 +1,12 @@
 import { AgentSessionsService } from '@rembric/core';
-import { createRepositories, type DbHandle } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createMigrationFixture, type MigrationFixture } from '../migration-fixture.js';
+import { createRepositories, type DbHandle } from '@rembric/db';
+
+import {
+  createMigrationFixture,
+  type MigrationFixture,
+} from '../test-support/migration-fixture.js';
 
 /**
  * 0036 adds the single-writer anchor `last_turn_report_at` (`session-nudges`,

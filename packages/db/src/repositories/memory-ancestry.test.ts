@@ -1,7 +1,8 @@
-import { MemoryRepository } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../../db.js';
+import { MemoryRepository } from '@rembric/db';
+
+import { createTestDb, type TestDb } from '../test-support/db.js';
 
 /**
  * The shipped breadth-first walks, transcribed verbatim as equivalence ORACLES —

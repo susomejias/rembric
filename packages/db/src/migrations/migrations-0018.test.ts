@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { defaultMigrationsDir } from '@rembric/db';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { defaultMigrationsDir } from '@rembric/db';
 
 const MIGRATION_SQL = readFileSync(
   join(defaultMigrationsDir(), '0018_unique_topic_key_active_index.sql'),

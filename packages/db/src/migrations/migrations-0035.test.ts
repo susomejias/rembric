@@ -1,7 +1,11 @@
-import { type DbHandle } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createMigrationFixture, type MigrationFixture } from '../migration-fixture.js';
+import { type DbHandle } from '@rembric/db';
+
+import {
+  createMigrationFixture,
+  type MigrationFixture,
+} from '../test-support/migration-fixture.js';
 
 const MIGRATION = '0035_drop_session_summary_versions.sql';
 
@@ -33,8 +37,15 @@ function seeded(handle: DbHandle): { sessionId: string; curatedSessionId: string
   return { sessionId: '01SESSPLAIN', curatedSessionId: '01SESSCURATED' };
 }
 
-function tableRows(handle: DbHandle, table: string): Row[] {
-  return handle.raw.prepare<[], Row>(`SELECT * FROM ${table} ORDER BY id`).all();
+const TABLE_SELECT = {
+  sessions: 'SELECT * FROM sessions ORDER BY id',
+  memory: 'SELECT * FROM memory ORDER BY id',
+  prompts: 'SELECT * FROM prompts ORDER BY id',
+  confirmations: 'SELECT * FROM confirmations ORDER BY id',
+} as const;
+
+function tableRows(handle: DbHandle, table: keyof typeof TABLE_SELECT): Row[] {
+  return handle.raw.prepare<[], Row>(TABLE_SELECT[table]).all();
 }
 
 beforeEach(() => {

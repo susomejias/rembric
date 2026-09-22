@@ -2,6 +2,9 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   createQueryTokenizerTables,
   createRepositories,
@@ -12,11 +15,9 @@ import {
   UnrecognisedFts5OptionError,
   type Repositories,
 } from '@rembric/db';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../index.js';
-import { ALL_TABLES, SHADOW_TABLE_NAMES } from '../schema-inventory.js';
+import { createTestDb, type TestDb } from './test-support/db.js';
+import { ALL_TABLES, SHADOW_TABLE_NAMES } from './test-support/schema-inventory.js';
 
 /**
  * The tokenising table's declaration comes from `memory_fts`'s own, read out of

@@ -1,8 +1,12 @@
 import { AgentSessionsService } from '@rembric/core';
-import { createRepositories, type DbHandle } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createMigrationFixture, type MigrationFixture } from '../migration-fixture.js';
+import { createRepositories, type DbHandle } from '@rembric/db';
+
+import {
+  createMigrationFixture,
+  type MigrationFixture,
+} from '../test-support/migration-fixture.js';
 
 /**
  * 0034 is purely additive — three ALTER TABLE ADD COLUMN statements, no
@@ -49,8 +53,10 @@ function seeded(handle: DbHandle): {
   };
 }
 
-function tableRows(handle: DbHandle, table: string): Row[] {
-  return handle.raw.prepare<[], Row>(`SELECT * FROM ${table} ORDER BY id`).all();
+const TABLE_SELECT = { sessions: 'SELECT * FROM sessions ORDER BY id' } as const;
+
+function tableRows(handle: DbHandle, table: keyof typeof TABLE_SELECT): Row[] {
+  return handle.raw.prepare<[], Row>(TABLE_SELECT[table]).all();
 }
 
 beforeEach(() => {
