@@ -6,7 +6,10 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@rembric/db": ["../../packages/db/src/index.ts"],
+      "@rembric/core": ["../../packages/core/src/index.ts"],
+      "@rembric/mcp": ["../../packages/mcp/src/index.ts"]
     },
     "allowJs": true,
     "noEmit": true,
