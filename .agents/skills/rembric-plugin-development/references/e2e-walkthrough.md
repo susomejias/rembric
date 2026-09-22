@@ -1,29 +1,30 @@
-# E2E walkthrough — exercising plugin changes against `pnpm run dev:docker:up`
+# E2E walkthrough — exercising plugin changes against a local dev server (`pnpm run dev`)
 
-## 1. Bring up the dev stack
+## 1. Bring up the dev server
 
 ```bash
-pnpm run dev:docker:up
+REMBRIC_DATA_DIR=./data-dev REMBRIC_ADMIN_TOKEN=<16+-char-token> pnpm run dev
 ```
 
-Foreground process. Logs to stdout AND `./data-dev/data.db` (host bind-mount). Every `up` wipes and reseeds, so you get a predictable baseline:
+Host Next.js dev server (`next dev`), loopback only, hot-reloading. For a predictable baseline, seed the demo corpus first:
+
+```bash
+REMBRIC_DATA_DIR=./data-dev REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 \
+  pnpm --filter @rembric/core exec tsx ../../apps/web/src/scripts/seed-dev.ts --reset
+```
+
+That gives you a deterministic baseline:
 
 - Project: `demo` (slug)
-- Tokens (regenerated every reset; capture from the boot banner):
+- Tokens (regenerated every reset; capture from the seed output):
   - `demo-reader: <plaintext>`
   - `demo-writer: <plaintext>`
-- Listening on `http://127.0.0.1:8788` (host-mapped from the container's `:8787`).
-- Admin token from the `.env` file in the repo (`REMBRIC_ADMIN_TOKEN`).
-
-Don't grep `/tmp/rembric-dev*.log` for "listening" — the docker-compose attach mode buffers stdout; use `docker logs rembric-dev | tail -30` instead.
+- Listening on `http://127.0.0.1:3000`.
+- Admin token: the `REMBRIC_ADMIN_TOKEN` you exported (or `REMBRIC_ADMIN_TOKEN` from the repo `.env`).
 
 ## 2. Get the seeded token
 
-```bash
-docker logs rembric-dev 2>&1 | grep -aE 'demo-writer|demo-reader' | head -2
-```
-
-`demo-writer` has write permission to the `demo` project — what you want for any handler that POSTs.
+The seed treats secrets as shown-once: capture `demo-reader` / `demo-writer` from the seed command's own output when it runs (the "project-scoped tokens" lines) — they are not re-readable from a logfile afterwards. `demo-writer` has write permission to the `demo` project — what you want for any handler that POSTs.
 
 ## 3. Install the plugin under test
 
@@ -53,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin
 Pi has no repo-side install script — its mechanism is its own CLI (`pi install npm:@rembric/pi` for the registry form, **never** with a version suffix; the local-path form for iterating on a branch is in `apps/plugin/.pi-plugin/README.md`). Note the local-path shape runs **no** dependency install, which is why the extension declares zero runtime dependencies. Credentials are shell-only — this harness injects nothing from its settings file:
 
 ```bash
-export REMBRIC_SERVER_URL=http://127.0.0.1:8788
+export REMBRIC_SERVER_URL=http://127.0.0.1:3000
 export REMBRIC_API_TOKEN=<demo-writer-plaintext-from-step-2>
 export BRIDGE_VERSION="$(node -p 'require("./apps/plugin/package.json").version')"
 ```
@@ -70,7 +71,7 @@ cat > ~/.config/opencode/opencode.json <<JSON
       "type": "local",
       "command": ["npx", "-y", "@rembric/mcp-bridge@${BRIDGE_VERSION}"],
       "environment": {
-        "REMBRIC_SERVER_URL": "http://127.0.0.1:8788",
+        "REMBRIC_SERVER_URL": "http://127.0.0.1:3000",
         "REMBRIC_API_TOKEN": "<demo-writer-plaintext-from-step-2>"
       },
       "enabled": true
@@ -100,7 +101,7 @@ opencode mcp list --print-logs --log-level DEBUG 2>&1 | grep -aE 'rembric-bridge
 
 Expected:
 
-- `[rembric-bridge] projectDir=/tmp/rembric-spike-real (from PWD) url=http://127.0.0.1:8788/mcp/demo`
+- `[rembric-bridge] projectDir=/tmp/rembric-spike-real (from PWD) url=http://127.0.0.1:3000/mcp/demo`
 - `[Local→Remote] initialize` then `[Remote→Local] 0`
 - `toolCount=19 create() successfully created client`
 - `✓ rembric connected`
@@ -112,7 +113,7 @@ Direct invocation via tsx. Pattern from `add-opencode-plugin`:
 ```ts
 // /tmp/exercise.ts
 import { RembricPlugin } from '/Users/<user>/.config/opencode/plugins/rembric.ts';
-process.env.REMBRIC_SERVER_URL = 'http://127.0.0.1:8788';
+process.env.REMBRIC_SERVER_URL = 'http://127.0.0.1:3000';
 process.env.REMBRIC_API_TOKEN = '<demo-writer>';
 
 async function main() {
@@ -161,7 +162,7 @@ Direct `tsx` invocation proves the handler; it cannot prove the harness delivers
 
 ```bash
 S=/tmp/scratch/e2e; mkdir -p "$S/pihome"
-HOME="$S/pihome" REMBRIC_SERVER_URL=http://127.0.0.1:8788 REMBRIC_API_TOKEN="$TOK" pi …
+HOME="$S/pihome" REMBRIC_SERVER_URL=http://127.0.0.1:3000 REMBRIC_API_TOKEN="$TOK" pi …
 ```
 
 **3. Load the plugin per run, do not install it.** Pi takes `-e <path>` ("Load an extension file"). Installing mutates settings you then have to restore, and a half-restored setup is worse than no test.
@@ -190,7 +191,7 @@ sqlite3 data-dev/data.db "SELECT id,status,ended_at,substr(coalesce(summary,''),
 ```bash
 for id in $(sqlite3 data-dev/data.db "SELECT id FROM sessions WHERE agent='pi' AND status='active';"); do
   curl -sf -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
-    -d '{}' "http://127.0.0.1:8788/api/<slug>/sessions/$id/end"
+    -d '{}' "http://127.0.0.1:3000/api/<slug>/sessions/$id/end"
 done
 ```
 
@@ -269,7 +270,8 @@ To probe the server mid-session (attribution, ambiguity), fire a background job 
 ## 6. Tear down cleanly
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+# stop the `pnpm run dev` process (Ctrl-C in its terminal, or kill the PID owning :3000)
+rm -rf ./data-dev                                # optional: drop the scratch DB
 bash apps/plugin/.<client>-plugin/uninstall.sh   # opencode + Hermes; Pi has no repo-side script — use its own removal verb
 ```
 

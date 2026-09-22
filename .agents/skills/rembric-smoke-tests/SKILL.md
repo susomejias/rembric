@@ -1,15 +1,17 @@
 ---
 name: rembric-smoke-tests
-description: End-to-end smoke against the local rembric dev stack (`pnpm run dev:docker:up`). Apply when the user says "smoke", "probar contra docker", "dev:up", or after applying an OpenSpec change that touches HTTP (`apps/web/src/app/api/`), MCP tools (`packages/mcp/src/`), or DB migrations (`packages/db/src/migrations/`). Encodes bring-up, mount verification, probe pattern and teardown — not the probes themselves.
+description: End-to-end smoke against the local rembric dev server (`pnpm run dev`, host Next.js dev on :3000). Apply when the user says "smoke", "probar contra docker", "dev:up", or after applying an OpenSpec change that touches HTTP (`apps/web/src/app/api/`), MCP tools (`packages/mcp/src/`), or DB migrations (`packages/db/src/migrations/`). Encodes bring-up, readiness verification, probe pattern and teardown — not the probes themselves.
 ---
 
 # Rembric smoke pattern
 
-Real-stack verification of a change before opening the PR. Read `apps/web/Dockerfile` and `package.json::dev` (next dev) for the source of truth on ports and the dev target — this file gives you only the pattern that survives those changing.
+Real-stack verification of a change before opening the PR. Read `apps/web/package.json::dev` (`next dev`) and `docs/docker.md` → "Local dev (host)" for the source of truth on how the server boots and where it listens — this file gives you only the pattern that survives those changing.
+
+> The Docker dev stack is **retired**. `pnpm run dev:docker:up` is not a root script, `docker-compose.dev.yml` does not exist, and the compose files describe only the published image. Local dev is the Next.js server on the host.
 
 ## 0. Preflight: free the RAM the build needs
 
-`/tmp` is a tmpfs on this box, so everything under it is RAM. Every vitest run leaves a `rembric-test-*` directory behind and nothing cleans them: 1624 of them once held 8 GB, leaving 2.4 GB free, and `pnpm run dev:docker:up` died with `exit code: 137` (`Killed`) mid-`pnpm install`. That failure reads like a network or lockfile problem and is neither.
+`/tmp` is a tmpfs on this box, so everything under it is RAM. Every vitest run leaves a `rembric-test-*` directory behind and nothing cleans them: 1624 of them once held 8 GB, leaving 2.4 GB free, and `pnpm run dev` died with `exit code: 137` (`Killed`) mid-`pnpm install`. That failure reads like a network or lockfile problem and is neither.
 
 ```bash
 free -h                                                     # the `shared` column is the tmpfs
@@ -22,37 +24,51 @@ Keep the `-mmin +60`: other sessions may be mid-run, and a bare glob takes their
 
 ```bash
 cd <your-worktree>
-[ -f .env ] || cp <main-worktree>/.env .env
-pnpm run dev:docker:up         # background OK
+REMBRIC_DATA_DIR=./data-dev REMBRIC_ADMIN_TOKEN=<16+-char-token> pnpm run dev
+# → http://127.0.0.1:3000/dashboard
 ```
 
-## 2. Verify YOUR source is mounted
+Point `REMBRIC_DATA_DIR` at a scratch directory (gitignored `./data-dev` is the convention) — never at a real deployment's database. `next dev` binds loopback only and hot-reloads, so there is no build step and no container to rebuild.
 
-The compose project name is global across worktrees, so `docker compose up` will silently attach to a stack another worktree already owns. Always confirm:
+Optionally seed a demo corpus so every dashboard surface renders meaningfully:
 
 ```bash
-docker inspect rembric-dev --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+REMBRIC_DATA_DIR=./data-dev REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 \
+  pnpm --filter @rembric/core exec tsx ../../apps/web/src/scripts/seed-dev.ts --reset
 ```
 
-Sources must point to the current worktree. If they don't, `docker compose -f docker-compose.yml -f docker-compose.dev.yml down --remove-orphans` from the owning worktree path, then up again from yours.
+The seed prints the generated `demo-reader` / `demo-writer` plaintext tokens once.
 
-## 3. Wait healthy
+## 2. Confirm this server is yours
+
+With the host dev server there is no container and no bind-mount to verify, but you still have to confirm you are talking to **your worktree's** server and **your** data file — a stale `pnpm run dev` from another checkout on :3000 will silently serve the wrong code.
 
 ```bash
-until docker ps --filter name=rembric-dev --filter health=healthy --format '{{.Names}}' | grep -q rembric-dev; do sleep 3; done
+lsof -nP -iTCP:3000 -sTCP:LISTEN        # which process/cwd owns :3000
 ```
 
-## 4. Read port + bearer from sources of truth
+The cwd must be your worktree. `next dev` on :3000 exits if the port is taken, so the second checkout usually fails loudly — but confirm anyway if a run looks wrong.
 
-- Container port: from `docker-compose.dev.yml::ports`.
-- Admin bearer: `grep '^REMBRIC_ADMIN_TOKEN=' .env | cut -d= -f2-`. **Never `cat .env`** — the harness blocks it to keep secrets out of the transcript.
-- Default seeded project slug: from `apps/web/src/scripts/seed-dev.ts`.
+## 3. Wait until ready
+
+```bash
+until curl -sf -H "Authorization: Bearer $REMBRIC_ADMIN_TOKEN" \
+    http://127.0.0.1:3000/healthz >/dev/null; do sleep 1; done
+```
+
+`next dev` compiles routes lazily; the first request to a route can take a few seconds. `/healthz` requires auth.
+
+## 4. Read bearer + slug from sources of truth
+
+- Port: `3000` for host dev (`next dev`); the published image uses `8787` — don't confuse the two.
+- Admin bearer: the `REMBRIC_ADMIN_TOKEN` you exported. If you sourced a `.env`, read it with `grep '^REMBRIC_ADMIN_TOKEN=' .env | cut -d= -f2-`; **never `cat .env`** — the harness blocks it to keep secrets out of the transcript.
+- Default seeded project slug: from `apps/web/src/scripts/seed-dev.ts` (currently `demo`).
 
 ## 5. Probe the change's surface
 
-- **HTTP**: `curl … | jq` against `http://localhost:<port>/api/<slug>/…` with `Authorization: Bearer …` and `Content-Type: application/json`. Parse responses with `jq`, not regex.
+- **HTTP**: `curl … | jq` against `http://127.0.0.1:3000/api/<slug>/…` with `Authorization: Bearer …` and `Content-Type: application/json`. Parse responses with `jq`, not regex.
 - **MCP**: POST JSON-RPC to `/mcp/<slug>` (path-scoped) or `/mcp` (unscoped). Send `Accept: application/json, text/event-stream` — the response is SSE-framed, so strip a leading `data: ` before `JSON.parse`. Handshake first (`initialize` → store the `mcp-session-id` header → `notifications/initialized`), then `tools/call`.
-- **DB**: the container is intentionally minimal (no `sqlite3`, no `ps`) — and the **host has no `sqlite3` either**. Read the bind-mounted file with node, from the pnpm store, with `cwd` inside `apps/web`:
+- **DB**: read the host SQLite file directly with node, from the pnpm store, with `cwd` inside `apps/web`. The file is `$REMBRIC_DATA_DIR/data.db` (default `~/.rembric/data.db`):
 
   ```bash
   cd <worktree>/apps/web
@@ -77,7 +93,7 @@ Common setup for all of them: a scratch working directory containing
 PROJECT_SLUG=demo
 ```
 
-in a file named `.rembric` — **`PROJECT_SLUG=<slug>`, not a bare slug.** A bare slug makes every shell hook `exit 0` in silence with no diagnostic, which is indistinguishable from the hooks never running. That mistake produced a confident, wrong "Codex does not run plugin hooks in `codex exec`" finding that had to be retracted. Plus `REMBRIC_SERVER_URL=http://localhost:<port>`, `REMBRIC_API_TOKEN=<admin>` and `REMBRIC_DEBUG=1` — without the last one a failing hook says nothing at all.
+in a file named `.rembric` — **`PROJECT_SLUG=<slug>`, not a bare slug.** A bare slug makes every shell hook `exit 0` in silence with no diagnostic, which is indistinguishable from the hooks never running. That mistake produced a confident, wrong "Codex does not run plugin hooks in `codex exec`" finding that had to be retracted. Plus `REMBRIC_SERVER_URL=http://127.0.0.1:3000`, `REMBRIC_API_TOKEN=<admin>` and `REMBRIC_DEBUG=1` — without the last one a failing hook says nothing at all.
 
 - **Codex** — works headless, hooks included:
 
@@ -105,7 +121,7 @@ in a file named `.rembric` — **`PROJECT_SLUG=<slug>`, not a bare slug.** A bar
   ```bash
   export CLAUDE_CONFIG_DIR=<scratch>/claudehome     # isolated; ~/.claude untouched
   claude plugin marketplace add <worktree>
-  claude plugin install rembric@rembric --config server_url=http://localhost:<port> --config api_token=<token>
+  claude plugin install rembric@rembric --config server_url=http://127.0.0.1:3000 --config api_token=<token>
   claude -p --output-format json "..."              # session_id is in the JSON
   claude -p --resume <session-id> --output-format json "..."
   ```
@@ -123,19 +139,20 @@ in a file named `.rembric` — **`PROJECT_SLUG=<slug>`, not a bare slug.** A bar
 ## 6. Teardown
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down --remove-orphans
+# stop the `pnpm run dev` process (Ctrl-C in its terminal, or kill the PID from §2)
+rm -rf ./data-dev          # optional: drop the scratch DB
 ```
 
-Run from the same worktree path you brought up.
+There is no compose stack to bring down.
 
 ## Pitfalls that bit in practice
 
-- **Compose project name is global.** Two worktrees cannot run dev:up simultaneously — the second silently attaches to the first.
+- **Stale dev server from another checkout.** :3000 is single-occupancy; confirm the listening process' cwd (§2) before trusting a result.
 - **`cat .env` is blocked.** Targeted `grep` only.
-- **Container lacks `sqlite3` / `ps` / `vi`.** Inspect from the host, log via `docker logs`.
+- **`next dev` compiles lazily.** The first hit on a route can be slow — warm the route once before timing anything.
 - **MCP responses are SSE-framed** even when you sent `Accept: application/json` too.
-- **`docker compose up` does not warn on mount divergence.** §2 is the only way to catch it.
-- **A container restart WIPES the database.** The dev container runs `seed-dev --reset` on every boot, so `docker restart rembric-dev` returns a freshly seeded corpus: new session ids, your smoke's rows gone, and migrations applied from `0000` in the log. Anything that needs state to survive a restart — "the boot sweep does not re-retire this row", "no migration ran" — is **not measurable in this stack**, and neither is it a defect in the change. Capture fixture ids after the boot you are going to use, never before.
-- **`/tmp` is tmpfs and vitest never cleans up.** See §0; the symptom is `exit code: 137` in a `RUN` layer.
+- **`./data-dev` is scratch, not durable.** It is gitignored and can be wiped freely; anything that needs state to survive must be reproduced in the same run.
+- **Don't point a dev server and a real deployment at the same `REMBRIC_DATA_DIR`.** Two processes on one SQLite file is a data-safety violation; use a scratch dir.
+- **`/tmp` is tmpfs and vitest never cleans up.** See §0; the symptom is `exit code: 137`.
 
-When in doubt, read the compose files first; this skill is the procedure, the files are the contract.
+When in doubt, read `docs/docker.md` → "Local dev (host)" first; this skill is the procedure, the docs are the contract.
