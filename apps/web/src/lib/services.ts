@@ -1,3 +1,5 @@
+import { dirname } from 'node:path';
+
 import {
   AgentSessionsService,
   ConsolidationRunner,
@@ -11,6 +13,7 @@ import {
   TokensService,
   UsageCounters,
   embeddingQueryInput,
+  ensureVectorModel,
   loadEmbedder,
   undoOp as coreUndoOp,
   undoRun as coreUndoRun,
@@ -68,7 +71,12 @@ function buildServices(): Services {
   const usageCounters = new UsageCounters();
 
   let embedderPromise: Promise<Embedder> | null = null;
-  const getEmbedder = (): Promise<Embedder> => (embedderPromise ??= loadEmbedder());
+  const dataDir = dirname(db.raw.name);
+  const getEmbedder = (): Promise<Embedder> =>
+    (embedderPromise ??= loadEmbedder().then((embedder) => {
+      resetVectorModelOnLoad(repos, dataDir);
+      return embedder;
+    }));
 
   const memory = new MemoryService(repos, db.db, undefined, (text) =>
     getEmbedder().then((embedder) => embedder.embed(embeddingQueryInput(text))),
@@ -131,6 +139,28 @@ function buildServices(): Services {
     undoRun: (runId) => coreUndoRun(repos, db.db, runId),
     undoOp: (opId) => coreUndoOp(repos, db.db, opId),
   };
+}
+
+export function resetVectorModelOnLoad(
+  repos: Pick<Repositories, 'vectors'>,
+  dataDir: string,
+): { wiped: number; deferred: boolean } {
+  try {
+    const { wiped } = ensureVectorModel(repos, dataDir);
+    if (wiped > 0) {
+      console.error(
+        `[embeddings] model identity changed → ${wiped} stale vector(s) wiped; the drain re-embeds from scratch`,
+      );
+    }
+    return { wiped, deferred: false };
+  } catch (err) {
+    console.error(
+      `[embeddings] embedding-identity reset deferred; re-checking on next load (${dataDir}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return { wiped: 0, deferred: true };
+  }
 }
 
 function envInt(name: string, fallback: number, bounds: { min: number; max: number }): number {

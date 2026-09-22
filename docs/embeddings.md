@@ -29,30 +29,40 @@ CI prefetches the same artifact with a cache keyed on `packages/core/scripts/fet
 
 Why phase 3 runs in a fresh process: it exercises exactly the resolution path the runtime uses, so "builds green" implies "boots green".
 
-## 2. Boot (every start)
+## 2. Boot (every start) — the model loads lazily, on first use
 
 ```
 apps/web/src/instrumentation.ts (register() → lib/process.ts)
    │
-   ├─ await loadEmbedder()                      ← packages/core/src/embeddings/embedder.ts
-   │     /app/models present (image) → offline, ~1.1 s
-   │     absent (bare-metal dev)     → one-time pinned download
-   │     ✗ load fails → BOOT ABORTS (fail fast — no degraded mode;
-   │                     a listening server ALWAYS has a warm model)
+   ├─ assertDataLossGuard, counts banner, state-marker refresh
+   ├─ bootstrapAdminToken, session reaper
+   ├─ startEmbeddingDrain        ← no model load; skips while no row is pending
+   └─ startEntityBackfill        ← unrelated, owns its own identity marker
+```
+
+The embedder is load-on-first-use (`apps/web/src/lib/services.ts::getEmbedder`).
+An idle boot that needs no embedding never loads it; the first caller that needs
+a vector — a save, a search query, or a drain tick with a pending row — triggers:
+
+```
+loadEmbedder()                                ← packages/core/src/embeddings/embedder.ts
+   /app/models present (image) → offline, ~1.1 s
+   absent (bare-metal dev)     → one-time pinned download
+   ✗ load fails → the caller degrades (save/search fall back to FTS5), the
+                  drain retries on a later tick; the boot does NOT abort
    │
-   ├─ ensureVectorModel(repos, config.dataDir)  ← packages/core/src/embeddings/state.ts
-   │     reads embedding-state.json (model-identity marker)
-   │     ├─ matches the compiled-in model, settled → no-op
-   │     └─ differs/absent/pending → mark pending
-   │                                 → wipe memory_vec (derived data)
-   │                                 → settle the marker
-   │        «marker trouble never aborts the boot. Fails before the
-   │         wipe → index untouched. Fails after → index already
-   │         emptied; either way the reset is re-checked next boot»
-   │        «a pre-upgrade DB self-migrates; flow 3 refills it»
-   │
-   ├─ new EmbeddingWorker({ repos, embedder })
-   └─ setInterval(drain tick, 30 s)
+   └─ resetVectorModelOnLoad(repos, dataDir)  ← apps/web/src/lib/services.ts
+        runs ONCE after the first load resolves, before the first vector
+        ensureVectorModel(repos, dataDir)     ← packages/core/src/embeddings/state.ts
+          reads embedding-state.json (model-identity marker)
+          ├─ matches the compiled-in model, settled → no-op
+          └─ differs/absent/pending → mark pending
+                                      → wipe memory_vec (derived data)
+                                      → settle the marker
+             «marker trouble never blocks the server. Fails before the
+              wipe → index untouched. Fails after → index already
+              emptied; either way the reset is re-checked on the next load»
+             «a pre-upgrade DB self-migrates; flow 3 refills it»
 ```
 
 ## 3. Background drain (every 30 s)
@@ -103,24 +113,24 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 ## Failure modes, summarized
 
-| Failure                         | Behavior                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| Model missing/corrupt at boot   | Boot aborts, non-zero exit, healthcheck never goes green                  |
-| Single inference error at save  | Save succeeds, FTS-only detection for that save, drain retries            |
-| Single inference error in drain | Row skipped, retried next tick                                            |
-| Model artifact drift at build   | Image build fails (phase-3 validation)                                    |
-| HF rate limit (429) at build    | Retried with backoff; `hf_token` build secret authenticates               |
-| Model changed between versions  | Marker mismatch → vectors wiped → drain re-embeds                         |
-| Data dir unwritable at reset    | Boot proceeds, index untouched, reset retried next boot                   |
-| Reset interrupted after wipe    | Marker stays `pending`, index empty, drain refills; next boot may re-wipe |
-| Reset owed but not done         | `memory.doctor` warns; dense results unreliable until a boot settles it   |
+| Failure                            | Behavior                                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| Model missing/corrupt on first use | The calling operation degrades to FTS5, the drain retries the load; the boot never aborts |
+| Single inference error at save     | Save succeeds, FTS-only detection for that save, drain retries                            |
+| Single inference error in drain    | Row skipped, retried next tick                                                            |
+| Model artifact drift at build      | Image build fails (phase-3 validation)                                                    |
+| HF rate limit (429) at build       | Retried with backoff; `hf_token` build secret authenticates                               |
+| Model changed between versions     | Marker mismatch at first load → vectors wiped → drain re-embeds                           |
+| Data dir unwritable at reset       | Boot proceeds, index untouched, reset retried next boot                                   |
+| Reset interrupted after wipe       | Marker stays `pending`, index empty, drain refills; next boot may re-wipe                 |
+| Reset owed but not done            | `memory.doctor` warns; dense results unreliable until a load settles it                   |
 
 ## Engine constants (not configuration)
 
 | Constant            | Value                                                  | Lives in                                             |
 | ------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
-| Model + revision    | `onnx-community/gte-multilingual-base@2edbf5e`         | `packages/core/src/embeddings/embedder.ts`           |
-| Quantization / dims | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `packages/core/src/embeddings/embedder.ts`           |
+| Model + revision    | `onnx-community/gte-multilingual-base@2edbf5e`         | `packages/core/src/embeddings/model-identity.json`   |
+| Quantization / dims | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `packages/core/src/embeddings/model-identity.json`   |
 | `VEC_THRESHOLD`     | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `packages/core/src/services/save-time-candidates.ts` |
 
 The lexical pass has no equivalent absolute threshold: bm25 is unbounded and
