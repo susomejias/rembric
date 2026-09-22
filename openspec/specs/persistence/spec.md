@@ -277,14 +277,16 @@ Cross-token id collisions (a client tries to create a session with an id already
 
 ### Requirement: The distributed Docker image MUST NOT execute destructive data operations on startup
 
-The image artifact published to `ghcr.io/susomejias/rembric:*` (and any successor registry/repository name) SHALL invoke the runtime server entrypoint (`node /app/dist/server-entrypoint.js`) on container start and SHALL NOT execute any code path that issues `DELETE FROM` against operator-visible tables (`memory`, `projects`, `sessions`, `tokens`, `prompts`, `memory_relations`, `confirmations`, `consolidation_ops`) as part of its boot sequence.
+The image artifact published to `ghcr.io/susomejias/rembric:*` (and any successor registry/repository name) SHALL invoke the published runtime entrypoint (`node /app/apps/web/server.js`) on container start and SHALL NOT execute any code path that issues `DELETE FROM` against operator-visible tables (`memory`, `projects`, `sessions`, `tokens`, `prompts`, `memory_relations`, `confirmations`, `consolidation_ops`) as part of its boot sequence.
 
 Operator-visible tables MAY be modified by the server's normal startup path (`AgentSessionsService.abandonStale` flips `active` sessions to `abandoned` after a TTL, migration runner inserts into `_migrations`, embedding worker enqueues but does not delete) — these are non-destructive UPDATE/INSERT operations against a small subset of rows and are NOT covered by this prohibition. The prohibition specifically targets `DELETE FROM <table>` and `TRUNCATE` of any row whose loss is not deterministically reconstructible from operator action. Note that operator-invoked purge actions (session purge, archived-memory purge, deleted-prompt purge) issued via `/dashboard/maintenance` are EXEMPT — they are explicit operator intent, not boot-sequence behaviour.
 
-The seed script `apps/server/src/scripts/seed-dev.ts` exists in the source tree and SHALL be present in the dev-stage Docker image, but SHALL NOT be invoked by the runtime-stage image's `ENTRYPOINT` or `CMD`. Compliance with this requirement is verified by:
+The seed script `apps/server/src/scripts/seed-dev.ts` exists in the source tree and SHALL be present in the dev-stage Docker image, but SHALL NOT be invoked by the runtime-stage image's `ENTRYPOINT` or `CMD`. The published artifact is the `runner` stage of `apps/web/Dockerfile`, which ships no seed script at all — it copies only `apps/web` and `packages/*`, carries a deterministic `apps/web/package.json` for its release identity, and carries nothing from the server app. The entrypoint assertion below is kept as defence in depth: the prohibition is on the boot path, not on which files happen to be present.
 
-1. **Source-tree invariant** (`apps/server/src/test/invariants.test.ts`): assert that `apps/server/Dockerfile`'s last `FROM ... AS <name>` stage is `runtime`, AND that the runtime stage's `ENTRYPOINT` is `["node", "/app/dist/server-entrypoint.js"]`, AND that the runtime stage has no `CMD` (or only an empty `CMD []`).
-2. **Publish-time smoke test** (`.github/workflows/docker-publish.yml`): after `docker push`, pull the just-pushed immutable `:sha-<short>` tag and inspect its `Config.Cmd`/`Config.Entrypoint`. Fail the workflow if either contains the substrings `seed-dev` or `tsx watch`. Fail if `Config.Entrypoint` is empty and `Config.Cmd` does not contain `dist/server-entrypoint.js`. The retag of `:latest` (and any version/major aliases) SHALL be gated on this smoke test passing.
+Compliance with this requirement is verified by:
+
+1. **Source-tree invariant** (`apps/web/src/test/invariants.test.ts`): assert that `apps/web/Dockerfile`'s last `FROM ... AS <name>` stage is `runner`, AND that the `runner` stage's `ENTRYPOINT` is `["/nodejs/bin/node", "/app/apps/web/server.js"]`, AND that the `runner` stage has no `CMD`. The same test file SHALL assert that `docker-publish.yml` passes `target: runner` with `dockerfile: ./apps/web/Dockerfile` and that its smoke test's expected entrypoint substring is `apps/web/server.js`, so the workflow's expectation and the Dockerfile's `ENTRYPOINT` cannot drift apart unnoticed.
+2. **Publish-time smoke test** (`.github/workflows/docker-publish.yml`): after each build job pushes its per-architecture image by digest, the job SHALL pull **that digest** and inspect its `Config.Cmd`/`Config.Entrypoint`. Fail the job if either contains the substrings `seed-dev` or `tsx watch`. Fail the job if `Config.Entrypoint` does not contain `apps/web/server.js` — the entrypoint `apps/web/Dockerfile`'s `runner` stage starts, and therefore the one the published artifact must have. The retag of the immutable `:<version>`/`:sha-<short>` manifest list (and any version/major aliases) SHALL be gated on this smoke test passing on every architecture: the merge job `needs:` both build jobs.
 
 This requirement complements the existing append-only contract on the `memory` table by closing a parallel pipeline-level gap: the runtime code is structurally append-only, but the artifact that delivers the runtime code can subvert that contract if built from the wrong source. The two layers together ensure no operator can lose data without explicitly invoking a documented destructive admin action.
 
@@ -292,17 +294,17 @@ This requirement complements the existing append-only contract on the `memory` t
 
 - **WHEN** a release publishes `ghcr.io/susomejias/rembric:<version>` via `docker-publish.yml`
 - **AND** the post-publish smoke test step runs
-- **THEN** `docker inspect <image>` SHALL show `Config.Entrypoint` containing `node /app/dist/server-entrypoint.js`
+- **THEN** `docker inspect <image>` SHALL show `Config.Entrypoint` containing `node /app/apps/web/server.js`
 - **AND** `Config.Cmd` SHALL NOT contain `seed-dev` or `tsx watch`
 - **AND** the workflow SHALL proceed to retag `:latest` and the version/major aliases
 
 #### Scenario: An image built from the wrong stage of `apps/server/Dockerfile` is blocked
 
-- **GIVEN** a regression that causes `docker-publish.yml` to produce an image with `CMD ["sh", "-c", "... seed-dev.ts --reset && exec tsx watch ..."]`
-- **WHEN** the post-publish smoke test inspects the pushed `:sha-<short>` tag
-- **THEN** the smoke test SHALL detect `seed-dev` in `Config.Cmd`
-- **AND** the workflow SHALL fail with a non-zero exit code BEFORE retagging `:latest`
-- **AND** the `:sha-<short>` immutable tag remains in the registry but is NEVER promoted to `:latest`
+- **GIVEN** a regression that causes `docker-publish.yml` to produce an image that does not start the web server — a mutated `CMD ["sh", "-c", "... seed-dev.ts --reset && exec tsx watch ..."]`, or a dropped web override that falls back to `apps/server/Dockerfile`
+- **WHEN** the per-arch smoke test inspects the pushed digest
+- **THEN** the smoke test SHALL detect `seed-dev` in `Config.Cmd` or the missing `apps/web/server.js` entrypoint
+- **AND** the build job SHALL fail with a non-zero exit code BEFORE any tag is created
+- **AND** no `:<version>`, `:sha-<short>`, `:latest` or alias tag SHALL be created
 
 #### Scenario: Container start against a populated data dir preserves all rows
 
@@ -315,18 +317,18 @@ This requirement complements the existing append-only contract on the `memory` t
 
 #### Scenario: Invariant test enforces the rule at the source layer
 
-- **WHEN** `apps/server/src/test/invariants.test.ts` runs the "distributed image is non-destructive" assertion
-- **THEN** the test SHALL parse `apps/server/Dockerfile` and verify the `runtime` stage is the last `AS <name>` stage
-- **AND** verify the `runtime` stage's `ENTRYPOINT` is `["node", "/app/dist/server-entrypoint.js"]`
-- **AND** verify the `runtime` stage has no destructive command (no `CMD` referencing `seed-dev` or `tsx watch`)
-- **AND** verify `.github/workflows/docker-publish.yml` contains a build-push step with `target: runtime`
+- **WHEN** `apps/web/src/test/invariants.test.ts` runs the "distributed image is non-destructive" assertion
+- **THEN** the test SHALL parse `apps/web/Dockerfile` and verify the `runner` stage is the last `AS <name>` stage
+- **AND** verify the `runner` stage's `ENTRYPOINT` is `["/nodejs/bin/node", "/app/apps/web/server.js"]`
+- **AND** verify the `runner` stage has no destructive command (no `CMD` referencing `seed-dev` or `tsx watch`)
+- **AND** verify `.github/workflows/docker-publish.yml` contains a build-push step with `target: runner`
 - **AND** verify `.github/workflows/docker-publish.yml` contains the post-publish smoke-test step that greps `Config.Cmd`/`Config.Entrypoint` for the forbidden substrings
 
 #### Scenario: The invariants test allow-lists `DELETE FROM prompts` only from `purgeDeleted`
 
-- **WHEN** the invariants test scans the server source tree for `DELETE FROM prompts` occurrences
-- **THEN** the only allowed occurrence SHALL be inside `apps/server/src/services/prompts.ts::purgeDeleted`
-- **AND** the test SHALL positively assert that file contains the statement so the relaxation cannot silently disappear if `purgeDeleted` is removed
+- **WHEN** the invariants test scans the source tree for `DELETE FROM prompts` occurrences
+- **THEN** the only allowed occurrence SHALL be inside `packages/db/src/repositories/prompts-repository.ts::purgeDeleted` (plus the dev-only reset in `apps/web/src/scripts/seed-dev.ts`)
+- **AND** the test SHALL positively assert that the allow-listed file contains the statement so the relaxation cannot silently disappear if `purgeDeleted` is removed
 
 ### Requirement: The server MUST refuse to start when operator-visible tables shrink by ≥ 50% since the last clean shutdown
 
@@ -1103,7 +1105,7 @@ It SHALL be emptied before each query is tokenised, so that the terms read back 
 
 ### Requirement: The index set MUST be exactly the measured one, and snapshot-asserted
 
-The declared index set is a contract, not an accretion. Every index below was
+The declared index set SHALL be exactly the measured one, and is a contract, not an accretion. Every index below was
 created and its plan re-captured before it shipped; every index dropped below was
 shown to be unusable by any query predicate that exists. An index no plan selects
 is pure write cost.
@@ -1195,7 +1197,7 @@ a reviewable line.
 
 ### Requirement: The `tokens` project binding MUST be closed at the database level
 
-`tokens.scope` and `tokens.project_id` encode the same fact for a project-scoped token. The foreign key from `tokens.project_id` to `projects(id)`, present since `0000_initial_tables.sql:89,93`, proves that `project_id` names a real project; nothing proves the scope string agrees with it. Two columns encoding one fact, with only one of them enforced, is a drift the next author inherits.
+`tokens.scope` and `tokens.project_id` MUST encode the same fact for a project-scoped token. The foreign key from `tokens.project_id` to `projects(id)`, present since `0000_initial_tables.sql:89,93`, proves that `project_id` names a real project; nothing proves the scope string agrees with it. Two columns encoding one fact, with only one of them enforced, is a drift the next author inherits.
 
 `tokens` SHALL carry `CHECK (project_id IS NULL OR scope = 'project:' || project_id OR scope = 'read:project:' || project_id)`, declared in the Drizzle schema as well as the migration. The constraint encodes a representational invariant — two columns must name the same project — not a tunable policy value, and so is not of the class that `0012_drop_summary_length_check.sql` retired.
 

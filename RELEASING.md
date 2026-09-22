@@ -82,7 +82,7 @@ Every client lives under `apps/plugin/`, so any of the last three bumps the one 
 docker compose pull && docker compose up -d
 ```
 
-Migrations apply automatically on the next start (the entrypoint opens SQLite via `apps/server/src/db/client.ts`, which calls `migrate()` before serving).
+Migrations apply automatically on the next start (the app opens SQLite via `packages/db`'s `createDb`, which calls `migrate()` during boot).
 
 ## Hotfix path
 

@@ -117,7 +117,7 @@ Tracked content SHALL NOT include literal references to any maintainer or contri
 
 The repo's release identity is **two-component** (`server` + unified `plugin`). The version declared in each component's manifest SHALL match the version release-please last set there, AND the most recent component-prefixed git tag for that component, AND the value reported by the relevant runtime surface:
 
-- `apps/server/package.json::version` ⟷ the most recent `server-vX.Y.Z` git tag ⟷ `GET /healthz` body `version` field ⟷ `ghcr.io/susomejias/rembric:<X.Y.Z>` image tag.
+- `apps/web/package.json::version` ⟷ the most recent `server-vX.Y.Z` git tag ⟷ `GET /healthz` body `version` field ⟷ `ghcr.io/susomejias/rembric:<X.Y.Z>` image tag.
 - `apps/plugin/package.json::version` ⟷ the most recent `plugin-vX.Y.Z` git tag. The single `plugin` component covers the WHOLE `apps/plugin/` tree; **all five client carriers share this one version**, kept in sync by the component's `extra-files`: `.claude-plugin/{package,plugin}.json`, `.codex-plugin/{package,plugin}.json`, `.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `.opencode-plugin/plugin.ts`, and `.pi-plugin/package.json`. The last of these is also the version published to npm as `@rembric/pi`, so the npm registry becomes a **sixth** surface the plugin version must agree with.
 - `mcp-bridge/package.json::version` ⟷ the same `plugin` version, and so SHALL every operational pinned `@rembric/mcp-bridge@<x.y.z>` specifier in the Claude Code and Codex manifests. The opencode hook and printed snippet are executable carriers checked against that version. These transport carriers join the five client carriers under the one version. `@rembric/mcp-bridge` is published to npm as well, so the sixth surface is the registry entry of **both** published packages rather than of `@rembric/pi` alone.
 
@@ -125,11 +125,13 @@ The bridge's pin is a carrier rather than a hand-maintained constant precisely b
 
 `release-please` SHALL be the single source of truth for bumping these — `.release-please-manifest.json` carries the authoritative versions and each component's updater (plus the `plugin` component's `extra-files`) synchronizes its surfaces. There is **no `node-workspace` cascade**.
 
+The `server` component's release identity SHALL live in `apps/web/package.json` (the shipped app), while the component's name, tag prefix and publish trigger stay unchanged: the version anchor and the release channel are separate concerns, and only the anchor moves.
+
 Legacy `vX.Y.Z` tags (pre-restructure) and the frozen per-client tags (`plugin-shared-v*`, `claude-code-plugin-v*`, `codex-plugin-v*`, `opencode-plugin-v*`, `hermes-plugin-v*`) SHALL be retained in git history (`ghcr.io/susomejias/rembric:v0.17.0` MUST remain pullable) but SHALL NOT be created or updated going forward. The unified `plugin-vX.Y.Z` tag line supersedes the per-client lines.
 
 #### Scenario: Server version drift
 
-- **WHEN** any of the four server-side surfaces (`apps/server/package.json::version`, manifest entry for `apps/server`, `/healthz`, GHCR tag for a given release) disagree for the same release
+- **WHEN** any of the four server-side surfaces (`apps/web/package.json::version`, manifest entry for `apps/web`, `/healthz`, GHCR tag for a given release) disagree for the same release
 - **THEN** the disagreement SHALL be treated as a release-blocking bug; release-please SHALL be the single source of truth for bumping the server in lock-step
 
 #### Scenario: Plugin version drift
@@ -177,9 +179,9 @@ After the orphan-branch swap that opens the project to the public, the pre-rewri
 
 ### Requirement: docker-publish MUST run only when the server component releases
 
-The `.github/workflows/release-please.yml` workflow SHALL gate the `publish-docker` job on the `apps/server` path being present in the release-please-action's `paths_released` output (or whichever equivalent output key the pinned release-please-action version emits). When `apps/server` is NOT in `paths_released`, `publish-docker` SHALL NOT run, even if other components were released in the same workflow invocation.
+The `.github/workflows/release-please.yml` workflow SHALL gate the `publish-docker` job on the `server` component's release — the package now anchored on the `apps/web` path — being present in the release-please-action's per-path outputs (the `apps/web` entry in `paths_released`, or the per-path `apps/web--release_created` output, or whichever equivalent output key the pinned release-please-action version emits). When the `server` component is NOT released, `publish-docker` SHALL NOT run, even if other components were released in the same workflow invocation.
 
-This SHALL be expressed as a job-level `if:` condition such as `if: ${{ fromJSON(needs.release-please.outputs.paths_released)['apps/server'] != null }}` or equivalent depending on the action's actual output shape.
+This SHALL be expressed as a job-level `if:` condition derived from that component's path, such as `if: ${{ fromJSON(needs.release-please.outputs.paths_released)['apps/web'] != null }}` or a forwarded per-path output (`server_release_created`) whose source is `steps.release.outputs['apps/web--release_created']` — the job-output name is a local alias and MAY stay `server_*`, but its source path SHALL be the component's configured path.
 
 A `workflow_dispatch` manual override SHALL remain available on `docker-publish.yml` for operator recovery (first-time bootstrap, smoke-test publish of a specific tag) — invoked outside the automatic gate.
 
@@ -276,7 +278,7 @@ The repository SHALL configure `release-please-config.json` in manifest mode wit
 
 The two packages:
 
-- `apps/server` — component `server`, `release-type: node`, `package-name: @rembric/server`, `include-component-in-tag: true`. Tag `server-vX.Y.Z`. Releases only when files under `apps/server/` change. Its release is the trigger for the Docker image publish (see the docker-publish requirement, retained).
+- `apps/web` — component `server`, `release-type: node`, `package-name: @rembric/web`, `include-component-in-tag: true`. Tag `server-vX.Y.Z`. Releases only when files under `apps/web/` change. Its release is the trigger for the Docker image publish (see the docker-publish requirement, retained). The component's release identity lives in `apps/web/package.json`; its name and tag prefix are unchanged from when it was anchored on `apps/server`.
 - `apps/plugin` — component `plugin`, `release-type: node`, `package-name: @rembric/plugin`, `include-component-in-tag: true`. It SHALL cover the **entire** `apps/plugin/` tree (shared assets AND all five client dirs) — it SHALL declare **no** `exclude-paths`. Tag `plugin-vX.Y.Z`. Releases only when files under `apps/plugin/` change; a plugin release SHALL NOT rebuild the server image. A plugin release IS the trigger for the `@rembric/pi` npm publish (see the outbound-publication requirement in `supply-chain-hygiene`).
 
 `apps/plugin/mcp-bridge/` — the published stdio↔Streamable-HTTP transport package — is part of that tree and is therefore covered by the same component under the same **no `exclude-paths`** rule: a commit touching only it releases `plugin`, and a plugin release is equally the trigger for the `@rembric/mcp-bridge` npm publish. It is **not** a third package: the config still declares exactly two, and the two-track model (`server` + unified `plugin`) is unchanged by it.
@@ -285,7 +287,7 @@ All five plugin clients SHALL share the single `plugin` version (no per-client i
 
 The transport package SHALL share that same single version, and the `plugin` component's `extra-files` SHALL additionally cover `apps/plugin/mcp-bridge/package.json` and the two manifest pin sites, under the same component-relative constraint (no leading slash, no `..`). The opencode hook and printed snippet are executable carriers checked by invariant rather than release-please text replacement. A pin is a carrier rather than a hand-maintained constant precisely because it names a package released by the same run: a hand-bumped pin can name a version that was never published, and a carrier cannot. The location rule above applies unchanged to a published package that is **not** a client — the attribution mechanism knows nothing about clients, so any package this repository publishes to npm SHALL live inside `apps/plugin/` for the same reason.
 
-The `.release-please-manifest.json` SHALL declare exactly two entries (`apps/server`, `apps/plugin`). A client being published to npm SHALL NOT make it a component: it is a version carrier of `plugin` and nothing more. Git tags produced by release-please SHALL follow `<component>-vX.Y.Z` — only `server-` and `plugin-`. Legacy `vX.Y.Z` and per-client tags (`claude-code-plugin-v*`, `codex-plugin-v*`, `opencode-plugin-v*`, `hermes-plugin-v*`, `plugin-shared-v*`) remain in history but SHALL NOT be created by future runs.
+The `.release-please-manifest.json` SHALL declare exactly two entries (`apps/web`, `apps/plugin`), and their keys SHALL be exactly the `packages` keys of `release-please-config.json`. Manifest mode matches a package to its version by directory path, so a key present in one and absent from the other would re-bootstrap the component at an implied `0.0.0`. A client being published to npm SHALL NOT make it a component: it is a version carrier of `plugin` and nothing more. Git tags produced by release-please SHALL follow `<component>-vX.Y.Z` — only `server-` and `plugin-`. Legacy `vX.Y.Z` and per-client tags (`claude-code-plugin-v*`, `codex-plugin-v*`, `opencode-plugin-v*`, `hermes-plugin-v*`, `plugin-shared-v*`) remain in history but SHALL NOT be created by future runs.
 
 Neither does being published to npm make the transport a component: like the Pi client, it is a version carrier of `plugin` and nothing more.
 
@@ -297,7 +299,7 @@ The transport package is covered by that same changelog: a change scoped to `app
 
 #### Scenario: A server-only change bumps only server and publishes Docker
 
-- **WHEN** a contributor merges a `feat:`/`fix:` commit touching only files under `apps/server/`
+- **WHEN** a contributor merges a `feat:`/`fix:` commit touching only files under `apps/web/`
 - **THEN** release-please SHALL open a release PR for the `server` component only, and the merged release SHALL tag `server-vX.Y.Z` and publish the Docker image
 - **AND** the `apps/plugin` version SHALL remain unchanged
 - **AND** no npm package SHALL be published
@@ -323,7 +325,7 @@ The transport package is covered by that same changelog: a change scoped to `app
 #### Scenario: The manifest is not extended by an npm-published client
 
 - **WHEN** `.release-please-manifest.json` and `release-please-config.json` are read at HEAD
-- **THEN** the manifest SHALL declare exactly two entries and the config exactly two packages
+- **THEN** the manifest SHALL declare exactly two entries — `apps/web` and `apps/plugin` — and the config exactly two packages with the same keys
 - **AND** every `extra-files` entry of the `plugin` component SHALL be a component-relative path inside `apps/plugin/` — no leading slash, no `..`
 
 #### Scenario: Concurrent release runs queue instead of cancelling
@@ -346,7 +348,7 @@ The transport package is covered by that same changelog: a change scoped to `app
 
 ### Requirement: Documented operator commands MUST be verified against the published image
 
-The distribution documentation is required to accurately describe the current distribution model. That requirement is presently violated in a way review cannot catch by reading: the README's backup command shells into the container to run `sqlite3`, which does not exist in the distroless runtime stage, so the command fails on every invocation against the artifact users actually run.
+The distribution documentation SHALL accurately describe the current distribution model. That requirement is presently violated in a way review cannot catch by reading: the README's backup command shells into the container to run `sqlite3`, which does not exist in the distroless runtime stage, so the command fails on every invocation against the artifact users actually run.
 
 Any command the documentation instructs an operator to run inside the container SHALL be verified against the published image, not against a development checkout. When a documented procedure depends on tooling absent from the runtime stage, the documentation SHALL present the mechanism that does work instead.
 
