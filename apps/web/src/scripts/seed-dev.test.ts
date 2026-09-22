@@ -7,6 +7,15 @@ import { createTestDb, type TestDb } from '../test/index.js';
 
 import { runSeed } from './seed-dev.js';
 
+/**
+ * Process environment the seed is driven with. `NODE_ENV` is always present
+ * because Next's `ProcessEnv` augmentation declares it required — the seed
+ * itself reads only `REMBRIC_ALLOW_DESTRUCTIVE_SEED`.
+ */
+function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { NODE_ENV: 'test', ...extra };
+}
+
 let db: TestDb;
 
 beforeEach(() => {
@@ -64,7 +73,7 @@ describe('runSeed', () => {
     const result = runSeed({
       handle: db.handle,
       reset: true,
-      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+      env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
       log: () => {},
     });
 
@@ -105,7 +114,7 @@ describe('runSeed', () => {
       runSeed({
         handle: db.handle,
         reset: true,
-        env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+        env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
         log: () => {},
       }),
     ).not.toThrow();
@@ -136,7 +145,7 @@ describe('runSeed', () => {
       runSeed({
         handle: db.handle,
         reset: true,
-        env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+        env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
         log: () => {},
       }),
     ).not.toThrow();
@@ -155,7 +164,7 @@ describe('runSeed', () => {
     const result = runSeed({
       handle: db.handle,
       reset: true,
-      env: {},
+      env: env(),
       log: (l) => lines.push(l),
     });
 
@@ -178,7 +187,7 @@ describe('runSeed', () => {
     const result = runSeed({
       handle: db.handle,
       reset: true,
-      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: 'true' },
+      env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: 'true' }),
       log: () => {},
     });
 
@@ -208,7 +217,7 @@ describe('runSeed', () => {
     const reset = runSeed({
       handle: db.handle,
       reset: true,
-      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+      env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
       log: () => {},
     });
     expect(reset.refused).toBeUndefined(); // without the env gate the wipe never runs and this test measures nothing
@@ -226,7 +235,7 @@ describe('runSeed', () => {
     const healRun = runSeed({
       handle: db.handle,
       reset: true,
-      env: { REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' },
+      env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
       log: () => {},
     });
     expect(healRun.refused).toBeUndefined();

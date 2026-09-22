@@ -157,7 +157,7 @@ describe('seed-volumetric is structurally incapable of deleting', () => {
     // closed pair design D1 argues from. Matched structurally rather than as one
     // literal line, because prettier owns the line breaks of that array.
     expect(invariants).toMatch(
-      /allow:\s*\[\s*'packages\/db\/src\/repositories\/memory-repository\.ts',\s*'apps\/server\/src\/scripts\/seed-dev\.ts',\s*\]/,
+      /allow:\s*\[\s*'packages\/db\/src\/repositories\/memory-repository\.ts',\s*'apps\/web\/src\/scripts\/seed-dev\.ts',\s*\]/,
     );
   });
 });
