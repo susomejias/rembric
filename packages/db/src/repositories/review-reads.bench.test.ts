@@ -330,16 +330,29 @@ describe.runIf(ENABLED)('review-axis read benchmark', () => {
    * The rewrite this change exists to reject: replace the two correlated
    * subqueries with grouped derived tables joined once. Hand-written because
    * the point is to measure the alternative the repository does NOT use.
+   *
+   * The TTL ladder is rebuilt from the same map the repository's predicate
+   * reads (`reviewTtlEntries`) rather than hard-coded, so the number of
+   * `WHEN m.type = ? THEN ?` branches is always the production count and the
+   * two forms cannot diverge on a TTL added or removed in `REVIEW_TTL_MS`.
    */
   function countNeedsReviewAsJoin(t: TestDb, nowMs: number): number {
-    const ttlCaseParams = reviewTtlEntries().flatMap(([type, ms]) => [type, ms]);
-    const ttlParams = ttlCaseParams.filter((v) => typeof v === 'number');
+    const ttlEntries = reviewTtlEntries();
+    const ttlLadder = ttlEntries.map(() => 'WHEN m.type = ? THEN ?').join(' ');
+    const baseline = 'MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at))';
+    const joinSql = `SELECT COUNT(*) AS v FROM memory m LEFT JOIN (SELECT memory_id, MAX(event_ts) AS affirmed_at FROM confirmations WHERE verdict = 'affirm' GROUP BY memory_id) af ON af.memory_id = m.id LEFT JOIN (SELECT memory_id, MAX(event_ts) AS refuted_at FROM confirmations WHERE verdict = 'refute' GROUP BY memory_id) rf ON rf.memory_id = m.id WHERE m.status = 'active' AND m.scope = 'project' AND m.project_id = ? AND (((CASE ${ttlLadder} ELSE NULL END) IS NOT NULL AND ${baseline} + (CASE ${ttlLadder} ELSE NULL END) <= ?) OR (rf.refuted_at IS NOT NULL AND rf.refuted_at > ${baseline}))`;
+    // Placeholder order matches the repository's where-clause: the scoped
+    // project_id leads, then the TTL ladder twice (type/ms per entry, in
+    // `reviewTtlEntries` order) with `nowMs` last.
+    const ttlCaseParams = ttlEntries.flatMap(([type, ms]) => [type, ms]);
+    const declared = (joinSql.match(/\?/g) ?? []).length;
+    const bound = 1 + ttlCaseParams.length * 2 + 1;
+    if (declared !== bound) {
+      throw new Error(`join rewrite declares ${declared} placeholders but binds ${bound} values`);
+    }
     const row = t.handle.raw
-      .prepare<
-        [number, ...unknown[]],
-        { v: number }
-      >(`SELECT COUNT(*) AS v FROM memory m LEFT JOIN (SELECT memory_id, MAX(event_ts) AS affirmed_at FROM confirmations WHERE verdict = 'affirm' GROUP BY memory_id) af ON af.memory_id = m.id LEFT JOIN (SELECT memory_id, MAX(event_ts) AS refuted_at FROM confirmations WHERE verdict = 'refute' GROUP BY memory_id) rf ON rf.memory_id = m.id WHERE m.status = 'active' AND m.scope = 'project' AND m.project_id = ? AND (((CASE WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? ELSE NULL END) IS NOT NULL AND MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at)) + (CASE WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? ELSE NULL END) <= ?) OR (rf.refuted_at IS NOT NULL AND rf.refuted_at > MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at))))`)
-      .get(nowMs, ...ttlCaseParams, ...ttlParams, ...ttlCaseParams, ...ttlParams);
+      .prepare<[string, ...unknown[]], { v: number }>(joinSql)
+      .get(PROJECT_ID, ...ttlCaseParams, ...ttlCaseParams, nowMs);
     return row?.v ?? 0;
   }
 
