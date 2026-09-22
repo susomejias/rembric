@@ -6,7 +6,7 @@ import { getServices } from '../../../lib/services';
 
 /**
  * `/mcp` and `/mcp/<slug>` — the MCP Streamable HTTP endpoint, at the same path
- * `apps/server` serves it on, so no client config changes with the port. This
+ * MCP clients are configured for, so no client config changes. This
  * route owns only what is HTTP: the path slug, pre-auth identity, the bearer
  * gate, and installing the per-request context the tools read. The protocol
  * lives in `lib/mcp-server.ts` (v2 handler + sessionful 2025-era leg) and the
@@ -23,8 +23,7 @@ type RouteContext = { params: Promise<{ path?: string[] }> };
 async function handle(request: Request, context: RouteContext): Promise<Response> {
   const { path } = await context.params;
   // `params.path` is undefined for `/mcp` and the segments after it otherwise.
-  // Only the first segment is a project slug — `apps/server`'s
-  // `extractProjectSlug` stops at the next `/` the same way.
+  // Only the first segment is a project slug.
   const slug = path?.[0] ?? null;
 
   if (slug !== null && !isValidSlug(slug)) {
@@ -46,11 +45,10 @@ async function handle(request: Request, context: RouteContext): Promise<Response
   });
   if (!auth.ok) return auth.response;
 
-  // The two hardening gates `apps/server/src/server/http.ts` applies before the
-  // transport: the body cap (`MAX_BODY_BYTES`, step 2) and the opt-in
-  // DNS-rebinding Host/Origin allow-lists. Both are only reachable after the
-  // bearer gate, exactly as they are there — an unauthenticated caller learns
-  // nothing about either.
+  // The two hardening gates applied before the transport: the body cap
+  // (`MAX_BODY_BYTES`) and the opt-in DNS-rebinding Host/Origin allow-lists.
+  // Both are only reachable after the bearer gate, so an unauthenticated caller
+  // learns nothing about either.
   const oversized = await bodyTooLarge(request);
   if (oversized !== null) return oversized;
 
@@ -69,7 +67,7 @@ async function handle(request: Request, context: RouteContext): Promise<Response
   );
 }
 
-/** `apps/server/src/config.ts::MAX_BODY_BYTES`'s default. */
+/** Default for the `MAX_BODY_BYTES` env override. */
 const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /**
@@ -85,9 +83,8 @@ function maxBodyBytes(): number {
 }
 
 /**
- * `apps/server/src/server/http.ts`'s 413 arm. The body is measured on a CLONE
- * so the transport still receives its own untouched stream — the same buffering
- * the server does in `readJsonBody`, which reads the whole body before deciding.
+ * The body is measured on a CLONE so the transport still receives its own
+ * untouched stream.
  */
 async function bodyTooLarge(request: Request): Promise<Response | null> {
   const method = request.method.toUpperCase();
@@ -112,8 +109,8 @@ function payloadTooLarge(max: number): Response {
 
 /**
  * `McpTransportManager`'s DNS-rebinding gate
- * (`packages/mcp/src/transport.ts:enableDnsRebindingProtection`), moved into the
- * route because the web surface builds its transport in `lib/mcp-server.ts`.
+ * (`packages/mcp/src/transport.ts:enableDnsRebindingProtection`), applied here
+ * because this surface builds its transport in `lib/mcp-server.ts`.
  * Both allow-lists are opt-in: with neither set the gate is inactive, so a
  * non-browser MCP client that sends no Origin/Host is unaffected by default.
  * The refusal body is the SDK's own `createJsonErrorResponse(403, -32000, …)`.
@@ -147,7 +144,6 @@ function invalidHeader(name: 'Host' | 'Origin', value: string | null): Response 
   );
 }
 
-/** `apps/server/src/config.ts::splitCsv`, verbatim. */
 function splitCsv(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -161,9 +157,8 @@ export const POST = handle;
 export const DELETE = handle;
 
 /**
- * Mirrors `apps/server/src/server/http.ts::isValidSlug`. A slug that fails this
- * is refused before any authentication, exactly as it is there: it cannot name
- * a project, so it is a malformed request rather than an unauthorized one.
+ * A slug that fails this is refused before any authentication: it cannot name a
+ * project, so it is a malformed request rather than an unauthorized one.
  */
 const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
 function isValidSlug(slug: string): boolean {
@@ -171,10 +166,9 @@ function isValidSlug(slug: string): boolean {
 }
 
 /**
- * Pre-auth lockout key. `apps/server` reads the socket address; a route handler
- * cannot reach it, so the first `x-forwarded-for` hop is the closest available
- * substitute and a direct request shares the `'unknown'` bucket — the same
- * decision `lib/api.ts::networkIdentity` documents for the `/api` surface.
+ * Pre-auth lockout key. A route handler cannot reach the socket address, so the
+ * first `x-forwarded-for` hop is the closest available substitute and a direct
+ * request shares the `'unknown'` bucket.
  */
 function clientIdentity(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');

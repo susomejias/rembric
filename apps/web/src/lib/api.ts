@@ -9,11 +9,9 @@ import { getServices } from './services';
  * Response bodies, status codes and the request pipeline shared by every route
  * under `app/api/[slug]`.
  *
- * Transcriptions of `apps/server/src/server/api-router.ts` — the shapes, not
- * the Hono code. Every refusal is `{ ok: false, code, message }` with the
- * status `api-router.ts::statusForCode` maps that code to, plus the router's
- * two non-`message` refusals: `project_not_found` carries `slug`, and the
- * catch-all `not_found` carries `path`.
+ * Every refusal is `{ ok: false, code, message }`, plus two non-`message`
+ * refusals: `project_not_found` carries `slug`, and the catch-all `not_found`
+ * carries `path`.
  */
 
 export interface ApiErrorBody {
@@ -171,9 +169,8 @@ export async function authenticateRequest(request: Request, slug: string): Promi
 }
 
 /**
- * Pre-auth identity for the lockout. `apps/server` reads
- * `getConnInfo(c).remote.address` — the socket address, which a Next route
- * handler cannot reach. The first `x-forwarded-for` hop is the closest
+ * Pre-auth identity for the lockout. A Next route handler cannot reach the
+ * socket address. The first `x-forwarded-for` hop is the closest
  * available substitute; it is absent on a direct loopback request, so such
  * requests share the `'unknown'` bucket instead of one bucket per client.
  */
@@ -218,8 +215,7 @@ export function send(status: number, body: ApiErrorBody): Response {
 }
 
 /**
- * Mirrors `apps/server/src/mcp/_shared.ts::snippet` verbatim. That module is
- * the MCP layer's and is not importable here, and `@rembric/core` does not
+ * The MCP layer's snippet is not importable here and `@rembric/core` does not
  * export it, so `/memory/recall`'s snippet bound would otherwise drift.
  */
 export function snippet(content: string, max: number): string {

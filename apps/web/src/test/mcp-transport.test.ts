@@ -35,16 +35,15 @@ import { getServices } from '../lib/services';
 import { defaultProject } from './default-project.js';
 
 /**
- * The MCP protocol conformance suite, ported off `apps/server` onto the real
- * Next route handlers so the coverage survives the server's deletion.
+ * The MCP protocol conformance suite, over the real Next route handlers.
  *
- * The only thing that changes from the original is the transport underneath the
- * official SDK `Client`: instead of a listening TCP server, `routeFetch` hands
- * each SDK request straight to `/mcp/[[...path]]/route.ts`'s `POST`/`GET`/`DELETE`
- * with the same `Request` the network would carry. Everything above that seam —
- * the auth gate, the Streamable-HTTP session, `runWithContext`, the 20 tools, the
- * `SessionRouter` — is the production path, exactly as batch 5's
- * `api-router.test.ts` drives the `/api` handlers.
+ * The transport underneath the official SDK `Client` is a seam: instead of a
+ * listening TCP server, `routeFetch` hands each SDK request straight to
+ * `/mcp/[[...path]]/route.ts`'s `POST`/`GET`/`DELETE` with the same `Request` the
+ * network would carry. Everything above that seam — the auth gate, the
+ * Streamable-HTTP session, `runWithContext`, the 20 tools, the `SessionRouter` —
+ * is the production path, exactly as `api-router.test.ts` drives the `/api`
+ * handlers.
  *
  * `loadEmbedder` is the one seam replaced: `lib/services.ts` wires the real ONNX
  * model with no injection point, and these tests depend on a deterministic,

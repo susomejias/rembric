@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 /**
- * Test double for `apps/server/src/server/error-response.ts::logInternalError`.
+ * Test double for `logInternalError`.
  *
  * Same contract: return a correlatable `errorId` and log the real error
  * server-side — never the error's own message, which may contain internal

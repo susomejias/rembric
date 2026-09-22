@@ -1,9 +1,8 @@
 import { deriveOAuthAreqKey } from '@rembric/core';
 
 /**
- * The key derivation is `@rembric/core`'s (`deriveOAuthAreqKey`), so this app and
- * `apps/server` cannot drift in *how* they derive — only in the secret they are
- * handed.
+ * The key derivation is `@rembric/core`'s (`deriveOAuthAreqKey`), so every
+ * caller drifts only in the secret it is handed, never in how it derives.
  */
 
 export const CONSENT_FORM = 'oauth.consent';

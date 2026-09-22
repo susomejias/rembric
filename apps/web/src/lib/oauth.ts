@@ -11,38 +11,34 @@ import { createOAuthProvider } from './oauth-provider';
 import { getServices } from './services';
 
 /**
- * The OAuth 2.1 authorization-server surface, at the paths `apps/server` serves
- * it on — `/authorize`, `/token`, `/register`, `/revoke` and
- * `/.well-known/oauth-*` — so an MCP client completes the dance against this
- * app alone.
+ * The OAuth 2.1 authorization-server surface, at the standard paths —
+ * `/authorize`, `/token`, `/register`, `/revoke` and `/.well-known/oauth-*` — so
+ * an MCP client completes the dance against this app alone.
  *
- * The protocol surface is the SDK's vetted `mcpAuthRouter` (the same 1.x router
- * `apps/server/src/server/http.ts:188` mounts), not a re-implementation: PKCE
- * validation, redirect/state handling, dynamic client registration, RFC 8414 /
- * RFC 9728 metadata, error shapes and per-endpoint rate limiting all stay inside
- * the SDK. This module owns only what Next changes about the request shape.
+ * The protocol surface is the SDK's vetted `mcpAuthRouter`, not a
+ * re-implementation: PKCE validation, redirect/state handling, dynamic client
+ * registration, RFC 8414 / RFC 9728 metadata, error shapes and per-endpoint
+ * rate limiting all stay inside the SDK. This module owns only what Next changes
+ * about the request shape.
  *
  * ## Why there is an adapter here
  *
  * `mcpAuthRouter` hands back an Express router — the SDK's auth surface has no
- * Web-standard variant. `apps/server` mounts it on a real Express app; this app
- * serves it from a route handler, so every request has to be presented to the
- * router as the Node-shaped `req`/`res` pair its middlewares expect
+ * Web-standard variant — so every request has to be presented to it as the
+ * Node-shaped `req`/`res` pair its middlewares expect
  * (`express.json`/`urlencoded` read a stream, `cors` and `express-rate-limit`
  * write headers and end the response). The shims below implement exactly that
  * surface and translate the result back into a `Response`. They are the only
  * Express-shaped code in this app, and each detail they have to get right is
  * documented where it is set.
  *
- * The issuer is `REMBRIC_PUBLIC_URL` (trailing slash stripped, as
- * `apps/server/src/config.ts:235` does): it is the externally reachable origin
- * every absolute metadata URL is built from, and the SDK refuses anything but
- * https or a loopback host.
+ * The issuer is `REMBRIC_PUBLIC_URL` (trailing slash stripped): it is the
+ * externally reachable origin every absolute metadata URL is built from, and the
+ * SDK refuses anything but https or a loopback host.
  */
 
 type AuthRouter = ReturnType<typeof mcpAuthRouter>;
 
-/** Mirrors `apps/server/src/server/http.ts::isOAuthPath`. */
 const OAUTH_EXACT_PATHS = new Set(['/authorize', '/token', '/register', '/revoke']);
 
 /**
@@ -132,9 +128,8 @@ function buildOAuthRouter(
 }
 
 /**
- * Serve one authorization-server request. Returns the same JSON 404 body
- * `apps/server`'s `notFound` answers with when OAuth is disabled — the feature
- * is enabled iff `REMBRIC_PUBLIC_URL` is set, exactly as it is there.
+ * Serve one authorization-server request. Returns a JSON 404 body when OAuth is
+ * disabled — the feature is enabled iff `REMBRIC_PUBLIC_URL` is set.
  */
 export async function handleOAuthRequest(request: Request, pathname: string): Promise<Response> {
   const router = getOAuthRouter();

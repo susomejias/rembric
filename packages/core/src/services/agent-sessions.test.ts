@@ -2008,11 +2008,9 @@ describe('AgentSessionsService', () => {
   describe('NUDGE_FLOOR_MS — the one floor constant in the domain tree', () => {
     it('no other `_FLOOR_MS` constant is defined anywhere under apps/server/src or packages/core/src', async () => {
       const { execSync } = await import('node:child_process');
-      // Both trees: the module that declares the floor lives in the domain
-      // package, and a second declaration must fail where it now lives too.
-      // Four levels up is the REPOSITORY root (this suite sits in
-      // `packages/core/src/services/`), so both `apps/server/src` and
-      // `packages/core/src` resolve from the grep's cwd.
+      // A second declaration must fail in the domain tree; the retired server
+      // path stays in the grep as defence in depth. Four levels up is the
+      // REPOSITORY root (this suite sits in `packages/core/src/services/`).
       const out = execSync(
         `git grep -n "_FLOOR_MS\\s*=" -- apps/server/src packages/core/src ` +
           `':(exclude)apps/server/src/**/*.test.ts' ':(exclude)packages/core/src/**/*.test.ts'`,

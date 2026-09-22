@@ -1,7 +1,7 @@
 // `stopword@3` ships no types, so `./stopword.d.ts` declares the two arrays
 // this module reads. An ambient declaration only joins a program that includes
-// it, and consumers compile this package from SOURCE (`paths` in apps/server,
-// the vitest alias) — where the sibling `.d.ts` is not in the program and the
+// it, and consumers compile this package from SOURCE (`paths`, the vitest alias)
+// — where the sibling `.d.ts` is not in the program and the
 // import below would fail with TS7016. The reference keeps the shim travelling
 // with the module that needs it.
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference -- see above: the shim must join every program that compiles this package from source

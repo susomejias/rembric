@@ -49,15 +49,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 }
 
 /**
- * The rail's badges, grouped by project the way main's sidebar groups them
- * (`apps/server/src/server/dashboard-router.ts::computeBadgeCounters`). A badge
+ * The rail's badges, grouped by project. A badge
  * carries its per-project split as well as its total because the dashboard reads
  * across every project at once: a bare total would say "3" where the operator
  * needs to know which project to open, and the split is what the item's `title`
  * renders as one line per project.
  *
  * The breakdown is not merely a display detail — it is why the total is read from
- * the *grouped* siblings of the counters this shell used to read. They are also a
+ * the *grouped* siblings of the counters. They are also a
  * narrower definition, and deliberately so: `adminPendingAdjudicableByProject`
  * counts pending pairs whose source and target memories are both still active,
  * which is the set `memory.judge` can actually resolve and therefore the set the

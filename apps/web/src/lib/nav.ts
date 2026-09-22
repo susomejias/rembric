@@ -46,13 +46,12 @@ export type NavBadgeCounters = {
 
 /**
  * The navigation table is data, not markup: ordering, labels, icons, section
- * numbers and badges are pinned here so the sidebar reads one source. Order, `num`
- * and the two badge entries mirror the production dashboard's sidebar
- * (`apps/server/src/dashboard/components.ts::NAV`) — MAIN above ADMIN,
- * `needsReview` on memories and `pendingJudgments` on judgments.
+ * numbers and badges are pinned here so the sidebar reads one source. Order,
+ * `num` and the two badge entries are MAIN above ADMIN, `needsReview` on
+ * memories and `pendingJudgments` on judgments.
  *
- * Every entry carries its own icon. Main's rail tints each one differently and a
- * repeated glyph there reads as a rendering bug rather than as two sections.
+ * Every entry carries its own icon: a repeated glyph reads as a rendering bug
+ * rather than as two sections.
  */
 export const NAV: readonly NavEntry[] = [
   {
@@ -141,9 +140,8 @@ export const NAV: readonly NavEntry[] = [
 
 /**
  * The two sections, in render order, each carrying the caption the sidebar paints
- * above its items. The captions are main's literal `MAIN` / `ADMIN`
- * (`components.ts::renderSidebar`) rather than prettified, because the rail is
- * meant to be the same rail on both surfaces.
+ * above its items. The captions are literal `MAIN` / `ADMIN` rather than
+ * prettified, because the rail's identity type is uppercase.
  */
 export const NAV_GROUPS = [
   { key: 'main', heading: 'MAIN' },
@@ -159,9 +157,7 @@ export function navEntryForPath(pathname: string): NavEntry | undefined {
 
 /**
  * Native `title` for a sidebar badge: the headline plus the per-project
- * breakdown, one project per line, biggest first. Ported from main's
- * `components.ts::badgeTip` so an operator moving between the two dashboards
- * reads the same sentence and the same resolution verb.
+ * breakdown, one project per line, biggest first.
  */
 export function badgeTooltip(key: BadgeKey, badge: BadgeBreakdown): string {
   const head =

@@ -5,10 +5,9 @@ import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/das
 export type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
- * The prompts list's filter model. Reading is deliberately the same shape the
- * Hono handler used (`apps/server/src/dashboard/prompts.ts`): the retired
- * `__global__` project sentinel normalises to "no filter", `include_deleted` is
- * the literal `1`, and every other filter is empty-string "unset".
+ * The prompts list's filter model: the legacy `__global__` project sentinel
+ * normalises to "no filter", `include_deleted` is the literal `1`, and every
+ * other filter is empty-string "unset".
  */
 export interface PromptsFilters {
   project: string;
@@ -31,7 +30,7 @@ export function readPromptsFilters(searchParams: SearchParams): PromptsFilters {
   };
 }
 
-/** Every param the current URL carries except `page` and the retired project sentinel. */
+/** Every param the current URL carries except `page` and the `__global__` sentinel. */
 export function promptsQuery(searchParams: SearchParams): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(searchParams)) {
@@ -46,7 +45,7 @@ export function promptsQuery(searchParams: SearchParams): Record<string, string>
 /**
  * The FTS branch searches the whole corpus post-pagination, so the URL's other
  * filters have to be applied to its rows in memory — the repository can only
- * take them on the non-search path. Same predicate the Hono handler applied.
+ * take them on the non-search path.
  */
 export function matchesFilters(
   p: Prompt,

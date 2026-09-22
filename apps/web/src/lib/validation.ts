@@ -1,13 +1,12 @@
 /**
  * Request-body validation for the session-lifecycle HTTP API.
  *
- * `apps/server/src/server/api-router.ts` validates these bodies with `zod` and
- * answers `invalid_input` with zod's own text:
+ * The session-lifecycle HTTP API validates these bodies with `zod` and answers
+ * `invalid_input` with zod's own text:
  * `issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')`.
- * That module is not importable from `apps/web` and `zod` is not a dependency
- * of this workspace, so the checks below transcribe the same schemas by hand:
- * same field order, same wording, same short-circuit behaviour. Each function
- * names the zod schema it mirrors.
+ * `zod` is not a dependency of this workspace, so the checks below transcribe
+ * the same schemas by hand: same field order, same wording, same short-circuit
+ * behaviour. Each function names the zod schema it mirrors.
  *
  * Two zod behaviours are load-bearing for message equality and are not
  * obvious from reading the schemas:
@@ -16,9 +15,8 @@
  *   - a failed type check ABORTS the remaining checks on that field, but a
  *     failed safe-integer bound does not: `limit: -1e21` reports both the int
  *     bound and `min(1)`.
- * Every message below was taken verbatim from a zod 4.6.5 run against
- * `apps/server`'s schemas; editing one without re-running that comparison is a
- * contract regression.
+ * Every message below was taken verbatim from a zod 4.6.5 run; editing one
+ * without re-running that comparison is a contract regression.
  */
 
 interface Issue {

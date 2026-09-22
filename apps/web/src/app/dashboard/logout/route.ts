@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { clearSessionCookie, destroySession, getSession } from '@/lib/session';
 
 /**
- * `POST /dashboard/logout` — `dashboard-router.ts`'s logout handler.
+ * `POST /dashboard/logout`.
  *
  * Two effects, in this order and for one reason each: the row is deleted so the
  * cookie value cannot be replayed even if it was copied out of the browser, and
@@ -11,9 +11,8 @@ import { clearSessionCookie, destroySession, getSession } from '@/lib/session';
  * the load-bearing half; clearing the cookie alone would leave a live session in
  * `dashboard_sessions` that the next holder of that string could use.
  *
- * The row is resolved through `getSession`, which verifies the signature first —
- * the retired handler split the id out of the cookie without checking it. Only a
- * value this process signed can reach the delete.
+ * The row is resolved through `getSession`, which verifies the signature first,
+ * so only a value this process signed can reach the delete.
  *
  * `middleware.ts` exempts this path, so a request carrying an expired or stale
  * cookie still reaches here and still gets the cookie cleared instead of a

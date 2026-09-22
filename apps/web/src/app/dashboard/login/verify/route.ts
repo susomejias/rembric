@@ -7,8 +7,7 @@ import { getServices } from '@/lib/services';
 import { createSessionCookie } from '@/lib/session';
 
 /**
- * The token sign-in — `dashboard-router.ts`'s `POST /dashboard/login`, as a
- * route handler.
+ * The token sign-in, as a route handler.
  *
  * Why this lives one segment down (`/dashboard/login/verify`) instead of beside
  * the page: the App Router refuses `page.tsx` and `route.ts` in the same
@@ -17,14 +16,13 @@ import { createSessionCookie } from '@/lib/session';
  * `Conflicting route and page at /dashboard/login: route at
  * /dashboard/login/route and page at /dashboard/login/page`. `middleware.ts`
  * therefore forwards an incoming `POST /dashboard/login` to this path with
- * `NextResponse.rewrite`, which keeps the public URL — the one the retired form
- * posts to, and the one the dashboard spec names — byte-identical while the
+ * `NextResponse.rewrite`, which keeps the public URL byte-identical while the
  * handler sits where the framework allows it.
  *
- * The token is validated by the same call the retired handler made
- * (`tokens.authenticate`) and refused by the same rule: only `scope === '*'`
- * opens the dashboard, and a valid-but-non-admin token earns the *same* answer
- * as an invalid one so the endpoint is not a token-validity oracle. The
+ * The token is validated by `tokens.authenticate` and refused by this rule: only
+ * `scope === '*'` opens the dashboard, and a valid-but-non-admin token earns the
+ * *same* answer as an invalid one so the endpoint is not a token-validity
+ * oracle. The
  * `DomainError` check goes through `isDomainError`'s shape test rather than
  * `instanceof`, because Turbopack hands the service and this module two class
  * identities for `@rembric/core` (see `lib/auth.ts`).
@@ -36,8 +34,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const tokenPlain = stringField(form.get('token'));
   const next = safeNext(stringField(form.get('next')));
 
-  // Same pre-auth lockout as the retired handler, keyed on the closest thing a
-  // route handler has to `getConnInfo(c).remote.address` — see `networkIdentity`.
+  // Pre-auth lockout, keyed on the closest thing a route handler has to the
+  // socket address — see `networkIdentity`.
   const identity = networkIdentity(request);
   const locked = services.authLockout.check(identity);
   if (locked.locked) return backToLogin(request, 'locked', next);
@@ -107,12 +105,10 @@ function backToLogin(
 }
 
 /**
- * Pre-auth identity for the lockout. `apps/server` reads
- * `getConnInfo(c).remote.address`; a Next route handler cannot reach the socket,
- * so the first `x-forwarded-for` hop is the substitute — the same one
- * `lib/api.ts::networkIdentity` uses for the `/api` paths. Absent on a direct
- * loopback request, so those share the `'unknown'` bucket rather than one bucket
- * per client.
+ * Pre-auth identity for the lockout. A Next route handler cannot reach the
+ * socket, so the first `x-forwarded-for` hop is the substitute. Absent on a
+ * direct loopback request, so those share the `'unknown'` bucket rather than one
+ * bucket per client.
  */
 function networkIdentity(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');

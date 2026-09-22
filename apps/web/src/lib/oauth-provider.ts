@@ -26,11 +26,10 @@ import {
 } from '@rembric/core';
 
 /**
- * The MCP SDK's `OAuthServerProvider` over this app's `OAuthService` — the port
- * of `apps/server/src/server/oauth-provider.ts`, byte-comparable in behaviour.
- * The SDK's vetted `mcpAuthRouter` (installed by `lib/oauth.ts`) owns the
- * protocol surface — PKCE validation, redirect/CSRF/state handling, metadata,
- * DCR, rate limiting — while our audited service owns persistence and logic.
+ * The MCP SDK's `OAuthServerProvider` over this app's `OAuthService`. The SDK's
+ * vetted `mcpAuthRouter` (installed by `lib/oauth.ts`) owns the protocol surface
+ * — PKCE validation, redirect/CSRF/state handling, metadata, DCR, rate limiting
+ * — while our audited service owns persistence and logic.
  *
  * `authorize()` only receives the response object, so it cannot read the
  * operator session — it signs the SDK-validated request and redirects to the

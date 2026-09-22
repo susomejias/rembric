@@ -41,7 +41,7 @@ const BACKUP_KEEP = 3;
 const UPGRADER_LABEL_KEY = 'rembric.upgrader';
 const UPGRADER_LABEL_VALUE = '1';
 const UPGRADER_LABEL_FILTER = `${UPGRADER_LABEL_KEY}=${UPGRADER_LABEL_VALUE}`;
-/** MUST match `LABEL rembric.stage=runtime` in apps/server/Dockerfile — sync-tested in invariants.test.ts; a silent mismatch would resurrect the per-update image leak. */
+/** MUST match `LABEL rembric.stage=runtime` in apps/web/Dockerfile — sync-tested in invariants.test.ts; a silent mismatch would resurrect the per-update image leak. */
 export const RUNTIME_IMAGE_LABEL_FILTER = 'rembric.stage=runtime';
 
 type UpdateEngine = Pick<

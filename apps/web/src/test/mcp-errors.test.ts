@@ -14,8 +14,7 @@ import { getMcpSurface, type McpHttpSurface } from '../lib/mcp-server';
  * message and stack belong in the server log, and the caller gets a generic
  * message plus a correlatable `errorId` — never the raw text.
  *
- * On the `/api` side that is `lib/api.ts`'s private `internalError`, the port of
- * `apps/server/src/server/error-response.ts::httpInternalError`; the exported
+ * On the `/api` side that is `lib/api.ts`'s private `internalError`; the exported
  * `domainErr` is the real code path that reaches it, so the shape is asserted
  * through the function the route handlers actually call. The domain-error
  * branch is the control: a `DomainError` keeps its own code and status, which
@@ -27,8 +26,7 @@ import { getMcpSurface, type McpHttpSurface } from '../lib/mcp-server';
  * against the real Streamable-HTTP surface, then a real `memory.search` call
  * that fails before it can resolve a request context. That the tool answers
  * `internal_error` with an id the log carries proves the callback is wired into
- * the tool path, which the retired `error-response.test.ts` could only assert
- * against a standalone helper.
+ * the tool path, not merely that a standalone helper returns the right shape.
  */
 
 type MutableGlobal = typeof globalThis & {

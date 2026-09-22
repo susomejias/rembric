@@ -1,4 +1,3 @@
-// Duplicated from apps/server/src/test/default-project.ts (see also packages/db/src/test-support/default-project.ts).
 import { projectScope, type DbHandle, type Scope } from '@rembric/db';
 
 /**

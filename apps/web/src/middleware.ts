@@ -34,14 +34,13 @@ const LOGIN_PATH = '/dashboard/login';
  * `page.tsx` and `route.ts` in the same segment (measured: with the handler at
  * `login/route.ts` every `/dashboard/login` request answered 500,
  * "Conflicting route and page at /dashboard/login"), so the handler sits one
- * segment down and this rewrite is what keeps the public URL — the retired
- * form's action and the dashboard spec's sign-in URL — unchanged. A rewrite,
- * not a redirect: a redirect would answer the form POST with a GET to a path
- * that has no handler, and the token would never be read.
+ * segment down and this rewrite is what keeps the public URL unchanged. A
+ * rewrite, not a redirect: a redirect would answer the form POST with a GET to a
+ * path that has no handler, and the token would never be read.
  */
 const LOGIN_POST_PATH = '/dashboard/login/verify';
 
-/** `dashboard-router.ts`'s own exemptions: the anonymous pair and the brand assets. */
+/** The anonymous pair and the brand assets. */
 const PUBLIC_PATHS = new Set([LOGIN_PATH, '/dashboard/logout']);
 
 export function middleware(request: NextRequest): NextResponse {

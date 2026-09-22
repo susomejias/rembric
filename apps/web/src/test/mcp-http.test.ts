@@ -22,22 +22,13 @@ vi.mock('@/lib/services', async () => await import('../lib/services'));
 vi.mock('@/lib/session', async () => await import('../lib/session'));
 
 /**
- * The transport/HTTP slice of `apps/server/src/test/mcp-integration.test.ts`'s
- * "HTTP hardening" block that survives the port, driven through the real route
- * handlers.
+ * The transport/HTTP slice: the body cap and the opt-in DNS-rebinding gates,
+ * driven through the real route handlers.
  *
- * Two arms of that block are NOT here and are named in the batch report because
- * the behaviour they assert does not exist in this workspace: the 413 body cap
- * and the opt-in DNS-rebinding Origin rejection are `apps/server`-level
- * middleware (`MAX_BODY_BYTES`, `REMBRIC_MCP_ALLOWED_*`) that
- * `apps/web/src/app/mcp/[[...path]]/route.ts` does not implement, and the Origin
- * arm additionally needs a raw socket because `fetch` forbids setting `Origin`.
- *
- * The login arms keep the "no token-validity oracle" property. The status code
- * is the one divergence: `apps/server` answered 401, this app's
- * `POST /dashboard/login/verify` answers a 302 back to the login page with
- * `?error=invalid`. The property — both responses byte-identical — is what the
- * test exists for, and it is preserved against the real handler.
+ * The login arms keep the "no token-validity oracle" property. The status code is
+ * `302` back to the login page with `?error=invalid`, not a `401`; the property —
+ * an invalid and a valid-but-non-admin token answer byte-identically — is what
+ * the test exists for.
  */
 
 type MutableGlobal = typeof globalThis & {
@@ -198,11 +189,8 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
   };
 
   /**
-   * The two server-level hardening gates the port carried over.
-   *
-   * `apps/server` asserted these against a listening socket; here they run
-   * against the production route handler, which is where the behaviour now
-   * lives. Each arm names its own precondition, and each has the control that
+   * The two server-level hardening gates, run against the production route
+   * handler. Each arm names its own precondition, and each has the control that
    * makes it more than a check over a constant: the 413 is compared against a
    * matching-but-smaller body, and both 403 arms against the allowed pair.
    */

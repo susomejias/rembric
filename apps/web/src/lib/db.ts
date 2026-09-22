@@ -15,11 +15,10 @@ import { createDb, type DbHandle } from '@rembric/db';
 const globalForDb = globalThis as typeof globalThis & { __rembricDb?: DbHandle };
 
 /**
- * Same resolution as `apps/server/src/config.ts`: `REMBRIC_DATA_DIR`, default
- * `~/.rembric`. Data-safety rule DS1 — if this drifts, `createDb` creates a
- * fresh empty `data.db` and the process reads and writes a different file with
- * no error at all. (`createDb` logs the resolved path and whether the file
- * already existed, which is what makes that visible.)
+ * `REMBRIC_DATA_DIR`, default `~/.rembric`. Data-safety rule DS1 — if this
+ * drifts, `createDb` creates a fresh empty `data.db` and the process reads and
+ * writes a different file with no error at all. (`createDb` logs the resolved
+ * path and whether the file already existed, which is what makes that visible.)
  */
 function resolveDataDir(): string {
   return process.env.REMBRIC_DATA_DIR ?? join(homedir(), '.rembric');

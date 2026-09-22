@@ -1,6 +1,5 @@
 /**
- * Next's once-per-server-instance bootstrap hook — the replacement for
- * `apps/server/src/server/bootstrap.ts`'s process responsibilities.
+ * Next's once-per-server-instance bootstrap hook.
  *
  * Next guarantees the build phase never reaches this hook (`register()` is
  * skipped when `NEXT_PHASE === 'phase-production-build'`, in

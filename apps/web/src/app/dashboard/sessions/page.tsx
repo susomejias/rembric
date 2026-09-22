@@ -50,17 +50,16 @@ import { getServices } from '@/lib/services';
  * view head, the scope/agent/status filter bar, and the runs as a table with
  * the title/agent/project/token/started/ended/status/memories/prompts columns.
  *
- * The reads and the filter model are the ported view's own — the same
+ * The reads and the filter model are the view's own — the same
  * `AdminSessionFilters`, the same `deleted: false` address for the filtered
  * table, the same second page-sized slice for the soft-deleted table, the same
  * `titleCascade`.
  *
- * The row actions are `apps/server/src/dashboard/sessions.ts`'s three POST
- * handlers: Abandon (warn confirmation, active rows only) and Delete (danger
- * confirmation) on a live row, Undelete on a soft-deleted one. Each lands on the
- * same query string main redirected to, which is what the flash above the table
- * reads. Every mutation carries `adminBypass` — these are the operator's own
- * verbs, exactly as the retired handlers passed it.
+ * The row actions: Abandon (warn confirmation, active rows only) and Delete
+ * (danger confirmation) on a live row, Undelete on a soft-deleted one. Each
+ * lands on the same query string the redirect built, which is what the flash
+ * above the table reads. Every mutation carries `adminBypass` — these are the
+ * operator's own verbs.
  */
 export const dynamic = 'force-dynamic';
 
@@ -166,8 +165,8 @@ export default async function SessionsPage({
   const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
   const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
 
-  // Filters apply to the non-deleted table only, exactly as the retired view
-  // read them; the soft-deleted table is a second, unfiltered page-sized slice.
+  // Filters apply to the non-deleted table only; the soft-deleted table is a
+  // second, unfiltered page-sized slice.
   const deletedRowsRaw = filters.includeDeleted
     ? repos.agentSessions.adminList({
         deleted: true,

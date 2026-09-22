@@ -5,10 +5,9 @@ import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/das
 export type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
- * The sessions list's filter model. Reading is deliberately the same shape the
- * Hono handler used (`apps/server/src/dashboard/sessions.ts`): the retired
- * `__global__` project sentinel normalises to "no filter", `include_deleted` is
- * the literal `1`, and every other filter is empty-string "unset".
+ * The sessions list's filter model: the legacy `__global__` project sentinel
+ * normalises to "no filter", `include_deleted` is the literal `1`, and every
+ * other filter is empty-string "unset".
  */
 export interface SessionsFilters {
   project: string;
@@ -32,7 +31,7 @@ export function readSessionsFilters(searchParams: SearchParams): SessionsFilters
 /**
  * A status the query string names only counts as a filter when it is a real
  * session status; anything else leaves the list unfiltered rather than
- * filtering to nothing — the Hono handler's rule.
+ * filtering to nothing.
  */
 export function parseSessionStatus(raw: string): AgentSessionStatus | undefined {
   return (AGENT_SESSION_STATUSES as readonly string[]).includes(raw)
@@ -41,7 +40,7 @@ export function parseSessionStatus(raw: string): AgentSessionStatus | undefined 
 }
 
 /**
- * Every param the current URL carries, except `page` and the retired project
+ * Every param the current URL carries, except `page` and the `__global__`
  * sentinel — the set the pager and the filter form round-trip, `include_deleted`
  * included so the deleted table stays visible across pages.
  */

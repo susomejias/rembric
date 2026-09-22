@@ -7,11 +7,6 @@ import { type Token } from '@rembric/db';
 /**
  * Bearer authentication for the session-lifecycle HTTP API.
  *
- * Port of `apps/server/src/server/auth.ts` — same header parsing, same error
- * codes, same status codes, same ordering of the static-token lookup against
- * the OAuth access-token fallback. Duplicated rather than imported because
- * `apps/server` is not a dependency of this workspace.
- *
  * Project scope is resolved exclusively from the URL path slug. The
  * `X-Rembric-Project` header is intentionally NOT consulted.
  */
@@ -62,14 +57,12 @@ const BEARER_PREFIX = 'bearer ';
  * Validate an `Authorization` header value and resolve the optional URL path
  * slug into a project row.
  *
- * The returned value is `@rembric/core`'s `RequestContext` — the same type
- * `apps/server`'s `authenticate` returns after the phase-4 extraction. The
+ * The returned value is `@rembric/core`'s `RequestContext`. The
  * `/api` surface never reads `mcpSessionId` (only the MCP transport establishes
- * one) so it is always `null` here, as it is for a non-MCP request there.
+ * one) so it is always `null` here.
  *
  * A slug that does NOT exist returns `project = null` with `requestedSlug`
- * populated rather than throwing; the handler decides, exactly as the
- * Hono router's middleware/handler split does.
+ * populated rather than throwing; the handler decides.
  */
 export async function authenticate(input: {
   authorization: string | undefined;

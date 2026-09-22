@@ -1,4 +1,3 @@
-// Duplicated from apps/server/src/test/clock.ts (see also packages/db/src/test-support/clock.ts).
 /**
  * Test clock fixture. Pass `clock.now` into services that accept a
  * `now: () => Date` constructor argument. Tests can freeze time, advance

@@ -25,11 +25,9 @@ import { getServices, type Services } from './services';
 import { REMBRIC_VERSION } from './version';
 
 /**
- * The MCP HTTP surface: `apps/server/src/server/{http.ts::handleMcpRequest,
- * bootstrap.ts}'s McpServer factory and mcp/transport.ts's session manager,
- * re-expressed on MCP SDK v2 (`@modelcontextprotocol/server@2.0.0`) instead of
- * the v1 `StreamableHTTPServerTransport` over raw `IncomingMessage` /
- * `ServerResponse`.
+ * The MCP HTTP surface, re-expressed on MCP SDK v2
+ * (`@modelcontextprotocol/server@2.0.0`) instead of the v1
+ * `StreamableHTTPServerTransport` over raw `IncomingMessage` / `ServerResponse`.
  *
  * ## What is v2's and what is ours
  *
@@ -93,9 +91,8 @@ type RembricMcpServer = ReturnType<typeof createMcpServer>;
  * Cached on `globalThis` for the same reason `lib/db.ts` caches the database
  * handle: Next re-evaluates modules on every HMR edit, and a re-evaluated
  * module would drop the session map while live clients still hold their
- * `mcp-session-id`s. The map is in-process only — exactly as it is in
- * `apps/server` today — so a session id issued before a real restart is refused
- * with the transport's own `404 Session not found`.
+ * `mcp-session-id`s. The map is in-process only — a session id issued before a
+ * real restart is refused with the transport's own `404 Session not found`.
  */
 const globalForMcp = globalThis as typeof globalThis & {
   __rembricMcpSurface?: McpHttpSurface;
@@ -172,9 +169,8 @@ function buildSurface(services: Services): McpHttpSurface {
     if (sessionId !== null) {
       const held = legacySessions.get(sessionId);
       if (held !== undefined) return held.transport.handleRequest(request, { authInfo });
-      // The streamable-HTTP contract (and `apps/server` today) answers a
-      // session id this process does not hold with `404` so a client knows to
-      // re-`initialize`. The transport alone cannot: handed a fresh instance it
+      // The streamable-HTTP contract answers a session id this process does not
+      // hold with `404` so a client knows to re-`initialize`. The transport alone cannot: handed a fresh instance it
       // reports `400 Server not initialized` instead, because that instance
       // never initialized. `initialize` is exempt — it establishes a session
       // regardless of what stale id it carries.
@@ -186,7 +182,7 @@ function buildSurface(services: Services): McpHttpSurface {
       }
     }
 
-    // One server per connection, as today: the factory's `requestedSlug` is
+    // One server per connection: the factory's `requestedSlug` is
     // fixed for the session that created it, so a later request cannot move an
     // established connection's instructions to another project.
     const server = buildServer(requestedSlug);
@@ -230,8 +226,7 @@ function buildSurface(services: Services): McpHttpSurface {
 /**
  * Whether this request is the `initialize` handshake, read from a clone so the
  * original body stays unconsumed for the transport that serves it. Anything
- * unreadable or unparseable is not an initialize request, which is what
- * `apps/server`'s body read also concludes.
+ * unreadable or unparseable is not an initialize request.
  */
 async function isInitializePost(request: Request): Promise<boolean> {
   if (request.method.toUpperCase() !== 'POST') return false;
@@ -259,10 +254,9 @@ function requestedSlugOf(request: Request | undefined): string | null {
 }
 
 /**
- * Server-side logging for an unexpected tool failure. Same contract as
- * `apps/server/src/server/error-response.ts::logInternalError` — log a
- * correlatable id plus the real message, hand the caller only the id — which is
- * what `packages/mcp`'s handlers expect this callback to do.
+ * Server-side logging for an unexpected tool failure: log a correlatable id
+ * plus the real message, hand the caller only the id — what `packages/mcp`'s
+ * handlers expect this callback to do.
  */
 function logInternalError(err: unknown, context: string): string {
   const errorId = randomUUID();
@@ -275,13 +269,11 @@ function logInternalError(err: unknown, context: string): string {
 }
 
 /**
- * `memory.doctor`'s one-shot operational report — the port of
- * `apps/server/src/server/bootstrap.ts::buildDoctorReportFactory`, reading the
- * same repositories. `dataDir` is taken from the open connection
- * (`better-sqlite3`'s `Database.name` is the file it actually opened) rather
- * than re-resolving `REMBRIC_DATA_DIR`, so the two index-reset warnings compare
- * the markers against the directory this process is genuinely writing to
- * (data-safety rule DS1: the resolution must not be duplicated).
+ * `memory.doctor`'s one-shot operational report. `dataDir` is taken from the
+ * open connection (`better-sqlite3`'s `Database.name` is the file it actually
+ * opened) rather than re-resolving `REMBRIC_DATA_DIR`, so the two index-reset
+ * warnings compare the markers against the directory this process is genuinely
+ * writing to (data-safety rule DS1: the resolution must not be duplicated).
  */
 function buildDoctorReport(
   services: Services,
@@ -359,9 +351,8 @@ function entityIndexResetWarningOf(dataDir: string, services: Services): string 
 }
 
 /**
- * Integer environment value with the same clamping `lib/services.ts` applies,
- * so a deployment cannot drift from `apps/server`'s zod-parsed config: unset or
- * unparseable → the default, out-of-range → the bound.
+ * Integer environment value with the same clamping `lib/services.ts` applies:
+ * unset or unparseable → the default, out-of-range → the bound.
  */
 function envInt(name: string, fallback: number, bounds: { min: number; max: number }): number {
   const raw = process.env[name];

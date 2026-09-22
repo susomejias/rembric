@@ -86,9 +86,8 @@ vi.mock('next/headers', () => ({ cookies: () => requestCookies.current }));
  * action calls. The only injected thing is the cookie store, because a Server
  * Action reads it from a request context this process does not have.
  *
- * The fixture mirrors `apps/server/src/test/db.ts` (fresh temp dir, real
- * migrations, paired cleanup) and `dashboard-e2e.test.ts`'s second connection
- * onto the running data dir. `REMBRIC_DATA_DIR` and `REMBRIC_ADMIN_TOKEN` are
+ * The fixture uses a fresh temp dir, real migrations and paired cleanup, plus a
+ * second connection onto the running data dir. `REMBRIC_DATA_DIR` and `REMBRIC_ADMIN_TOKEN` are
  * set in `beforeAll`, which is early enough: `lib/db.ts` and `lib/session.ts`
  * open nothing at import time.
  */
@@ -269,9 +268,7 @@ describe('guardAction', () => {
 });
 
 describe('projects mutations', () => {
-  // `apps/server/src/dashboard/projects.ts`: create → archive → unarchive, each
-  // guarded by its own form name. Main's dashboard has no archive round trip
-  // test of its own, so this is the port's coverage of that pair.
+  // create → archive → unarchive, each guarded by its own form name.
   it('creates, archives and unarchives a project, and refuses the default project', async () => {
     const project = fixture.projects.create({ slug: 'slice-one', displayName: null });
 
@@ -321,8 +318,7 @@ describe('sessions mutations', () => {
     return started.id;
   }
 
-  // `apps/server/src/dashboard/sessions.ts`: softDelete → undelete, mirroring
-  // main's own dashboard E2E round trip.
+  // softDelete → undelete round trip.
   it('soft-deletes a session and restores it, while refusing an ended abandon', async () => {
     const id = startSession();
 
@@ -364,9 +360,9 @@ describe('sessions mutations', () => {
 });
 
 describe('tokens mutations', () => {
-  // `apps/server/src/dashboard/tokens.ts` POST `/`: the empty project set mints
-  // the admin scope, one slug mints the single-project arm, and the minted
-  // plaintext is the only copy that will ever exist.
+  // The empty project set mints the admin scope, one slug mints the
+  // single-project arm, and the minted plaintext is the only copy that will
+  // ever exist.
   it('mints an admin-scope token over no project and revokes it by name', async () => {
     const guard = await guardAction(
       submission('token.create', { name: 'slice-three-admin', access: 'write', expires: '' }),
@@ -424,8 +420,7 @@ describe('tokens mutations', () => {
 });
 
 describe('memories mutations', () => {
-  // `apps/server/src/dashboard/memories.ts` `/:id/archive` and `/:id/confirm`:
-  // the row is read unscoped and the scope the service call is pinned to comes
+  // The row is read unscoped and the scope the service call is pinned to comes
   // from that row's own project. Confirm records the operator's event, which is
   // what bumps the confirmation count the detail hub renders.
   const ARCHIVE_FORM = 'memory.archive';
@@ -440,7 +435,7 @@ describe('memories mutations', () => {
     return row.id;
   }
 
-  /** The retired handler's scope resolution: read the row, then scope to its project. */
+  /** Read the row unscoped, then scope to its project. */
   function resolveScope(id: string): Scope {
     const row = getServices().memory.unsafeGetById(id);
     if (!row?.projectId) throw new Error('fixture: memory has no project to scope to');
@@ -495,9 +490,8 @@ describe('memories mutations', () => {
 });
 
 describe('judgments mutations', () => {
-  // `apps/server/src/dashboard/judgments.ts` `/:judgmentId/orphan`: the operator
-  // closes a pending judgment once; the second call is the "already closed"
-  // answer the row's form surfaces as an error.
+  // The operator closes a pending judgment once; the second call is the
+  // "already closed" answer the row's form surfaces as an error.
   const ORPHAN_FORM = 'judgment.orphan';
 
   function pendingJudgment(): string {
@@ -544,9 +538,8 @@ describe('judgments mutations', () => {
 });
 
 describe('maintenance mutations', () => {
-  // `apps/server/src/dashboard/maintenance.ts`'s three purge POSTs. Each covers
-  // the zero-count branch main renders as a disabled control and the non-zero
-  // branch it renders as a danger-confirmed form.
+  // Each purge POST covers the zero-count branch the UI renders as a disabled
+  // control and the non-zero branch it renders as a danger-confirmed form.
   const PURGE_SESSIONS = 'maintenance.purge-sessions';
   const PURGE_MEMORIES = 'maintenance.purge-archived-memories';
   const PURGE_PROMPTS = 'maintenance.purge-prompts';
@@ -627,8 +620,7 @@ describe('maintenance mutations', () => {
 });
 
 describe('maintenance backup', () => {
-  // `apps/server/src/dashboard/maintenance.ts` POST `/backup` plus the two
-  // download routes. The writer, the retention rule and the filename gate all
+  // The writer, the retention rule and the filename gate all
   // live in `maintenance/data.ts`; the routes are thin over them, so the tests
   // drive the routes themselves — a handler-level assertion, not a mock of one.
   const BACKUP_FORM = 'maintenance.backup';
@@ -762,8 +754,7 @@ describe('maintenance backup', () => {
 });
 
 describe('consolidation sweep and undo', () => {
-  // `apps/server/src/dashboard/consolidation.ts`: the forced sweep and the two
-  // undo POSTs, bound in `lib/services.ts` exactly as `bootstrap.ts` binds them.
+  // The forced sweep and the two undo POSTs, bound in `lib/services.ts`.
   const SWEEP_FORM = 'sweep.run';
   const RUN_UNDO_FORM = 'run.undo';
   const OP_UNDO_FORM = 'op.undo';
@@ -844,8 +835,7 @@ describe('consolidation sweep and undo', () => {
     expect(guard.services.undoOp(op.id)).toEqual({ reverted: op.id, skipped: [] });
     expect(guard.services.memory.unsafeGetById(id)?.status).toBe('active');
 
-    // Main's second undo answered the 400 error page with this message; the
-    // action turns it into the form's error flash.
+    // The second undo must surface `already reverted` as the form's error flash.
     expect(() => guard.services.undoOp(op.id)).toThrow(/already reverted/);
   });
 
@@ -880,9 +870,9 @@ describe('consolidation sweep and undo', () => {
 });
 
 describe('entities rebuild', () => {
-  // `apps/server/src/dashboard/entities.ts`'s `POST /rebuild`: the guard first,
-  // then `resetIndex()` plus up to `REBUILD_MAX_BATCHES` forced batches over the
-  // live worker, then the processed count carried back on the redirect.
+  // The guard first, then `resetIndex()` plus up to `REBUILD_MAX_BATCHES`
+  // forced batches over the live worker, then the processed count carried back
+  // on the redirect.
   const FORM = 'entities.rebuild';
 
   it('re-scans the whole backlog across batches and reports the processed count', async () => {
@@ -926,8 +916,8 @@ describe('entities rebuild', () => {
 });
 
 describe('update manual check', () => {
-  // `apps/server/src/dashboard/update.ts`'s `POST /check`, driven through the
-  // real guard and the process singleton `update-service.ts` builds.
+  // Driven through the real guard and the process singleton
+  // `update-service.ts` builds.
   const FORM = 'update.check';
   const RELEASES_URL = 'http://updates.test/releases';
 
@@ -1015,8 +1005,8 @@ describe('update manual check', () => {
 });
 
 describe('oauth consent endpoint', () => {
-  // `apps/server/src/dashboard/oauth-consent.ts` at the provider's redirect
-  // path. GET delegates to the consent page; POST is the protocol decision.
+  // At the provider's redirect path. GET delegates to the consent page; POST is
+  // the protocol decision.
   const FORM = 'oauth.consent';
   const REDIRECT_URI = 'https://client.example/callback';
 
