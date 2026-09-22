@@ -74,6 +74,9 @@ RUN pnpm install --frozen-lockfile --filter @rembric/web... --config.node-linker
 # from /app/packages/core/node_modules — not from the app, where that import
 # cannot resolve.
 COPY packages/core/scripts/fetch-model.mjs ./packages/core/scripts/fetch-model.mjs
+# The bake imports the shared model identity, which lives with the package source
+# (not copied yet at this layer): ship just that file so the two cannot drift.
+COPY packages/core/src/embeddings/model-identity.json ./packages/core/src/embeddings/model-identity.json
 WORKDIR /app/packages/core
 # Optional hf_token secret avoids anonymous-IP 429s on CI runners.
 RUN --mount=type=secret,id=hf_token,env=HF_TOKEN node scripts/fetch-model.mjs /models

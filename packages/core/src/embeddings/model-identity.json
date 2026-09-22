@@ -1,0 +1,7 @@
+{
+  "modelId": "onnx-community/gte-multilingual-base",
+  "dtype": "q8",
+  "dims": 768,
+  "revision": "2edbf5e672aab465f9ed4c154a8b61791c082c69",
+  "onnxArtifact": "onnx/model_quantized.onnx"
+}

@@ -11,10 +11,12 @@
 import { cpSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const MODEL_ID = 'onnx-community/gte-multilingual-base';
-const REVISION = '2edbf5e672aab465f9ed4c154a8b61791c082c69';
-const DTYPE = 'q8';
-const DIMS = 768;
+import identity from '../src/embeddings/model-identity.json' with { type: 'json' };
+
+const MODEL_ID = identity.modelId;
+const REVISION = identity.revision;
+const DTYPE = identity.dtype;
+const DIMS = identity.dims;
 
 const target = process.argv[2];
 if (!target) {
