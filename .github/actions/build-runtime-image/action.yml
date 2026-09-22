@@ -1,11 +1,10 @@
 name: Build runtime image
 description: >
   Build a Rembric app's production image for a single native platform. The
-  Dockerfile and stage are inputs. Defaults are the server image's (distroless)
-  `runtime` stage, which CI's docker-build-check builds in mode=load;
-  docker-publish.yml overrides them with the web image (apps/web/Dockerfile,
-  `runner`) in mode=digest, push-by-digest. The caller handles checkout and
-  GHCR login.
+  Dockerfile and stage are inputs. Defaults are the published web image's
+  (distroless) `runner` stage, which CI's docker-build-check builds in
+  mode=load; docker-publish.yml passes them explicitly in mode=digest,
+  push-by-digest. The caller handles checkout and GHCR login.
 
 inputs:
   image:
@@ -25,16 +24,15 @@ inputs:
   dockerfile:
     description: >
       Dockerfile to build, relative to the repo-root build context. Defaults to
-      the server image, so a caller that omits it keeps building what it always
-      built.
+      the published web image, so a caller that omits it builds the artifact the
+      release channel ships.
     required: false
-    default: ./apps/server/Dockerfile
+    default: ./apps/web/Dockerfile
   target:
     description: >
-      Stage to produce. Defaults to the server image's `runtime` stage; the
-      publish overrides it with the web image's `runner` stage.
+      Stage to produce. Defaults to the web image's `runner` stage.
     required: false
-    default: runtime
+    default: runner
   hf-token:
     description: >
       Hugging Face read token for the model bake (optional; falls back to

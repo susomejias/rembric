@@ -36,7 +36,7 @@ When you report, please include:
 
 - Affected version(s) — output of `GET /healthz` from the running server, or the
   tag of the Docker image you pulled.
-- Reproduction steps. A minimal reproducer in a fresh `pnpm run dev:docker:up`
+- Reproduction steps. A minimal reproducer in a fresh `pnpm run dev`
   environment is ideal.
 - Impact assessment from your end — what an attacker could read, modify, or
   deny.
@@ -74,7 +74,7 @@ commit to a backward-compatible patch on older minors before v1.0.0.
 
 In scope:
 
-- The Rembric server (everything under `apps/server/src/`).
+- The Rembric server (everything under `apps/web/src/`).
 - The shipped Docker image (`ghcr.io/susomejias/rembric:*`).
 - The shared plugin tree (`apps/plugin/`) and every client plugin built from
   it: Claude Code, Codex CLI, Hermes Agent, opencode, and Pi.
@@ -93,7 +93,7 @@ Out of scope (please do **not** spend time on these):
   outside the project's control. See the README's "Project status" section
   for the data-protection contract.
 - Reports based on third-party security scanners without a demonstrated
-  exploit path on a default-configuration `pnpm run dev:docker:up`.
+  exploit path on a default-configuration `pnpm run dev`.
 - Best-practice suggestions ("you should use Argon2 instead of bcrypt-style
   hashing") — open a regular issue or PR for these.
 

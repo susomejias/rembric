@@ -12,6 +12,7 @@
  */
 
 export * from './consolidation/index.js';
+export * from './doctor.js';
 // The consolidation module barrel curates its surface and omits these four, but
 // dashboard and test consumers imported them from the module directly before
 // the move — so the public contract still carries them.

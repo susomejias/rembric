@@ -34,7 +34,7 @@ const transcriptHelper = join(scriptsDir, '_transcript.sh');
 // The JSONL fixtures still live in `apps/server`'s tree: this relocation's edit
 // surface is this file alone, and those fixtures move (or go) with the rest of
 // that tree. The reference is relative, so nothing here changes when they land.
-const fixturesDir = join(here, '..', '..', 'server', 'src', 'test', 'fixtures', 'transcripts');
+const fixturesDir = join(here, 'fixtures', 'transcripts');
 
 interface ParserCase {
   agent: 'claude_code' | 'codex_cli';

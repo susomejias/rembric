@@ -1,0 +1,6 @@
+{
+  "schema": "gentle-ai.opencode-default-agent",
+  "version": 1,
+  "state": "managed",
+  "previous_state": "absent"
+}

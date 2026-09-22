@@ -42,10 +42,6 @@ FROM base AS builder
 # Copy workspace manifest + lockfile first for cache-friendly installs.
 COPY package.json pnpm-lock.yaml .npmrc pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/package.json
-# Workspace manifests outside the @rembric/web closure are still copied: pnpm
-# resolves the whole workspace graph from the lockfile before applying the
-# filter, and a missing member manifest is a hard install error.
-COPY apps/server/package.json ./apps/server/package.json
 COPY apps/plugin/package.json ./apps/plugin/package.json
 COPY packages/config/package.json ./packages/config/package.json
 COPY packages/db/package.json ./packages/db/package.json

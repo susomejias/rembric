@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { deriveTitle, type MemoryService } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
+import type { DoctorReport } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { RelationsService } from '@rembric/core';
 import type { CandidateOptions } from '@rembric/core';
@@ -24,6 +25,15 @@ import { ok } from './result.js';
  * Observability + read-back MCP tools: doctor / stats / capture_passive.
  */
 
+// `parseRunSummary`, `DoctorReport` and the stored-summary shape now live in
+// `@rembric/core` (`doctor.js`), which owns `memory.doctor`'s reads and its
+// factory. Re-exported here because the mcp barrel is what consumers import
+// them from. The summary keeps its historical name at this surface; core calls
+// it `DoctorRunSummary` (it already had a `ConsolidationRunSummary` of its own,
+// with an unrelated shape).
+export { parseRunSummary } from '@rembric/core';
+export type { DoctorReport, DoctorRunSummary as ConsolidationRunSummary } from '@rembric/core';
+
 export const capturePassiveSchema = {
   text: z.string().min(1).max(50_000),
   sessionId: z
@@ -43,48 +53,6 @@ const counts = z.record(z.string(), z.number());
  * add a `kind` discriminator (`{kind:'agent_memory_archive',archived:1}`).
  */
 const runSummary = z.object({ kind: z.string().optional() }).catchall(z.number());
-
-export interface ConsolidationRunSummary {
-  kind?: string;
-  [op: string]: string | number | undefined;
-}
-
-/**
- * Narrow a stored summary to what `doctorOutput` admits, so a shape no writer
- * is supposed to produce degrades this one field instead of failing the whole
- * report — `memory.doctor` is the tool an operator reaches for when the DB is
- * already suspect.
- */
-export function parseRunSummary(raw: string): ConsolidationRunSummary {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return {};
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-  const out: ConsolidationRunSummary = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    if (key === 'kind') {
-      if (typeof value === 'string') out.kind = value;
-    } else if (typeof value === 'number' && Number.isFinite(value)) {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-export interface DoctorReport {
-  db: { journalMode: string; integrity: string; sizeBytes: number };
-  embeddings: { model: string; backlog: number };
-  /** Memories not yet scanned for entities — a derived-index drift signal, same shape as `embeddings.backlog`. */
-  entities: { backlog: number };
-  consolidation: { lastRunAt: string | null; lastRunOps: ConsolidationRunSummary };
-  sessions: { active: number };
-  /** Server-wide (unscoped) queue-depth signals — same precedent as `sessions.active`; `memory.stats` carries the scoped equivalents. */
-  review: { needsReview: number; pendingJudgments: number };
-  warnings: string[];
-}
 
 export const doctorOutput = {
   db: z.object({

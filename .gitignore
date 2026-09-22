@@ -65,7 +65,7 @@ yarn-error.log*
 data-dev.backup-*/
 .playwright-mcp/
 # `@rembric/server` test:coverage reporter output; regenerated on every run.
-apps/server/test-results.json
+apps/web/test-results.json
 
 # Operator's own LAN compose override, not part of the shipped stack.
 docker-compose.lan.yml
