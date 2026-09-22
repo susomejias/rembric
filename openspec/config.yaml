@@ -5,7 +5,8 @@ schema: spec-driven
 # two diverge, this section is the authoritative summary for spec authoring.
 context: |
   Rembric is a self-hosted memory + sessions + dashboard for AI coding agents.
-  The MCP memory surface (save/search/get/judge/confirm/compare/context/timeline)
+  The MCP memory surface
+  (save/search/get/judge/confirm/compare/context/timeline)
   is the core; sessions, judgments, projects, consolidation, and an operator
   dashboard come along in the same single Node process backed by one SQLite
   file. Multi-client by construction (Claude Code, Codex CLI, Hermes Agent,
@@ -13,7 +14,8 @@ context: |
   image at ghcr.io/susomejias/rembric. MIT license, open-source on GitHub.
 
   Tech stack:
-    - TypeScript strict (no any without a justifying comment, no floating promises)
+    - TypeScript strict (no any without a justifying comment, no floating
+      promises)
     - Node 22+ via corepack-pinned pnpm 11.x
     - pnpm workspace monorepo: apps/* hold deliverables, packages/* hold shared
       libraries. packages/db is the SQL confinement boundary — schema,
@@ -24,7 +26,8 @@ context: |
       Turborepo owns build/typecheck/test via turbo.json; lint, format:check,
       test:coverage, eval and dev stay direct scripts.
     - Drizzle ORM over better-sqlite3 (sqlite-vec + FTS5 extensions)
-    - Hono (HTTP + dashboard SSR) + raw IncomingMessage for /mcp transport
+    - Next.js App Router (RSC dashboard + route handlers) owning /mcp, /api,
+      /healthz, OAuth and the dashboard
     - HTMX for dashboard interactivity (no SPA, no build pipeline for JS)
     - Vitest for tests; co-located src/**/*.test.ts
     - Conventional Commits, release-please, GHCR for image publish
@@ -32,10 +35,10 @@ context: |
   Load-bearing invariants (DO NOT violate without a dedicated OpenSpec change):
     - Append-only memory: rows are never DELETEd; content is never UPDATEd.
       Lifecycle is `status` flips (active → superseded | archived) plus
-      `replaces` links. Every consolidation op is journaled in `consolidation_ops`
-      and reversible. Two narrow physical-purge escape hatches exist
-      (purgeEmpty sessions, purgeDisconnectedArchived memory) gated by admin
-      bypass and journaled.
+      `replaces` links. Every consolidation op is journaled in
+      `consolidation_ops` and reversible. Two narrow physical-purge escape
+      hatches exist (purgeEmpty sessions, purgeDisconnectedArchived memory)
+      gated by admin bypass and journaled.
     - Scope enforced at the service layer: every MemoryService query filters
       by Scope. Tools resolve scope once and thread it down; they never query
       DB directly.
@@ -61,12 +64,12 @@ context: |
       install.sh shim) is the single install/upgrade/uninstall path for the
       server and every client plugin. Per-client commands are its backend and
       are documented only as manual fallback.
-    - release-please runs exactly two components: `server` (apps/server/,
+    - release-please runs exactly two components: `server` (apps/web/,
       tag server-vX.Y.Z, Docker image) and `plugin` (the whole apps/plugin/
       tree, tag plugin-vX.Y.Z). All five clients share the one `plugin`
       version, kept in lock-step by that component's extra-files. No
       node-workspace / linked-versions grouping, so no cascade.
-    - Shared logic lives in the HTTP API contract (src/server/api-router.ts).
+    - Shared logic lives in the HTTP API contract (apps/web/src/app/api/).
       Per-client adapters MAY be written in any language; they implement the
       same set of POSTs against the same endpoints.
 
@@ -101,7 +104,8 @@ rules:
       changes.
     - Decisions section MUST include alternatives considered (not just the
       chosen path) so the archived design reads as a complete decision log.
-    - Risks / Trade-offs section uses the format `[Risk] description → Mitigation`
+    - Risks / Trade-offs section uses the format `[Risk] description →
+      Mitigation`
       or `[Trade-off] description → Accepted because ...`. Be specific about
       what could go wrong.
 

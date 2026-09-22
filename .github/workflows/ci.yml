@@ -50,8 +50,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Replay the measured violation window
-        working-directory: apps/server
-        run: pnpm exec vitest run ../../scripts/check-spec-provenance.history.test.ts
+        # `--root ../..` + a positional filter, rather than running from
+        # `apps/plugin`/`apps/web` directly: an `exclude` always wins over a
+        # positional filter, and the web project excludes this file from its
+        # default run (it needs a full clone). Started from the repo root the
+        # default config applies and the filter narrows the run to this file.
+        run: pnpm --filter @rembric/web exec vitest run --root ../.. scripts/check-spec-provenance.history.test.ts
 
   test:
     runs-on: ubuntu-latest
@@ -126,18 +130,20 @@ jobs:
       - name: Check published specs carry no dangling requirement cross-reference
         run: pnpm run check:spec-crossrefs
 
-      # Server suite runs WITH coverage so the vitest thresholds actually gate
-      # PRs; the Hermes plugin's Python tests run separately (they have no
-      # coverage gate). Together these cover what `pnpm test` runs.
+      # The web suite is the whole battery now (the server app is deleted) and
+      # emits the JSON the rescued-test gate below reads. The coverage
+      # thresholds this step used to gate PRs on lived in the retired server
+      # vitest project; the web project carries no coverage block or provider,
+      # so there is nothing to enforce here.
       - name: Test
         run: |
-          pnpm --filter @rembric/server run test:coverage
+          pnpm run test:coverage
           pnpm run test:hermes-plugin
 
       # A rescued test passes after retry but carries stale failureMessages.
       # Vitest reports it green; this gate fails the run instead.
       - name: Check for rescued tests
-        working-directory: apps/server
+        working-directory: apps/web
         run: node ../../scripts/check-rescued-tests.mjs test-results.json
 
       - name: Installer e2e (headless)
@@ -216,48 +222,29 @@ jobs:
       - uses: actions/checkout@v7
 
       # Same composite action the release publish uses (mode=load here vs
-      # mode=digest there) — one place defines how an app image is built. This
-      # call omits the action's `dockerfile`/`target` inputs, so it keeps
-      # building the server image's `runtime` stage; the publish overrides them
-      # with the web image (apps/web/Dockerfile, `runner`).
-      # Loaded as :latest so the e2e / boot smoke below bring it up without
-      # pulling from GHCR (REMBRIC_NO_PULL).
+      # mode=digest there) — one place defines how the app image is built. This
+      # call omits the action's `dockerfile`/`target` inputs, so it builds their
+      # defaults: the published web image (apps/web/Dockerfile, `runner`).
+      # Loaded as :latest so the installer e2e / boot smoke below bring it up
+      # without pulling from GHCR (REMBRIC_NO_PULL).
       - name: Build runtime (prod) target
         uses: ./.github/actions/build-runtime-image
         with:
           image: ghcr.io/susomejias/rembric
           platform: linux/${{ matrix.arch }}
           mode: load
-          # CI-local since the publish moved off the server image: the release
-          # now builds apps/web/Dockerfile under the `web-runtime-<arch>` scope
-          # that docker-build-check-web owns. Still per-arch, and still the
-          # scope the dev build below imports.
+          # CI-local scope, distinct from the `web-runtime-<arch>` one
+          # docker-build-check-web and the publish use: the two jobs build the
+          # same Dockerfile and stage but must not evict each other's cache.
           cache-scope: runtime-${{ matrix.arch }}
           # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
           hf-token: ${{ secrets.HF_TOKEN }}
 
-      - name: Build dev target
-        if: matrix.arch == 'amd64'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./apps/server/Dockerfile
-          target: dev
-          platforms: linux/amd64
-          push: false
-          # Import the runtime leg's builder layers (incl. the baked model) so the
-          # dev build reuses them instead of re-fetching — dev now COPYs the model
-          # from the builder stage.
-          cache-from: |
-            type=gha,scope=runtime-amd64
-            type=gha,scope=docker-build-check-dev
-          cache-to: type=gha,mode=max,scope=docker-build-check-dev
-          secrets: |
-            hf_token=${{ secrets.HF_TOKEN }}
-
       # amd64: real end-to-end of the installer's server bring-up — drive the
       # actual `install.sh --server --up` against the locally-built image
       # (REMBRIC_NO_PULL → uses the loaded :latest, no GHCR), then assert.
+      # The image is the published web one, which serves /healthz and
+      # /dashboard on the same paths the retired server image did.
       - name: Installer e2e — server --up against the built image
         if: matrix.arch == 'amd64'
         run: |
@@ -287,9 +274,9 @@ jobs:
           docker compose down
 
       # arm64: boot smoke — run the just-built distroless image natively and
-      # wait for /healthz. A clean boot proves the arm64 glibc native modules +
-      # the eagerly-loaded embedding model work (the install.sh path is
-      # exercised on amd64; here we only need to confirm the arm64 image runs).
+      # wait for /healthz. A clean boot proves the arm64 glibc native modules
+      # work (the install.sh path is exercised on amd64; here we only need to
+      # confirm the arm64 image runs and migrates).
       - name: Boot smoke — arm64 distroless runtime
         if: matrix.arch == 'arm64'
         run: |
@@ -307,20 +294,32 @@ jobs:
             [ "$c" = 200 ] && { ok=1; break; }
             sleep 3
           done
-          if [ -z "$ok" ]; then echo "::error::arm64 /healthz never returned 200"; docker logs rembric-arm64-smoke || true; exit 1; fi
-          # Assert the embedder warmed (eager load); its absence means the native
-          # modules failed silently before listening.
-          docker logs rembric-arm64-smoke 2>&1 | grep -q 'embedding model loaded' \
-            || { echo "::error::arm64 embedder did not load"; docker logs rembric-arm64-smoke; exit 1; }
-          echo "arm64 boot smoke: healthz=200, embedder loaded ✓"
+          LOGS="$(docker logs rembric-arm64-smoke 2>&1 || true)"
+          if [ -z "$ok" ]; then
+            echo "::error::arm64 /healthz never returned 200"; echo "$LOGS"; exit 1
+          fi
+          # DS1/DS3: the boot must resolve the mounted volume, not create a
+          # fresh data.db in the container's ephemeral layer. The web image
+          # loads the embedder lazily, so this volume/migration signal — not the
+          # retired server image's eager "embedding model loaded" line — is what
+          # proves the arm64 native stack came up.
+          echo "$LOGS" \
+            | grep -q '\[db\] data file /data/data.db (pre-existing: false)' \
+            || { echo "::error::arm64 boot did not open /data/data.db"; \
+                 echo "$LOGS"; exit 1; }
+          applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
+          [ "$applied" = 37 ] \
+            || { echo "::error::expected 37 migrations, got $applied"; \
+                 echo "$LOGS"; exit 1; }
+          echo "arm64 boot smoke: healthz=200, /data/data.db, 37 migrations ✓"
           docker rm -f rembric-arm64-smoke
 
   docker-build-check-web:
     # The published image is the Next.js one (apps/web/Dockerfile, `runner`):
     # docker-publish.yml builds exactly this Dockerfile and stage through the
-    # shared composite action. The server image above is still built and booted
-    # here because the installer e2e exercises it, not because the channel
-    # publishes it.
+    # shared composite action, and so does the matrix job above — this one keeps
+    # its own amd64 cache scope and its deeper boot assertions (data dir +
+    # migration count).
     #
     # amd64 only, on purpose. The build is platform-independent apart from
     # the onnxruntime prebuilt, and the arch-specific part — the prune that

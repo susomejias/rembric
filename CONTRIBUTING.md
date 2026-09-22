@@ -74,38 +74,33 @@ and try again — never bypass with `--no-verify` for normal development.
 
 ## Tests
 
-Every PR must keep coverage at or above the thresholds enforced by Vitest
-(`apps/server/vitest.config.ts`). CI runs `pnpm --filter @rembric/server run
-test:coverage`, so the gate below fails the build on any PR that drops below
-it:
-
-- statements ≥ 85%
-- branches ≥ 78%
-- functions ≥ 91%
-- lines ≥ 85%
-
-These are an enforced floor set at (rounded down from) current real coverage,
-not an aspirational target. The ratchet is **up-only**: raise them as coverage
-grows; never lower them to make a PR pass. Keep these numbers identical to the
-`thresholds` block in `apps/server/vitest.config.ts`.
+Every PR must keep coverage at or above the thresholds enforced by Vitest. CI
+runs `pnpm run test:coverage`, which runs the web suite
+(`apps/web/vitest.config.ts`). The thresholds and their `@vitest/coverage-v8`
+provider retired with the server app, and the web project carries no coverage
+block today, so the floor is currently unenforced. Reinstate it — the last
+floor was statements ≥ 85%, branches ≥ 78%, functions ≥ 91%, lines ≥ 85% — only
+together with a `coverage` block and provider in `apps/web/vitest.config.ts`.
+The ratchet is **up-only**: raise it as coverage grows; never lower it to make
+a PR pass.
 
 Critical invariants of the product (append-only, status state machine, scope
 isolation, replaces-graph acyclicity, confirm-chain semantics) have
 dedicated tests in
-`apps/server/src/test/{invariants,runtime-invariants}.test.ts`. **Do not**
+`apps/web/src/test/{invariants,runtime-invariants}.test.ts`. **Do not**
 weaken or delete these. If a feature genuinely requires changing an invariant,
 change the spec first via an OpenSpec change.
 
-For new code, add unit tests in `apps/server/src/**/*.test.ts` next to the
+For new code, add unit tests in `apps/web/src/**/*.test.ts` next to the
 module — for a module that lives in `packages/`, under
-`apps/server/src/test/<area>/` mirroring its package path, since the suite
+`apps/web/src/test/<area>/` mirroring its package path, since the suite
 resolves `@rembric/db` and `@rembric/core` from source — and integration / E2E
 tests where the boundary lives. Run with:
 
 ```bash
 pnpm test                # full suite, one-shot
 pnpm run test:watch      # watch mode
-pnpm run test:coverage   # gated thresholds; CI matches this
+pnpm run test:coverage   # web suite + the vitest JSON report CI reads
 ```
 
 ## OpenSpec

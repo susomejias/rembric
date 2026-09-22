@@ -427,11 +427,12 @@ describe('install-time code-execution surface', () => {
 });
 
 /**
- * `apps/web/Dockerfile`'s deployable stage — `runner` here, `runtime` in the
- * server image. Everything the image assertions pin about it (it is LAST, so a
- * bare `docker build` produces the production image; it is distroless; it
- * carries `rembric.stage=runtime`) is what makes the PUBLISHED artifact correct,
- * and the published artifact is the web image.
+ * `apps/web/Dockerfile`'s deployable stage — `runner` — is the only one left:
+ * the retired server image's `runtime` stage went with `apps/server`. Everything
+ * the image assertions pin about it (it is LAST, so a bare `docker build`
+ * produces the production image; it is distroless; it carries
+ * `rembric.stage=runtime`) is what makes the PUBLISHED artifact correct, and the
+ * published artifact is the web image.
  */
 const PROD_STAGE = 'runner';
 const prodDockerfile = (): string => readFileSync(join(repoRoot, 'apps/web/Dockerfile'), 'utf8');
@@ -472,29 +473,13 @@ describe('image packaging invariants', () => {
     expect(new RegExp(`^LABEL\\s+${escaped}\\s*$`, 'm').test(runtimeBlock)).toBe(true);
   });
 
-  // Still the dev compose build (`docker-compose.dev.yml`), which the port has
-  // not moved yet: apps/web/Dockerfile has no `dev` stage, so the rule keeps its
-  // target instead of being dropped. It retires with apps/server.
-  it('apps/server/Dockerfile: the `dev` stage declares LABEL rembric.stage=dev', () => {
-    const dockerfile = readFileSync(join(repoRoot, 'apps/server/Dockerfile'), 'utf8');
-    const devIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+dev\b/m);
-    const runtimeIdx = dockerfile.search(/^FROM\s+\S+\s+AS\s+runtime\b/m);
-    expect(devIdx).toBeGreaterThan(-1);
-    expect(runtimeIdx).toBeGreaterThan(devIdx);
-    const devBlock = dockerfile.slice(devIdx, runtimeIdx);
-    expect(/LABEL\s+rembric\.stage=dev\b/.test(devBlock)).toBe(true);
-  });
-
-  it('build-runtime-image action parameterizes file + target, defaulting to the server runtime', () => {
-    // The action serves two callers: ci.yml's docker-build-check builds the
-    // server image, and docker-publish.yml builds the web image. That is only
-    // true while BOTH build modes read `inputs.dockerfile`/`inputs.target`
+  it('build-runtime-image action parameterizes file + target, defaulting to the web runtime', () => {
+    // The action serves two callers: ci.yml's docker-build-check (mode=load) and
+    // docker-publish.yml (mode=digest), and both build the web image. That is
+    // only true while BOTH build modes read `inputs.dockerfile`/`inputs.target`
     // (a re-hard-coded `file:`/`target:` silently ignores the override) AND the
-    // defaults keep the caller that omits them on `apps/server/Dockerfile`.
-    // ci.yml's docker-build-check DOES omit them — only its dev-target step
-    // passes `file:` explicitly — so the default cannot flip to the web image
-    // until that step names its image, or the server installer e2e and the boot
-    // smoke would silently start exercising the web image.
+    // defaults keep the caller that omits them on the web Dockerfile's `runner`
+    // stage — which is exactly what ci.yml's docker-build-check does.
     const action = readFileSync(
       join(repoRoot, '.github/actions/build-runtime-image/action.yml'),
       'utf8',
@@ -506,9 +491,9 @@ describe('image packaging invariants', () => {
     // Anchored inside the input's own block, so a `default:` moved to another
     // input — or a commented-out one — fails here.
     expect(compositeActionInput(action, 'dockerfile')).toMatch(
-      /^ {4}default: \.\/apps\/server\/Dockerfile$/m,
+      /^ {4}default: \.\/apps\/web\/Dockerfile$/m,
     );
-    expect(compositeActionInput(action, 'target')).toMatch(/^ {4}default: runtime$/m);
+    expect(compositeActionInput(action, 'target')).toMatch(/^ {4}default: runner$/m);
   });
 
   it('docker-publish.yml publishes the web image through the shared action', () => {
@@ -591,31 +576,6 @@ describe('distroless runtime node-path invariants', () => {
     expect(/^\s*-\s*node\s*$/m.test(compose)).toBe(false);
   });
 
-  it('dev compose overrides the healthcheck (its target is node:22-bookworm-slim, not distroless)', () => {
-    const dev = readFileSync(join(repoRoot, 'docker-compose.dev.yml'), 'utf8').replace(
-      /^\s*#.*$/gm,
-      '',
-    );
-    // Without !override the dev stack inherits the distroless path, and
-    // `up --wait` never returns healthy: stat /nodejs/bin/node: no such file.
-    expect(/^\s*healthcheck:\s*!override\s*$/m.test(dev)).toBe(true);
-    expect(dev).not.toContain(NODE);
-  });
-
-  // `image:` is the last environment-specific key the dev override has to
-  // restate. Inheriting it makes `up --build` tag the 4.9 GB dev artifact as
-  // the published production tag, replacing it on the developer's host — the
-  // local-blast-radius twin of the 2026-05-17 dev-as-latest incident.
-  it('dev compose does not tag its build with the published image name', () => {
-    const dev = readFileSync(join(repoRoot, 'docker-compose.dev.yml'), 'utf8').replace(
-      /^\s*#.*$/gm,
-      '',
-    );
-    const image = /^\s*image:\s*(\S+)\s*$/m.exec(dev)?.[1];
-    expect(image).toBeDefined();
-    expect(image).not.toContain('ghcr.io/');
-  });
-
   it('self-update upgrader entrypoint uses the absolute node path (runs in the NEW distroless image)', () => {
     const orch = readFileSync(join(coreRoot, 'services/self-update/orchestrator.ts'), 'utf8');
     expect(orch).toContain(`'${NODE}'`);
@@ -642,10 +602,10 @@ const SCOPE_BYPASS_ALLOWED_PREFIXES = [
   'packages/core/src/consolidation/',
   'apps/web/src/app/dashboard/',
   // Eval harness ingest re-reads its own throwaway corpus across scopes
-  // post-ingest — see add-retrieval-eval-harness. Two copies while `apps/server`
-  // is retired: the colocated one in `packages/core` and the one it replaces.
+  // post-ingest — see add-retrieval-eval-harness. One copy: the harness is
+  // co-located in `packages/core` and the app-side duplicate went with
+  // `apps/server`.
   'packages/core/src/test-support/retrieval/ingest.ts',
-  'apps/server/src/test/retrieval/ingest.ts',
 ];
 
 describe('scope-leak invariant', () => {
@@ -770,11 +730,12 @@ describe('data-access confinement invariant', () => {
 const ADMIN_CALL_PATTERN = /\.(admin[A-Z]\w*)\(/g;
 
 const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
-  // The ported equivalents of the two server call sites below: the doctor
-  // surface in `mcp-server.ts` is `bootstrap.ts`'s admin reads, and the
-  // dashboard views under `app/dashboard/` (exempt by prefix) are
-  // `dashboard-router.ts`'s. The server entries stay while that tree is still
-  // present and live.
+  // The doctor surface in `mcp-server.ts` is the factory in
+  // `packages/core/src/doctor.ts`'s admin reads, and the dashboard views under
+  // `app/dashboard/` (exempt by prefix) are the retired server
+  // `dashboard-router.ts`'s. Both app-side call sites that used to carry those
+  // reads (the Hono dashboard router and `bootstrap.ts`) went with
+  // `apps/server`.
   'apps/web/src/lib/mcp-server.ts': [
     'adminBacklogCount',
     'adminCountByStatus',
@@ -782,19 +743,7 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
     'adminCountNeedsReview',
     'adminLatestRun',
   ],
-  'apps/server/src/server/dashboard-router.ts': [
-    'adminCountArchived',
-    'adminCountByStatus',
-    'adminCountCreatedByDay',
-    'adminCountNeedsReviewByProject',
-    'adminListAll',
-    'adminListRuns',
-    'adminOpCounts',
-    'adminPendingAdjudicableByProject',
-    'adminRecent',
-    'adminRecentJudged',
-  ],
-  'apps/server/src/server/bootstrap.ts': [
+  'packages/core/src/doctor.ts': [
     'adminBacklogCount',
     'adminCountByStatus',
     'adminCountEntities',
@@ -1367,14 +1316,6 @@ const LEGACY_URL_ALLOW_LIST = new Set([
   'apps/web/src/test/invariants.test.ts', // self-reference: this test owns the rule
 ]);
 
-/**
- * The pre-move copy of THIS file, still present until `apps/server` is deleted.
- * It carries the same token list, so it self-flags exactly as this one does. It
- * is deliberately NOT in `LEGACY_URL_ALLOW_LIST`: the anchor test reads every
- * entry, so a file about to disappear would red it there. Inert once removed.
- */
-const PRE_MOVE_DUPLICATES = new Set(['apps/server/src/test/invariants.test.ts']);
-
 const LEGACY_URL_BINARY_EXTENSIONS = new Set([
   '.png',
   '.jpg',
@@ -1401,7 +1342,7 @@ describe('install URL drift invariant', () => {
 
     const offenders: { file: string; line: number; text: string }[] = [];
     for (const rel of tracked) {
-      if (LEGACY_URL_ALLOW_LIST.has(rel) || PRE_MOVE_DUPLICATES.has(rel)) continue;
+      if (LEGACY_URL_ALLOW_LIST.has(rel)) continue;
       // Active and archived OpenSpec changes are work-in-progress
       // documents that may legitimately quote the legacy URL while
       // describing the 404 contract. The canonical 404-contract

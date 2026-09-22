@@ -1,7 +1,7 @@
 {
   "name": "@rembric/monorepo",
   "version": "0.0.0",
-  "description": "Rembric monorepo root — manages apps/server and apps/plugin workspaces.",
+  "description": "Rembric monorepo root — manages the apps/web and apps/plugin workspaces.",
   "type": "module",
   "license": "MIT",
   "author": "rembric contributors",
@@ -13,15 +13,15 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "dev": "pnpm --filter @rembric/server run dev",
-    "start": "pnpm --filter @rembric/server run start",
+    "dev": "pnpm --filter @rembric/web run dev",
+    "start": "pnpm --filter @rembric/web run start",
     "test": "turbo run test && pnpm run test:hermes-plugin",
-    "test:watch": "pnpm --filter @rembric/server run test:watch",
-    "test:coverage": "pnpm --filter @rembric/server run test:coverage",
+    "test:watch": "pnpm --filter @rembric/web run test:watch",
+    "test:coverage": "pnpm --filter @rembric/web run test:coverage",
     "test:hermes-plugin": "command -v python3 >/dev/null && python3 -m unittest discover -s apps/plugin/.hermes-plugin/tests -v || echo '[skip] python3 not available; Hermes plugin tests skipped'",
     "eval": "pnpm --filter @rembric/core exec tsx src/test-support/retrieval/run-eval.ts",
     "corpus:build": "pnpm --filter @rembric/core exec tsx ../../apps/web/src/scripts/seed-volumetric.ts",
-    "e2e:installer": "for f in install.sh apps/plugin/install.sh apps/plugin/.hermes-plugin/install.sh apps/plugin/.hermes-plugin/uninstall.sh apps/plugin/.opencode-plugin/install.sh apps/plugin/.opencode-plugin/uninstall.sh; do sh -n \"$f\" || exit 1; done && pnpm --filter @rembric/server exec vitest run ../../install.test.ts",
+    "e2e:installer": "for f in install.sh apps/plugin/install.sh apps/plugin/.hermes-plugin/install.sh apps/plugin/.hermes-plugin/uninstall.sh apps/plugin/.opencode-plugin/install.sh apps/plugin/.opencode-plugin/uninstall.sh; do sh -n \"$f\" || exit 1; done && pnpm --filter @rembric/web exec vitest run --root ../.. install.test.ts",
     "check:spec-provenance": "node scripts/check-spec-provenance.mjs --base origin/main --head HEAD",
     "check:delta-freshness": "node scripts/check-delta-freshness.mjs",
     "check:delta-sections": "node scripts/check-delta-sections.mjs",
@@ -30,7 +30,6 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dev:docker:up": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
     "prepare": "husky"
   },
   "devDependencies": {

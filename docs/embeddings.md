@@ -32,7 +32,7 @@ Why phase 3 runs in a fresh process: it exercises exactly the resolution path th
 ## 2. Boot (every start)
 
 ```
-apps/server/src/server/bootstrap.ts
+apps/web/src/instrumentation.ts (register() → lib/process.ts)
    │
    ├─ await loadEmbedder()                      ← packages/core/src/embeddings/embedder.ts
    │     /app/models present (image) → offline, ~1.1 s

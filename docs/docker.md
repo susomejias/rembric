@@ -169,18 +169,17 @@ The embedding model (`gte-multilingual-base`, ONNX q8) ships inside the image an
 
 ## What's in the image (workspace packages)
 
-The image builds from the monorepo root, not from `apps/server/`, because the server's runtime closure now spans three workspace packages: `@rembric/server` (the app), `@rembric/db` and `@rembric/core`. Build order is load-bearing:
+The image builds from the monorepo root, not from `apps/web/`, because the web app's runtime closure spans four workspace packages: `@rembric/web` (the app), `@rembric/db`, `@rembric/core` and `@rembric/mcp`. Build order is load-bearing:
 
-1. Copy the workspace manifests (`apps/server`, `apps/plugin`, `packages/{config,db,core}`) plus the lockfile, then `pnpm install --frozen-lockfile --filter @rembric/server...` — that closure only.
-2. Bake the embedding model from `packages/core/scripts/fetch-model.mjs` **before any source copy**, so the ~300 MB layer invalidates only on lockfile or script changes.
-3. Copy the source, then build `packages/db` and `packages/core` **before** the app: `apps/server/tsconfig.build.json` empties `paths`, so the app resolves `@rembric/*` through their `exports` maps to real `dist/` output.
-4. `pnpm deploy --legacy` writes `/prod-out` with its own virtual store, carrying `@rembric/db` and `@rembric/core` (`packages/ui` is outside the closure and absent). A build-time gate then asserts the deployed `dist/migrations` holds **exactly 37** `*.sql` files — a deploy that drops a package fails the build instead of shipping an image that boots against a volume it cannot migrate.
+1. Copy the workspace manifests (`apps/web`, `apps/plugin`, `packages/{config,db,core,mcp}`) plus the lockfile, then `pnpm install --frozen-lockfile --filter @rembric/web... --config.node-linker=hoisted` — that closure only. The flat, npm-style tree is what lets Next's externalised native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) resolve from the server chunks.
+2. Bake the embedding model from `packages/core/scripts/fetch-model.mjs` **before any source copy**, so the large model layer invalidates only on lockfile or script changes.
+3. Copy the source, then build `packages/db`, `packages/core` and `packages/mcp` **before** the app: the app type-imports `@rembric/*` through their `exports` maps to real `dist/` output, so Next's build-time type check fails on missing declarations. `packages/db`'s build also stages `src/migrations` into `dist/`.
+4. Assemble the runtime tree: the app code and traced assets come from `apps/web/.next/standalone`, while `node_modules` comes from the flat install (the only layout that resolves the native chunks). A build-time gate then asserts the assembled `packages/db/dist/migrations` holds **exactly 37** `*.sql` files — a drop that would otherwise ship an image booting against a volume it cannot migrate.
 5. Prune `onnxruntime-node`'s non-target prebuilt libs (~185 MB), asserting the target binding survives.
 
-Two consequences worth knowing:
+One consequence worth knowing:
 
-- **The packages are baked, not mounted.** The dev stack mounts only `apps/server/src`, so editing `packages/*/src` on the host does **not** hot-reload. Rebuild to see the change — `pnpm run dev:docker:up` builds, a plain `docker compose up` reuses the old layer. App code under `apps/server/src/` still reloads in ~1–2 s.
-- **In-image migrations resolve through the deploy's virtual store**, under `/prod-out/node_modules/.pnpm/…`, not `/app/node_modules/@rembric/db/…`. Your data path is unchanged: the same migrations run at startup against `./data/data.db`.
+- **In-image migrations resolve from the assembled runtime tree**, under `/app/packages/db/dist/migrations`, read back by `defaultMigrationsDir()` from the bundle's `import.meta.url`. Your data path is unchanged: the same migrations run at startup against `./data/data.db`.
 
 ## Healthchecks
 
@@ -204,83 +203,38 @@ External monitoring (Uptime Kuma, Healthchecks.io, Grafana, etc.) needs to send 
 | Dashboard reachable but the agent can't connect                    | The agent's `REMBRIC_SERVER_URL` doesn't match the host's published port. Verify with `curl -H "Authorization: Bearer $TOKEN" http://<your-url>/healthz` and adjust the plugin config. |
 | Memory list shows nothing after upgrade                            | You're looking at a freshly-bind-mounted `./data/` that's empty. The previous data is wherever the old install kept it — check the npm-install path `~/.rembric/` and migrate.         |
 
-## Local dev stack
+## Local dev (host)
 
-When you need to hack on Rembric itself — change source, see the result, iterate — the dev stack gives you a parallel container alongside your prod deployment without colliding on data, port, container name, or network.
-
-It's NOT the right tool for the prod operator. For prod, follow the Quickstart at the top of this doc. The dev stack is for **contributors and the author** iterating on the codebase.
-
-### What it gives you
-
-- **Hot-reload via tsx watch.** Edit a file under `apps/server/src/**/*.ts` on the host, and the running Node process inside the container restarts within ~1–2 seconds. No rebuild, no recompile loop. The container itself stays up; only its Node child cycles.
-- **Isolated state.** Volume `./data-dev/` (gitignored), container `rembric-dev`, compose project `rembric-dev`, network `rembric-dev_default`, port `127.0.0.1:8788`. Your prod stack (if any) on the same host is untouched.
-- **Loopback only.** The dev port binds to `127.0.0.1` to keep half-cooked debug builds off the LAN. Opt into LAN exposure via a personal `docker-compose.override.yml` if you really need it.
-- **A populated dashboard out of the box.** The seed script creates a demo project, 3 tokens, ~23 memories across 5 `topic_key` clusters, 3 ended sessions with summaries, 2 active sessions, and 1 pending judgment. Every dashboard surface renders meaningfully on first login.
+When you need to hack on Rembric itself — change source, see the result, iterate — run the Next.js dev server on the host. The Docker dev stack is retired: `docker-compose.dev.yml` (tsx watch + `seed-dev --reset`) went with `apps/server`, and the compose files above describe only the published image. For prod, follow the Quickstart at the top of this doc.
 
 ### Quickstart
 
 ```bash
-pnpm run dev:docker:up
-# one command: builds the dev image, runs build:css + copy-assets + seed --reset,
-# starts the server in the foreground with tsx watch.
-# Boot chain takes ~25-35s on first run; subsequent runs are faster.
-# Logs stream to this terminal. Ctrl-C stops the container.
-
-# In EVERY boot output you'll see (fresh tokens minted on every up):
-#   [seed-dev] tokens (plaintext shown exactly once — copy now):
-#     admin-dev:    <copy this for dashboard login>
-#     demo-reader:  ...
-#     demo-writer:  ...
-
-open http://127.0.0.1:8788/dashboard
-# log in with the 'admin-dev' token captured above
-# iterate on apps/server/src/... — tsx watch reloads in ~2s on save
+pnpm install
+# `next dev` starts the web app (apps/web). Point it away from any real
+# deployment's database first, or first-run bootstrap mints and prints a token:
+REMBRIC_DATA_DIR=./data-dev REMBRIC_ADMIN_TOKEN=<16+-char-token> pnpm run dev
+# → http://127.0.0.1:3000/dashboard  (log in with the admin token)
 ```
 
-### Every `up` is a fresh canvas
-
-The boot chain runs `seed-dev.ts --reset` unconditionally. Every `up` wipes `./data-dev/` and reseeds with the same baseline counts + three FRESH plaintext tokens. **Rows you create manually through the dashboard or MCP during a session DO NOT survive a Ctrl-C + `up` cycle** — that's the dev contract.
-
-If you want to preserve manual additions between sessions (uncommon), run the seed without `--reset` once and then use `docker compose -f docker-compose.yml -f docker-compose.dev.yml start rembric` (not `up`) to restart without re-running the boot chain:
+The app opens the SQLite file under `REMBRIC_DATA_DIR` (default `~/.rembric`) on boot and applies migrations. `apps/web/src/scripts/seed-dev.ts` populates a demo project, 3 tokens, ~23 memories across 5 `topic_key` clusters, 3 ended sessions with summaries, 2 active sessions and 1 pending judgment so every dashboard surface renders meaningfully on first login:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml \
-  exec rembric tsx src/scripts/seed-dev.ts --reset
+REMBRIC_DATA_DIR=./data-dev REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 \
+  pnpm --filter @rembric/core exec tsx ../../apps/web/src/scripts/seed-dev.ts --reset
 ```
 
-This emits a one-line stderr warning and then deletes from `memory_relations`, `confirmations`, `consolidation_ops`, `consolidation_runs`, `prompts`, `memory`, `sessions`, `tokens`, `projects` (children-first, in one transaction). Triggers clean up `memory_vec` and `memory_fts` automatically.
+### Isolated state
 
-`--reset` is the only path outside the operator-only purges (`packages/core/src/services/memory.ts::purgeDisconnectedArchived` and `packages/core/src/services/agent-sessions.ts::purgeEmpty`) permitted to `DELETE FROM` the protected tables. The invariant test (`apps/server/src/test/invariants.test.ts`) pins this allow-list and asserts that `apps/server/src/scripts/seed-dev.ts` actually contains the expected `DELETE FROM` strings — so removing the script's seed wouldn't silently expand the allow-list.
+- **Data.** `REMBRIC_DATA_DIR` (default `~/.rembric`) selects the SQLite file. Point it at a scratch directory (e.g. `./data-dev/`, gitignored) so a dev run never touches a real deployment.
+- **Loopback only.** `next dev` binds the local interface; nothing reaches your LAN unless you ask it to.
+- **Never point a dev server and a real deployment at the same `REMBRIC_DATA_DIR`.** Two processes on one SQLite file is a data-safety violation, not a convenience.
 
-### How it avoids colliding with prod
+The `--reset` seed wipes the protected tables first and prints a one-line stderr warning. It deletes from `memory_relations`, `confirmations`, `consolidation_ops`, `consolidation_runs`, `prompts`, `memory`, `sessions`, `tokens`, `projects` (children-first, in one transaction); triggers clean up `memory_vec` and `memory_fts` automatically. Without `--reset` the seed is idempotent and skips when the `demo` project already exists.
 
-Compose v2 generates container / network names from the project name. The canonical compose hardcodes `container_name: rembric` and uses project `rembric`. The dev compose sets `name: rembric-dev` at the top level and `container_name: rembric-dev`. The two stacks never see each other:
+`--reset` is the only path outside the operator-only purges (`packages/core/src/services/memory.ts::purgeDisconnectedArchived` and `packages/core/src/services/agent-sessions.ts::purgeEmpty`) permitted to `DELETE FROM` the protected tables. The invariant test (`apps/web/src/test/invariants.test.ts`) pins this allow-list and asserts that `apps/web/src/scripts/seed-dev.ts` actually contains the expected `DELETE FROM` strings — so removing the script's seed wouldn't silently expand the allow-list.
 
-| Resource        | Prod                               | Dev                   |
-| --------------- | ---------------------------------- | --------------------- |
-| Container       | `rembric`                          | `rembric-dev`         |
-| Compose project | `rembric`                          | `rembric-dev`         |
-| Network         | `rembric_default`                  | `rembric-dev_default` |
-| Volume          | `./data`                           | `./data-dev`          |
-| Published port  | `<all interfaces>:8787`            | `127.0.0.1:8788`      |
-| Image tag       | `ghcr.io/susomejias/rembric:<ver>` | `rembric-dev:local`   |
+### When NOT to run dev on the host
 
-`docker compose ls` shows both as distinct entries; `docker ps` shows both containers. To stop only the dev stack, pass both files so compose resolves the same project: `docker compose -f docker-compose.yml -f docker-compose.dev.yml down`.
-
-### When NOT to use the dev stack
-
-- **For raw fast iteration on TypeScript**, plain `pnpm run dev` on the host is faster (sub-second tsc rebuilds, no Docker layer). Use Docker dev when you need to validate the packaged image's behavior or you want the seeded dashboard handy.
-- **For running unit/integration tests**, use `pnpm test`. Vitest spins up isolated in-memory DBs in <10s. The dev stack is a long-running sandbox, not a test runner.
-
-### Opting into LAN exposure (advanced)
-
-If you want to view the dev dashboard from another machine on your LAN (e.g. for screen-share debugging), drop a `docker-compose.override.yml` next to the canonical files with:
-
-```yaml
-services:
-  rembric:
-    ports: !override
-      - '0.0.0.0:8788:8787'
-```
-
-Compose auto-merges `docker-compose.override.yml` on every `up`. The bearer token remains the actual security boundary; expose only to networks you trust.
+- **For a fully packaged image**, build it directly: `docker build -f apps/web/Dockerfile -t rembric-web .` (the context is the repo root). There is no compose build override any more.
+- **For running unit/integration tests**, use `pnpm test`. Vitest spins up isolated DBs in seconds; the dev server is a long-running sandbox, not a test runner.
