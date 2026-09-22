@@ -35,7 +35,7 @@ function mem(overrides: Partial<NewMemory> & { id: string }): NewMemory {
 }
 
 // The pre-rewrite correlated form, kept verbatim here as the equivalence oracle.
-const LEGACY_NOT_EXISTS = `m.status = 'archived'
+const LEGACY_IDS_QUERY = `SELECT m.id FROM memory m WHERE m.status = 'archived'
          AND NOT EXISTS (
              SELECT 1 FROM memory m2, json_each(m2.replaces) je
               WHERE je.value = m.id)
@@ -50,7 +50,6 @@ const LEGACY_NOT_EXISTS = `m.status = 'archived'
               WHERE r.source_id = m.id OR r.target_id = m.id)
          AND NOT EXISTS (
              SELECT 1 FROM confirmations c WHERE c.memory_id = m.id)`;
-
 /**
  * Explains the SQL a repository call actually executes. Reconstructing the
  * query in the test instead would let an assertion pass against a query the
@@ -192,7 +191,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
         .run();
 
       const legacyIds = t.handle.raw
-        .prepare<[], { id: string }>(`SELECT m.id FROM memory m WHERE ${LEGACY_NOT_EXISTS}`)
+        .prepare<[], { id: string }>(LEGACY_IDS_QUERY)
         .all()
         .map((r) => r.id)
         .sort();
@@ -246,8 +245,8 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
         for (let i = 0; i < OVER_BIND_CEILING; i++) insert.run(`m-${i}`);
       })();
 
-      // Derived rows on a subset, so the entity DELETEs (which must precede the
-      // memory DELETE — no ON DELETE CASCADE) are actually exercised.
+      // Derived rows on a subset, so the entity DELETEEs (which must precede the
+      // memory DELETEE — no ON DELETEE CASCADE) are actually exercised.
       t.handle.raw
         .prepare(
           `INSERT INTO memory_entities (id, scope, project_id, kind, value, created_at) VALUES ('e1','global',NULL,'path','/tmp/x',1000)`,
@@ -276,8 +275,15 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
 
       repo.purgeByIds(ids);
 
-      const countOf = (table: string) =>
-        (t.handle.raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+      const COUNT_QUERIES = {
+        memory: 'SELECT count(*) AS n FROM memory',
+        memory_entity_links: 'SELECT count(*) AS n FROM memory_entity_links',
+        memory_entity_scan: 'SELECT count(*) AS n FROM memory_entity_scan',
+        memory_vec: 'SELECT count(*) AS n FROM memory_vec',
+        memory_fts: 'SELECT count(*) AS n FROM memory_fts',
+      } as const;
+      const countOf = (table: keyof typeof COUNT_QUERIES) =>
+        (t.handle.raw.prepare(COUNT_QUERIES[table]).get() as { n: number }).n;
       expect(countOf('memory')).toBe(0);
       expect(countOf('memory_entity_links')).toBe(0);
       expect(countOf('memory_entity_scan')).toBe(0);

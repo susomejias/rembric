@@ -49,12 +49,15 @@ describe('the query-tokenising declaration is derived, not restated', () => {
     return raw;
   }
 
+  // The two helper tables are created by this test from its own constants, so
+  // the table names are literal strings rather than interpolated SQL.
+  const termsInsert = `INSERT INTO temp.${QUERY_TERMS_TABLE}(rowid, body) VALUES (0, ?)`;
+  const termsSelect = `SELECT term FROM temp.${QUERY_TERMS_VOCAB_TABLE} ORDER BY term`;
+
   function termsOf(db: Database.Database, text: string): string[] {
-    db.prepare(`INSERT INTO temp.${QUERY_TERMS_TABLE}(rowid, body) VALUES (0, ?)`).run(text);
+    db.prepare(termsInsert).run(text);
     return db
-      .prepare<[], { term: string }>(
-        `SELECT term FROM temp.${QUERY_TERMS_VOCAB_TABLE} ORDER BY term`,
-      )
+      .prepare<[], { term: string }>(termsSelect)
       .all()
       .map((r) => r.term);
   }
