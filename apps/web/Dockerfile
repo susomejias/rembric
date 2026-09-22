@@ -120,7 +120,14 @@ RUN pnpm run build
 # in this file. A production runtime tree without the
 # build toolchain is worth a follow-up; it is not worth an unguarded rebuild.
 #
-#   apps/web/server.js + .next/**   — the standalone server and its chunks
+#   apps/web/next-server.js + .next/**
+#                                   — the standalone server and its chunks. The
+#                                     generated `server.js` is renamed here so
+#                                     the launcher (copied into the runner at
+#                                     `apps/web/server.js`) is what the entrypoint
+#                                     runs; the generated file keeps its own
+#                                     directory, so its `process.chdir(__dirname)`
+#                                     and `require('next')` root are unchanged.
 #   packages/db/dist/migrations     — outputFileTracingIncludes put them here,
 #                                     and `defaultMigrationsDir()` (dirname of
 #                                     the bundle's import.meta.url) reads them
@@ -136,6 +143,7 @@ RUN set -eux; \
     rm -rf /runtime; mkdir -p /runtime; \
     cp -a /app/apps/web/.next/standalone/apps /runtime/apps; \
     cp -a /app/apps/web/.next/standalone/packages /runtime/packages; \
+    mv /runtime/apps/web/server.js /runtime/apps/web/next-server.js; \
     rm -rf /runtime/apps/web/node_modules; \
     cp -a /app/node_modules /runtime/node_modules
 
@@ -166,7 +174,8 @@ RUN set -eux; cd /runtime/node_modules/onnxruntime-node; \
 # `/app/node_modules`; every check passed and the image could not start.)
 #
 # Each gate protects a failure that is otherwise silent at runtime: a missing
-# `server.js` is an image that cannot start; a missing migrations directory
+# `next-server.js` (the renamed generated server) or launcher is an image that
+# cannot start; a missing migrations directory
 # throws when the migration runner reads the mounted volume (37 is the full
 # set — the count is the gate); a native module that does not resolve throws at
 # boot, after the process looks healthy enough to accept traffic; a missing
@@ -180,7 +189,8 @@ RUN set -eux; cd /runtime/node_modules/onnxruntime-node; \
 # rather than shipping the sentinel. (`lib/version.ts` finds that file by
 # walking up from `/app/apps/web`.)
 RUN set -eux; \
-    [ -f /runtime/apps/web/server.js ]; \
+    [ -f /runtime/apps/web/next-server.js ]; \
+    [ -f /app/apps/web/server.js ]; \
     release_version=$(node -p "require('/app/apps/web/package.json').version"); \
     printf '%s' "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || { \
       echo "release identity is not a semver: '$release_version'" >&2; \
@@ -235,6 +245,11 @@ COPY --from=builder --chown=10001:10001 /runtime ./
 # walk-up root and the brand falls back to the `0.0.0` sentinel. The build gate above
 # checks this exact file.
 COPY --from=builder --chown=10001:10001 /app/apps/web/package.json ./apps/web/package.json
+# The standalone entrypoint. It resolves `REMBRIC_PORT` (the variable the Compose
+# mapping and the installer use) into the `PORT` the generated server reads, then
+# loads `next-server.js`. Placed at the path the publish smoke test asserts, which
+# is why the generated server was renamed during the assembly step above.
+COPY --from=builder --chown=10001:10001 /app/apps/web/server.js ./apps/web/server.js
 # Next does not put these in the standalone output; it documents copying them
 # next to the server, which is the same `apps/web` directory here.
 COPY --from=builder --chown=10001:10001 /app/apps/web/.next/static ./apps/web/.next/static
@@ -245,9 +260,11 @@ COPY --from=builder --chown=10001:10001 /empty-data                 /data
 
 USER 10001:10001
 
-# PORT/HOSTNAME are what the standalone server.js reads (its defaults are 3000
-# and 0.0.0.0, and only the port is wrong here); REMBRIC_HOST/REMBRIC_PORT are
-# what the app itself reports. Docker honours an image ENV HOSTNAME.
+# HOSTNAME is what the generated server reads (its default is 0.0.0.0 anyway);
+# REMBRIC_HOST/REMBRIC_PORT are what the app itself reports. The launcher reads
+# REMBRIC_PORT first and then PORT, so REMBRIC_PORT remains the single source of
+# truth for the listen port while both keep their historical default. Docker
+# honours an image ENV HOSTNAME.
 ENV REMBRIC_DATA_DIR=/data \
     REMBRIC_HOST=0.0.0.0 \
     REMBRIC_PORT=8787 \
@@ -261,8 +278,10 @@ EXPOSE 8787
 # Absolute node path: distroless ships it at /nodejs/bin/node and does not
 # guarantee a bare `node` on PATH. The start period is longer than the server
 # image's: the first boot applies migrations and starts the reaper/embedder
-# timers before it accepts connections.
+# timers before it accepts connections. The probe runs the same launcher, so it
+# targets the env-derived port instead of the 8787 default a customised
+# installation does not listen on.
 HEALTHCHECK --interval=30s --timeout=3s --retries=5 --start-period=20s \
-  CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:8787/healthz',{headers:{Authorization:'Bearer '+process.env.REMBRIC_ADMIN_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "/app/apps/web/server.js", "--healthcheck"]
 
 ENTRYPOINT ["/nodejs/bin/node", "/app/apps/web/server.js"]

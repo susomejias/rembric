@@ -110,6 +110,7 @@ export default tseslint.config(
       'apps/plugin/mcp-bridge/**/*.mjs',
       'apps/landing/build.mjs',
       'apps/web/next.config.mjs',
+      'apps/web/server.js',
       'scripts/*.mjs',
     ],
     extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
