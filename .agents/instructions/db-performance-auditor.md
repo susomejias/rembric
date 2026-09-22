@@ -18,7 +18,7 @@ Before you measure anything, work out how often the query runs. This decides whe
 - **Per-session-start / background** — the consolidation sweep, the embedding and entity backfill workers. Tens of ms is tolerable; hundreds is not, because the worker holds the event loop for the whole batch.
 - **Dashboard / operator** — one human, occasional clicks. Cost barely matters. Do NOT optimise these unless the plan shows something pathological (a full scan that will grow unbounded), and say plainly that the cost is acceptable.
 
-Trace the frequency through the MCP tools in `packages/mcp/src/` and the routers in `apps/server/src/server/` rather than guessing from the method name.
+Trace the frequency through the MCP tools in `packages/mcp/src/` and the routes in `apps/web/src/app/api/**/route.ts` (with handler helpers under `apps/web/src/lib/`) rather than guessing from the method name.
 
 ## Method
 
@@ -55,7 +55,7 @@ Also account for `DROP INDEX` in later migrations, and for table-rebuild migrati
 
 **3. Measure at scale, on a real migrated database.**
 
-Build a temp DB through the actual migration runner (helpers live under `apps/server/src/test/` and `packages/db/src/`) and seed a realistic corpus — ~1.3KB bodies, ~1 confirmation per memory, relations, several projects and sessions, ~18 entities per memory. Time at **1k / 20k / 50k** rows. One data point cannot distinguish linear from quadratic, and quadratic is the thing you are hunting.
+Build a temp DB through the actual migration runner (helpers live under `apps/web/src/test/` and `packages/db/src/`) and seed a realistic corpus — ~1.3KB bodies, ~1 confirmation per memory, relations, several projects and sessions, ~18 entities per memory. Time at **1k / 20k / 50k** rows. One data point cannot distinguish linear from quadratic, and quadratic is the thing you are hunting.
 
 Report milliseconds. Distinguish warm from cold cache. Repeat enough to be above noise, and say what noise looks like on your box.
 

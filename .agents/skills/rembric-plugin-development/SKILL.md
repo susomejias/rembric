@@ -1,6 +1,6 @@
 ---
 name: rembric-plugin-development
-description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode / Pi, on edits to `apps/plugin/mcp-bridge/`, `apps/plugin/bin/rembric-plugin-core.mjs`, per-client manifest changes, or plugin install/uninstall scripts. End-to-end validation against `pnpm run dev:docker:up` is mandatory whenever local testing is feasible.
+description: Apply when creating, modifying, or reviewing any Rembric agent plugin. Triggers on changes under `apps/plugin/`, on new clients added alongside Claude Code / Codex CLI / Hermes Agent / opencode / Pi, on edits to `apps/plugin/mcp-bridge/`, `apps/plugin/bin/rembric-plugin-core.mjs`, per-client manifest changes, or plugin install/uninstall scripts. End-to-end validation against a local dev server (`pnpm run dev`, host Next.js on :3000) is mandatory whenever local testing is feasible.
 ---
 
 # Rembric plugin development
@@ -11,8 +11,8 @@ Authoritative specs: `openspec/specs/{claude-code-plugin,codex-distribution,herm
 
 1. **OpenSpec change first.** Run `/opsx:propose` (or amend an existing change). Plugin work always touches ≥2 specs and ≥3 files. Skipping the change is the failure mode that produces drift.
 2. **Two release tracks: `server` + unified `plugin` (no cascade).** release-please runs exactly two components, no `node-workspace`/`linked-versions`/grouping. `server` (`apps/web`, package `@rembric/web`, tag `server-v*`) builds the Docker image. **`plugin`** (`apps/plugin` — the WHOLE tree, no `exclude-paths`, package `@rembric/plugin`, tag `plugin-v*`) carries **one unified version for all five clients**; its `extra-files` update every client carrier in lock-step (`.claude-plugin/{package,plugin}.json`, `.codex-plugin/{package,plugin}.json`, `.hermes-plugin/plugin.yaml`, `.opencode-plugin/plugin.ts` comment, `.pi-plugin/package.json`). A change to ANY plugin file bumps the single `plugin` version — claude/codex/opencode/hermes/pi never diverge; the CHANGELOG (scoped by conventional commit) records what actually changed. A `plugin` release NEVER rebuilds the server image (`publish-docker` gates on `server_release_created`), but it IS what publishes `@rembric/pi` to npm (trusted-publishing OIDC, provenance, no long-lived token). `.pi-plugin/` has to live inside `apps/plugin/` for that: release-please attributes a release by the paths of the commits under the component's `path`, so a client outside it would never _cause_ a release and its carrier would only move when something unrelated did. `release-please.yml` carries a `concurrency` guard (`cancel-in-progress: false`) so a rapid second merge can't cancel tag-minting. The former six-component + `node-workspace` cascade was retired (change `unify-plugin-release-track`) after its anchor-tag fragility produced phantom release PRs. Legacy per-client tags (`claude-code-plugin-v*`, …) stay in history, inert.
-3. **End-to-end against `pnpm run dev:docker:up`** before reporting done — see [E2E discipline](#end-to-end-validation-discipline) below.
-4. **Docs sweep**: `README.md`, `docs/agents.md`, `apps/plugin/README.md`, the in-plugin `README.md`, `apps/plugin/CHANGELOG.md`. New-client checklist in [references/files-checklist.md](./references/files-checklist.md).
+3. **End-to-end against a local dev server** (`pnpm run dev`, host Next.js on :3000) before reporting done — see [E2E discipline](#end-to-end-validation-discipline) below.
+4. **Docs sweep**: `README.md`, `docs/agents.md`, `apps/plugin/README.md`, the in-plugin `README.md`, `apps/plugin/CHANGELOG.md`.
 
 > **No tool watches the per-client manifest dirs for you.** `eslint.config.js` ignores `apps/plugin/*/**`, which matches the dot-directories, and none of them match `pnpm-workspace.yaml::packages` (`apps/*`, `packages/*`) — so `pnpm -r` does not reach them, ESLint does not lint their TypeScript, and any `dependencies` they declare are not installed by the repo's own install (`.claude-plugin/package.json`'s `workspace:*` dep is dead letter today). Their tests run **only** because `apps/web/vitest.config.ts::include` lists a literal glob per client; a new client without its glob leaves a test file written and never executed, and the suite is green on nothing.
 
@@ -64,7 +64,7 @@ This bit us in `add-opencode-plugin` — first iteration speced `chat.message` P
 
 ## Adding a brand-new client
 
-Always start with a Phase 0 spike in `tasks.md` that validates platform assumptions BEFORE any plugin code. Examples of what to spike, plus the cwd/PWD propagation experiment template, live in [references/new-client-spike.md](./references/new-client-spike.md).
+Always start with a Phase 0 spike in `tasks.md` that validates platform assumptions BEFORE any plugin code — the platform assumption you can't cheaply prove is the one that sinks the change. Spike the cwd/PWD propagation chain and the hook/lifecycle delivery shape for the new host before writing any plugin code.
 
 The spike's outcome MUST be recorded as a comment in BOTH `tasks.md` (`<!-- spike result: plan-a -->`) and the plugin's source file (`// cwd-spike-result: plan-a`).
 
@@ -74,10 +74,10 @@ The spike's outcome MUST be recorded as a comment in BOTH `tasks.md` (`<!-- spik
 
 Minimum required steps:
 
-1. `pnpm run dev:docker:up`. Wait for `[bootstrap] listening on`. Capture the seeded `demo-writer` token from the seed banner.
+1. `REMBRIC_DATA_DIR=./data-dev REMBRIC_ADMIN_TOKEN=<16+-char-token> pnpm run dev` (host Next.js dev, `http://127.0.0.1:3000`). Wait for the server to answer `/healthz`, then capture the seeded `demo-writer` token from `seed-dev`'s output (see [references/e2e-walkthrough.md](./references/e2e-walkthrough.md) §1-2).
 2. Install the plugin (`bash apps/plugin/.<X>-plugin/install.sh`), configure the client end-to-end with real URL + real token, drop `.rembric` with `PROJECT_SLUG=demo` in the working directory.
 3. Exercise the lifecycle path your change affects. The exact commands per client (opencode `mcp list`, tsx-driven handler invocation, dashboard SQLite verification, etc.) are in [references/e2e-walkthrough.md](./references/e2e-walkthrough.md).
-4. Tear down: `docker compose ... down`, uninstall, restore user's config file to its prior state (placeholders if it didn't exist before).
+4. Tear down: stop the dev server, uninstall, restore user's config file to its prior state (placeholders if it didn't exist before).
 
 **Prefer the isolated variant of steps 2-4 when the client's CLI supports it** — scratch `HOME`, per-run extension load instead of install, deliberately invalid API key. It touches none of the operator's config, so there is nothing to restore and no half-restored state to leave behind, and it costs no LLM calls. Six rails plus the paired-control method: [references/e2e-walkthrough.md § 5b](./references/e2e-walkthrough.md).
 
@@ -100,7 +100,7 @@ If any answer is "no" or "I don't know", stop and resolve it.
 - [ ] Two-track release respected (`server` + unified `plugin`; no node-workspace/cascade; all five clients share the one `plugin` version via `extra-files`; plugin release never rebuilds Docker)
 - [ ] No duplication of `parseDotenv` / `SLUG_RE` / the `rembric-plugin-core` helpers / endpoint strings without justification
 - [ ] `pnpm vitest run` + `pnpm run typecheck` + `pnpm run lint` + `openspec validate <change> --strict` all clean
-- [ ] Exercised against `pnpm run dev:docker:up` (or explicitly told the user what isn't verified)
+- [ ] Exercised against a local dev server (`pnpm run dev`, :3000) (or explicitly told the user what isn't verified)
 - [ ] Docs sweep done (README, docs/agents.md, apps/plugin/README.md, in-plugin README, CHANGELOG)
 - [ ] Install/uninstall idempotent (verified by running twice)
 - [ ] User's local state restored (dev stack down, plugin uninstalled, config placeholders)
