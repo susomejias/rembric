@@ -1,19 +1,106 @@
-import { describe, expect, it } from 'vitest';
+import { RateLimiterMemory } from 'rate-limiter-flexible';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthLockout } from '../lib/auth-lockout';
-
-/**
- * `lib/auth-lockout.ts::AuthLockout` — the pre-auth failed-attempt lockout both
- * HTTP surfaces consult before touching a token hash (`lib/api.ts` and
- * `lib/mcp-auth.ts`).
- *
- * The token-bucket `RateLimiter` the server module `rate-limit.ts` also exports
- * has NO counterpart in this workspace: the port kept the lockout only, and the
- * OAuth router's own per-endpoint limiter (`lib/oauth.ts`) is a different
- * instrument. Its cases are therefore not ported — see the batch report.
- */
+import {
+  applyMcpRateLimit,
+  getMcpRateLimiter,
+  getRateLimitConfig,
+  resetMcpRateLimiterForTests,
+} from '../lib/rate-limit';
 
 const CFG = { maxFailures: 3, windowMs: 60_000, lockoutMs: 30_000 };
+
+describe('MCP rate-limit direct library integration', () => {
+  beforeEach(() => {
+    resetMcpRateLimiterForTests();
+    delete process.env['RATE_LIMIT_ENABLED'];
+    delete process.env['RATE_LIMIT_RPS'];
+    delete process.env['RATE_LIMIT_BURST'];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetMcpRateLimiterForTests();
+    delete process.env['RATE_LIMIT_ENABLED'];
+    delete process.env['RATE_LIMIT_RPS'];
+    delete process.env['RATE_LIMIT_BURST'];
+  });
+
+  it('preserves disabled defaults and derives a fractional fixed window', () => {
+    expect(getRateLimitConfig({})).toEqual({
+      enabled: false,
+      ratePerSecond: 10,
+      burst: 30,
+      windowMs: 3000,
+      durationSeconds: 3,
+    });
+    expect(
+      getRateLimitConfig({
+        RATE_LIMIT_ENABLED: 'true',
+        RATE_LIMIT_RPS: '20',
+        RATE_LIMIT_BURST: '1',
+      }),
+    ).toEqual({
+      enabled: true,
+      ratePerSecond: 20,
+      burst: 1,
+      windowMs: 50,
+      durationSeconds: 0.05,
+    });
+  });
+
+  it('rejects malformed and unsafe configuration', () => {
+    expect(() => getRateLimitConfig({ RATE_LIMIT_RPS: 'nope' })).toThrow(/RATE_LIMIT_RPS/);
+    expect(() => getRateLimitConfig({ RATE_LIMIT_BURST: '1.5' })).toThrow(/RATE_LIMIT_BURST/);
+    expect(() => getRateLimitConfig({ RATE_LIMIT_RPS: '10001' })).toThrow(/RATE_LIMIT_RPS/);
+    expect(() => getRateLimitConfig({ RATE_LIMIT_RPS: '0.00000000000000001' })).toThrow(
+      /windowMs|window/,
+    );
+    expect(() => getRateLimitConfig({ RATE_LIMIT_RPS: '0.0000000001' })).toThrow(/windowMs|window/);
+  });
+
+  it('does not create a limiter when disabled and caches one per configuration', () => {
+    expect(getMcpRateLimiter()).toBeNull();
+
+    process.env['RATE_LIMIT_ENABLED'] = 'true';
+    const first = getMcpRateLimiter();
+    const second = getMcpRateLimiter();
+    expect(first).toBeInstanceOf(RateLimiterMemory);
+    expect(second).toBe(first);
+
+    resetMcpRateLimiterForTests();
+    expect(getMcpRateLimiter()).not.toBe(first);
+  });
+
+  it('enforces points per key and returns safe legacy 429 JSON metadata', async () => {
+    process.env['RATE_LIMIT_ENABLED'] = 'true';
+    process.env['RATE_LIMIT_RPS'] = '10';
+    process.env['RATE_LIMIT_BURST'] = '2';
+
+    expect(await applyMcpRateLimit('token-a', 'name-a')).toBeNull();
+    expect(await applyMcpRateLimit('token-a', 'name-a')).toBeNull();
+    const blocked = await applyMcpRateLimit('token-a', 'token "quoted"');
+    expect(blocked?.status).toBe(429);
+    expect(blocked?.headers.get('retry-after')).toMatch(/^[1-9][0-9]*$/);
+    expect(await blocked?.json()).toEqual({
+      ok: false,
+      code: 'rate_limited',
+      message: 'token \'token "quoted"\' exceeded its rate limit; retry in 1s',
+      retryAfterSeconds: 1,
+    });
+    expect(await applyMcpRateLimit('token-b', 'name-b')).toBeNull();
+  });
+
+  it('throws unexpected consume errors instead of treating them as allowed', async () => {
+    process.env['RATE_LIMIT_ENABLED'] = 'true';
+    const limiter = getMcpRateLimiter();
+    if (limiter === null) throw new Error('fixture: limiter is disabled');
+    vi.spyOn(limiter, 'consume').mockRejectedValueOnce(new Error('store failure'));
+
+    await expect(applyMcpRateLimit('token-a', 'token-a')).rejects.toThrow('store failure');
+  });
+});
 
 describe('AuthLockout', () => {
   it('does not lock a fresh identity', () => {

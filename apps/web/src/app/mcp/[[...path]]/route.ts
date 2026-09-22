@@ -2,6 +2,7 @@ import { runWithContext } from '@rembric/core';
 
 import { verifyMcpBearerToken } from '../../../lib/mcp-auth';
 import { getMcpSurface } from '../../../lib/mcp-server';
+import { applyMcpRateLimit } from '../../../lib/rate-limit';
 import { getServices } from '../../../lib/services';
 
 /**
@@ -44,6 +45,21 @@ async function handle(request: Request, context: RouteContext): Promise<Response
     services: getServices(),
   });
   if (!auth.ok) return auth.response;
+
+  let rateLimitResponse: Response | null;
+  try {
+    rateLimitResponse = await applyMcpRateLimit(
+      auth.requestContext.token.id,
+      auth.requestContext.token.name,
+    );
+  } catch (err) {
+    console.error('[mcp] rate limiter failed', err);
+    return Response.json(
+      { ok: false, code: 'internal_error', message: 'An unexpected error occurred.' },
+      { status: 500 },
+    );
+  }
+  if (rateLimitResponse !== null) return rateLimitResponse;
 
   // The two hardening gates applied before the transport: the body cap
   // (`MAX_BODY_BYTES`) and the opt-in DNS-rebinding Host/Origin allow-lists.

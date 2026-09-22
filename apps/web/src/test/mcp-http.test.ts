@@ -3,14 +3,16 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TokensService } from '@rembric/core';
+import { TokensService, type TokenPair } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
 import { NextRequest } from 'next/server';
+import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { POST as loginPost } from '../app/dashboard/login/verify/route';
 import { DELETE, POST } from '../app/mcp/[[...path]]/route';
+import { resetMcpRateLimiterForTests } from '../lib/rate-limit';
 import { getServices } from '../lib/services';
 
 // The login route reaches its neighbours through the `@/` alias, which this
@@ -81,6 +83,10 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     delete process.env['REMBRIC_DATA_DIR'];
     delete process.env['REMBRIC_PUBLIC_URL'];
     delete process.env['REMBRIC_SESSION_SECRET'];
+    delete process.env['RATE_LIMIT_ENABLED'];
+    delete process.env['RATE_LIMIT_RPS'];
+    delete process.env['RATE_LIMIT_BURST'];
+    resetMcpRateLimiterForTests();
     rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -89,10 +95,19 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     headers: Record<string, string> = {},
     method = 'POST',
   ): Request {
+    return mcpRequestForToken(adminToken, body, headers, method);
+  }
+
+  function mcpRequestForToken(
+    token: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+    method = 'POST',
+  ): Request {
     return new Request(`${ORIGIN}/mcp`, {
       method,
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        authorization: `Bearer ${token}`,
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
         ...headers,
@@ -270,6 +285,105 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       body: `token=${encodeURIComponent(token)}`,
     });
   }
+
+  describe('post-auth fixed-window limiter', () => {
+    afterEach(() => {
+      delete process.env['RATE_LIMIT_ENABLED'];
+      delete process.env['RATE_LIMIT_RPS'];
+      delete process.env['RATE_LIMIT_BURST'];
+      resetMcpRateLimiterForTests();
+    });
+
+    it('keeps the disabled default and refuses invalid credentials before quota accounting', async () => {
+      const token = services.tokens.create({ name: 'rate-disabled', scope: '*' }).plaintext;
+      const first = await POST(mcpRequestForToken(token, initializeBody), ctx);
+      const second = await POST(mcpRequestForToken(token, initializeBody), ctx);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+
+      process.env['RATE_LIMIT_ENABLED'] = 'true';
+      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_BURST'] = '1';
+      resetMcpRateLimiterForTests();
+      const invalid = await POST(mcpRequestForToken('not-a-real-token', initializeBody), ctx);
+      expect(invalid.status).toBe(401);
+      const allowed = await POST(mcpRequestForToken(token, initializeBody), ctx);
+      expect(allowed.status).toBe(200);
+      const blocked = await POST(mcpRequestForToken(token, initializeBody), ctx);
+      expect(blocked.status).toBe(429);
+    });
+
+    it('fails closed with 500 when the direct limiter returns an unexpected error', async () => {
+      process.env['RATE_LIMIT_ENABLED'] = 'true';
+      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_BURST'] = '1';
+      resetMcpRateLimiterForTests();
+      const consume = vi
+        .spyOn(RateLimiterMemory.prototype, 'consume')
+        .mockRejectedValueOnce(new Error('store failure'));
+
+      const response = await POST(mcpRequestForToken(adminToken, initializeBody), ctx);
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        ok: false,
+        code: 'internal_error',
+        message: 'An unexpected error occurred.',
+      });
+      expect(consume).toHaveBeenCalledWith(expect.any(String));
+    });
+
+    it('isolates quotas by resolved static token id', async () => {
+      process.env['RATE_LIMIT_ENABLED'] = 'true';
+      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_BURST'] = '1';
+      resetMcpRateLimiterForTests();
+      const tokenA = services.tokens.create({ name: 'rate-a', scope: '*' }).plaintext;
+      const tokenB = services.tokens.create({ name: 'rate-b', scope: '*' }).plaintext;
+
+      expect((await POST(mcpRequestForToken(tokenA, initializeBody), ctx)).status).toBe(200);
+      expect((await POST(mcpRequestForToken(tokenA, initializeBody), ctx)).status).toBe(429);
+      expect((await POST(mcpRequestForToken(tokenB, initializeBody), ctx)).status).toBe(200);
+    });
+
+    it('keeps an OAuth refresh rotation on the client identity bucket', async () => {
+      const oauth = services.oauth;
+      if (oauth === null) throw new Error('fixture: OAuth service is disabled');
+      const client = oauth.registerClient({ redirectUris: ['https://client.example/callback'] });
+      const code = oauth.issueCode({
+        clientId: client.clientId,
+        redirectUri: 'https://client.example/callback',
+        codeChallenge: 'challenge',
+        scope: '*',
+        subject: 'oauth-subject',
+      });
+      const first = oauth.redeemCode({
+        code,
+        clientId: client.clientId,
+        redirectUri: 'https://client.example/callback',
+      });
+      const refreshed: TokenPair = oauth.refresh({
+        refreshToken: first.refreshToken,
+        clientId: client.clientId,
+      });
+
+      process.env['RATE_LIMIT_ENABLED'] = 'true';
+      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_BURST'] = '1';
+      resetMcpRateLimiterForTests();
+      expect((await POST(mcpRequestForToken(first.accessToken, initializeBody), ctx)).status).toBe(
+        200,
+      );
+      const blocked = await POST(mcpRequestForToken(refreshed.accessToken, initializeBody), ctx);
+      expect(blocked.status).toBe(429);
+      expect(await blocked.json()).toMatchObject({
+        ok: false,
+        code: 'rate_limited',
+        retryAfterSeconds: 1,
+      });
+      expect(blocked.headers.get('retry-after')).toMatch(/^[0-9]+$/);
+    });
+  });
 
   it('sets Secure on the session cookie for an HTTPS deployment', async () => {
     const res = await loginPost(loginRequest(adminToken));
