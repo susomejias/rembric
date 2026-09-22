@@ -185,10 +185,6 @@ export class RelationsRepository {
       .get();
   }
 
-  /**
-   * Rows touching `memoryId` as source or target, excluding acknowledged
-   * false positives (`not_conflict`).
-   */
   listTouching(memoryId: string): MemoryRelation[] {
     return this.db
       .select()
@@ -219,12 +215,6 @@ export class RelationsRepository {
       .all();
   }
 
-  /**
-   * Distinct target ids that any of `sourceIds` has already judged
-   * `not_conflict`. Save-time candidate detection uses this (keyed on the new
-   * memory's `replaces` ancestry) to stop re-surfacing pairs the agent already
-   * dismissed. Empty input → [].
-   */
   listNotConflictTargetsForSources(sourceIds: readonly string[]): string[] {
     if (sourceIds.length === 0) return [];
     return this.db
@@ -241,11 +231,6 @@ export class RelationsRepository {
       .map((r) => r.targetId);
   }
 
-  /**
-   * Aged pending relations in `scope`, ids only — feeds the consolidator's
-   * per-scope orphan-promotion pass (scope filter in SQL, oldest first,
-   * batch-bounded, so one scope's backlog never starves another's).
-   */
   findPendingOlderThanInScope(opts: {
     projectId: string;
     cutoffMs: number;
@@ -317,29 +302,19 @@ export class RelationsRepository {
     return row?.value ?? 0;
   }
 
-  /**
-   * `listTouching` with joined counterpart titles, for the memory detail
-   * hub's Judgments section. Same touching/not_conflict predicate as
-   * `listTouching` — no new SQL shape, just the admin content join.
-   */
   adminListTouching(memoryId: string): AdminRelationWithContent[] {
-    return (
-      this.db
-        .select(withContentSelection)
-        .from(memoryRelations)
-        .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
-        .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
-        .where(
-          and(
-            or(eq(memoryRelations.sourceId, memoryId), eq(memoryRelations.targetId, memoryId)),
-            or(isNull(memoryRelations.relation), ne(memoryRelations.relation, 'not_conflict')),
-          ),
-        )
-        // Unordered, like `listTouching`: both callers re-sort by `compareAnnotations`,
-        // whose leading key is POV-dependent and so cannot be an ORDER BY column. An
-        // ORDER BY here only bought a temp B-tree on an uncapped read.
-        .all()
-    );
+    return this.db
+      .select(withContentSelection)
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(
+          or(eq(memoryRelations.sourceId, memoryId), eq(memoryRelations.targetId, memoryId)),
+          or(isNull(memoryRelations.relation), ne(memoryRelations.relation, 'not_conflict')),
+        ),
+      )
+      .all();
   }
 
   adminGetWithContent(id: string): AdminRelationWithContent | undefined {
@@ -352,12 +327,6 @@ export class RelationsRepository {
       .get();
   }
 
-  /**
-   * Pending relations whose source AND target both lie in `scope`, oldest
-   * first, with joined content — feeds memory.context.pendingJudgments[].
-   * `cutoffMs: null` skips the age predicate, which is how the caller asks
-   * for inventory rather than the aged queue-depth warning.
-   */
   listPendingInScope(opts: {
     projectId: string;
     cutoffMs: number | null;
@@ -413,13 +382,6 @@ export class RelationsRepository {
       .all();
   }
 
-  /**
-   * Server-wide pending counts grouped by the SOURCE endpoint's project
-   * (null = global scope), counting only pairs whose source AND target are
-   * still active — the unscoped sibling of `countPendingInScope`, i.e. the
-   * adjudicable definition. Candidate pairs share one scope, so the source
-   * endpoint's project is the pair's project.
-   */
   adminPendingAdjudicableByProject(): Array<{ projectId: string | null; count: number }> {
     return this.db
       .select({ projectId: sourceMemory.projectId, count: count() })

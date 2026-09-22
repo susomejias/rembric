@@ -15,23 +15,9 @@ import { DELETE, POST } from '../app/mcp/[[...path]]/route';
 import { resetMcpRateLimiterForTests } from '../lib/rate-limit';
 import { getServices } from '../lib/services';
 
-// The login route reaches its neighbours through the `@/` alias, which this
-// vitest project deliberately does not define (see `dashboard/harness.ts`). The
-// three modules are proxied to their real relative files, so the login arms run
-// the production handler and service graph, not a stub.
 vi.mock('@/lib/auth', async () => await import('../lib/auth'));
 vi.mock('@/lib/services', async () => await import('../lib/services'));
 vi.mock('@/lib/session', async () => await import('../lib/session'));
-
-/**
- * The transport/HTTP slice: the body cap and the opt-in DNS-rebinding gates,
- * driven through the real route handlers.
- *
- * The login arms keep the "no token-validity oracle" property. The status code is
- * `302` back to the login page with `?error=invalid`, not a `401`; the property —
- * an invalid and a valid-but-non-admin token answer byte-identically — is what
- * the test exists for.
- */
 
 type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
@@ -46,9 +32,7 @@ const globalForApp = globalThis as MutableGlobal;
 function resetAppGlobals(): void {
   try {
     globalForApp.__rembricDb?.close();
-  } catch {
-    // ignore double-close of a fixture the process already closed
-  }
+  } catch {}
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
@@ -67,10 +51,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     resetAppGlobals();
     dataDir = mkdtempSync(join(tmpdir(), 'rembric-web-mcp-http-'));
     process.env['REMBRIC_DATA_DIR'] = dataDir;
-    // HTTPS issuer → Secure cookies + OAuth enabled, exactly as the original
-    // hardening server was configured.
     process.env['REMBRIC_PUBLIC_URL'] = 'https://rembric.example.com';
-    // The dashboard session service refuses to build without a signing secret.
     process.env['REMBRIC_SESSION_SECRET'] = 'web-mcp-http-session-secret-long-enough';
     services = getServices();
     adminToken = services.tokens.create({ name: 'hardening-admin', scope: '*' }).plaintext;
@@ -182,8 +163,6 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     );
     expect(deleted.status).toBeLessThan(300);
 
-    // The session is gone from the server's map, so the same id now takes the
-    // unknown-session path — the teardown the transport's DELETE owns.
     const after = await POST(
       mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { 'mcp-session-id': sessionId }),
       ctx,
@@ -203,12 +182,6 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     },
   };
 
-  /**
-   * The two server-level hardening gates, run against the production route
-   * handler. Each arm names its own precondition, and each has the control that
-   * makes it more than a check over a constant: the 413 is compared against a
-   * matching-but-smaller body, and both 403 arms against the allowed pair.
-   */
   describe('body cap and DNS-rebinding gates', () => {
     for (const key of [
       'MAX_BODY_BYTES',
@@ -368,8 +341,6 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       });
 
       process.env['RATE_LIMIT_ENABLED'] = 'true';
-      // A 1 s window keeps both requests inside it despite real-clock jitter;
-      // at 100 ms the second request could land in a fresh bucket (observed flake).
       process.env['RATE_LIMIT_RPS'] = '1';
       process.env['RATE_LIMIT_BURST'] = '1';
       resetMcpRateLimiterForTests();
@@ -402,7 +373,6 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     const validNonAdmin = await loginPost(loginRequest(nonAdmin.plaintext));
     const invalid = await loginPost(loginRequest('definitely-not-a-real-token-value'));
 
-    // No validity oracle: status, destination and body are all indistinguishable.
     expect(validNonAdmin.status).toBe(302);
     expect(invalid.status).toBe(302);
     expect(validNonAdmin.headers.get('location')).toBe(invalid.headers.get('location'));
@@ -410,11 +380,6 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
   });
 });
 
-/**
- * The cap lives twice — as the assertion above and as the mcp-api requirement
- * that publishes it — and nothing couples them. Either location counts, so this
- * holds before and after the delta is merged at archive time.
- */
 describe('the enforced description cap is published in mcp-api', () => {
   it(`states ${DESCRIPTION_MAX_LENGTH} in the live spec or a pending delta`, () => {
     const openspecDir = join(
@@ -433,11 +398,6 @@ describe('the enforced description cap is published in mcp-api', () => {
       }
     }
 
-    // The constant NAME and the value on one line. A bare digit search was
-    // satisfied by 22 numbers already in these files — including 2048 and 1000,
-    // so bumping the cap to the ceiling passed green — and by a stray `1900` in
-    // unrelated prose after the requirement was deleted. The separator is
-    // optional because the sibling documents write `1,900`.
     const digits = String(DESCRIPTION_MAX_LENGTH);
     const withSeparator =
       digits.length > 3 ? `${digits.slice(0, -3)},?${digits.slice(-3)}` : digits;

@@ -7,11 +7,6 @@ import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } f
 
 installViewMocks('/dashboard/sessions');
 
-/**
- * 0252 — stored XSS via prompt tags / project slug / session summary on the
- * session-detail and session-list dashboard pages. Mutation-checked: weakening
- * the escape (rendering the tag as markup) turns the first test red.
- */
 const MALICIOUS_TAG = '<img src=x onerror=alert(1)>';
 const MALICIOUS_SCRIPT = '<script>alert(1)</script>';
 
@@ -89,8 +84,6 @@ describe('dashboard sessions XSS regression (#252)', () => {
       .insert(projects)
       .values([{ id: 'PR1', slug: 'legit-slug', createdAt: new Date(500) }])
       .run();
-    // Simulate a legacy slug containing HTML — the SLUG_REGEX only guards
-    // new writes, not rows that predate it.
     t.handle.raw
       .prepare("UPDATE projects SET slug = '<script>alert(1)</script>' WHERE id = 'PR1'")
       .run();
@@ -113,7 +106,6 @@ describe('dashboard sessions XSS regression (#252)', () => {
   it('never renders raw HTML from a curated markdown summary', async () => {
     const html = await renderSessionDetail('S-CURATED-XSS');
     expect(html).not.toContain(MALICIOUS_SCRIPT);
-    // Escaped as text, exactly like the raw boundary — never parsed as markup.
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).toContain('<strong class="font-medium text-primary">Accomplished</strong>');
   });

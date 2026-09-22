@@ -6,34 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-/**
- * Regression tests for the per-agent transcript parsers in
- * `apps/plugin/scripts/_transcript.sh`.
- *
- * The parsers are coupled to the JSONL shapes emitted by each host
- * agent's transcript file. If Claude Code or Codex CLI ever change the
- * shape of those files in a way the parser doesn't anticipate, the
- * fallback path in our SessionEnd / Stop hooks would silently emit an
- * empty summary, which is exactly the bug we fixed in
- * `fix-session-summary-all-clients`.
- *
- * These tests run the bash parsers against synthetic fixtures that
- * mirror the real-world shapes observed in production (May 2026 — see
- * `fixtures/transcripts/*.jsonl` for the documented examples). If a
- * future host change reshapes the JSONL, these tests will fail loudly
- * and the parser can be updated before the regression hits users.
- *
- * Both `jq` and the awk-only fallback are exercised to keep parity
- * between the two code paths.
- */
-
 const here = dirname(fileURLToPath(import.meta.url));
 // `apps/plugin/scripts` is this file's sibling directory.
 const scriptsDir = join(here, '..', 'scripts');
 const transcriptHelper = join(scriptsDir, '_transcript.sh');
-// The JSONL fixtures still live in `apps/server`'s tree: this relocation's edit
-// surface is this file alone, and those fixtures move (or go) with the rest of
-// that tree. The reference is relative, so nothing here changes when they land.
 const fixturesDir = join(here, 'fixtures', 'transcripts');
 
 interface ParserCase {
@@ -70,13 +46,6 @@ const CASES: ParserCase[] = [
   },
 ];
 
-// A jq-free PATH sandbox: mirrors the minimal system dirs but omits `jq`.
-// Merely stripping PATH to the standard dirs is NOT enough — `jq` commonly
-// lives in `/usr/bin` (CI, most Linux), survives the strip, and the parser
-// prefers it, so the "awk fallback" cases would silently exercise jq. The
-// dispatcher uses `command -v jq`, so jq must be genuinely absent (a failing
-// shim wouldn't do — the parser would just return empty). Symlinking every
-// entry except jq guarantees the awk path runs while all other tools remain.
 let jqlessPathDir: string | null = null;
 function buildJqlessPath(): string {
   if (jqlessPathDir) return jqlessPathDir;
@@ -104,8 +73,6 @@ function buildJqlessPath(): string {
 }
 
 function runBash(script: string, hideJq: boolean): string {
-  // Spawn a fresh bash that sources the helper, runs the function, and
-  // prints the result. Empty stdout is a valid (empty) parser output.
   const env = { ...process.env };
   if (hideJq) {
     env.PATH = buildJqlessPath();

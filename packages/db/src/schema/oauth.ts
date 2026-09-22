@@ -1,21 +1,5 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-/**
- * OAuth 2.1 authorization-server state, kept in dedicated tables so the
- * static operator `tokens` table is untouched (its rows are few, named, and
- * long-lived; OAuth rows are many, anonymous, and short-lived).
- *
- * Secrets (authorization codes, access/refresh tokens) are stored only as a
- * deterministic SHA-256 (NOT the salted scrypt the static `tokens` table
- * uses — see design D1: stretching adds nothing to a 256-bit random secret,
- * and a per-row salt would preclude the indexed O(1) lookup these hot-path
- * tables need). The two hash schemes are intentionally different and not
- * interchangeable. `oauth_tokens.scope` reuses the static `TokenScope`
- * grammar so the same `isAuthorized()` checks apply. `family_id` groups an
- * access/refresh lineage so refresh-reuse detection can revoke the whole
- * family.
- */
-
 export const oauthClients = sqliteTable('oauth_clients', {
   clientId: text('client_id').primaryKey(),
   clientName: text('client_name'),

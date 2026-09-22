@@ -66,19 +66,8 @@ const listSelection = {
   projectSlug: projects.slug,
 };
 
-// Single source of truth for "when was this session last touched" — a
-// zombie active row (killed without SessionEnd) never advances
-// last_activity_at again, so falling back to started_at only matters for
-// rows from before this column existed.
 const EFFECTIVE_LAST_ACTIVITY = sql`COALESCE(${agentSessions.lastActivityAt}, ${agentSessions.startedAt})`;
 
-// "Session has something worth surfacing" — adding a new table that anchors
-// to a session id (e.g. a future `tool_calls`) MUST update only this helper.
-// requireCuratedSummary distinguishes the two consumers' bars on clause 1
-// only: context-surfacing (true, default) trusts only a curated summary;
-// purge-eligibility (false) treats any summary text as "not empty", since
-// deleting genuine-but-uncurated content is irreversible while merely not
-// surfacing it in memory.context is not.
 function sessionHasContentSql(
   alias: 's' | 'sessions',
   opts: { requireCuratedSummary: boolean } = { requireCuratedSummary: true },
@@ -106,11 +95,6 @@ export class AgentSessionsRepository {
     return this.db.select().from(agentSessions).where(eq(agentSessions.id, id)).get();
   }
 
-  /**
-   * Apply a field update to a session, optionally requiring it still be
-   * `active` (the FSM guard). Returns the updated row, or undefined when
-   * the active-guard filtered it out (concurrent transition).
-   */
   updateById(
     id: string,
     set: Partial<NewAgentSession>,
@@ -128,25 +112,6 @@ export class AgentSessionsRepository {
       .get();
   }
 
-  /**
-   * The auto-attachment fallback for MCP writes that omit an explicit
-   * sessionId and have no SessionRouter entry for this transport. Returns
-   * undefined — never guesses — when more than one active session matches
-   * `(tokenId, projectId)`: two concurrently active sessions (e.g. two
-   * different clients, or two windows of the same client) are genuinely
-   * ambiguous, and silently attaching to "whichever started most recently"
-   * can attach to the WRONG one. Preferring no attachment over a wrong one
-   * is the whole point of this method's contract — see
-   * `sessions/spec.md`'s "findActiveForTransport MUST NOT guess under
-   * concurrent ambiguity".
-   *
-   * `activeSinceMs` additionally excludes rows whose last activity predates
-   * that instant — a session killed without SessionEnd (SIGKILL/OOM/closed
-   * terminal) never advances `last_activity_at` again, so it stops
-   * contributing false ambiguity once stale, WITHOUT introducing a
-   * recency tiebreak among genuinely concurrent live sessions (both must
-   * still be within the window to be considered "live" at all).
-   */
   findActiveForTransport(
     tokenId: string,
     projectId: string | null,
@@ -169,11 +134,6 @@ export class AgentSessionsRepository {
     return rows.length === 1 ? rows[0] : undefined;
   }
 
-  /**
-   * Sole-active lookup with NO staleness window — used only by
-   * `memory.session_start`'s reuse branch (see the sessions spec's no-guess
-   * requirement); auto-attach must keep using `findActiveForTransport`.
-   */
   findSoleActiveForReuse(tokenId: string, projectId: string | null): AgentSession | undefined {
     const conditions = [
       eq(agentSessions.tokenId, tokenId),
@@ -227,14 +187,6 @@ export class AgentSessionsRepository {
     return conditions.length > 0 ? query.where(and(...conditions)).all() : query.all();
   }
 
-  /**
-   * Bulk-abandon active rows whose last activity predates `cutoff`. Keyed
-   * on `COALESCE(last_activity_at, started_at)` rather than `started_at`
-   * alone, so a session that is genuinely still being written to (long-
-   * running work, not a zombie) is never abandoned out from under it — only
-   * `fix-audited-defects: zombie sessions block auto-attach` changes it from
-   * a boot-only sweep to one also runnable on an interval.
-   */
   abandonInactiveSince(cutoff: Date, endedAt: Date): number {
     const result = this.db
       .update(agentSessions)
@@ -263,24 +215,12 @@ export class AgentSessionsRepository {
       .all();
   }
 
-  /**
-   * Session counts scoped to `(projectId === null ? global : that project)`.
-   * The MCP-facing `memory.stats` handler MUST use this, not
-   * `adminCountByStatus` — see openspec/changes/fix-audited-defects
-   * ("memory.stats.sessionsByStatus bypasses scope enforcement").
-   */
   countByStatusInScope(projectId: string | null): { status: AgentSessionStatus; count: number }[] {
     const scopeCondition =
       projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId);
     return this.countByStatusWhere(scopeCondition);
   }
 
-  /**
-   * Unscoped, server-wide session counts. `admin`-prefixed so the data-
-   * access confinement grep gate (`src/test/invariants.test.ts`) confines it
-   * to the dashboard layer and `memory.doctor` (whose global `sessions.active`
-   * is spec-blessed) — never to a per-request MCP tool.
-   */
   adminCountByStatus(): { status: AgentSessionStatus; count: number }[] {
     return this.countByStatusWhere();
   }
@@ -328,11 +268,6 @@ export class AgentSessionsRepository {
     this.db.run(sql`DELETE FROM sessions WHERE id IN (${placeholders})`);
   }
 
-  /**
-   * Optional filters shared by `adminList`/`adminCount`. `projectId`
-   * follows the memories-list scope convention: unset = no filter,
-   * `null` = global-only (`project_id IS NULL`), a string = that project.
-   */
   private adminFilterConditions(opts: AdminSessionFilters): SQL[] {
     const conditions: SQL[] = [
       opts.deleted ? isNotNull(agentSessions.deletedAt) : isNull(agentSessions.deletedAt),

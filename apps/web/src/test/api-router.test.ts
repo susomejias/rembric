@@ -17,21 +17,6 @@ import { POST as turnPost } from '../app/api/[slug]/sessions/[id]/turn/route';
 import { POST as sessionsPost, GET as sessionsGet } from '../app/api/[slug]/sessions/route';
 import { getServices } from '../lib/services';
 
-/**
- * The `/api/[slug]` session-lifecycle surface. This drives the REAL route
- * handlers over a real migrated database: the auth pipeline, validation, service
- * calls, status codes and `{ ok: false, code }` bodies are all the production
- * path.
- *
- * Two things are deliberately outside this suite:
- *   - a successful `POST /memory/recall`, because `lib/services.ts` wires the
- *     real embedder as the query embedder and `memory.search` calls it
- *     unconditionally (a model load, not a database read). The refusal paths
- *     have no embedder in them and are covered.
- *   - the `sweep`/`forcedSweep` background work, which is fire-and-forget by
- *     contract and unobservable from a response.
- */
-
 type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { raw: { close: () => void }; close: () => void };
@@ -42,9 +27,7 @@ const globalForApp = globalThis as MutableGlobal;
 function resetAppGlobals(): void {
   try {
     globalForApp.__rembricDb?.close();
-  } catch {
-    // ignore double-close of a fixture the process already closed
-  }
+  } catch {}
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
 }
@@ -63,8 +46,6 @@ beforeEach(() => {
   resetAppGlobals();
   dataDir = mkdtempSync(join(tmpdir(), 'rembric-web-api-'));
   process.env['REMBRIC_DATA_DIR'] = dataDir;
-  // The OAuth fallback is present iff REMBRIC_PUBLIC_URL is set; unset keeps
-  // every case on the static-token path this suite is about.
   delete process.env['REMBRIC_PUBLIC_URL'];
 
   const services = getServices();
@@ -77,9 +58,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // The session-start consolidation sweep is fire-and-forget (`services.sweep`
-  // schedules on `setImmediate`), so let it run while the connection is still
-  // open instead of logging a spurious "connection is not open" after cleanup.
   await new Promise((resolve) => setImmediate(resolve));
   resetAppGlobals();
   delete process.env['REMBRIC_DATA_DIR'];
@@ -114,7 +92,6 @@ async function body(res: Response | Promise<Response>): Promise<{
   return { status: response.status, json };
 }
 
-/** Call a route handler with the segment params Next would supply. */
 function call<P extends Record<string, string>>(
   handler: (request: Request, ctx: { params: Promise<P> }) => Promise<Response>,
   req: Request,
@@ -209,8 +186,6 @@ describe('method → handler mapping', () => {
   });
 
   it('does not consult auth for the declared method (control for the 405 replacement)', async () => {
-    // The declared POST on the same path IS authenticated, so the 404 above is
-    // the fallback answering rather than an auth refusal in disguise.
     const declared = await call(
       sessionsPost,
       request('POST', `/api/${project.slug}/sessions`),
@@ -479,9 +454,6 @@ describe('session routes: token binding and lifecycle', () => {
   });
 
   it('recall-hints answers an empty prompt with no lines, on a read action', async () => {
-    // Seeded through the service with the READ token as owner: `/sessions`
-    // itself requires write, and ownership is by token id, so this is the only
-    // way to reach a read-only caller that owns its session.
     getServices().agentSessions.ensure({
       id: 'sess-hints1',
       tokenId: reader.token.id,

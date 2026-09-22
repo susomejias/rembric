@@ -1,58 +1,16 @@
 import { existsSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 
-/**
- * In-process embedder. The model is part of the engine, not configuration:
- * gte-multilingual-base (Apache 2.0), ONNX q8, 768 dims, cls pooling,
- * normalized output — pinned constants, calibrated thresholds live in
- * `save-time-candidates.ts`.
- *
- * Loaded eagerly at boot and REQUIRED for boot to succeed (fail fast: a
- * broken or missing model turns the deploy red instead of degrading
- * silently). From the baked image the load takes ~1.1s; once the server
- * is listening the model is always warm — there is no cold state.
- *
- * transformers.js quirk (pinned): the model's custom `NewModel`
- * architecture resolves through the EncoderOnly fallback with a console
- * warning. Output correctness through that path is guarded by
- * `embedder.test.ts`; the dependency version is exact-pinned in
- * package.json — do not loosen it.
- */
-
 export const EMBEDDING_MODEL_ID = 'onnx-community/gte-multilingual-base';
 export const EMBEDDING_DTYPE = 'q8';
 export const EMBEDDING_DIMS = 768;
 
-/**
- * Version tag for the TEXT recipe fed to the embedder (independent of the
- * model id). Stored in the embedding-state marker alongside the model id;
- * bumping it invalidates every stored vector so the boot-time
- * `ensureVectorModel` reset + background drain re-embed the corpus with the
- * new recipe. Bump whenever `embeddingInput` changes.
- *   v2-title-content: embed `title + "\n\n" + content` (was content-only).
- *
- * Governs BOTH halves of the recipe — the document side (`embeddingInput`) and
- * the query side (`embeddingQueryInput`). Bump if EITHER changes so the corpus
- * re-embeds against a matching query encoder.
- */
 export const EMBEDDING_INPUT_VERSION = 'v2-title-content';
 
-/**
- * The exact text embedded for a memory (document side): its curated title
- * followed by the body, so the headline shapes the stored vector. Used
- * identically at save time (`embedNow`) and by the background drain.
- */
 export function embeddingInput(title: string, content: string): string {
   return `${title}\n\n${content}`;
 }
 
-/**
- * The exact text embedded for a search query (query side). A query has no
- * curated title, so it is embedded verbatim — identity today. Kept as a named
- * counterpart to `embeddingInput` so the document/query asymmetry is an
- * explicit, co-located decision: a future change to the document recipe has an
- * obvious place to weigh the matching query-side transform.
- */
 export function embeddingQueryInput(query: string): string {
   return query;
 }
@@ -73,19 +31,8 @@ type FeaturePipeline = (
   opts: { pooling: 'cls'; normalize: boolean },
 ) => Promise<{ data: Float32Array | number[] }>;
 
-/**
- * Load the model and return the embedder. Called once by bootstrap,
- * before the HTTP listener starts; a load failure aborts the boot.
- */
 export async function loadEmbedder(): Promise<Embedder> {
   const { env, pipeline } = await import('@huggingface/transformers');
-  // The baked model dir only exists in the Docker image (produced and
-  // offline-validated by scripts/fetch-model.mjs in local-model layout).
-  // Present → resolve locally, refuse network. Absent (dev machines) →
-  // download at the pinned revision into the default cache; the first
-  // bare-metal boot blocks on that download, once.
-  // REMBRIC_MODEL_CACHE overrides the dir (CI prefetches the same layout
-  // and points here so the suite resolves offline, never the HF CDN).
   const localModelDir = process.env.REMBRIC_MODEL_CACHE ?? IMAGE_MODEL_CACHE;
   const baked = existsSync(localModelDir);
   if (baked) {
@@ -94,13 +41,6 @@ export async function loadEmbedder(): Promise<Embedder> {
   }
   const pipe = (await pipeline('feature-extraction', EMBEDDING_MODEL_ID, {
     dtype: EMBEDDING_DTYPE,
-    // onnxruntime sizes its pool from the kernel's CPU topology, not from the
-    // cgroup/cpuset the process is confined to: unpinned it opens one thread
-    // per HOST core, and exceeding the cores actually available degrades
-    // linearly (measured on 1 core: 20ms at 1 thread, 181ms at 8).
-    // availableParallelism honours both cpuset and cgroup quota. Capped at 2
-    // because past that a short-text embed buys ~3ms of latency for 2.6x the
-    // CPU — the wrong trade for a server sharing a self-hoster's box.
     session_options: {
       intraOpNumThreads: Math.min(2, availableParallelism()),
       interOpNumThreads: 1,

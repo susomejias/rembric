@@ -29,13 +29,6 @@ import { buildSessionHandlers } from '@rembric/mcp';
 import { createTestDb, defaultProject, mintTestToken, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * A path slug that names no project used to resolve to the global scope, so
- * `/mcp/<typo>` was a live connection onto user-wide memory: reads widened and
- * `capture_passive` / `save_prompt` / `session_start` deposited global rows.
- * Every tool that resolves scope now refuses with `project_not_found`.
- */
-
 const UNRESOLVABLE = 'no-such-project';
 const ADMIN = '*' as const;
 
@@ -143,8 +136,6 @@ describe('reads on an unresolvable slug refuse rather than widen', () => {
     expect(decode(r).body.code).toBe('project_not_found');
   });
 
-  // Control: the same malformed call on a slug that DOES resolve still reports
-  // the argument error, so the reordering above is scoped to the refusal.
   it('memory.get with neither id nor ids is still invalid_input on a resolvable slug', async () => {
     const r = await runWithContext(
       ctxFor({ project: realProject, requestedSlug: realProject.slug }),
@@ -246,16 +237,12 @@ describe('the refusal does not brick the connection', () => {
     });
     const current = await runWithContext(ctxFor(), () => Promise.resolve(projectTools.current({})));
     expect(decode(current).isError).toBe(false);
-    // A project row with content, so the count below is non-zero and the
-    // assertion is not satisfied by an empty corpus.
     memory.save(
       { type: 'project', title: 'row in the real project', content: 'row in the real project' },
       projectScope(realProject.id),
     );
     const listed = await runWithContext(ctxFor(), () => Promise.resolve(projectTools.list({})));
     expect(decode(listed).isError).toBe(false);
-    // The count is produced without resolving an effective scope, so it must
-    // still be reported for every project the token may read.
     const entries = decode(listed).body.projects as
       | { slug: string; activeMemoryCount: number }[]
       | undefined;
@@ -271,10 +258,6 @@ describe('the refusal does not brick the connection', () => {
     expect(body.created).toBe(true);
   });
 
-  // `project.current` is the one tool that answers without resolving a scope,
-  // so it is also the one that skips `assertAuthorized`. The exemption is only
-  // defensible while the payload carries no data about any project — pinned
-  // here so a change that starts projecting real data has to face it.
   it('project.current on an unresolvable slug projects no project data at all', async () => {
     const projectTools = buildProjectHandlers({
       logInternalError,
@@ -312,8 +295,6 @@ describe('the refusal does not brick the connection', () => {
     await runWithContext(ctxFor(), () =>
       Promise.resolve(projectTools.use({ slug: UNRESOLVABLE, autocreate: true })),
     );
-    // `authenticate` re-runs per request, so the next call arrives with
-    // `ctx.project` populated from the now-existing slug.
     const minted = projects.findBySlug(UNRESOLVABLE);
     expect(minted).toBeDefined();
     const inScope = memory.save(
@@ -341,8 +322,6 @@ describe('error messages name only reachable remedies', () => {
   });
 
   it('the refusal a path-scoped connection can still produce names no scope', async () => {
-    // `project.use` for another slug is the surviving `scope_locked`: a lock on
-    // switching, not on a scope, so its message may not name one.
     const projectTools = buildProjectHandlers({
       logInternalError,
       repos,
@@ -363,8 +342,6 @@ describe('error messages name only reachable remedies', () => {
   });
 
   it('agrees with the path-scoped instructions block about reachability', () => {
-    // Two surfaces of the same connection: neither may name a scope the server
-    // does not have, and neither may promise a second connection.
     const instructions = buildInstructions({ requestedSlug: realProject.slug });
     expect(instructions).toContain(realProject.slug);
     expect(instructions).not.toMatch(/global|user-wide/i);
@@ -390,8 +367,6 @@ describe('error messages name only reachable remedies', () => {
     expect(message).toContain('rembric');
   });
 
-  // Control for the clause above: a token with no project pin has nothing to
-  // activate, so the hint must be absent.
   it('a read:* token denied a write is not told to call project.use', async () => {
     const readOnly = mintTestToken(db.handle, { scope: 'read:*' }).token;
     const r = await runWithContext(
@@ -409,9 +384,6 @@ describe('error messages name only reachable remedies', () => {
     expect(body.message as string).not.toContain('project.use');
   });
 
-  // The remedy's condition is "the resolved scope differs from the token's pin",
-  // not "the resolved scope is global": a router pin on a path-less connection is
-  // switchable with `project.use`, so the way out is real here too.
   it('a token pinned to another project IS told to activate it on a project-scope denial', async () => {
     const other = projects.create({ slug: 'other-project' });
     const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
@@ -433,8 +405,6 @@ describe('error messages name only reachable remedies', () => {
     expect(body.message as string).toContain("project.use({slug: 'other-project'})");
   });
 
-  // Second control: the denied scope IS the token's pin, so re-activating it
-  // changes nothing — a `read:` token refused a write cannot fix that by moving.
   it('a token denied an action on its OWN pinned project is not told to activate it', async () => {
     const pinned = mintTestToken(db.handle, { project: realProject, access: 'read' }).token;
     router.setActiveProject(pinned.id, 'mcp-sess-own', realProject.id, 'tool-explicit');
@@ -453,9 +423,6 @@ describe('error messages name only reachable remedies', () => {
     expect(body.message as string).not.toContain('project.use');
   });
 
-  // A token row predating the enforced project binding carries a SLUG in its
-  // scope string rather than an id (`db/schema/tokens.ts:35-37`), so the remedy
-  // cannot resolve it to a project row and must name the string it already has.
   it('a legacy token whose scope carries a slug is told to activate that slug', async () => {
     const r = await runWithContext(
       ctxFor({
@@ -472,9 +439,6 @@ describe('error messages name only reachable remedies', () => {
     expect(body.message as string).not.toContain('undefined');
   });
 
-  // Third control: on a path-scoped connection `project.use({slug})` is rejected
-  // whenever the slug differs from the path slug (`project-tools.ts`), so the
-  // hint would name a remedy this caller cannot reach.
   it('a pinned token denied a read on a path-scoped connection is not told to call project.use', async () => {
     const other = projects.create({ slug: 'other-project' });
     const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
@@ -494,11 +458,6 @@ describe('error messages name only reachable remedies', () => {
   });
 });
 
-/**
- * Enumerated rather than grepped: the table is checked against the tool list
- * the SDK actually advertises, so a tool registered later fails this test
- * instead of silently inheriting a scope fallback.
- */
 const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.save': { type: 'user', title: 't', content: 'c' },
   'memory.search': {},
@@ -527,13 +486,6 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   },
 };
 
-/**
- * The recovery path. These four never resolve a scope, which is what keeps an
- * unresolvable connection repairable from inside the session. `project.use`
- * needs `autocreate` because minting the missing project is the repair — it
- * returns `project_not_found` without it, from its own lookup rather than from
- * the resolver.
- */
 const EXEMPT: Record<string, Record<string, unknown>> = {
   'memory.about': {},
   'project.use': { slug: UNRESOLVABLE, autocreate: true },

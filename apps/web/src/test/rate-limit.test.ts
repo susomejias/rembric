@@ -131,8 +131,6 @@ describe('AuthLockout', () => {
 
   it('reports a retry-after of at least one second while locked', () => {
     const now = 1_000_000;
-    // Belt and braces: the `Math.max(1, …)` clamp is what stops a sub-second
-    // remainder from advertising `Retry-After: 0`.
     const lockout = new AuthLockout({ ...CFG, lockoutMs: 1_000 }, () => now);
     for (let i = 0; i < 3; i++) lockout.recordFailure('1.2.3.4');
     expect(lockout.check('1.2.3.4').retryAfterSeconds).toBe(1);
@@ -143,7 +141,7 @@ describe('AuthLockout', () => {
     const lockout = new AuthLockout(CFG, () => now);
     lockout.recordFailure('1.2.3.4');
     lockout.recordFailure('1.2.3.4');
-    now += CFG.windowMs + 1; // the window lapses; the counter restarts
+    now += CFG.windowMs + 1;
     lockout.recordFailure('1.2.3.4');
     expect(lockout.check('1.2.3.4').locked).toBe(false);
     lockout.recordFailure('1.2.3.4');
@@ -160,7 +158,7 @@ describe('AuthLockout', () => {
     lockout.recordSuccess('1.2.3.4');
     lockout.recordFailure('1.2.3.4');
     lockout.recordFailure('1.2.3.4');
-    expect(lockout.check('1.2.3.4').locked).toBe(false); // counter restarted
+    expect(lockout.check('1.2.3.4').locked).toBe(false);
   });
 
   it('keys identities independently', () => {
@@ -169,7 +167,6 @@ describe('AuthLockout', () => {
     for (let i = 0; i < 3; i++) lockout.recordFailure('1.1.1.1');
     expect(lockout.check('1.1.1.1').locked).toBe(true);
     expect(lockout.check('2.2.2.2').locked).toBe(false);
-    // A success on one identity must not clear another's failures.
     lockout.recordSuccess('2.2.2.2');
     expect(lockout.check('1.1.1.1').locked).toBe(true);
   });

@@ -10,10 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionProtocol, RESUMED_READ_NUDGE } from '../bin/rembric-plugin-core.mjs';
 
-// The resumed-process read line lives in the shared core (plugin-session-protocol),
-// so this is the only place the rule can be pinned for the in-process JS/TS
-// clients (Pi, opencode) at once — they contribute a transport and nothing else.
-
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf8')) as {
   resumedReadCore: string;
@@ -71,8 +67,6 @@ describe('the resumed-process read line', () => {
 
     const turn1 = core.nudgesForTurn('s-resumed', 'anything');
     expect(turn1).toContain(RESUMED_READ_NUDGE);
-    // Control: it really did fire, so the next assertion is not measured
-    // against an empty set.
     expect(turn1.filter((l) => l === RESUMED_READ_NUDGE)).toHaveLength(1);
 
     const turn2 = core.nudgesForTurn('s-resumed', 'anything');
@@ -110,11 +104,6 @@ describe('the resumed-process read line', () => {
     stubEnsureCreated(false);
     const core = protocol();
     await core.ensureSession('s-first');
-    // A LATER ensure in the SAME process reports an unclear outcome (no
-    // `created` field); the process-wide latch from the FIRST ensure still
-    // governs the resumedRead line for every session. (Its own per-session
-    // `created` outcome is `null`, so the OPENING line — which IS tracked
-    // per-session — does not fire and mask this one.)
     stubEnsureCreated(undefined);
     await core.ensureSession('s-second');
 
@@ -175,9 +164,6 @@ describe('the resumed-process read line', () => {
     const core = protocol();
     await core.ensureSession('s-poison');
 
-    // A /summary response that ALSO happens to carry `created: false` must
-    // not be consulted: the contract forbids reading a *summary* response
-    // to learn summary (or resume) state at all.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/summary')) {
@@ -219,9 +205,6 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
     requests = [];
     ensureBody = '{"ok":true}';
     root = mkdtempSync(join(tmpdir(), 'rembric-resumedread-'));
-    // TMPDIR (the marker root) and the session's cwd (where `.rembric`
-    // resolves the slug) are DIFFERENT directories under `root` — the
-    // marker mechanism must not depend on them coinciding.
     tmpdirEnv = join(root, 'tmp');
     cwd = join(root, 'cwd');
     mkdirSync(tmpdirEnv, { recursive: true });
@@ -282,8 +265,6 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
   it('emits the resumedRead line on turn 1 when the ensure reported created:false', async () => {
     ensureBody = '{"ok":true,"created":false}';
     await runSessionStart('s-resumed');
-    // Control: the ensure really landed against the stub, so the assertion
-    // below is not measured against a request that never happened.
     expect(requests.map((r) => r.path)).toContain('/api/demo/sessions');
 
     const out = await runPromptNudge('s-resumed');
@@ -318,9 +299,6 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
 
     const otherTmp = mkdtempSync(join(tmpdir(), 'rembric-resumedread-other-'));
     try {
-      // A DIFFERENT TMPDIR has no marker at all — indistinguishable from
-      // "unreadable" from prompt-nudge.sh's point of view, and it must
-      // still exit cleanly and emit nothing.
       const out = await runPromptNudge('s-broken-marker', { TMPDIR: otherTmp });
       expect(out).not.toContain(fixtures.resumedRead);
     } finally {

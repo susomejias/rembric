@@ -53,8 +53,6 @@ async function archiveMemory(_prev: ActionState, formData: FormData): Promise<Ac
   if (!guard.ok) return guardFailure(guard);
 
   const id = readField(formData, 'id');
-  // The row is read unscoped, then its own project's scope is what the service
-  // call is pinned to.
   const row = guard.services.memory.unsafeGetById(id);
   if (!row) redirect('/dashboard/memories');
   if (!row.projectId) return { error: NO_PROJECT_MESSAGE };
@@ -109,7 +107,6 @@ export default async function MemoryDetailPage({
   if (!row) notFound();
 
   const project = row.projectId ? repos.projects.adminFindById(row.projectId) : undefined;
-  // `adminGetByIds` has no ORDER BY; sorting restores the chronological contract.
   const predecessors = repos.memory
     .adminGetByIds(row.replaces)
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
@@ -127,7 +124,6 @@ export default async function MemoryDetailPage({
   );
   const successorId =
     row.status === 'superseded' ? repos.memory.findSuccessorId(row.id) : undefined;
-  // `findSuccessorId` returns only the id; the row behind it is what this view shows.
   const successor = successorId ? repos.memory.adminGetByIds([successorId]).at(0) : undefined;
 
   const touching = repos.relations

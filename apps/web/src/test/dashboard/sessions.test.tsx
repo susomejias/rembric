@@ -66,7 +66,6 @@ async function renderSessions(params: Record<string, string> = {}): Promise<stri
   return renderToHtml(await page({ searchParams: Promise.resolve(params) }));
 }
 
-/** The `<tr>` of one session in the list, so a value elsewhere cannot satisfy an assertion. */
 function sessionRow(html: string, id: string): string {
   const chunk = html.split('<tr').find((c) => c.includes(`/dashboard/sessions/${id}"`));
   if (chunk === undefined) throw new Error(`no row for session ${id}`);
@@ -85,7 +84,6 @@ describe('sessions filter bar', () => {
     expect(html).not.toContain('/dashboard/sessions/S1"');
     expect(html).not.toContain('/dashboard/sessions/S2"');
     expect(html).toContain('2 ROWS');
-    // Accessible label association per filter control.
     expect(html).toContain('for="s-agent"');
     expect(html).toContain('>AGENT<');
     expect(html).toContain('for="s-status"');
@@ -142,8 +140,6 @@ describe('sessions filter bar', () => {
       /href="\/dashboard\/sessions\?agent=claude-code&(?:amp;)?status=ended&(?:amp;)?page=1"/,
     );
 
-    // The retired sentinel is read as "no filter", so it must not come back out
-    // in a generated href either.
     const sentinel = await renderSessions({ project: '__global__' });
     expect(sentinel).toMatch(/href="\/dashboard\/sessions\?page=1"/);
     expect(sentinel).not.toContain('__global__');

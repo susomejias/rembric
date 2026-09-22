@@ -15,22 +15,6 @@ import {
   SESSION_ID_NUDGE_TEMPLATE,
 } from '../bin/rembric-plugin-core.mjs';
 
-/**
- * The remaining client-composed nudge texts are the lock-step contract shared
- * with the bash (scripts/prompt-nudge.sh, scripts/prompt-search.sh), JS/TS
- * (bin/rembric-plugin-core.mjs, imported by every JS/TS client), and Python
- * (.hermes-plugin/__init__.py) implementations. Bash and the shared JS/TS
- * module embed the SAME `rembric:`-prefixed strings verbatim (asserted
- * directly here); Python wraps each hint in `<memory-hint>...</memory-hint>`
- * tags, so its lock-step check unwraps the tag and compares the shared core
- * text (the `…Core` fixture keys).
- *
- * The stretch-close reminder (`session-nudges`) is server-composed and has
- * NO fixture: every client prints what the server hands it, and its own
- * 640-byte bound is asserted against the emitted string on the server
- * (apps/server/src/services/session-nudge.test.ts).
- */
-
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf8')) as {
   sessionIdCoreTemplate: string;
@@ -51,11 +35,6 @@ function sessionIdLine(sessionId: string): string {
   return fixtures.sessionIdTemplate.replace('{{SESSION_ID}}', sessionId);
 }
 
-/**
- * The budget unit is pinned by claude-code-plugin's token-budget requirement as
- * UTF-8 bytes ÷ 4. `.length` undercounts because `≤ · —` are multi-byte, which
- * is why the same post-compact block has two published token figures.
- */
 const bytes = (s: string): number => Buffer.byteLength(s, 'utf8');
 /** 36 chars: the sessionId line's cap is stated for a rendered UUID. */
 const UUID_SESSION_ID = '0189d5f2-6c3a-7b4e-9f21-8c7d6e5a4b30';
@@ -248,8 +227,6 @@ describe('sessionOpening fixture lock-step across bash, TS, and Python', () => {
   });
 });
 
-// The JS/TS clients contribute only a transport, so the core's own emission is
-// the only place the order can be pinned for all of them at once.
 describe('the shared JS/TS core: nudgesForTurn order and no-cadence contract', () => {
   const core = () =>
     createSessionProtocol({
@@ -279,16 +256,6 @@ describe('the shared JS/TS core: nudgesForTurn order and no-cadence contract', (
   });
 });
 
-/**
- * post-compact.sh's PROTOCOL block fires at SessionStart(matcher:"compact")
- * on Claude Code AND Codex CLI — both run this exact script, so it is
- * byte-identical across the two by construction. opencode's compaction
- * handler (`experimental.session.compacting` in .opencode-plugin/plugin.ts)
- * sources the same core text via rembric-plugin-core.mjs's
- * POST_COMPACT_NUDGE_CORE plus its own slug sentence — pinned in
- * plugin.test.ts, not here, since it runs through the TS handler rather
- * than this bash script.
- */
 describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
   function runPostCompact(cwd: string): string {
     return execFileSync('bash', [postCompactSh], {
@@ -360,10 +327,6 @@ describe('postCompactCore fixture lock-step across the shared JS/TS core and Pyt
   });
 });
 
-/**
- * One assertion per row of the token-budget requirement's per-line table. Each
- * is its own `it` so a violation names exactly one line.
- */
 describe('per-line byte budgets', () => {
   it('SessionStart nudge ≤100 bytes (25 tokens)', () => {
     expect(bytes(fixtures.sessionStart)).toBeLessThanOrEqual(100);
@@ -400,14 +363,6 @@ describe('per-line byte budgets', () => {
   });
 });
 
-/**
- * The per-firing-turn ceiling (session-nudges, claude-code-plugin) is derived
- * from firstPromptRelevance + recall + sessionIdTemplate + the notice's own
- * 640-byte bound + 4 newlines. The notice itself has no fixture (it is
- * composed server-side per session), so the worst case is reconstructed here
- * from a SYNTHETIC 640-byte string standing in for it — the real end-to-end
- * figure is measured against a live server in the PR description (task 8.3).
- */
 describe('UserPromptSubmit emitted-output budgets', () => {
   it('turn 1 with a recall keyword stays ≤800 bytes (200 tokens): this sub-budget does NOT move', () => {
     const counterDir = mkdtempSync(join(tmpdir(), 'rembric-budget-turn1-'));
@@ -482,18 +437,7 @@ describe.runIf(hasPython3)('no cadence constant remains in the Python provider',
   });
 });
 
-/**
- * The caps below live in two places by necessity — a prose contract and an
- * executing assertion — and nothing coupled them, so amending one silently left
- * the other. This asserts every cap this file enforces appears verbatim in the
- * published requirement, which is what makes a spec edit and a test edit fail
- * together instead of drifting apart.
- */
 describe('every enforced cap is published in the capability that owns it', () => {
-  // The PUBLISHED spec: `server-gated-session-nudges` is archived, so the
-  // capability file now carries these numbers. It pointed at that change's
-  // delta while it was unarchived, because the published file still held the
-  // pre-change 960/180 until the archive phase merged it.
   const spec = readFileSync(
     join(here, '..', '..', '..', 'openspec', 'specs', 'claude-code-plugin', 'spec.md'),
     'utf8',

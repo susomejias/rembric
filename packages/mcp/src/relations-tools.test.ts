@@ -115,8 +115,6 @@ describe('memory.judge — batch form', () => {
       results: { ok: boolean; judgmentId: string; status?: string; code?: string }[];
     }>(r);
     expect(results.map((x) => x.ok)).toEqual([true, false, true]);
-    // `not_found` (not `memory_not_found`): change enforce-mcp-authorization
-    // unified missing and out-of-scope judgment ids so existence never leaks.
     expect(results[1]?.code).toBe('not_found');
     // The good items persisted (not rolled back by the bad one in the middle).
     expect(repos.relations.findByJudgmentId(p1.judgmentId)?.status).toBe('judged');

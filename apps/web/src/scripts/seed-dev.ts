@@ -1,19 +1,3 @@
-/**
- * Dev seed — populates a fresh dev DB with ~30-50 thematic rows so every
- * dashboard surface renders with meaningful data on first boot.
- *
- * Usage:
- *   tsx src/scripts/seed-dev.ts          # idempotent: skip if `demo` project exists
- *   tsx src/scripts/seed-dev.ts --reset  # wipe and reseed
- *
- * Inside the dev container the wrapper is:
- *   pnpm run dev:docker:seed
- *
- * This script is gated by an entry in `src/test/invariants.test.ts`'s
- * `DELETE FROM` allow-list — it is the ONLY script outside the service
- * layer permitted to emit DELETEs against the protected tables.
- */
-
 import { AgentSessionsService } from '@rembric/core';
 import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
@@ -27,33 +11,13 @@ const DEMO_SLUG = 'demo';
 export interface SeedDeps {
   handle: DbHandle;
   reset: boolean;
-  /**
-   * Plaintext to use for the admin token. When the dev container's boot
-   * chain invokes the seed, it passes `process.env.REMBRIC_ADMIN_TOKEN`
-   * here so the operator's existing `.env` token stays valid across
-   * `--reset` reboots (dashboard login + container HEALTHCHECK both rely
-   * on it). When undefined (e.g. unit tests), the seed generates a
-   * random plaintext and prints it like the other project-scoped tokens.
-   */
   adminTokenPlaintext?: string;
-  /**
-   * Environment used to gate the destructive `--reset` path. When `reset`
-   * is true, this map MUST contain `REMBRIC_ALLOW_DESTRUCTIVE_SEED=1` or
-   * the seed will refuse to wipe and return early. Defaults to
-   * `process.env`. Tests inject a controlled map.
-   */
   env?: NodeJS.ProcessEnv;
-  /** Output sink for the operator-facing summary. Defaults to console.error. */
   log?: (line: string) => void;
 }
 
 export interface SeedResult {
   skipped: boolean;
-  /**
-   * True when `--reset` was requested but the destructive-action env gate
-   * (`REMBRIC_ALLOW_DESTRUCTIVE_SEED=1`) was missing. The seed performed
-   * no wipe and no insert. `main()` uses this to exit with code 1.
-   */
   refused?: boolean;
   counts?: {
     projects: number;
@@ -72,11 +36,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const log = deps.log ?? ((l) => console.error(l));
   const env = deps.env ?? process.env;
 
-  // Destructive-action gate. The dev compose sets
-  // REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 inline; the prod compose does NOT.
-  // This stops the script from ever wiping a directory it shouldn't —
-  // including when a dev-stage image ends up running with a prod
-  // bind-mount, or when an operator runs `--reset` from the wrong shell.
   if (deps.reset && env['REMBRIC_ALLOW_DESTRUCTIVE_SEED'] !== '1') {
     log('[seed-dev] --reset requires REMBRIC_ALLOW_DESTRUCTIVE_SEED=1; refusing to wipe');
     return { skipped: true, refused: true };
@@ -99,12 +58,8 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const relationsSvc = new RelationsService(createRepositories(deps.handle.db), deps.handle.db);
   const sessionsSvc = new AgentSessionsService(createRepositories(deps.handle.db), deps.handle.db);
 
-  // 1. Project.
   const proj = projectsSvc.create({ slug: DEMO_SLUG, displayName: 'Demo Project' });
 
-  // 1b. Showcase projects — enough rows that the projects list and the token
-  // form's project picker render at a realistic operator scale, with display
-  // names of uneven width. Bare projects: no tokens, no memories.
   const showcase: Array<{ slug: string; displayName: string }> = [
     { slug: 'api-gateway', displayName: 'API Gateway' },
     { slug: 'mobile-app', displayName: 'Mobile App' },
@@ -127,11 +82,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
   ];
   for (const p of showcase) projectsSvc.create(p);
 
-  // 2. Admin token. When the dev container's boot chain passes
-  // adminTokenPlaintext (from `REMBRIC_ADMIN_TOKEN` in .env), insert the
-  // admin row with that exact plaintext via bootstrapAdmin — so the
-  // operator's existing .env login keeps working across resets. When
-  // undefined, fall back to generating a random plaintext (test mode).
   const envAdmin = deps.adminTokenPlaintext;
   const useEnvAdmin = typeof envAdmin === 'string' && envAdmin.length >= 16;
   let adminTokenId: string;
@@ -150,12 +100,9 @@ export function runSeed(deps: SeedDeps): SeedResult {
     adminTokenPlaintext = adminTok.plaintext;
   }
 
-  // 2b. Two project-scoped tokens. Plaintext printed every boot — these
-  // are dev-only ephemeral tokens regenerated on every `--reset`.
   const readerTok = tokensSvc.create({ name: 'demo-reader', project: proj, access: 'read' });
   const writerTok = tokensSvc.create({ name: 'demo-writer', project: proj, access: 'write' });
 
-  // 3. Memories — 5 topic_key clusters × 4 memories each = 20 rows.
   const scope = projectScope(proj.id);
   const clusters: Array<{
     topicKey: string;
@@ -231,10 +178,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
     }
   }
 
-  // 3b. Backdated memories so the derived `needs_review` review state is
-  // visible in the dashboard (badge + `review` filter) on a fresh seed.
-  // A MemoryService with a past clock stamps an old created_at via the
-  // normal save path (no raw UPDATE) — review is derived from that.
   const DAY = 24 * 60 * 60 * 1000;
   const staleSeeds: Array<{
     type: 'project' | 'feedback' | 'user' | 'reference';
@@ -273,7 +216,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
     memoryCount += 1;
   }
 
-  // 4. Ended sessions with realistic summaries.
   const endedSessions = [
     {
       agent: 'claude-code',
@@ -314,7 +256,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
     });
   }
 
-  // 5. Active sessions.
   sessionsSvc.start({
     tokenId: writerTok.token.id,
     projectId: proj.id,
@@ -330,9 +271,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
     cwd: '/Users/dev/demo',
   });
 
-  // 6. Pending judgment — create two related memories in the SAME topic_key
-  // cluster and register a pending conflict between them via the relations
-  // service. The dashboard's /dashboard/judgments shows the pending row.
   memorySvc.save(
     {
       type: 'feedback',
@@ -353,8 +291,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
     },
     scope,
   );
-  // m2 already supersedes m1 by topic_key. Add a separate pending row to
-  // exercise the judgment surface explicitly.
   const m3 = memorySvc.save(
     {
       type: 'feedback',
@@ -372,10 +308,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
   });
   memoryCount += 3;
 
-  // 7. Judged relations — four memory pairs, one per verdict colour the
-  // home overview's RECENT JUDGMENTS tile renders (supersedes / warn,
-  // conflicts_with / danger, related / dim, compatible / lime). Each pair
-  // is a fresh topicKey so the cluster supersede chains stay untouched.
   const judgedPairs: Array<{
     relation: 'supersedes' | 'conflicts_with' | 'related' | 'compatible';
     topicKey: string;
@@ -488,20 +420,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
 }
 
 function wipe(handle: DbHandle): void {
-  // Raw SQL — Drizzle's `db.delete(table)` is forbidden by the invariant
-  // grep for memory/sessions/memory_relations even in this allow-listed
-  // file, so we mirror the pattern used by services/memory.ts and
-  // services/agent-sessions.ts: raw `DELETE FROM` inside a transaction.
-  //
-  // `PRAGMA defer_foreign_keys = ON` defers FK checks until the transaction
-  // commits. Without it, SQLite checks FKs after each DELETE in
-  // dependency order — which fails because some children reference rows
-  // we haven't reached yet (e.g. memory_relations → memory is fine, but
-  // depending on schema details, some checks fire mid-transaction).
-  // Defer + dependency-ordered deletes + atomic commit = clean wipe.
-  // `memory_fts` has AFTER DELETE triggers on memory; `memory_vec` does NOT —
-  // it is a vec0 vtable outside FK enforcement, so it is deleted explicitly
-  // here. Omitting it leaked the previous boot's vectors on every --reset.
   handle.raw.transaction(() => {
     handle.raw.exec('PRAGMA defer_foreign_keys = ON');
     handle.raw.exec('DELETE FROM memory_relations');
@@ -509,31 +427,16 @@ function wipe(handle: DbHandle): void {
     handle.raw.exec('DELETE FROM consolidation_ops');
     handle.raw.exec('DELETE FROM consolidation_runs');
     handle.raw.exec('DELETE FROM prompts');
-    // memory_entity_links references both memory_entities and memory;
-    // memory_entity_scan references memory — both must go before memory.
     handle.raw.exec('DELETE FROM memory_vec');
     handle.raw.exec('DELETE FROM memory_entity_links');
     handle.raw.exec('DELETE FROM memory_entity_scan');
     handle.raw.exec('DELETE FROM memory_entities');
     handle.raw.exec('DELETE FROM memory');
-    handle.raw.exec('DELETE FROM sessions'); // agent_sessions table is named `sessions`
-    handle.raw.exec('DELETE FROM dashboard_sessions'); // dashboard login cookies → tokens
-    // References both tokens and projects, so it precedes both: the deferred
-    // check fires at COMMIT and would abort the whole reset over one set token.
+    handle.raw.exec('DELETE FROM sessions');
+    handle.raw.exec('DELETE FROM dashboard_sessions');
     handle.raw.exec('DELETE FROM token_projects');
     handle.raw.exec('DELETE FROM tokens');
-    // Every project EXCEPT the default one. Migration 0031 creates that row and
-    // the schema keeps exactly one via a partial unique index; deleting it left
-    // the database with no `is_default`, so every path-less `/mcp` tool call
-    // threw `internal_error` — for every token, admin included — until the next
-    // migration run, which never comes because 0031 is already in the ledger.
     handle.raw.exec('DELETE FROM projects');
-    // Migration 0031 creates the one project carrying `is_default`, and the wipe
-    // above removes it along with everything else. Without putting one back, the
-    // database has no default at all and every path-less `/mcp` tool call throws
-    // `internal_error` — for every token, admin included — because the resolver
-    // has nothing to resolve to. The migration will not re-run: its ledger row
-    // survives the wipe.
     handle.raw
       .prepare(
         "INSERT INTO projects (id, slug, display_name, is_default, created_at) VALUES (?, 'default', 'Default', 1, ?)",

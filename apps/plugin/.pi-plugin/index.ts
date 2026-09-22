@@ -47,9 +47,6 @@ type ToolDefinition = {
   ) => RenderComponent;
 };
 
-// `ui` is optional because the extension is installed into whatever harness
-// version the operator has, and a missing diagnostic channel must not cost them
-// a working extension.
 type ExtensionContext = {
   cwd: string;
   sessionManager: { getSessionId: () => string; getSessionFile?: () => string | undefined };
@@ -67,9 +64,6 @@ type MessageEndEvent = {
   message?: { role?: string; content?: unknown };
 };
 
-// `reason` is a plain optional string, not the harness's five-member union: a
-// union types the non-member branch out of existence, and that branch is what
-// keeps a future sixth reason from ending a session that is still running.
 type SessionShutdownEvent = { reason?: string; targetSessionFile?: string };
 
 type ExtensionApi = {
@@ -83,14 +77,8 @@ const CLIENT_NAME = 'rembric-pi';
 const PROTOCOL_VERSION = '2025-06-18';
 const DISCOVERY_TIMEOUT_MS = 10_000;
 
-// Membership, never `reason !== 'reload'`: an unrecognised reason must fail
-// toward not ending, because no path returns a session to `active` while a
-// session left active is retired by the server's stale-active sweep.
 const CLOSING_SHUTDOWN_REASONS = new Set(['quit', 'new', 'resume', 'fork']);
 
-// One deadline for the whole handshake, not one per request: the harness awaits
-// the factory and `session_start`, so per-request timeouts would sum. Read per
-// use, so an override set after this module loads still wins.
 function discoveryDeadline(): AbortSignal {
   return AbortSignal.timeout(
     Number(process.env.REMBRIC_DISCOVERY_TIMEOUT_MS ?? DISCOVERY_TIMEOUT_MS),
@@ -178,8 +166,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
       if (typeof result.instructions === 'string' && result.instructions) {
         serverInstructions = underscoreToolNames(result.instructions);
       }
-      // Not awaited: a path-scoped connection is already bound to its project,
-      // so nothing downstream depends on the notification landing.
       void fetch(endpoint, {
         method: 'POST',
         headers: headers(),
@@ -192,8 +178,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
       return serverInstructions;
     },
 
-    // Discovery-resolved, so a server-side rename degrades the declaration
-    // instead of bricking the extension on a hard-coded name.
     sessionResumeToolName(): string | null {
       return discovered.find((tool) => tool.name.endsWith('session_resume'))?.name ?? null;
     },
@@ -224,18 +208,13 @@ function createMcpClient(endpoint: string, apiToken: string) {
       return { text, isError: result.isError === true };
     },
 
-    // Bounded by the flush budget, not the discovery deadline: this DELETE is
-    // awaited alongside the final summary POST on the way out.
     async close(): Promise<void> {
       if (!mcpSessionId) return;
       await fetch(endpoint, {
         method: 'DELETE',
         headers: headers(),
         signal: AbortSignal.timeout(POST_TIMEOUT_MS),
-      }).catch(() => {
-        // Deliberate: the process is exiting, and a failed teardown costs the
-        // server one idle transport, which it drops on close.
-      });
+      }).catch(() => {});
     },
     sessionId(): string | null {
       return mcpSessionId;
@@ -245,8 +224,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
 
 type McpClient = ReturnType<typeof createMcpClient>;
 
-// `description` strings only: enum members, patterns and property names are
-// argument values a rename would corrupt.
 function renameToolsInDescriptions<T>(node: T): T {
   if (Array.isArray(node)) return node.map((item) => renameToolsInDescriptions(item)) as T;
   if (typeof node !== 'object' || node === null) return node;
@@ -271,12 +248,6 @@ function assistantText(content: unknown): string {
     .trim();
 }
 
-// The settled message (the last `message_end` of a turn) carries no
-// `toolCall` part — the calls were in an EARLIER `message_end` with
-// `stopReason: "toolUse"` — so the tool-observation flag must be
-// ACCUMULATED across the whole turn rather than read from one event
-// (session-nudges D4a). `event.message.role === 'toolResult'` covers the
-// separate result messages; the `toolCall` check covers the calling one.
 function messageIndicatesToolUse(message: MessageEndEvent['message']): boolean {
   if (!message) return false;
   if (message.role === 'toolResult') return true;
@@ -289,10 +260,6 @@ function messageIndicatesToolUse(message: MessageEndEvent['message']): boolean {
   );
 }
 
-// Resuming the session already open emits `reason: "resume"` with the same id,
-// so the reason alone cannot tell replacement-by-another from replacement-by-
-// itself. Compared only when the event names a file: on `quit` it is absent, and
-// a bare comparison would read `undefined === undefined` and suppress the end.
 function isSelfResume(event: SessionShutdownEvent, ctx: ExtensionContext): boolean {
   const target = event.targetSessionFile;
   if (typeof target !== 'string' || target.length === 0) return false;
@@ -320,21 +287,10 @@ export function renderToolResultLines(
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
-  // A session row exists for a pi process's PRIMARY conversation. A process
-  // driven as a tool by another program is not one: RPC mode is pi's
-  // orchestrator interface (gentle-pi and every other subagent runtime spawns
-  // `pi --mode rpc` children), and any spawner can declare a child explicitly
-  // with REMBRIC_SUBAGENT=1 (plugins, SDK runners, scripts). The gentle-pi
-  // marker is kept as a legacy alias. REMBRIC_TRACK_SESSION=1 wins over all of
-  // it — an explicit operator opt-in tracks the session anyway.
   const declaredChild =
     process.env.REMBRIC_SUBAGENT === '1' || process.env.GENTLE_PI_AGENTS_CHILD === '1';
   const trackForced = process.env.REMBRIC_TRACK_SESSION === '1';
-  // D4′: the (transport, host) pair last successfully declared; consecutive
-  // declaration failures are capped.
   let boundKey: string | null = null;
-  // The key last ATTEMPTED, success or failure, so an exhausted budget belongs
-  // to the transport that exhausted it and a re-keyed transport starts fresh.
   let lastBindAttemptKey: string | null = null;
   let bindFailures = 0;
   let missingResumeToolWarned = false;
@@ -369,9 +325,6 @@ export default function rembric(pi: ExtensionApi): void {
       const deadline = discoveryDeadline();
       await client.initialize(deadline);
       for (const tool of await client.listTools(deadline)) {
-        // A provider refuses the whole tools payload if one name contains a
-        // `.`, so registration is underscored and `tools/call` keeps the
-        // canonical name, which `label` carries.
         pi.registerTool({
           name: tool.name.replace(/\./g, '_'),
           label: tool.name,
@@ -419,14 +372,8 @@ export default function rembric(pi: ExtensionApi): void {
     const prompt = event.prompt ?? '';
     const suppress = !trackForced && (declaredChild || ctx.mode === 'rpc');
     if (suppress) core.markSubAgent(sessionId);
-    // Reset BEFORE this turn's message_end events can set it — a flag set in
-    // one turn must never be read in the next (session-nudges D4a).
     core.beginTurn(sessionId);
     await core.ensureSession(sessionId);
-    // D4′: declare this transport's session identity by exact id, so every
-    // later resolution is a pin and never a heuristic lookup. Silent on
-    // failure; never the minting verb (session_start). The tool name comes
-    // from discovery — never a literal here.
     const resumeTool = mcp?.sessionResumeToolName() ?? null;
     const mcpSessionId = mcp?.sessionId() ?? null;
     const bindKey = mcpSessionId && resumeTool ? `${mcpSessionId}::${sessionId}` : null;
@@ -464,9 +411,6 @@ export default function rembric(pi: ExtensionApi): void {
 
     const result: BeforeAgentStartResult = {};
 
-    // Pi hands every turn its BASE system prompt and resets the override when no
-    // extension returns one, so returning it each turn is what keeps it there;
-    // the `includes` guard keeps it at once per turn regardless.
     const instructions = mcp?.instructions() ?? null;
     const base = event.systemPrompt ?? '';
     if (instructions && !base.includes(instructions)) {
@@ -488,10 +432,6 @@ export default function rembric(pi: ExtensionApi): void {
   pi.on('message_end', (event: MessageEndEvent, ctx) => {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
-    // Set BEFORE the role filter below, which is precisely the branch a
-    // `toolResult` message takes, and before assistantText's own `type ===
-    // 'text'` filter, which drops every `toolCall` part. The predicate is
-    // this client's; the latch is the core's.
     if (messageIndicatesToolUse(event.message)) core.markToolUsed(sessionId);
     if (event.message?.role !== 'assistant') return;
     const text = assistantText(event.message.content);
@@ -514,8 +454,6 @@ export default function rembric(pi: ExtensionApi): void {
       closes ? core.endSession(sessionId) : core.flushSessionSummary(sessionId),
       mcp?.close(),
     ]);
-    // After the flush, and only reachable on a teardown the process survives:
-    // otherwise a pending debounce timer re-POSTs what just landed.
     core.forgetSession(sessionId);
   });
 }

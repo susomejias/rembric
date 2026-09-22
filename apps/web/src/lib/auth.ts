@@ -4,13 +4,6 @@ import type { RequestContext } from '@rembric/core';
 import type { ResolvedToken, TokenScope, TokensService } from '@rembric/core';
 import { type Token } from '@rembric/db';
 
-/**
- * Bearer authentication for the session-lifecycle HTTP API.
- *
- * Project scope is resolved exclusively from the URL path slug. The
- * `X-Rembric-Project` header is intentionally NOT consulted.
- */
-
 export type AuthErrorCode =
   | 'missing_token'
   | 'malformed_authorization'
@@ -30,19 +23,6 @@ export class AuthError extends Error {
   }
 }
 
-/**
- * `DomainError` identified by shape rather than by class identity.
- *
- * Turbopack assigns a distinct module id to `@rembric/core` per chunk group,
- * so the `DomainError` a service throws and the one this module imported can be
- * two different classes and `instanceof` is false across them (measured: the
- * standalone `/.next/server/chunks/` carries two copies, and every invalid or
- * revoked bearer came back 500 instead of 401). `name` plus a string `code` is
- * the contract both copies share (`packages/core/src/services/errors.ts`); the
- * `name` clause is what keeps a better-sqlite3 `SqliteError` — which also
- * carries a string `code`, e.g. `SQLITE_BUSY` — from being reported as an
- * authentication failure.
- */
 export function isDomainError(err: unknown): err is DomainError {
   return (
     err instanceof Error &&
@@ -53,24 +33,11 @@ export function isDomainError(err: unknown): err is DomainError {
 
 const BEARER_PREFIX = 'bearer ';
 
-/**
- * Validate an `Authorization` header value and resolve the optional URL path
- * slug into a project row.
- *
- * The returned value is `@rembric/core`'s `RequestContext`. The
- * `/api` surface never reads `mcpSessionId` (only the MCP transport establishes
- * one) so it is always `null` here.
- *
- * A slug that does NOT exist returns `project = null` with `requestedSlug`
- * populated rather than throwing; the handler decides.
- */
 export async function authenticate(input: {
   authorization: string | undefined;
-  /** Slug from the URL path, or undefined for an un-scoped path. */
   pathSlug: string | undefined;
   tokens: TokensService;
   projects: ProjectsService;
-  /** When set, OAuth-minted access tokens are accepted as a fallback. */
   oauth?: OAuthService | null;
 }): Promise<RequestContext> {
   const { authorization, pathSlug, tokens, projects, oauth } = input;
@@ -108,12 +75,6 @@ export async function authenticate(input: {
   };
 }
 
-/**
- * Resolve a bearer secret to a token + scope. The static `tokens` table is
- * consulted first; only a genuine no-match falls through to the OAuth
- * access-token lookup. A static revoked/expired token is a definitive match
- * and is NOT retried against OAuth.
- */
 async function resolveToken(
   plaintext: string,
   tokens: TokensService,
@@ -129,16 +90,12 @@ async function resolveToken(
     if (err.code === 'token_expired') {
       throw new AuthError('token_expired', 'token has expired', 401);
     }
-    // token_not_found / token_invalid → try OAuth before rejecting.
     if (oauth) {
       const oa = oauth.authenticateAccessToken(plaintext);
       if (oa) {
         return {
           token: syntheticOAuthToken(oa.clientId, oa.scope, oa.projectId),
           scope: oa.scope,
-          // An OAuth grant is bound to the one project it was consented for
-          // (RFC 8707 `resource` is a single URL), and `oauth:<clientId>` is no
-          // `tokens` row, so there is no membership to read.
           memberProjectIds: [],
         };
       }
@@ -147,12 +104,6 @@ async function resolveToken(
   }
 }
 
-/**
- * A `Token`-shaped value for an OAuth-authenticated connection. Keyed on the
- * client id (stable across refresh rotations and per-connector) so session
- * ownership and rate-limit bucketing stay continuous. The `hash` is never read
- * after authentication.
- */
 function syntheticOAuthToken(clientId: string, scope: TokenScope, projectId: string | null): Token {
   return {
     id: `oauth:${clientId}`,

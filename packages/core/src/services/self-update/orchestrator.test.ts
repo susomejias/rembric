@@ -233,9 +233,6 @@ describe('SelfUpdateOrchestrator', () => {
     await orch.start('0.22.0');
     await settle();
     expect(calls.sequence).toEqual(['pruneContainers', 'pruneImages', 'pull', 'create', 'start']);
-    // Literals on purpose (not the orchestrator constants): upgraders and
-    // images created by PAST releases carry these exact strings, so a rename
-    // that would strand that on-host backlog must fail here consciously.
     expect(calls.containerPrunes).toEqual([{ label: ['rembric.upgrader=1'] }]);
     expect(calls.imagePrunes).toEqual([{ dangling: ['true'], label: ['rembric.stage=runtime'] }]);
   });
@@ -244,8 +241,6 @@ describe('SelfUpdateOrchestrator', () => {
     const { orch, calls } = build({ failPrune: true });
     await orch.start('0.22.0');
     await settle();
-    // The two prunes fail independently: a 409 on the container sweep must
-    // not skip the image prune (the leak this feature exists to fix).
     expect(calls.imagePrunes.length).toBe(1);
     expect(calls.created.length).toBe(1);
     expect(calls.started).toEqual(['helper789']);

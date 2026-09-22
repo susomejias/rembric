@@ -110,7 +110,6 @@ export default async function UpdatePage({
         </p>
       </section>
 
-      {/* The check has nothing new to say once a release is known. */}
       {enabled && info === null ? (
         <ActionForm action={checkForUpdates} className="mt-5">
           <CsrfField form={UPDATE_CHECK_FORM} />
@@ -201,10 +200,6 @@ export default async function UpdatePage({
   );
 }
 
-/**
- * `err` codes are still mapped for an old bookmark or a lagging redirect; only
- * `none` can occur now.
- */
 function noticeFrom(
   params: SearchParams,
 ): { tone: 'error' | 'success'; label: string; body: string } | null {

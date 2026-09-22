@@ -29,11 +29,6 @@ describe('runtime invariants — status FSM and scope discipline', () => {
   });
   afterAll(() => testDb.cleanup());
 
-  /**
-   * Seed a historical `merge` op (two superseded predecessors + an active
-   * merged row + a journaled op) the way the removed LLM consolidator once did.
-   * The producer is gone, but the spec requires such rows to stay undoable.
-   */
   function seedHistoricalMerge(
     repos: Repositories,
     svc: MemoryService,
@@ -107,22 +102,13 @@ describe('runtime invariants — status FSM and scope discipline', () => {
     undoOp(repos, db, opId);
     expect(db.select().from(memory).where(eq(memory.id, aId)).get()!.status).toBe('active');
     expect(db.select().from(memory).where(eq(memory.id, bId)).get()!.status).toBe('active');
-    // Merged row is archived (not deleted) by undo; the table is append-only.
     expect(db.select().from(memory).where(eq(memory.id, mergedId)).get()!.status).toBe('archived');
   });
 
   it('every consolidation op records an affected_ids set with a single (scope, project) tuple', () => {
-    // Walk every op row in the test DB and assert all of its affected
-    // memories share scope + project_id. This is the surviving guarantee for
-    // "consolidation never crosses scope" now that the producer-level scope
-    // guards (applyMerge/applySupersede) are gone — the deterministic sweep
-    // operates one (scope, project) tuple at a time.
     const db = testDb.handle.db;
     const repos = createRepositories(db);
 
-    // The ops have to come from the real sweep in TWO projects, both holding
-    // a decay-eligible row: with ops in one scope only, `keys.size <= 1`
-    // holds by construction and the assertion below proves nothing.
     const x = repos.projects.findBySlug('proj-x')!.id;
     const y = repos.projects.findBySlug('proj-y')!.id;
     const stale = new Date(Date.now() - 60_000);
@@ -172,9 +158,6 @@ describe('runtime invariants — status FSM and scope discipline', () => {
       inspected += 1;
       expect(keys.size, `op ${op.id} spans multiple scopes`).toBeLessThanOrEqual(1);
     }
-    // Non-vacuity: ops were inspected at all, and they cover both projects,
-    // so a producer that ignored scope would have had a second project's row
-    // to pull into the first project's op.
     expect(inspected).toBeGreaterThan(0);
     expect(spanned).toContain(`project:${x}`);
     expect(spanned).toContain(`project:${y}`);

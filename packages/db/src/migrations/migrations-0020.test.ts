@@ -12,10 +12,6 @@ import {
 import { createTestDb, type TestDb } from '../test-support/db.js';
 import { seedProject } from '../test-support/default-project.js';
 
-/**
- * 0020_fix_fts_delete_triggers — dangling-posting fix + memory_au write-amp fix.
- */
-
 function mem(overrides: Partial<NewMemory> & { id: string }): NewMemory {
   return {
     title: 't',

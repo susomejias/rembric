@@ -42,17 +42,6 @@ import {
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
-/**
- * The memories list, in the production dashboard's composition: the numbered
- * view head, the URL-driven filter bar, and the memories as a table with the
- * project/type/title/status/review/created columns.
- *
- * It stays a server component reading `@rembric/core`/`@rembric/db` directly: no
- * API call, no client-side fetching, no cache that could disagree with the
- * database. Every filter, the page index and the total come from the URL, so the
- * server does the filtering and paginating and the browser back button is the
- * filter's undo.
- */
 export const dynamic = 'force-dynamic';
 
 const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
@@ -72,8 +61,6 @@ export default async function MemoriesPage({
 }) {
   const params = await searchParams;
   const filters = readMemoriesFilters(params);
-  // The params the pager and the filter form round-trip, as the browser sent
-  // them (minus `page` and the `__global__` sentinel).
   const roundTripQuery = memoriesQuery(params);
 
   const { repos } = getServices();
@@ -81,14 +68,8 @@ export default async function MemoriesPage({
 
   const wantsNeedsReview = filters.review === 'needs_review';
   const offset = filters.page * PAGE_SIZE;
-  // `searchParams` is untrusted text, not the enum: the cast is what makes a
-  // bogus value filter to nothing (the SQL comparison simply matches no row)
-  // instead of silently falling back to `active`.
   const status = filters.status as MemoryStatus;
   const type = filters.type === '' ? undefined : (filters.type as MemoryType);
-  // Sanitized before it reaches `memory_fts MATCH` — ordinary punctuation (an
-  // apostrophe, a stray quote, "docker-compose") otherwise raises an FTS5 syntax
-  // error and 500s the page. `filters.q` is still what the search box redisplays.
   const ftsQuery = sanitizeFtsQuery(filters.q);
 
   const isFiltered =
@@ -132,8 +113,6 @@ export default async function MemoriesPage({
     });
   }
 
-  // Derived review state per row for the pill, and to refine the FTS path when
-  // the needs_review filter is combined with a text query.
   const reviewById = new Map<string, ReviewState | null>();
   if (rows.length > 0) {
     const reviewTimestamps = repos.memory.reviewTimestampsByIds(rows.map((m) => m.id));
@@ -161,8 +140,6 @@ export default async function MemoriesPage({
   const hasMore = rows.length > PAGE_SIZE;
   const visible = rows.slice(0, PAGE_SIZE);
 
-  // needs_review+search has no cheap exact count — leave the total undefined
-  // there so the pager shows a lower bound rather than a wrong "OF Y".
   let totalCount: number | undefined;
   if (resolvedProject.unknown) {
     totalCount = 0;

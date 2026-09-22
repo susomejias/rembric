@@ -11,13 +11,6 @@ import {
 } from '../../server/src/mcp/memory-tools.js';
 import { sessionSummarySchema } from '../../server/src/mcp/session-tools.js';
 
-/**
- * Command bodies are agent-facing instructions: the model reads one and issues
- * the call verbatim, so a parameter the tool's schema does not accept is a
- * runtime zod rejection. `memory.search({q})`, `memory.context({limit})` and
- * `memory.session_summary({auto})` all reached a published spec this way.
- */
-
 const SCHEMAS: Record<string, Record<string, unknown>> = {
   save: memorySaveSchema,
   search: memorySearchSchema,
@@ -40,10 +33,6 @@ function parse(file: string): { name: string; description: string; body: string 
   return { name: file.replace(/\.md$/, ''), description, body: match[2] };
 }
 
-/**
- * Pinned per command, so a DROPPED argument fails too. Asserting only that
- * every named key is accepted leaves `memory.session_summary({})` passing.
- */
 const EXPECTED: Record<string, { tool: string; keys: string[] }[]> = {
   'context.md': [{ tool: 'save', keys: ['topic_key'] }],
   'recall.md': [{ tool: 'search', keys: ['query', 'limit'] }],
@@ -61,13 +50,6 @@ function callSites(body: string): { tool: string; keys: string[] }[] {
   }));
 }
 
-/**
- * Calls passing an object literal, counted without parsing it. A call the
- * pattern cannot parse — a nested object in an argument — is simply absent from
- * `callSites`, and an absent site still satisfies the pinned array, so the
- * schema check silently never runs on it. Argument-less calls
- * (`memory.context()`) are deliberately not counted: there is nothing to check.
- */
 function objectCallCount(body: string): number {
   return [...body.matchAll(/memory\.[a-z_]+\(\s*\{/g)].length;
 }

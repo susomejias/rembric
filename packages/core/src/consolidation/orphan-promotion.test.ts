@@ -10,20 +10,6 @@ import { ConsolidationRunner } from '@rembric/core';
 
 import { createTestDb, defaultProject, type TestDb } from '../test-support/index.js';
 
-/**
- * Deadline-orphaning correctness (change `remove-llm-consolidation`).
- *
- * The contract:
- *   - `memory_relations` rows with `status='pending'` AND
- *     `created_at < now - orphanDeadlineMs` transition to `orphaned`,
- *     journaled as an `orphan_promote` op. No LLM is involved.
- *   - Pending rows younger than the deadline are NOT touched (between
- *     `JUDGMENT_ORPHAN_AFTER_MS` and the deadline they are re-exposed via
- *     `memory.context.pendingJudgments[]` instead).
- *   - Orphaning is undoable while the referenced rows exist.
- *   - The sweep is idempotent: a second forced run orphans nothing new.
- */
-
 let db: TestDb;
 let memory: MemoryService;
 let relations: RelationsService;

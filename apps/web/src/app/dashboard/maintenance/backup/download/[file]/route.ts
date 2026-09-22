@@ -2,11 +2,6 @@ import type { NextRequest } from 'next/server';
 
 import { backupDownloadDenial, resolveBackupDownload, streamBackup } from '../../../data';
 
-/**
- * The filename is the only untrusted input, and `resolveBackupDownload` refuses
- * anything outside `BACKUP_FILENAME_RE` — no `/` and no `..` reaches `join`.
- */
-
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

@@ -53,18 +53,6 @@ export interface QueryVectorKnnOpts {
 export class VectorsRepository {
   constructor(private readonly db: Db) {}
 
-  /**
-   * Cosine-distance kNN over active rows in the query row's scope shard,
-   * excluding the query row and any ids already linked to it. Empty when
-   * the query row has no embedding yet. Save-time candidate detection only.
-   *
-   * Two-step: fetch the row's embedding, then reuse the partition-pruned
-   * `knnByQueryVector` with `k = limit + |excludeIds| + 1` (the over-fetch
-   * keeps result cardinality after dropping self + excluded ids). The L2
-   * kNN order equals cosine order because embeddings are unit-normalized
-   * (embedder `normalize: true`); the hydration recomputes exact cosine
-   * distances so returned values match the pre-pruning implementation.
-   */
   knnCandidates(opts: KnnOpts): VecNeighbor[] {
     const queryVector = this.findEmbedding(opts.memoryId);
     if (!queryVector) return [];
@@ -108,19 +96,6 @@ export class VectorsRepository {
     return decodeEmbedding(row.embedding);
   }
 
-  /**
-   * kNN over an arbitrary query vector, pre-filtered inside the vector index
-   * by partition key (scope shard), `status`, and optional `type`. Powers the
-   * `memory.search` dense branch. Uses sqlite-vec's `MATCH … AND k = ?` form
-   * (k, not LIMIT) so the named shards are scanned, not the whole corpus.
-   *
-   * `k` applies PER named partition and `ORDER BY distance` merges the shards
-   * into one globally distance-ordered list, so a rank here is a global fact
-   * and fusion needs no per-project correction (vec-partition-capability.md §3).
-   * The predicate is never dropped: without it the read is not bounded to the
-   * authorized set at all. It uses `idJsonSet` where `scopeWhere` refuses to:
-   * `memory_vec` is a vtable with no b-tree index for the planner to drop.
-   */
   knnByQueryVector(opts: QueryVectorKnnOpts): { id: string; distance: number }[] {
     if (opts.partitionKeys.length === 0) throw new Error('kNN addresses no partition');
     const embedding = Buffer.from(
@@ -150,11 +125,6 @@ export class VectorsRepository {
     return row?.v ?? 0;
   }
 
-  /**
-   * status/type are read from `memory` in this same statement rather than
-   * accepted as parameters, so a status change racing an in-flight embed
-   * (e.g. a topic_key supersede) can never be written stale.
-   */
   insertEmbedding(memoryId: string, embedding: Buffer, partitionKey: string): void {
     this.db.run(
       sql`INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding)
@@ -178,15 +148,6 @@ export class VectorsRepository {
     `);
   }
 
-  /**
-   * Unscoped — `admin`-prefixed so the confinement gate covers it, matching
-   * `entities.adminBacklogCount()`. Reachable from `memory.doctor`, whose
-   * report is deliberately server-wide.
-   *
-   * The anti-join, not `count(memory) - count(memory_vec)`: `memory_vec` is the
-   * one derived child of `memory` with no foreign key, so an orphaned vec row
-   * and a genuinely pending memory cancel to exactly zero.
-   */
   adminBacklogCount(): number {
     const row = this.db.get<{ v: number }>(sql`
       SELECT COUNT(*) AS v FROM memory m

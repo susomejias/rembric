@@ -12,11 +12,8 @@ import {
 import { getServices } from '../../../../lib/services';
 import { parseSessionPost } from '../../../../lib/validation';
 
-// Every handler under this surface reads and writes the live database; a cached
-// response would be a stale session row.
 export const dynamic = 'force-dynamic';
 
-/** `POST /api/:slug/sessions` — mirrors `api-router.ts`'s ensure handler. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
@@ -57,8 +54,6 @@ export async function POST(
   }
 }
 
-// api-router's `app.all('/*')` fallback: this path declares POST, so any other
-// method answers the router's `not_found` body instead of Next's 405.
 export const GET = methodFallback;
 export const PUT = methodFallback;
 export const PATCH = methodFallback;

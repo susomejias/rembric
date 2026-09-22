@@ -105,9 +105,6 @@ describe('prompt-search.sh (self-filtering, independent of the hook matcher)', (
   });
 
   it('an unwritable counter dir fails closed on first-turn detection but keyword matching still works', () => {
-    // TMPDIR pointing at a regular file (not a directory) makes
-    // `mkdir -p "$TMPDIR/rembric-relevance-prefetch"` fail, so the counter
-    // can never be written or read — the exact "COUNT unreadable" case.
     const notADir = join(counterDir, 'this-is-a-file-not-a-dir');
     writeFileSync(notADir, '');
     const out = execFileSync('bash', [promptSearchSh], {

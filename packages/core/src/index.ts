@@ -1,16 +1,5 @@
-/**
- * `@rembric/core` barrel — the package's public entry point.
- *
- * The named `export *` list below is deliberate: every symbol those modules
- * export is part of the contract, and an ambiguity fails loudly as TS2308
- * rather than silently dropping an export.
- */
-
 export * from './consolidation/index.js';
 export * from './doctor.js';
-// The consolidation module barrel curates its surface and omits these four, but
-// dashboard and test consumers imported them from the module directly before
-// the move — so the public contract still carries them.
 export {
   NotUndoableError,
   PurgedRowMissingError,
@@ -19,10 +8,6 @@ export {
 } from './consolidation/operations.js';
 export * from './embeddings/embedder.js';
 export * from './embeddings/state.js';
-// Shared request/tool-call context. App-agnostic infrastructure that both the
-// application's HTTP layer and `@rembric/mcp` consume, so it lives here rather
-// than inside either — one `AsyncLocalStorage` instance per process, or the
-// store reads as empty with no type error (see the single-instance invariant).
 export * from './server-context/request-context.js';
 export * from './server-context/session-router.js';
 export * from './server-context/tool-call-context.js';

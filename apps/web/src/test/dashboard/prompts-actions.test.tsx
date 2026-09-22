@@ -2,16 +2,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/**
- * The `@/` alias bridge for the prompts page module.
- *
- * The test project has no `@` alias (see `maintenance/data.ts`), so the page's
- * view-layer specifiers are stubbed here and the guard and the service graph are
- * proxied to the real modules — a Server Action reads them through the page
- * module, and the tested path is the production path. Nothing here renders the
- * page, so the render-time components are only stubbed to keep their transitive
- * imports out of the module graph.
- */
 vi.mock('@/components/dashboard/action-form', () => ({}));
 vi.mock('@/components/dashboard/confirm-submit', () => ({}));
 vi.mock('@/components/dashboard/csrf-field', () => ({}));
@@ -34,15 +24,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import type { SessionCookieSource } from '../../lib/session';
 
-/**
- * The prompts Delete/Undelete actions, driven through the real guard against a
- * real migrated SQLite file — the same fixture shape `dashboard-mutations.test.ts`
- * uses, because the guard resolves the session through the app's own cached
- * `SessionsService` over `REMBRIC_DATA_DIR`.
- *
- * The only injected thing is the cookie store: a Server Action reads it from a
- * request context this process does not have.
- */
 const requestCookies = vi.hoisted(() => ({ current: null as SessionCookieSource | null }));
 vi.mock('next/headers', () => ({ cookies: () => requestCookies.current }));
 
@@ -91,9 +72,7 @@ function createFixture(): Fixture {
     cleanup: () => {
       try {
         handle.close();
-      } catch {
-        // ignore double-close
-      }
+      } catch {}
       rmSync(dataDir, { recursive: true, force: true });
     },
   };
@@ -118,15 +97,12 @@ function csrfFor(formName: string, session = fixture.admin.session): string {
   return fixture.sessions.csrfToken(session, formName);
 }
 
-/** A submission shaped exactly like the rendered form: the id field plus its CSRF token. */
 function submission(formName: string, id: string): FormData {
   return form({ id, csrf: csrfFor(formName) });
 }
 
-/** The state a Server Action's `useActionState` signature receives. */
 const EMPTY_STATE = { error: null };
 
-/** The path `redirect()` threw toward; a redirect is the action's success signal. */
 async function redirectTarget(run: () => Promise<unknown>): Promise<string> {
   try {
     await run();
@@ -143,10 +119,6 @@ type ActionFn = (
   formData: FormData,
 ) => Promise<{ error: string | null }>;
 
-/**
- * The page module's two mutation exports. Absent until the page declares them,
- * so a missing export is a test failure here rather than a link error.
- */
 async function actions(): Promise<{ deletePrompt: ActionFn; undeletePrompt: ActionFn }> {
   const mod = (await import('../../app/dashboard/prompts/page')) as {
     deletePrompt?: ActionFn;
@@ -180,7 +152,6 @@ beforeEach(() => {
   requestCookies.current = adminCookie;
 });
 
-/** A freshly saved prompt, exactly as an agent would have written one; returns its generated id. */
 function savePrompt(label: string): string {
   const row = fixture.prompts.save({
     content: `${label} content`,
@@ -261,12 +232,8 @@ describe('prompt.delete and prompt.undelete state transitions', () => {
     const { deletePrompt } = await actions();
 
     await redirectTarget(() => deletePrompt(EMPTY_STATE, submission(DELETE_FORM, id)));
-    // The first call reached the service — the control for the unchanged-value
-    // assertion below.
     expect(deletedAt(id)).not.toBeNull();
 
-    // Backdated so "unchanged" cannot be an artifact of two calls landing in the
-    // same millisecond: a second delete that re-set the column would overwrite it.
     const backdated = 1;
     fixture.handle.raw.prepare('UPDATE prompts SET deleted_at = ? WHERE id = ?').run(backdated, id);
 

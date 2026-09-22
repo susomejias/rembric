@@ -2,12 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { UsageCounters } from '@rembric/core';
 
-/**
- * In-memory usage counters (proactive-entity-recall, D6 + tasks 4.4). The
- * interesting properties are exactly the ones the database-persistence
- * alternative would have changed: restart semantics, per-token isolation,
- * and the debug-endpoint wire shape.
- */
 describe('UsageCounters', () => {
   it('increments one cell per record, and reads back through snapshot', () => {
     const counters = new UsageCounters();
@@ -39,8 +33,6 @@ describe('UsageCounters', () => {
     before.record('t1', 'memory.search');
     expect(before.get('t1', 'memory.search')).toBe(1);
 
-    // Counters are process-lifetime state; the restart the spec describes
-    // constructs a fresh service exactly like this does.
     const after = new UsageCounters();
     expect(after.get('t1', 'memory.search')).toBe(0);
     expect(after.snapshot()).toEqual({});

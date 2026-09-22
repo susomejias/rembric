@@ -3,13 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { checkAbstentionFlags } from './abstention-flags.js';
 import type { RawOutcome } from './types.js';
 
-/**
- * The committed corpus cannot exercise this check — no query yields an empty
- * candidate pool, so no outcome hits either direction (see
- * `openspec/changes/archive/2026-08-03-weight-relevance-levels-by-idf/measurements/sweep-after-amendment.txt:56`,
- * "fused pool per query: min 10, max 26"). A green eval run is therefore not
- * evidence about it, and these constructed outcomes are.
- */
 const outcome = (over: Partial<RawOutcome>): RawOutcome => ({
   query: {
     id: 'q1',

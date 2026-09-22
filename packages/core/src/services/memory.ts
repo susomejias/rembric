@@ -36,44 +36,11 @@ const AGENT_MEMORY_ARCHIVE_REASONING = 'agent archived memory at explicit user r
 // The candidate query has no LIMIT, so keep the per-statement payload bounded.
 const PURGE_DELETE_SLICE = 5_000;
 
-/**
- * Domain service for the memory lifecycle.
- *
- * Every read and write of memory data through this service takes a `Scope`
- * argument and the service refuses to surface or mutate rows outside it.
- * The compiler enforces this — call sites that omit the scope are type
- * errors. The only escape hatches are the `unsafe*` methods used by the
- * consolidation engine (which must cross scopes).
- *
- * Invariants enforced here (also asserted by tests):
- *   - `save` never inserts with status other than 'active'.
- *   - `save` never inserts outside the requested scope.
- *   - `get`, `search`, `confirm`, `archive` never surface rows outside scope.
- *   - `confirm` only inserts into the `confirmations` event table; it never
- *     mutates a `memory` row.
- *   - `archive` is the only path that flips active→archived.
- *   - Nothing here ever issues DELETE FROM memory or UPDATE memory.{content,title}.
- */
-
-// Bound is measured in JS string length (UTF-16 code units) at the zod/service
-// layers; the DB CHECK counts Unicode code points. The JS layers are the
-// stricter, binding bound for astral text — they reject before the DB sees it.
 export const TITLE_MAX_CHARS = 100;
 
-/**
- * Derive a non-empty, ≤100-char title from a memory's content. Used by
- * non-curated write paths (passive capture, dev seed) and mirrors the SQL
- * backfill in migration 0016. Deterministic, no LLM: first non-empty line,
- * leading Markdown markers stripped, truncated; falls back to the first 100
- * chars of `content` (which is validated non-empty, so the result is 1..100).
- */
 export function deriveTitle(content: string): string {
   const firstLine = content.split('\n', 1)[0] ?? '';
   const stripped = firstLine.replace(/^[\s*#`]+/, '').trim();
-  // Collapse all whitespace (incl. the newlines kept by the full-content
-  // fallback) so a derived title is always a single scannable line. Slice
-  // without splitting a surrogate pair — a raw index cut can leave a lone
-  // high surrogate that decodes to U+FFFD wherever the title is read back.
   const collapsed = (stripped || content.trim()).replace(/\s+/g, ' ');
   return sliceWithoutSplittingSurrogatePair(collapsed, TITLE_MAX_CHARS);
 }
@@ -85,34 +52,12 @@ export interface SaveMemoryInput {
   content: string;
   tags?: string[];
   source?: MemorySource;
-  /**
-   * Optional explicit agent-session id to stamp on the memory row. When
-   * omitted, the caller's request context (via the in-process
-   * SessionRouter) is consulted; absence there means the memory is saved
-   * with `session_id = NULL` for backwards compatibility.
-   */
   sessionId?: string | null;
-  /**
-   * Optional stable topic identifier. When supplied, the save acts as
-   * an upsert: the previously-active row in `(scope, project_id,
-   * topic_key)` is auto-superseded and the new row gains it in its
-   * `replaces[]` array. Empty string is normalized to null. Max 128
-   * chars; NUL bytes rejected.
-   */
   topicKey?: string | null;
 }
 
-/**
- * Output of `MemoryService.save` when called via `saveWithCandidates`.
- * Pure `save()` keeps its old signature (just the row) so existing
- * callers don't have to change.
- */
 export interface SaveResult {
   memory: Memory;
-  /**
-   * If the topic_key upsert path fired, this is the row that was just
-   * superseded (its status moved active → superseded). Null otherwise.
-   */
   supersededByTopicKey: Memory | null;
 }
 
@@ -137,26 +82,12 @@ export interface SearchMemoriesInput {
   tag?: string;
   /** Exact topic_key filter — see openspec/changes/fix-audited-defects. */
   topicKey?: string;
-  /**
-   * Exact-address retrieval by entity value (see `add-entity-index`):
-   * every memory linked to this value, chronological, no ranking, no
-   * fusion. Combined with `query`, narrows to the entity's memories that
-   * also match the text query — it never fuses the two into one ranked
-   * set (design.md Decision 5). `type`/`tag`/`topicKey`/`status` narrow it
-   * with the same meaning they carry on the ranked path, except that an
-   * omitted `status` means "any but archived" rather than "active" — the
-   * branch is specified as complete within scope.
-   */
   entity?: string;
   status?: MemoryStatus;
   limit?: number;
   offset?: number;
 }
 
-/**
- * The four fields `memory.get` publishes per predecessor. Narrowed from `Memory`
- * so `content` is not merely unused downstream but never read from the database.
- */
 export type PredecessorView = Pick<Memory, 'id' | 'title' | 'status' | 'createdAt'>;
 
 export interface MemoryWithHistory {
@@ -194,11 +125,6 @@ export class MemoryService {
     >,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
-    /**
-     * Optional lazy embedder for the hybrid search dense branch. When unset,
-     * `search` degrades to FTS-only (keeps the many test/seed construction
-     * sites compiling unchanged and tolerates pre-embedder bootstrap order).
-     */
     private readonly embedQuery?: (text: string) => Promise<Float32Array>,
   ) {}
 
@@ -207,11 +133,6 @@ export class MemoryService {
     return m;
   }
 
-  /**
-   * Save plus topic_key upsert: insert, supersede and the `agent_topic_key`
-   * relation row are one transaction. `supersededByTopicKey` is returned for
-   * the response payload, not for a follow-up write.
-   */
   saveWithTopicKey(input: SaveMemoryInput, scope: Scope): SaveResult {
     if (input.content.trim().length === 0) {
       throw new DomainError('invalid_input', 'memory.save: content must be non-empty');
@@ -293,12 +214,6 @@ export class MemoryService {
     });
   }
 
-  /**
-   * Get a memory by id, only if it belongs to the given scope. Returns
-   * null when the row is missing OR exists but lies outside scope —
-   * callers cannot tell the two apart (closes the information-leak
-   * channel that v2 had).
-   */
   get(id: string, scope: Scope): MemoryWithHistory | null {
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) return null;
@@ -334,14 +249,6 @@ export class MemoryService {
     };
   }
 
-  /**
-   * Scoped batch retrieve. Returns the in-scope memory rows in request id
-   * order; missing or out-of-scope ids are simply absent, so callers diff the
-   * returned ids against the request to report not-found (no leak — an
-   * out-of-scope id is indistinguishable from a missing one). Unlike `get`,
-   * this is a pure read: it does NOT touch `last_seen_at`, so a bulk pull does
-   * not reshuffle decay/context recency ordering.
-   */
   getMany(ids: readonly string[], scope: Scope): Memory[] {
     const byId = new Map(this.unsafeGetByIds(ids).map((m) => [m.id, m]));
     const out: Memory[] = [];
@@ -352,12 +259,6 @@ export class MemoryService {
     return out;
   }
 
-  /**
-   * Derive the read-time review state for a batch of memories (used by
-   * `memory.search` and `memory.get`'s batch form). Confirmation timestamps
-   * are fetched in one grouped query; non-active rows map to a null state.
-   * Read-only.
-   */
   reviewStateForMemories(
     memories: readonly Memory[],
   ): Map<string, Pick<DerivedReview, 'reviewState' | 'reviewAfter' | 'reviewEscalated'>> {
@@ -385,11 +286,6 @@ export class MemoryService {
     return out;
   }
 
-  /**
-   * Active in-scope memories past their review shelf life, oldest affirmation
-   * baseline first — the `needsReview` channel of `memory.context`. Scope is
-   * resolved here (service layer) and passed to the scoped repository read.
-   */
   needsReviewForContext(scope: Scope, limit: number): NeedsReviewItem[] {
     if (limit <= 0) return [];
     const now = this.now();
@@ -420,14 +316,6 @@ export class MemoryService {
     return items;
   }
 
-  /**
-   * Total needs-review count in scope — the queue-depth signal
-   * `memory.context` and `memory.stats` surface (separate-access-from-
-   * usefulness). An agent that knows the queue is 800 deep can batch-
-   * confirm with the `ids` form it already has; seeing only the 3 oldest
-   * (`needsReviewForContext`'s cap) can't distinguish a healthy corpus from
-   * a collapsing one.
-   */
   countNeedsReview(scope: Scope): number {
     return this.repos.memory.countNeedsReview({
       projectId: scope.projectId,
@@ -436,15 +324,6 @@ export class MemoryService {
     });
   }
 
-  /**
-   * Scope-restricted search. With a text query this is hybrid retrieval
-   * (dense vec ⊕ lexical FTS, RRF-fused — see `hybrid-search.ts`); without
-   * one it is the chronological listing with exact pagination. Scope is
-   * enforced at the SQL level; the agent cannot opt out by widening a filter.
-   *
-   * Does NOT advance `last_seen_at`: being returned in a page is not evidence
-   * a row was useful. Only `memory.get` touches.
-   */
   async search(input: SearchMemoriesInput, scope: SearchScope): Promise<Memory[]> {
     return (await this.searchWithAbstention(input, scope)).memories;
   }
@@ -461,12 +340,6 @@ export class MemoryService {
       entityIndexDraining?: boolean;
     }
   > {
-    // Ranked-branch default only. A `topic_key` filter addresses a convergent
-    // topic's whole history, and every row in that slot but the newest is
-    // `superseded` — so an absent `status` means "any but archived" there
-    // rather than the usual `active` default. An explicit `status` still
-    // narrows. The entity branch is specified as complete within scope, so it
-    // takes `input.status` directly and never inherits this default.
     const status = input.status ?? (input.topicKey ? undefined : 'active');
     const limit = clampLimit(input.limit);
     const offset = input.offset ?? 0;
@@ -475,14 +348,6 @@ export class MemoryService {
     const entity = input.entity?.trim();
 
     if (entity) {
-      // Exact-address retrieval: no fusion, no rank window, no threshold, no
-      // boost. `query` narrows rather than fusing — a containment filter over
-      // the entity's own memories, applied AFTER the fetch, so the fetch must
-      // cover more than the final page or a match older than one page is
-      // silently dropped. `RANK_WINDOW_CEILING` is the over-fetch ceiling used
-      // elsewhere in this file; here it doubles as the page size when the
-      // caller named no `limit`, since the branch is specified as complete
-      // within scope and the 8-row ranked default would truncate that.
       const entityLimit = input.limit === undefined ? RANK_WINDOW_CEILING : limit;
       const rows = this.repos.entities.findMemoriesByEntity({
         scope,
@@ -497,10 +362,6 @@ export class MemoryService {
         ? rows.filter((m) => `${m.title}\n${m.content}`.toLowerCase().includes(query.toLowerCase()))
         : rows;
       const page = filtered.slice(offset, offset + entityLimit);
-      // "Unknown entity" and "the index has not reached those memories yet"
-      // are the same empty response, and a recipe bump makes the second one
-      // last minutes over a large corpus. Only computed on a miss, so the hit
-      // path pays nothing for it.
       const draining =
         rows.length === 0 &&
         this.repos.entities.countPendingScans({
@@ -552,22 +413,12 @@ export class MemoryService {
     const ordered: Memory[] = [];
     for (const id of ids) {
       const m = byId.get(id);
-      // The dense branch's candidate ids come from memory_vec.status, which
-      // is derived asynchronously — belt-and-suspenders against any future
-      // staleness there: re-check the live row's status before returning it.
       if (m && (status === undefined ? m.status !== 'archived' : m.status === status))
         ordered.push(m);
     }
     return { memories: ordered, ...verdict };
   }
 
-  /**
-   * Record a confirmation event for the head of the supersedes chain
-   * reachable from `id`. No-op (throws `memory_not_found`) if the
-   * memory is missing or outside scope. Returns whether head resolution
-   * stopped at its hop cap without finding an active row — an explicit
-   * signal rather than silently confirming a non-active row.
-   */
   confirm(id: string, scope: Scope, opts: ConfirmOptions = {}): { headTruncated: boolean } {
     const verdict = opts.verdict ?? 'affirm';
     if (verdict === 'refute') {
@@ -599,11 +450,6 @@ export class MemoryService {
     return { headTruncated: truncated };
   }
 
-  /**
-   * Batch confirm: de-duplicates `ids` and records one confirmation per
-   * distinct id inside ONE transaction. Atomic — a missing/out-of-scope id
-   * aborts the whole batch via `confirm`'s `memory_not_found`.
-   */
   confirmMany(
     ids: readonly string[],
     scope: Scope,
@@ -632,9 +478,6 @@ export class MemoryService {
       );
     }
     const ts = this.now();
-    // Journaled in the same transaction as the flip so an agent-initiated
-    // retirement is attributable and reversible through the same
-    // consolidation_ops journal the sweep and purge use.
     this.tx.transaction(() => {
       this.repos.memory.markArchived(id, ts);
       this.journalMaintenanceOp(ts, {
@@ -646,10 +489,6 @@ export class MemoryService {
     });
   }
 
-  // Journal a single non-sweep lifecycle op (agent archive, operator purges)
-  // as a synthetic one-op `maintenance` run. Run scope 'maintenance' stays
-  // clear of the sweep's global/project:* throttle keys. Callers own the
-  // enclosing transaction so the journal is atomic with the mutation.
   private journalMaintenanceOp(
     ts: Date,
     op: {
@@ -678,19 +517,10 @@ export class MemoryService {
     });
   }
 
-  // Purge predicate + DELETE live in MemoryRepository (the only file
-  // allow-listed for `DELETE FROM memory`); this service keeps the gating
-  // and journaling. Spec: openspec/specs/memory/spec.md.
   countPurgeableDisconnectedArchived(): number {
     return this.repos.memory.countPurgeableDisconnectedArchived();
   }
 
-  /**
-   * Physically delete archived memories whose ids are referenced by NO
-   * other row in the graph. Drops the embedding (`memory_vec`) and FTS
-   * (`memory_fts`) shadow rows in the same transaction. Journals the
-   * deletion as `consolidation_ops.op_type='archived_memory_purge'`.
-   */
   purgeDisconnectedArchived(input: { adminBypass: true }): { deletedIds: string[] } {
     if (input?.adminBypass !== true) {
       throw new DomainError(
@@ -721,9 +551,6 @@ export class MemoryService {
     });
   }
 
-  // `unsafe*` = deliberate cross-scope read; a CI grep gate pins call
-  // sites to the allow-listed modules (consolidation, dashboard).
-  /** @internal */
   unsafeGetById(id: string): Memory | undefined {
     return this.repos.memory.unsafeGetById(id);
   }
@@ -733,52 +560,22 @@ export class MemoryService {
     return this.repos.memory.unsafeGetByIds(ids);
   }
 
-  /**
-   * Bounded `replaces` ancestry for `memory.get`, as ids then a four-field
-   * projection: two statements instead of one full-row select per hop.
-   *
-   * The ten `content` bodies the previous walk read are no longer read at all —
-   * the response has always discarded them, so a 30-save chain was pulling ~13 KB
-   * of text to emit ten titles.
-   *
-   * The bound now counts ancestor IDS rather than rows found, which is what
-   * `PREDECESSOR_CAP`'s docstring always described and what the save path's walk
-   * already did. The two differ only where an ancestor id has no `memory` row — a
-   * state the purge predicate structurally prevents, since it refuses to purge a
-   * row another row's `replaces` references. `truncated` is decided by asking for
-   * one id beyond the bound.
-   */
   private collectPredecessors(start: Memory): {
     rows: PredecessorView[];
     truncated: boolean;
   } {
-    // `+ 2`, not `+ 1`: the extra probe row detects truncation, and the start id
-    // can occupy one slot when the graph cycles back to it. Asking for only one
-    // extra let that cycle mask truncation — the filter ran after the SQL LIMIT,
-    // so a reachable start id pushed the real eleventh ancestor out of the window
-    // and `truncated` came back false with ancestry still unreached. `UNION`
-    // dedupes, so the start id can appear at most once and one spare slot suffices.
     const ids = this.repos.memory
       .unsafeAncestorIds({ startIds: start.replaces, limit: PREDECESSOR_CAP + 2 })
-      // The old walk seeded `visited` with the start id, so a cycle back to it was
-      // never reported as its own ancestor.
       .filter((id) => id !== start.id);
     const truncated = ids.length > PREDECESSOR_CAP;
     const wanted = ids.slice(0, PREDECESSOR_CAP);
     const byId = new Map(this.repos.memory.unsafeProjectionByIds(wanted).map((r) => [r.id, r]));
-    // Re-ordered to the traversal's order: the repository read is an id-set lookup
-    // and carries no ORDER BY, deliberately.
     const rows = wanted
       .map((id) => byId.get(id))
       .filter((r): r is PredecessorView => r !== undefined);
     return { rows, truncated };
   }
 
-  /**
-   * `truncated` is true ONLY when the 64-hop cap is exhausted without
-   * reaching an active row — a genuine dead end (no successor, or a missing
-   * row) is not truncation, it is the correct terminal state.
-   */
   private findHead(start: Memory): { head: Memory; truncated: boolean } {
     if (start.status === 'active') return { head: start, truncated: false };
     let current = start;
@@ -799,14 +596,6 @@ export class MemoryService {
 /** Exported so the annotation response budget can compute the EFFECTIVE row count. */
 export const DEFAULT_SEARCH_LIMIT = 8;
 
-/**
- * Max predecessors `memory.get` returns — a TOKEN BUDGET for that response and
- * nothing else. A daily-updated topic_key chain reaches this depth in ~10 days.
- *
- * Save-time dismissal suppression used to borrow this number; it now has its own
- * `DISMISSAL_ANCESTRY_CAP`, so changing the payload budget here cannot silently
- * change how far back a save looks for dismissals.
- */
 export const PREDECESSOR_CAP = 10;
 
 /** Bound on forward-successor hops when resolving a supersedes-chain head. */
@@ -819,14 +608,6 @@ function clampLimit(limit: number | undefined): number {
   return Math.floor(limit);
 }
 
-/**
- * Normalize `topic_key`:
- *   - undefined or null   → null
- *   - empty / whitespace  → null (degenerate; treat as "no topic")
- *   - > 128 chars         → throws invalid_input
- *   - NUL bytes           → throws invalid_input (SQLite TEXT does not
- *                            tolerate them)
- */
 function normalizeTopicKey(input: string | null | undefined): string | null {
   if (input == null) return null;
   const trimmed = input.trim();

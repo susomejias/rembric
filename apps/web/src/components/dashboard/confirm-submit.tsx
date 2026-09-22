@@ -15,13 +15,6 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
-/**
- * The submit crosses a Radix portal: `AlertDialogContent` renders into
- * `document.body`, so the confirm button is no longer inside the form element.
- * Committing it by `form={id}` — the form's id discovered through `ActionForm`'s
- * context — re-associates the two. `type="submit"` is required because Radix
- * defaults the action to `type="button"`.
- */
 export function ConfirmSubmit({
   tone,
   title,
@@ -33,7 +26,6 @@ export function ConfirmSubmit({
   title: ReactNode;
   description: ReactNode;
   confirmLabel: ReactNode;
-  /** The dialog's trigger. Give it `type="button"` so the click only opens the dialog. */
   children: ReactNode;
 }) {
   const formId = useActionFormId();

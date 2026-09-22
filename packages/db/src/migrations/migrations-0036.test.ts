@@ -8,13 +8,6 @@ import {
   type MigrationFixture,
 } from '../test-support/migration-fixture.js';
 
-/**
- * 0036 adds the single-writer anchor `last_turn_report_at` (`session-nudges`,
- * D1a). Additive, like 0034: one `ALTER TABLE ADD COLUMN`, no rebuild, and
- * every pre-existing row reads NULL — which is what makes an upgraded session
- * anchor its first work stamp on `started_at` rather than on a stale reading.
- */
-
 const MIGRATION = '0036_session_turn_report_anchor.sql';
 
 type Row = Record<string, unknown>;

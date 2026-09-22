@@ -15,13 +15,6 @@ import { buildMemoryHandlers } from '@rembric/mcp';
 import { createTestDb, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * Usage counters ride the SUCCESSFUL call (proactive-entity-recall, tasks
- * 4.1/4.2/4.4): the increment lives in the `counted` composition wrapper in
- * memory-tools.ts, so the test asserts through the real handler surface —
- * MCP-result shape included — rather than against the wrapper directly.
- */
-
 let db: TestDb;
 let projects: ProjectsService;
 let memory: MemoryService;
@@ -59,9 +52,6 @@ beforeEach(() => {
   projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);
   counters = new UsageCounters();
-  // `memory.context` reads sessions/prompts/relations, so the build mirrors
-  // the full composition `createMcpServer` uses — a half-wired build would
-  // make the context assertion about deps, not about counting.
   handlers = buildMemoryHandlers({
     logInternalError,
     memory,
@@ -103,8 +93,6 @@ describe('usage counters increment on successful tool calls only', () => {
   });
 
   it('does NOT count a call that failed (isError result)', async () => {
-    // Read-only reach: the write guard inside handleSave turns this into an
-    // errToMcp result, which must leave the save counter at zero.
     const ctx = fakeContext(READ_ONLY_ADMIN_SCOPE);
     const r = (await runWithContext(ctx, () =>
       handlers.save({ type: 'project', title: 'nope', content: 'denied' }),
@@ -119,8 +107,6 @@ describe('usage counters increment on successful tool calls only', () => {
     await runWithContext(ctx, () => handlers.search({ query: 'anything' }));
     expect(counters.get(ctx.token.id, 'memory.search')).toBe(1);
 
-    // Process restart: services are reconstructed; the MCP handlers built
-    // against the fresh instance must observe nothing from the old one.
     const restarted = new UsageCounters();
     const rebuilt = buildMemoryHandlers({
       logInternalError,

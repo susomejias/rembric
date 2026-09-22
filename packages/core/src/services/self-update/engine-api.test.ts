@@ -157,8 +157,6 @@ describe('DockerEngineApi', () => {
   it('refuses an unscoped prune before any socket I/O', async () => {
     const api = new DockerEngineApi(socketPath);
     const before = seen.length;
-    // The PruneFilters type already rejects these shapes at compile time; the
-    // casts exist to exercise the runtime guard that protects JS callers.
     const unscoped = {} as PruneFilters;
     const noLabel = { dangling: ['true'] } as unknown as PruneFilters;
     const emptyLabel = { label: [] } as unknown as PruneFilters;
@@ -167,8 +165,6 @@ describe('DockerEngineApi', () => {
     await expect(api.pruneImages(noLabel)).rejects.toThrow(/label/);
     await expect(api.pruneContainers(emptyLabel)).rejects.toThrow(/label/);
     await expect(api.pruneImages({ label: [' '] })).rejects.toThrow(/label/);
-    // A string label from an untyped caller must hit the guard's
-    // EngineApiError, not a raw TypeError from labels.some().
     await expect(api.pruneContainers(stringLabel)).rejects.toThrow(EngineApiError);
     expect(seen.length).toBe(before);
   });

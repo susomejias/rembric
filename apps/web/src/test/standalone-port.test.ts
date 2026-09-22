@@ -2,15 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { applyListenPort, DEFAULT_PORT, resolveListenPort } from '../../server.js';
 
-/**
- * `apps/web/server.js` is the standalone image's entrypoint. It exists because
- * the Next-generated server reads only `PORT`, while every Rembric surface —
- * the Compose mapping, the installer, `.env` on existing installations — names
- * `REMBRIC_PORT`. These cases pin the derivation the image depends on: an
- * existing install that sets `REMBRIC_PORT=8799` must listen on 8799 without
- * anyone editing their Compose file, and a typo must refuse startup rather than
- * silently bind the old default.
- */
 describe('standalone listen port derivation', () => {
   it('REMBRIC_PORT wins over the generated server PORT', () => {
     expect(resolveListenPort({ REMBRIC_PORT: '8799', PORT: '8787' })).toBe(8799);

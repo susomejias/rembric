@@ -136,9 +136,6 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
     'see fig. 2 in the appendix, or ch. 4 for background',
     'a public domain like example.com is not extracted bare (no scheme)',
     'the value 999.1.1.1 is not a valid IP (out of octet range)',
-    // Observed in a production index as `path` entities: a property access, a
-    // file type, an identifier fragment, and this product's own placeholder
-    // session title. None is an address, and none has a `/`.
     'the .length property is undefined',
     'run the .sql migrations by hand',
     'spawn returns a .child handle',
@@ -166,9 +163,6 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
     );
   });
 
-  // Membership is on the first segment, so a listed name may carry more. Both
-  // of these appear in this repo's own README and specs, so admitting only the
-  // bare form was a recall loss on exactly the identifiers the index is for.
   it('admits further segments on a listed dotfile name', () => {
     expect(values('', 'use .env.example as a template', 'path')).toEqual(['.env.example']);
     expect(values('', 'see .mcp.json for the server config', 'path')).toEqual(['.mcp.json']);
@@ -182,10 +176,6 @@ describe('extractEntities — false-positive fixture corpus (zero tolerance)', (
     expect(values('', 'a .env..example typo', 'path')).toEqual([]);
   });
 
-  // The narrowing's own spec forbids silencing prose by also dropping real
-  // addresses. These are every dotfile `git ls-files` reports for this repo, so
-  // the suite fails if a future trim of the list loses one. CLAUDE.md names
-  // several of them bare, which is how they reach a memory in the first place.
   it.each([
     '.agents',
     '.claude',
@@ -250,10 +240,6 @@ describe('extractEntities — per-memory budget', () => {
     expect(extractEntities('', dump).length).toBeLessThanOrEqual(BOUND);
   });
 
-  // Exactly, not at-most. Three kinds of 300 give a fair share of 83 and a total
-  // of 249, so the last slot only lands if the remainder is redistributed —
-  // mutation testing showed every set-equality test passes without that pass,
-  // because dropping it under-fills uniformly and permutations still agree.
   it('fills the bound exactly when the fair share leaves a remainder', () => {
     const contested = [
       Array.from({ length: 300 }, (_, i) => `src/mod${i}/index.ts`).join('\n'),
@@ -292,11 +278,6 @@ describe('extractEntities — adversarial input never throws', () => {
   });
 
   it('stays linear on the hostname/path label shape that was once quadratic', () => {
-    // `a.` repeated is the adversarial input for the label-group patterns: it
-    // is one continuous run of dot-separated labels, which the nested-
-    // quantifier form of HOSTNAME_RE walked in 19s at this size. Budget is
-    // deliberately far below the 2s hang guard above — a regression here is a
-    // complexity change, not a slow machine.
     const pathological = 'a.'.repeat(100_000);
     const start = performance.now();
     extractEntities('', pathological);
@@ -326,9 +307,6 @@ describe('projectEntities — fair share across kinds, not kind-name order', () 
     );
 
   it('gives every kind a slot before any kind gets a second, surplus to the larger', () => {
-    // The measured worst case: 21 paths plus one each of ticket, url, env_var.
-    // Under (kind, value) the three singletons are evicted; under fair share they
-    // are the first three placed.
     const { entities, entitiesTotal } = projectEntities(
       ents({ path: 21, ticket: 1, url: 1, env_var: 1 }),
       10,
@@ -348,8 +326,6 @@ describe('projectEntities — fair share across kinds, not kind-name order', () 
     const { entities, entitiesTotal } = projectEntities(input, 10);
     expect(entities).toEqual(input);
     expect(entitiesTotal).toBe(3);
-    // A copy, not the caller's array: the projection must not be a channel
-    // through which a consumer can mutate what the repository returned.
     expect(entities).not.toBe(input);
     entities.pop();
     expect(input).toHaveLength(3);

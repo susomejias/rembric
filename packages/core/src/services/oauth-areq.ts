@@ -1,16 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-/**
- * Stateless, signed hand-off of an already-SDK-validated authorization
- * request from `provider.authorize` (which only has the response object) to
- * the consent screen (a dashboard route with full request/session access).
- *
- * The payload is HMAC-signed with a key derived from the session secret, so
- * the consent screen can trust that the client_id / redirect_uri / scope /
- * code_challenge were validated by the SDK authorize handler and not forged.
- * Short-lived (the `exp` field) to bound replay.
- */
-
 export interface AuthRequest {
   clientId: string;
   redirectUri: string;

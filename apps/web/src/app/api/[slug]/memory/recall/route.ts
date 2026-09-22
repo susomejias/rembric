@@ -16,10 +16,8 @@ import { parseMemoryRecall } from '../../../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 
-/** Mirrors `api-router.ts::RECALL_SNIPPET_CHARS`. */
 const RECALL_SNIPPET_CHARS = 240;
 
-/** `POST /api/:slug/memory/recall` — mirrors `api-router.ts`'s recall handler. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
@@ -38,7 +36,6 @@ export async function POST(
   const deps = getServices();
   const limit = Math.min(parsed.data.limit ?? 5, 5);
   try {
-    // memory.search never touches last_seen_at.
     const rows = await deps.memory.search(
       { query: parsed.data.query, limit },
       projectScope(project.id),

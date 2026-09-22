@@ -9,50 +9,15 @@ import {
 import type { ProjectsService } from '@rembric/core';
 import type { SessionRouter } from '@rembric/core';
 
-/**
- * Server-driven project auto-detection via the MCP `roots` capability.
- *
- * Triggered lazily from the shared scope resolver, so `roots/list` is always
- * issued from inside a tool call and is correlated with it.
- *
- * Single-flight semantics across concurrent lazy callers come from
- * `SessionRouter.discoveryInFlight`.
- *
- * The behaviour is intentionally conservative:
- *
- *   - clients without `roots` capability → no-op
- *   - existing slug + no active project    → silently activate, source='roots'
- *   - existing slug + already active       → push to pendingSuggestedSlugs
- *   - non-existing slug                    → push to pendingSuggestedSlugs
- *   - timeout / error                      → no-op (silent fall-through)
- *   - `roots/list_changed` was received    → re-derive suggestions only, once
- *
- * Auto-detection NEVER creates projects and NEVER switches an already
- * active project. The agent must call `project.use({slug, …})` to make
- * either of those happen.
- */
-
 // Binds only a client that advertises `roots` and then declines to answer.
 const ROOTS_LIST_TIMEOUT_MS = 2500;
 
 interface DiscoveryState {
-  /**
-   * One slot per `(tokenId, mcpSessionId)` records whether discovery reached a
-   * DEFINITIVE outcome, so subsequent tool calls do not re-issue `roots/list`.
-   * An attempt that produced no answer leaves it unconsumed — see
-   * `markDiscoveryRun`'s call sites. Keyed by token because nothing binds a
-   * transport to the token that initialised it.
-   */
   answered: Set<string>;
   /** A `roots/list_changed` arrived and no tool call has served it yet. */
   refreshPending: boolean;
 }
 
-/**
- * Owned by the connection's server instance — `McpTransportManager.getOrCreate`
- * builds exactly one per transport, so per-server state is per-transport state
- * that no other transport can reach and that is released with its owner.
- */
 const stateByServer = new WeakMap<McpServer, DiscoveryState>();
 
 function discoveryState(server: McpServer): DiscoveryState {
@@ -92,19 +57,9 @@ export interface RootsDiscoveryContext {
   mcpSessionId: string;
   /** When the URL path already pinned a slug, discovery is a no-op. */
   pathSlug: string | null;
-  /**
-   * JSON-RPC id of the tool call discovery is running under, when one is in
-   * scope. Stamped on `roots/list` so the transport routes it onto that call's
-   * own response stream, which is registered before any handler runs.
-   */
   toolCallRequestId?: RequestId;
 }
 
-/**
- * Runs discovery while the slot is unconsumed, and otherwise serves a pending
- * `roots/list_changed` refresh — which lands here rather than in the
- * notification handler because it needs an in-flight tool call to be delivered.
- */
 export async function ensureRootsDiscoveryRun(
   deps: RootsDiscoveryDeps,
   ctx: RootsDiscoveryContext,
@@ -117,23 +72,15 @@ export async function ensureRootsDiscoveryRun(
   }
   const state = discoveryState(deps.server);
   if (!isDiscoveryRun(deps.server, ctx.tokenId, ctx.mcpSessionId)) {
-    // Discovery's own `roots/list` already reflects the new roots, so it
-    // discharges the refresh rather than adding a second request.
     state.refreshPending = false;
     await singleFlight(deps, ctx, () => maybeDiscoverViaRoots(deps, ctx));
     return;
   }
   if (!state.refreshPending) return;
-  // Consumed by the ATTEMPT, unlike the discovery slot: retrying until answered
-  // would make every later tool call on a silent client pay the budget again.
   state.refreshPending = false;
   await singleFlight(deps, ctx, () => refreshRootsAfterChange(deps, ctx));
 }
 
-/**
- * The router holds the promise only while an attempt is in flight, so a settled
- * one cannot short-circuit a later call's retry.
- */
 async function singleFlight(
   deps: RootsDiscoveryDeps,
   ctx: RootsDiscoveryContext,
@@ -192,12 +139,6 @@ function isAnswerFromClient(err: unknown): boolean {
   return err instanceof McpError && !NO_ANSWER_CODES.includes(err.code);
 }
 
-/**
- * Re-derive a slug for the transport in response to
- * `notifications/roots/list_changed`. Behaviour mirrors the lazy path
- * but never auto-switches an already-active project — list_changed
- * updates suggestions only.
- */
 export async function refreshRootsAfterChange(
   deps: RootsDiscoveryDeps,
   ctx: RootsDiscoveryContext,
@@ -246,14 +187,6 @@ function applyDerivedSlug(
   deps.router.setActiveProject(ctx.tokenId, ctx.mcpSessionId, project.id, 'roots');
 }
 
-/**
- * Convert a `file://` URI (or a plain path) to a candidate slug:
- *   - take the basename of the path
- *   - lowercase
- *   - replace non-`[a-z0-9-]` characters with `-`
- *   - collapse runs of `-` and trim leading/trailing `-`
- *   - return null when the result is empty or would not match the strict regex
- */
 export function deriveSlugFromUri(uri: string): string | null {
   let path: string;
   try {
@@ -279,8 +212,6 @@ export function deriveSlugFromUri(uri: string): string | null {
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
   if (collapsed.length === 0 || collapsed.length > 64) return null;
-  // Slugs must start and end with [a-z0-9]; the trim above already guarantees
-  // it, but defensively check.
   if (!/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/.test(collapsed)) return null;
   return collapsed;
 }

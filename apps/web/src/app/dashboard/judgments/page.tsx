@@ -49,8 +49,6 @@ async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<A
   const guard = await guardAction(formData, ORPHAN_FORM);
   if (!guard.ok) return guardFailure(guard);
 
-  // `false` is the service's "missing or already closed" answer, which has no
-  // status a Server Action could carry.
   if (!guard.services.relations.orphanByOperator(readField(formData, 'judgmentId'))) {
     return { error: 'Judgment not found or already closed.' };
   }

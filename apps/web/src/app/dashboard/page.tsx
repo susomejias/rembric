@@ -18,15 +18,6 @@ import { Button } from '@/components/ui/button';
 import { getServices } from '@/lib/services';
 import { cn } from '@/lib/utils';
 
-/**
- * The overview — the operator's whole-corpus view, in the production
- * dashboard's composition: the six-cell stat strip, the recent-judgments and
- * recent-sessions rows, the consolidation-health strip, and the activity and
- * system cards.
- *
- * Every read uses the same repository methods, the same limits and the same
- * unfiltered scope.
- */
 export const dynamic = 'force-dynamic';
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
@@ -48,8 +39,6 @@ export default function DashboardOverviewPage() {
   const activeSessions = agentSessions.adminCountByStatus().active;
   const orphanedPendings = repos.relations.adminCountByStatus('orphaned');
 
-  // The same seven-day window the ported overview charted, rebuilt from the
-  // repository's own UTC day buckets so the two views cannot disagree.
   const activity = sevenDayActivity(
     repos.memory.adminCountCreatedByDay(new Date(nowMs - 6 * DAY_MS)),
   );
@@ -350,7 +339,6 @@ function OpenAll({ href }: { href: string }) {
   );
 }
 
-/** The 64x16 sparkline over the seven real buckets. */
 function Sparkline({ data }: { data: ReadonlyArray<number> }) {
   if (data.length === 0) return <span>·</span>;
   const width = 64;

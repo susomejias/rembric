@@ -8,22 +8,6 @@ import { createTestDb } from '../test-support/index.js';
 import { CORPUS } from '../test-support/retrieval/corpus.js';
 import { QUERIES } from '../test-support/retrieval/queries.js';
 
-/**
- * What this measures: the ROW-MEMBERSHIP half of the lexical component agrees
- * with the index over the committed corpus — the corpus every retrieval number
- * in this repo is drawn from. It is NOT evidence of agreement in general, and
- * must not be read as such: `CORPUS` and `QUERIES` are English and Spanish,
- * where the divergence measures 0%, while outside single-diacritic Latin it runs
- * from 17% of terms (Arabic) to 100% (Japanese, Cyrillic with `й`/`ё`).
- *
- * The query half is no longer asserted here because it is no longer produced
- * here — it comes from the index itself (`adminQueryTermFrequencies`). The guards
- * that carry the general property are `db/query-tokenizer.test.ts` (the
- * declaration is derived, an unrecognised option fails startup),
- * `db/repositories/term-statistics-repository.test.ts` (an absent term is
- * reported, not inferred) and `lexical-asymmetry.test.ts` (a row-side
- * disagreement may only under-count).
- */
 describe('indexTerms agrees with the index over the committed corpus', () => {
   const TEXTS = [
     ...CORPUS.flatMap((m) => [m.title, m.content, (m.tags ?? []).join(' ')]),
@@ -35,9 +19,6 @@ describe('indexTerms agrees with the index over the committed corpus', () => {
   let ftsTermsByRow: Map<number, string[]>;
 
   beforeAll(() => {
-    // The probe's tokenizer is not restated: it is whatever `memory_fts` declares
-    // in the migrated schema, so a `tokenize=` added by a later migration reaches
-    // this test rather than silently bypassing it.
     const migrated = createTestDb();
     const declaration = migrated.handle.raw
       .prepare<[], { sql: string }>(`SELECT sql FROM sqlite_master WHERE name = 'memory_fts'`)
@@ -90,9 +71,6 @@ describe('indexTerms agrees with the index over the committed corpus', () => {
   });
 
   it('is the vocabulary `tokenSet` decides row membership with, not merely a function beside it', () => {
-    // `tokenSet` is what `relevanceComponents` compares a row's text with, and
-    // what the save-time candidate detector shares. Point it at the MATCH
-    // tokenizer and the two paths disagree about what a token is.
     const viaTokenSet = new Set(TEXTS.flatMap((text) => [...tokenSet(text)]));
     expect({
       appOnly: [...viaTokenSet].filter((t) => !ftsTerms.has(t)).sort(),

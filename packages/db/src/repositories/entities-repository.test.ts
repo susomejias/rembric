@@ -199,8 +199,6 @@ describe('EntitiesRepository', () => {
 
       const scoped = { scope: projectScope('p1'), value: 'shared.ts', limit: 10 } as const;
       expect(repo.findMemoriesByEntity(scoped).map((m) => m.id)).toEqual(['p1m']);
-      // The non-vacuity control: the rows excluded above are reachable, so the
-      // assertion is about the scope predicate rather than about an empty index.
       expect(
         repo.findMemoriesByEntity({ ...scoped, scope: projectScope('p2') }).map((m) => m.id),
       ).toEqual(['p2m']);
@@ -310,9 +308,6 @@ describe('EntitiesRepository', () => {
       expect(found.map((m) => m.id)).toEqual(['m3']);
     });
 
-    // `created_at DESC` puts the superseded and archived rows ahead of the
-    // active one, so a status predicate that admits them shows up at index 0
-    // rather than being hidden by scan order.
     it('returns only active rows — a superseded row is not an entity-channel candidate', () => {
       insertMemory('m_active', { createdAt: new Date(1_000) });
       insertMemory('m_superseded', { status: 'superseded', createdAt: new Date(2_000) });
@@ -417,10 +412,6 @@ describe('EntitiesRepository', () => {
 
     it('clears the scan bookkeeping before the links', () => {
       const order: string[] = [];
-      // A `Db` stub is the only way to observe statement ORDER, and order is
-      // the guarantee: scan-first means an interrupted wipe leaves links the
-      // drain re-writes idempotently, where links-first leaves scan rows that
-      // read as a drained backlog over a permanently empty index.
       const recording = {
         delete: (table: SQLiteTable) => {
           order.push(getTableConfig(table).name);
@@ -436,10 +427,6 @@ describe('EntitiesRepository', () => {
 
   describe('findMemoriesByEntity ordering', () => {
     it('breaks a same-millisecond tie deterministically so paging cannot repeat a row', () => {
-      // A batch capture writes several memories inside one millisecond, which
-      // makes `created_at DESC` a partial order. Without a tiebreaker SQLite may
-      // return tied rows in any order, and the caller pages by slicing the
-      // result — so page 2 can repeat or skip what page 1 showed.
       const tied = new Date(5_000);
       for (const id of ['m-a', 'm-b', 'm-c', 'm-d']) {
         insertMemory(id, { createdAt: tied, content: 'apps/tied.ts' });

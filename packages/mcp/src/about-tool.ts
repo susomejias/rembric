@@ -2,8 +2,6 @@ import { z } from 'zod';
 
 import { ok } from './result.js';
 
-// Must track the canonical installer entrypoint owned by the tui-installer
-// capability (repo-root install.sh shim). Never fork the URL or flag set here.
 const INSTALLER_URL = 'https://raw.githubusercontent.com/susomejias/rembric/main/install.sh';
 
 export interface AboutReport {
@@ -53,13 +51,6 @@ export const aboutOutput = {
   docs: z.string(),
 };
 
-// Exempt from the per-tool authorization gate: it accesses no stored data
-// (mcp-api spec — every other tool is classified read/write and gated).
-//
-// A factory rather than a bare handler: the version it reports is the
-// application's (`CreateMcpServerOptions.version` — bootstrap injects
-// `REMBRIC_VERSION`), because a self-relative `package.json` read from inside
-// this package would silently report `0.0.0`.
 export function createAboutHandler(version: string) {
   return function handleAbout(_args: Record<string, never>) {
     void _args;

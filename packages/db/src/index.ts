@@ -1,11 +1,3 @@
-/**
- * `@rembric/db` barrel — the package's public entry point.
- *
- * The named `export *` list below is deliberate: every symbol those modules
- * export is part of the contract, and an ambiguity fails loudly as TS2308
- * rather than silently dropping an export.
- */
-
 export { createDb, defaultMigrationsDir } from './client.js';
 export type { Db, DbHandle, CreateDbOptions, TransactionRunner } from './client.js';
 export { migrate, splitStatements } from './migrate.js';

@@ -8,15 +8,6 @@ import {
   type MigrationFixture,
 } from '../test-support/migration-fixture.js';
 
-/**
- * 0034 is purely additive — three ALTER TABLE ADD COLUMN statements, no
- * rebuild — so the interesting property is what it does NOT do: no
- * pre-existing row anywhere moves, and the three new columns start NULL
- * on a populated file (`sessions`, "Session rows MUST carry the three
- * nudge-gate timestamps...", "A populated table migrates without
- * rewriting a row").
- */
-
 const MIGRATION = '0034_session_nudge_gate.sql';
 
 type Row = Record<string, unknown>;
@@ -131,8 +122,6 @@ describe('migration 0034 — session nudge gate columns', () => {
     const { curatedId } = seeded(pre);
     pre.close();
 
-    // Through HEAD, not just through 0034: this reads back through the ORM,
-    // whose schema always describes HEAD.
     fx.stageThroughHead();
     const handle = open();
     try {

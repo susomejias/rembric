@@ -45,12 +45,6 @@ export class TokensRepository {
     return result.changes;
   }
 
-  /**
-   * The projects a set-scoped token reaches. Not scope-parameterised because it
-   * PRODUCES reach rather than filtering by it: this is the read the
-   * authorization decision is made from, and it must run per authenticated
-   * request (`services/tokens.ts::authorizeRow`).
-   */
   listProjectIds(tokenId: Token['id']): TokenProject['projectId'][] {
     return this.db
       .select({ projectId: tokenProjects.projectId })

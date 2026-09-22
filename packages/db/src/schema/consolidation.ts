@@ -1,18 +1,5 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-/**
- * Audit and reversal journal for memory-lifecycle operations.
- *
- * The deterministic consolidation sweep is the main producer, but non-sweep
- * lifecycle actions journal here too via synthetic single-op `maintenance`
- * runs: the operator purges (`session_purge`, `archived_memory_purge`,
- * `prompt_purge`) and the agent archive (`agent_memory_archive`). Each run
- * produces a row in consolidation_runs and one or more rows in
- * consolidation_ops. Every op is reversible; reversal sets `revertedAt`.
- */
-
-// Single source of truth for op types — the table `enum` below derives from
-// this tuple, so a new op type is declared in exactly one place.
 export const CONSOLIDATION_OP_TYPES = [
   'merge',
   'supersede',

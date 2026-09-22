@@ -51,8 +51,6 @@ describe('suggestTopicKey — deterministic family + slug', () => {
 });
 
 describe('suggestTopicKey — English output must not move', () => {
-  // Pinned against the pre-change implementation. If the stopword set is ever
-  // over-extended these are the assertions that catch it.
   it.each([
     [
       'feedback',
@@ -69,11 +67,6 @@ describe('suggestTopicKey — English output must not move', () => {
   });
 });
 
-/**
- * One row per language the transliteration must handle. Enabling a language in
- * `STOPWORD_LANGUAGES` moves rows here, so the coverage trade is visible in the
- * diff instead of being discovered later.
- */
 const LANGUAGE_MATRIX: ReadonlyArray<{
   lang: string;
   type: string;
@@ -216,10 +209,6 @@ describe('suggestTopicKey — properties that must hold in every language', () =
   });
 });
 
-/**
- * The guard that would have caught the measured regressions: `romance+germanic`
- * eats `dos` and `mit`, and all 60 languages eat `global`, `save` and `stop`.
- */
 describe("suggestTopicKey — this repo's vocabulary must survive the filter", () => {
   const PROTECTED = [
     'global',

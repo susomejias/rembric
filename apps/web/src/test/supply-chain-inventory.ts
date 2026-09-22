@@ -1,18 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/**
- * The one tracked enumeration of which dependencies may execute code at install
- * time, outside `pnpm-workspace.yaml::allowBuilds` itself.
- *
- * Same disease and same cure as `schema-inventory.ts`. This fact had six
- * hand-maintained prose copies and every one understated the `true` count,
- * because nothing compared the prose to the file.
- *
- * Justification text is deliberately NOT duplicated here: the reason an entry
- * exists lives in the YAML comment beside the entry, and the assertions check
- * that a comment EXISTS without ever comparing its wording.
- */
 export const ALLOWED_BUILD_SCRIPTS = [
   'better-sqlite3',
   'husky',
@@ -23,7 +11,6 @@ export const ALLOWED_BUILD_SCRIPTS = [
 interface AllowBuildsEntry {
   name: string;
   allowed: boolean;
-  /** The trailing `#` comment, empty when the entry carries none. */
   justification: string;
 }
 
@@ -37,15 +24,9 @@ export interface SupplyChainSources {
 const BLOCK_START_RE = /^allowBuilds:[ \t]*(?:#.*)?$/;
 const FLOW_STYLE_RE = /^allowBuilds:[ \t]*[[{]/m;
 const RETIRED_KEY_RE = /^[ \t]*onlyBuiltDependencies[ \t]*:/m;
-// pnpm's createAllowBuildFunction returns `() => true` on this before it reads
-// allowBuilds at all, so it grants every package and overrides explicit denies.
 const BYPASS_KEY_RE = /^[ \t]*dangerouslyAllowAllBuilds[ \t]*:[ \t]*true\b/m;
-// The name charset is the legal npm-name one rather than "anything but space,
-// colon or hash": the looser form admits `'husky': true`, whose quotes make it a
-// different key to pnpm while parsing here as a plain entry.
 const ENTRY_RE = /^ {2}([@A-Za-z0-9._/-]+):[ \t]*(true|false)[ \t]*(?:#[ \t]*(\S.*?))?[ \t]*$/;
 
-/** Every file the install-time policy is spread across, so a new input is one edit. */
 export function readSupplyChainSources(repoRoot: string): SupplyChainSources {
   return {
     workspace: readFileSync(join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'),
@@ -55,18 +36,7 @@ export function readSupplyChainSources(repoRoot: string): SupplyChainSources {
   };
 }
 
-/**
- * Scoped line scanner over the `allowBuilds:` block. No YAML dependency: adding
- * one to fix a supply-chain documentation bug would enlarge the surface under
- * audit (design.md Context).
- *
- * Fails closed — an in-block line the scanner cannot classify throws with the
- * line quoted, never a skip, because a line the scanner shrugs at is how a
- * code-execution grant hides (design D5).
- */
 export function parseAllowBuilds(source: string): AllowBuildsEntry[] {
-  // CRLF normalised first: without it a checkout with core.autocrlf reds every
-  // assertion with a message about a key rename that never happened.
   const lines = source.replace(/\r\n/g, '\n').split('\n');
   if (FLOW_STYLE_RE.test(source)) {
     throw new Error(
@@ -87,7 +57,6 @@ export function parseAllowBuilds(source: string): AllowBuildsEntry[] {
   const entries: AllowBuildsEntry[] = [];
   for (let i = start + 1; i < lines.length; i += 1) {
     const line = lines[i]!;
-    // Blank and comment lines before the unindented break: '' fails /^[ \t]/.
     if (/^[ \t]*(?:#|$)/.test(line)) continue;
     if (!/^[ \t]/.test(line)) break;
 
@@ -108,25 +77,13 @@ export function parseAllowBuilds(source: string): AllowBuildsEntry[] {
   return entries;
 }
 
-// Named by export, not by path: the requirement deliberately does not pin where
-// this module lives, so a message quoting its path would rot on any move.
 const INVENTORY = 'ALLOWED_BUILD_SCRIPTS';
 
-/**
- * Every violation of the install-time code-execution policy observable from the
- * working tree, as messages naming the offender.
- *
- * A working-tree property rather than a diff-scoped CI script (design D4): it
- * fails on every run — local `pnpm test`, pre-push and CI, including on the
- * branch that added the entry — and needs no base ref to resolve.
- */
 export function findSupplyChainViolations(sources: SupplyChainSources): string[] {
   const violations: string[] = [];
   const entries = parseAllowBuilds(sources.workspace);
   const granted = entries.filter((e) => e.allowed).map((e) => e.name);
 
-  // Non-vacuity before any set comparison: a match against an empty parse is
-  // satisfiable by construction and would prove nothing.
   if (granted.length === 0) {
     violations.push(
       'allowBuilds parsed to zero `true` entries; the pinned inventory would be trivially satisfied.',
@@ -169,9 +126,6 @@ export function findSupplyChainViolations(sources: SupplyChainSources): string[]
     );
   }
 
-  // Keyed, not substring: the file legitimately names the retired key in a
-  // comment explaining why it was replaced. Reached only when BOTH keys are
-  // present, which pnpm 11 tolerates in silence.
   if (RETIRED_KEY_RE.test(sources.workspace)) {
     violations.push(
       "pnpm-workspace.yaml declares the retired pnpm 10 key 'onlyBuiltDependencies'. pnpm 11 " +
@@ -179,10 +133,6 @@ export function findSupplyChainViolations(sources: SupplyChainSources): string[]
     );
   }
 
-  // The one true bypass, and the reason this check exists at all: pnpm honours it
-  // before reading allowBuilds, so it grants every package AND overrides explicit
-  // `false` denies. A top-level key is invisible to the block parser above, which
-  // stops at the first unindented line.
   if (BYPASS_KEY_RE.test(sources.workspace)) {
     violations.push(
       'pnpm-workspace.yaml sets `dangerouslyAllowAllBuilds: true`, which makes pnpm run every ' +
@@ -191,10 +141,6 @@ export function findSupplyChainViolations(sources: SupplyChainSources): string[]
     );
   }
 
-  // ini is last-wins, so the LAST assignment is the effective one. Measured against
-  // pnpm 11.1.2: this knob does NOT gate dependency lifecycle scripts (allowBuilds
-  // does), so it is asserted because the published requirement mandates the file's
-  // shape, not because the allowlist depends on it.
   const npmrcSetting = [...sources.npmrc.matchAll(/^ignore-scripts[ \t]*=[ \t]*(\S+)/gm)].at(-1);
   if (npmrcSetting?.[1] !== 'true') {
     violations.push(
@@ -209,38 +155,9 @@ export function findSupplyChainViolations(sources: SupplyChainSources): string[]
   return violations;
 }
 
-/**
- * Whether a Dockerfile stage can execute a dependency's lifecycle script.
- *
- * Measured against the pinned pnpm 11.1.2, with `esbuild@0.25.10` as the oracle
- * (its `bin/esbuild` is a JS shim in the tarball and an ELF binary only after its
- * postinstall runs), because the intuitive account of this is wrong in both
- * directions:
- *
- * - `.npmrc::ignore-scripts=true` does NOT gate dependency lifecycle scripts.
- *   With it set and `allowBuilds: {esbuild: true}`, the script RAN. With no
- *   `.npmrc` at all and no `allowBuilds`, pnpm refused
- *   (`ERR_PNPM_IGNORED_BUILDS`). Default-deny comes from `allowBuilds`, so
- *   `pnpm-workspace.yaml` is the file that must reach an installing stage.
- * - `pnpm rebuild <pkg>` DOES respect `allowBuilds`: with esbuild ungranted,
- *   `pnpm rebuild esbuild` left the shim untouched. Its argument list is checked
- *   anyway, as the cheapest guard against a future pnpm that changes this and
- *   against a bypass flag on the same line — it can only false-alarm.
- *
- * The one true bypass is `dangerouslyAllowAllBuilds`, which pnpm's own
- * `createAllowBuildFunction` honours before it reads `allowBuilds` at all
- * (`if (opts.dangerouslyAllowAllBuilds) return () => true`), so it overrides even
- * explicit `false` denies. Checked as a config key and as a CLI flag.
- */
 function findImageInstallViolations(dockerfile: string): string[] {
   const violations: string[] = [];
-  // Comment lines go FIRST, which is the order BuildKit removes them in: a
-  // comment is not an instruction, and `apps/web/Dockerfile` names
-  // `pnpm rebuild` in prose. Removing them cannot hide an executable one — the
-  // vacuity guard below still reports an install that exists only as a comment.
   const instructions = dockerfile.replace(/^[ \t]*#.*$/gm, '');
-  // Join `\`-continued instructions: a COPY or rebuild split across lines is one
-  // instruction to BuildKit and must not read as a missing one here.
   const joined = instructions.replace(/\\\r?\n\s*/g, ' ');
   const stages = joined.split(/^[ \t]*FROM /m).slice(1);
   const stageName = (stage: string) =>
@@ -257,7 +174,6 @@ function findImageInstallViolations(dockerfile: string): string[] {
 
   for (const stage of installing) {
     const installAt = stage.search(installRe);
-    // Ordinal, not merely present: a COPY after the install cannot have governed it.
     for (const file of ['pnpm-workspace.yaml', '.npmrc'] as const) {
       const copyRe = new RegExp(`^[ \\t]*COPY\\b[^\\n]*${file.replace('.', '\\.')}`, 'm');
       const copyAt = stage.search(copyRe);
@@ -311,12 +227,6 @@ function findImageInstallViolations(dockerfile: string): string[] {
   return violations;
 }
 
-/**
- * Anchored on the lockfile's `<name>@<version>` key shape at two-space
- * indentation, so `sqlite-vec` cannot be satisfied by `sqlite-vec-anything`.
- * The optional quote is load-bearing: lockfile v9 quotes every key starting with
- * `@`, so an unquoted pattern can never resolve a scoped package.
- */
 function resolvesInLockfile(lockfile: string, name: string): boolean {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`^ {2}'?${escaped}@`, 'm').test(lockfile);

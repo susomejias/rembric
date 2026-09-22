@@ -14,39 +14,6 @@ import { ulid } from 'ulid';
 import { DomainError } from './errors.js';
 import type { ProjectsService } from './projects.js';
 
-/**
- * Bearer-token authn/z service.
- *
- * Plaintext tokens are high-entropy (32 random bytes ≈ 256 bits) and never
- * persisted. We store a scrypt-derived hash with a per-token salt; matching
- * is by linear scan + constant-time compare. For realistic deployments
- * (< 100 tokens) the O(tokens) scan is fast; the actual cost is scrypt's
- * fixed ~20ms-per-verify KDF work, paid on every authenticated request
- * regardless of token count (every MCP tool call and `/api` request
- * re-authenticates — see `server/auth.ts`). `authenticate` caches the
- * (fast-hashed) plaintext → token id mapping after a successful scrypt
- * verify so a repeat caller skips the KDF; revocation/expiry are always
- * re-checked against a fresh row read on a cache hit, so revoking a token
- * still takes effect on its very next request regardless of cache state —
- * the cache only ever skips the *hashing*, never the authorization check.
- *
- * Scope grammar:
- *   - `*`                       → full access (admin)
- *   - `read:*`                  → read across all scopes
- *   - `project:<id>`            → write to that single project
- *   - `read:project:<id>`       → read that single project
- *   - `projects`                → write to the set in `token_projects`
- *   - `read:projects`           → read that set
- *
- * The two project arms are composed by `create` from a resolved project
- * row, never accepted from a caller: `<id>` is compared against
- * `projects.id`, and a caller-supplied string could name a slug instead.
- *
- * The two set arms name no project, so they authorize nothing by string
- * alone — deliberately, so that the union in `isAuthorized` can only add
- * reach and a reader ignorant of `token_projects` under-authorizes.
- */
-
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, keylen: 64 } as const;
 const HASH_VERSION = 's1';
 const TOKEN_BYTES = 32;
@@ -61,12 +28,6 @@ export type TokenScope =
   | 'projects'
   | 'read:projects';
 
-/**
- * Reach is unbound (the caller names the scope literal), a single project, or
- * an explicit set of them; the last two carry an access verb. Resolved project
- * ROWS throughout: a bare project id would re-admit a slug, and that is as true
- * of the set as of the single arm.
- */
 export type TokenGrant =
   | { scope: '*' | 'read:*'; project?: never; projects?: never; access?: never }
   | { project: Project; access: 'read' | 'write'; scope?: never; projects?: never }
@@ -80,12 +41,6 @@ export type TokenGrant =
 
 export type CreateTokenInput = { name: string; expiresAt?: Date | null } & TokenGrant;
 
-/**
- * A credential's reach: what its scope string grants, plus the projects it
- * reaches by membership. Both halves are required at every authorization
- * decision, so `isAuthorized` takes them together rather than letting a call
- * site supply one and forget the other.
- */
 export interface TokenReach {
   scope: TokenScope;
   /** From `token_projects`; empty for every arm but `projects`/`read:projects`. */
@@ -154,17 +109,6 @@ export class TokensService {
     return { plaintext, token: row };
   }
 
-  /**
-   * Mint a token over project SLUGS, creating any that names no project yet.
-   * One transaction spans the project inserts and the mint, so a refusal from
-   * either — an invalid slug, a token name already taken — leaves behind no
-   * project the operator never got a credential for. `create`'s own
-   * transaction nests inside this one as a savepoint (measured: an outer
-   * rollback undoes the inner commit).
-   *
-   * The resolver is an argument rather than a constructor dependency: every
-   * other construction site of this service would otherwise have to grow one.
-   */
   createForSlugs(
     input: {
       name: string;
@@ -209,23 +153,11 @@ export class TokensService {
     }
   }
 
-  /**
-   * Look up a token by its plaintext bearer secret. Returns the matching
-   * row if (a) the hash verifies, (b) it is not revoked, and (c) it has
-   * not expired.
-   *
-   * Async so the scrypt work runs on the libuv threadpool rather than
-   * blocking the single Node event loop — repeated failed attempts are
-   * additionally throttled by the pre-auth lockout (see `AuthLockout`).
-   */
   async authenticate(plaintext: string): Promise<ResolvedToken> {
     const cacheKey = createHash('sha256').update(plaintext).digest('hex');
     const cachedId = this.verifiedCache.get(cacheKey);
     if (cachedId !== undefined) {
       const row = this.repos.tokens.findById(cachedId);
-      // A cache hit only ever skips the scrypt verify, never the
-      // authorization check: revoked/expired/missing is re-read fresh
-      // every time, so revocation takes effect on the very next request.
       if (row) return this.authorizeRow(row);
     }
     const all = this.repos.tokens.listAll();
@@ -245,10 +177,6 @@ export class TokensService {
     if (row.expiresAt && row.expiresAt.getTime() <= this.now().getTime()) {
       throw new DomainError('token_expired', 'token has expired');
     }
-    // Membership is read here, beside revoked/expired, and for the same reason:
-    // removing a project must take effect on the token's next request, so it is
-    // never carried in `verifiedCache` — that cache may live forever precisely
-    // because it substitutes for nothing on this path.
     return {
       token: row,
       scope: row.scope as TokenScope,
@@ -264,11 +192,6 @@ export class TokensService {
     this.verifiedCache.set(cacheKey, tokenId);
   }
 
-  /**
-   * On first-run bootstrap, seed the admin token from REMBRIC_ADMIN_TOKEN.
-   * If a token row already exists, this is a no-op (the env var is
-   * authoritative only at first run).
-   */
   bootstrapAdmin(adminTokenPlaintext: string | null): void {
     if (this.count() > 0) return;
     if (!adminTokenPlaintext) {
@@ -301,8 +224,6 @@ interface ComposedGrant {
 function composeGrant(grant: TokenGrant): ComposedGrant {
   if (grant.projects) {
     const [first, ...rest] = grant.projects;
-    // One selection composes the SINGLE-project arm, not a one-member set, so
-    // the common case keeps the FK-enforced `project_id` binding.
     if (rest.length === 0) return singleProject(first, grant.access);
     return {
       scope: grant.access === 'read' ? 'read:projects' : 'projects',
@@ -364,14 +285,6 @@ function scryptAsync(
   });
 }
 
-/**
- * Authorization checks against a token's reach. Used by the MCP middleware
- * before dispatching tool calls.
- *
- * The union is additive: membership can only add authorizations, never remove
- * one the scope string grants. That is what makes every pre-existing token —
- * all of which have an empty membership set — observably unchanged.
- */
 export function isAuthorized(
   reach: TokenReach,
   action: 'read' | 'write',
@@ -407,11 +320,6 @@ function authorizedByScope(
   return false;
 }
 
-/**
- * What the membership set grants. Confined to the two set arms: on a `*` or
- * `read:*` base a set would be decorative — measured, base `read:*` with a set
- * of {A, C} authorized project B — so a stray membership row widens nothing.
- */
 function authorizedByMembership(
   reach: TokenReach,
   action: 'read' | 'write',
@@ -423,39 +331,17 @@ function authorizedByMembership(
   return reach.memberProjectIds.includes(target.projectId);
 }
 
-/**
- * Narrow a global scope to a single project: `*` → `project:<id>`, `read:*` →
- * `read:project:<id>`. A null project leaves the scope unchanged. Lives beside
- * its inverse `pinnedProjectId` so the grammar has one writer and one reader;
- * the OAuth grant path and `composeGrant` are both callers.
- */
 export function projectScopedGrant(base: TokenScope, projectId: string | null): TokenScope {
   if (!projectId) return base;
   return base === '*' ? `project:${projectId}` : `read:project:${projectId}`;
 }
 
-/**
- * The single project a token is pinned to, or null for `*` / `read:*`.
- * Parses the scope string rather than reading `tokens.project_id` because
- * its caller holds a `TokenScope`, not a row — and the string is what
- * `isAuthorized` compares against. Legacy rows predating the enforced
- * binding still carry a slug here, and resolve to no project.
- *
- * Null for the two set arms too, and that is the answer rather than a gap: a
- * set is not a pin, so there is no single project to name, and every caller
- * treats null as "no pin to reason about" — which is fail-closed.
- */
 export function pinnedProjectId(scope: TokenScope): string | null {
   if (scope.startsWith('read:project:')) return scope.slice('read:project:'.length);
   if (scope.startsWith('project:')) return scope.slice('project:'.length);
   return null;
 }
 
-/**
- * The set arms, whose reach lives in `token_projects` rather than in the string.
- * A predicate rather than a comparison, so every consumer narrows: the dashboard
- * interpolates the scope into a template unescaped once it does.
- */
 export function isProjectSetScope(scope: TokenScope): scope is 'projects' | 'read:projects' {
   return scope === 'projects' || scope === 'read:projects';
 }

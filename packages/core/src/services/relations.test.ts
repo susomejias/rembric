@@ -181,8 +181,6 @@ describe('annotation ordering under the bound', () => {
 
   it('two reads of a truncated memory agree, including on a same-millisecond batch', () => {
     const id = saveMemory('judged in one transaction');
-    // The clock never advances, so every row shares a created_at ms and only
-    // `judgment_id` can decide the order.
     for (let i = 0; i < 15; i++) {
       relations.compare({
         sourceId: id,

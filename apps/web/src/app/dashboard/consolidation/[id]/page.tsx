@@ -111,7 +111,6 @@ function scopeLabel(repos: Repositories, scope: string): string {
   return repos.projects.adminFindById(scope.slice('project:'.length))?.slug ?? scope;
 }
 
-/** Sweep runs store `{"archives":N,"orphaned":M}`; legacy LLM runs store prose. */
 function formatRunSummary(summary: string | null): string {
   if (summary === null) return '—';
   try {
@@ -125,9 +124,7 @@ function formatRunSummary(summary: string | null): string {
       const ops = parsed as { archives: number; orphaned: number };
       return `${ops.archives} archived · ${ops.orphaned} orphaned`;
     }
-  } catch {
-    // Legacy prose summary — fall through to the raw text.
-  }
+  } catch {}
   return summary;
 }
 

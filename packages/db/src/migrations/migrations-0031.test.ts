@@ -38,15 +38,6 @@ import {
   SOURCE_TABLES,
 } from '../test-support/schema-inventory.js';
 
-/**
- * Deterministic stand-in for `packages/core/src/test-support/embedder.ts`'s
- * `FakeEmbedder` (and its two sibling copies). A fixture module cannot be
- * imported across this boundary — `@rembric/core` is a test-only alias of this
- * package's vitest project, and its `test-support/` is not part of the barrel —
- * so this migration suite carries its own. Vectors are derived from a hash of
- * the input and L2-normalized, so identical texts embed identically and kNN
- * queries are stable across runs: no model load, no network.
- */
 class FakeEmbedder implements Embedder {
   public readonly modelId = 'fake-test-embedder';
 
@@ -81,42 +72,16 @@ function doctorReport(handle: DbHandle, dataDir: string) {
   })();
 }
 
-/**
- * 0031 repoints every previously-global row onto a newly created default
- * project. Its `memory_vec` step is the one whose omission is silent and
- * permanent — `findMissingEmbeddings` is an anti-join over ABSENT rows, so a
- * vector left at a dead partition key is never re-embedded, reads as zero
- * backlog, and disappears from the dense branch while FTS keeps returning the
- * memory. Hence the partition assertions below, each with the non-vacuity
- * control that makes it more than a comparison over an empty table.
- *
- * The corpus is built against the pre-0031 schema through the real services, so
- * `memory_fts`, `memory_vec`, `memory_entities` and `memory_entity_links` carry
- * production-shaped rows. `projects` rows are inserted raw: the Drizzle schema
- * already declares `is_default`, so a `select()` over `projects` cannot run
- * before the column exists.
- */
-
 const MIGRATION = '0031_default_project.sql';
 
 const GLOBAL_ROWS = 16;
 const ALPHA_ROWS = 5;
 
-/**
- * Every table whose total the migration must conserve, derived from the one
- * schema inventory rather than hand-listed — so a table added later is inside
- * the census by construction instead of falling silently outside it. `projects`
- * and `_migrations` grow by construction; shadow tables are vec0/fts5 internals
- * with their own row accounting.
- */
 const CENSUS_EXCLUDED = new Set(['projects', '_migrations', ...SHADOW_TABLE_NAMES]);
 const CENSUS_TABLES = [...SOURCE_TABLES, ...Object.keys(DERIVED_TABLES)]
   .filter((t) => !CENSUS_EXCLUDED.has(t))
   .sort();
 
-/** Table-name-keyed count queries: the census runs against this test's own
- * throwaway fixture database, and every identifier is a literal from the same
- * static list the schema inventory exports — no interpolated SQL. */
 const CENSUS_COUNT_QUERIES: Record<string, string> = {
   confirmations: 'SELECT count(*) AS n FROM confirmations',
   consolidation_ops: 'SELECT count(*) AS n FROM consolidation_ops',
@@ -157,11 +122,6 @@ function insertProject(handle: DbHandle, id: string, slug: string): void {
 }
 
 function census(handle: DbHandle): Census {
-  // Restricted to what exists at this checkpoint: the fixture stages only the
-  // migrations up to 0031, so a table a LATER migration creates is absent by
-  // construction and counting it would fail the census rather than test 0031.
-  // A table that vanished across the migration still fails, as a key the after
-  // census lacks.
   const present = new Set(
     handle.raw
       .prepare<[], { name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table'`)
@@ -193,14 +153,6 @@ function defaultProject(handle: DbHandle): { id: string; slug: string; display_n
   return row!;
 }
 
-/**
- * A pre-0031 global memory row with its derived vec and entity rows, all
- * written with SQL. Neither `MemoryService` nor the two backfill workers can
- * produce this state any more: the `Scope` union has one arm, and the workers
- * skip a row that belongs to no project. Constructing the state directly is
- * what keeps this migration testable against the shape it exists to migrate.
- * `memory_fts` is trigger-maintained and still tracks the insert.
- */
 function insertGlobalMemory(
   handle: DbHandle,
   row: { id: string; type: string; title: string; content: string; topicKey?: string },
@@ -264,11 +216,6 @@ function scratchTables(handle: DbHandle): string[] {
     .map((r) => r.name);
 }
 
-/**
- * Global + project memories with embeddings and entity links, sessions and
- * prompts on the null-`project_id` axis, and both a finished and a live global
- * consolidation run. Returns the ids the assertions address.
- */
 async function buildCorpus(): Promise<{
   alphaId: string;
   globalIds: string[];
@@ -311,8 +258,6 @@ async function buildCorpus(): Promise<{
           type: 'reference',
           title,
           content,
-          // Crosses `memory_topic_key_active_uidx`: the repointing changes these
-          // rows' key under it, so a populated destination would collide.
           ...(i < 4 ? { topicKey: `topic-${i}` } : {}),
         },
         await embedder.embed(embeddingInput(title, content)),
@@ -374,8 +319,6 @@ describe('migration 0031 — the default project (correctness)', () => {
     const before = await buildCorpus();
     expect(before.census['memory']).toBe(GLOBAL_ROWS + ALPHA_ROWS);
     expect(before.vectorsBefore.size).toBe(GLOBAL_ROWS);
-    // Non-vacuity: the population that had to move was itself ≥ 16 rows, which a
-    // total over global + alpha cannot tell from zero global rows.
     expect(before.globalMemoryRows).toBeGreaterThanOrEqual(16);
 
     fx.stage();
@@ -401,8 +344,6 @@ describe('migration 0031 — the default project (correctness)', () => {
       // Unbound `*` tokens are not a scope: 0029's CHECK depends on the null.
       expect(scalar(handle, `SELECT count(*) AS v FROM tokens WHERE project_id IS NULL`)).toBe(1);
 
-      // The journal keeps what happened; only the live run is repointed, and it
-      // carries the scope string every reader parses rather than a bare id.
       expect(
         one<{ scope: string }>(
           handle,
@@ -425,8 +366,6 @@ describe('migration 0031 — the default project (correctness)', () => {
       });
       expect(scalar(handle, `SELECT count(*) AS v FROM projects WHERE is_default = 1`)).toBe(1);
       expect(dflt.display_name).toBe('Default');
-      // The migration is the one place a project is created outside
-      // `ProjectsService.create`; a slug it would refuse is existing-but-unmintable.
       expect(SLUG_REGEX.test(dflt.slug)).toBe(true);
       expect(scratchTables(handle)).toEqual([]);
     } finally {
@@ -441,10 +380,6 @@ describe('migration 0031 — the default project (correctness)', () => {
     const dflt = defaultProject(first);
     const after = census(first);
 
-    // The runner's own splitter, so the replay cannot disagree with it about
-    // what a statement is. The two DDL statements are once-only by nature — the
-    // control below proves it — so the replay starts at the third, which is
-    // where the idempotency guard governs.
     const statements = splitStatements(fx.source());
     expect(() => first.raw.exec(statements[0]!)).toThrow(/duplicate column name/);
 
@@ -490,10 +425,6 @@ describe('migration 0031 — the default project (correctness)', () => {
   it('rolls the whole body back on a fault mid-body and applies in full on the next boot', async () => {
     const before = await buildCorpus();
 
-    // Injected after the `memory` UPDATE and before the vec step, so rows have
-    // already moved inside the transaction when it fires. The marker is asserted
-    // present, or editing the body turns the substitution into a silent no-op
-    // and the test passes having injected nothing.
     const marker = '\n--> statement-breakpoint\n--> progress: repointing the entity index';
     const body = fx.source();
     expect(body).toContain(marker);
@@ -505,8 +436,6 @@ describe('migration 0031 — the default project (correctness)', () => {
     );
     expect(() => open()).toThrow(/UNIQUE constraint failed/);
 
-    // Unstaged so reopening cannot reattempt it: what follows is the state the
-    // rolled-back transaction left behind.
     fx.unstage();
     const faulted = open();
     try {
@@ -578,9 +507,6 @@ describe('migration 0031 — the default project (correctness)', () => {
     const ins = pre.raw.prepare(
       `INSERT INTO projects (id, slug, display_name, archived_at, created_at) VALUES (?, ?, NULL, NULL, 1000)`,
     );
-    // The probe's recursive CTE stops at 1000 candidates. Past the bound the
-    // subquery is NULL and `projects.slug` is NOT NULL, so without the final
-    // fallback the server never boots and says neither which slug nor why.
     pre.raw.transaction(() => {
       ins.run('p0000', 'default');
       for (let n = 2; n <= 1000; n++) ins.run(`p${String(n).padStart(4, '0')}`, `default-${n}`);
@@ -614,9 +540,6 @@ describe('migration 0031 — the default project (correctness)', () => {
       const dflt = defaultProject(handle);
       expect(dflt.slug).toBe('default');
       expect(scalar(handle, `SELECT count(*) AS v FROM projects WHERE is_default = 1`)).toBe(1);
-      // The resolution half of this scenario (a path-less `/mcp` resolving here)
-      // lands with the resolver retargeting; what exists now is that the row is
-      // addressable by the slug the report named.
       expect(
         one<{ id: string }>(handle, `SELECT id FROM projects WHERE slug = ?`, dflt.slug)?.id,
       ).toBe(dflt.id);
@@ -704,8 +627,6 @@ describe('migration 0031 — the default project (correctness)', () => {
       expect(result.shrunkTables).toEqual([]);
       expect(result.current.memory).toBe(before.census['memory']);
 
-      // FKs off for the control only: the guard counts rows, and the children
-      // this leaves dangling are not what is under test.
       handle.raw.pragma('foreign_keys = OFF');
       handle.raw.prepare(`DELETE FROM memory WHERE id IN (SELECT id FROM memory LIMIT 13)`).run();
       handle.raw.pragma('foreign_keys = ON');
@@ -727,14 +648,6 @@ describe('migration 0031 — the default project (correctness)', () => {
 });
 
 describe('migration 0031 — duplicate global entities', () => {
-  /**
-   * `memory_entities_identity_idx` is UNIQUE over PLAIN columns, so two global
-   * rows sharing `(kind, value)` are DISTINCT before the migration
-   * (`project_id IS NULL`) and a live collision after it. No shipped path
-   * creates the pair, and a manual UPDATE or a restored snapshot can — and the
-   * failure is unrecoverable, because the ledger row is never written so every
-   * subsequent boot dies the same way.
-   */
   function withDuplicate(): { memoryIds: string[]; entityValue: string } {
     const handle = open();
     const repos = createRepositories(handle.db);
@@ -756,8 +669,6 @@ describe('migration 0031 — duplicate global entities', () => {
     );
     expect(original, 'the extractor did not produce the entity under test').toBeDefined();
 
-    // Accepted only because `project_id IS NULL` makes the identity index blind
-    // to it — the control the assertion below rests on.
     handle.raw
       .prepare(
         `INSERT INTO memory_entities (id, scope, project_id, kind, value, created_at) VALUES ('dupe', 'global', NULL, ?, ?, 1)`,
@@ -788,8 +699,6 @@ describe('migration 0031 — duplicate global entities', () => {
       expect(scalar(handle, `SELECT count(*) AS v FROM memory_entities WHERE id = 'dupe'`)).toBe(0);
       expect(handle.raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 
-      // Both memories are still reachable through the surviving entity — the
-      // collapse must not cost a link.
       const hits = createRepositories(handle.db).entities.findMemoriesByEntity({
         scope: projectScope(dflt.id),
         value: entityValue,
@@ -803,9 +712,6 @@ describe('migration 0031 — duplicate global entities', () => {
 
   it('is what makes the boot survivable at all: without the collapse the repoint collides', () => {
     withDuplicate();
-    // The dedupe removed, everything else verbatim: this is the mutation 12.x
-    // would apply, taken here so the guard's necessity is pinned by a test
-    // rather than by the comment above the statement.
     const body = fx.source();
     const dedupe = body.slice(
       body.indexOf('CREATE TEMP TABLE `_entity_dupes`'),
@@ -905,8 +811,6 @@ describe('migration 0031 — the dense index survives repartitioning', () => {
       const target = [...before.vectorsBefore.keys()][3]!;
       const targetVector = decodeEmbedding(before.vectorsBefore.get(target)!);
 
-      // A control native to the destination, saved after the migration, so a
-      // green test cannot be a fixture where nothing was repointed.
       const control = new MemoryService(repos, handle.db).save(
         {
           type: 'user',
@@ -924,8 +828,6 @@ describe('migration 0031 — the dense index survives repartitioning', () => {
         )!.embedding,
       );
 
-      // The query text matches nothing lexically, so the dense branch is the
-      // only one that can return either row.
       const found = async (vector: Float32Array): Promise<string[]> => {
         const service = new MemoryService(repos, handle.db, undefined, () =>
           Promise.resolve(vector),
@@ -958,9 +860,6 @@ describe('migration 0031 — derived state after the repointing', () => {
     fx.stage();
     const handle = open();
     try {
-      // The anti-join behind `embeddings.backlog` detects an ABSENT vec row,
-      // never a wrongly-partitioned one — necessary, and on its own not
-      // sufficient, which is why the partition assertions above exist.
       const report = doctorReport(handle, fx.dataDir);
       expect(report.embeddings.backlog).toBe(0);
       expect(report.entities.backlog).toBe(0);
@@ -1037,8 +936,6 @@ describe('migration 0031 — progress output', () => {
     const raw = new Database(join(fx.dataDir, 'data.db'));
     sqliteVec.load(raw);
     raw.pragma('foreign_keys = ON');
-    // Literal per-view count queries: every identifier is a fixed string, no
-    // interpolated SQL (the census invariant scans this file).
     const count = (
       view: 'memory' | 'memory_entities' | 'memory_vec' | 'sqlite_temp_master',
     ): number =>
@@ -1084,9 +981,6 @@ describe('migration 0031 — progress output', () => {
         'committing',
         `repointed ${GLOBAL_ROWS} previously-global memory row(s) into the default project default`,
       ]);
-      // Ordering, not presence, and each line probed against the statement it
-      // announces rather than against the body as a whole: emitting any of them
-      // one statement EARLIER or one statement LATER changes one of these reads.
       expect(events[0]!.hasColumn).toBe(false);
       expect(events[0]!.inTransaction).toBe(false);
       expect(events[1]!.inTransaction).toBe(true);
@@ -1099,8 +993,6 @@ describe('migration 0031 — progress output', () => {
       expect(events[3]!.inTransaction).toBe(true);
       expect(events[3]!.globalVec).toBe(0);
       expect(events[3]!.stashExists).toBe(0);
-      // A report is post-hoc by definition: the transaction the FK gate could
-      // still have vetoed is closed by the time it is emitted.
       expect(events[5]!.inTransaction).toBe(false);
       expect(result.applied).toContain(MIGRATION);
     } finally {
@@ -1110,9 +1002,6 @@ describe('migration 0031 — progress output', () => {
 
   it('withholds the report when the transaction it summarises is rolled back', async () => {
     await buildCorpus();
-    // A dangling FK the runner's own pre-commit gate must veto, appended AFTER
-    // the report statement — so the report has already read as done. A summary
-    // of work that was then discarded is worse than no summary.
     fx.stage(
       `${fx.source()}\n--> statement-breakpoint\nINSERT INTO sessions (id, token_id, project_id, agent, started_at) VALUES ('sX', 'no-such-token', NULL, 'x', 1);\n`,
     );
@@ -1165,8 +1054,6 @@ describe('migration 0031 — progress output', () => {
         },
       });
 
-      // `sqlite3_temp_directory` is a process-global, so leaving it set would
-      // redirect every other connection's spill too.
       expect(inside).not.toBeNull();
       expect(inside!.store).toBe(1); // FILE, while the body runs
       expect(inside!.dir).toBe(fx.dataDir);
@@ -1182,10 +1069,6 @@ describe('migration 0031 — progress output', () => {
     fx.stage();
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      // `onStartupLog` muted: the assertion below is about the migration
-      // progress lines on the default stderr channel, and the DS1 provenance
-      // line shares it. Leaving it in would make "no line repeats on the second
-      // boot" unprovable without also weakening it.
       const first = createDb({
         dataDir: fx.dataDir,
         migrationsDir: fx.migrationsDir,

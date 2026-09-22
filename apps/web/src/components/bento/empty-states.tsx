@@ -7,30 +7,6 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-/**
- * The empty states the dashboard shows when a table (or a search) has nothing
- * to put in it:
- *
- *  - `TableNoResults` (registry `filter-empty`) is the filtered-out case. The
- *    reader can act on it, so it leads with the filter chips that narrowed the
- *    list and a way to peel them off.
- *  - `TableEmptyState` (registry `table-empty`) is the empty-corpus case: the
- *    column headers stay so the table keeps its shape, and a dashed hint fills
- *    the body. No dashboard form can create these rows — memories, sessions and
- *    judgments arrive through MCP/HTTP — so it points at the tool that does.
- *  - `SearchEmptyState` (registry `search-empty`) echoes the term. A "no
- *    results" that does not repeat the query is a shrug.
- *
- * Every surface below paints with the shadcn semantic tokens (`bg-card`,
- * `text-muted-foreground`, `border-border`, `text-primary`) rather than the
- * blocks' literal neutral/white scale. `.dark` is the document's base state, so
- * those roles are what the light/dark flip moves.
- *
- * The motion comes from `motion/react`, which is already a dependency of this
- * app; each animation has a `useReducedMotion` branch, and the tinted surfaces
- * are near-opaque so the backdrop never bleeds through the ink in front of it.
- */
-
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 const SPRING_ENTRANCE: { type: 'spring'; stiffness: number; damping: number } = {
@@ -61,8 +37,6 @@ const FADE_DOWN = '[mask-image:linear-gradient(to_bottom,black_15%,transparent_9
 
 type Tone = 'neutral' | 'critical' | 'positive';
 type BackdropKind = 'rings' | 'ripple' | 'scan' | 'comet' | 'sieve';
-
-/* ── Glyphs ───────────────────────────────────────────────────────────────── */
 
 type GlyphProps = React.SVGProps<SVGSVGElement>;
 
@@ -144,8 +118,6 @@ function IconCopy(props: GlyphProps) {
     </Glyph>
   );
 }
-
-/* ── Backdrops ────────────────────────────────────────────────────────────── */
 
 function Backdrop({
   kind,
@@ -353,8 +325,6 @@ function Medallion({
   );
 }
 
-/* ── Anatomy ──────────────────────────────────────────────────────────────── */
-
 function useReveal() {
   const reduced = useReducedMotion();
 
@@ -468,17 +438,12 @@ function EmptyState({
   );
 }
 
-/* ── Actions ──────────────────────────────────────────────────────────────── */
-
 const EMPHASIS = {
   primary: 'bg-primary text-primary-foreground hover:bg-primary/10 hover:text-primary-foreground',
   secondary: 'border border-border bg-accent text-foreground hover:bg-accent hover:text-foreground',
   quiet: 'bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
 } as const;
 
-/* The drag handlers are omitted because motion redefines every one of them
-   with its own gesture signature, and a spread of React's DOM handlers onto a
-   motion component is a type error, not a merge. */
 type ActionProps = {
   emphasis?: keyof typeof EMPHASIS;
   icon?: React.ReactNode;
@@ -531,7 +496,6 @@ function EmptyAction({ emphasis = 'primary', className, children, ...props }: Ac
   );
 }
 
-/** The same button, wired to a `Link` so a navigation keeps client-side routing. */
 function EmptyActionLink({
   emphasis = 'primary',
   href,
@@ -561,7 +525,6 @@ function EmptyActionLink({
   );
 }
 
-/** The list that would have been here, drawn faint so the layout keeps its shape. */
 function GhostRows({ rows = 4, fade = 'down' }: { rows?: number; fade?: 'down' | 'up' }) {
   const reduced = useReducedMotion();
 
@@ -588,11 +551,8 @@ function GhostRows({ rows = 4, fade = 'down' }: { rows?: number; fade?: 'down' |
   );
 }
 
-/* ── Surfaces ─────────────────────────────────────────────────────────────── */
-
 const PANEL = 'w-full overflow-hidden rounded-2xl border border-border bg-card';
 
-/** The header a table keeps even when it has no rows. Column widths come from the caller. */
 export interface EmptyTableColumn {
   id: string;
   label: string;
@@ -606,12 +566,6 @@ export interface Destination {
   section?: string;
 }
 
-/**
- * The filtered case. The chips are the filters that are live on the URL; each
- * one links to the same list with that filter dropped, so the action is a real
- * navigation and not a local `useState` that pretends to re-query. `clearHref`
- * clears to the unfiltered list.
- */
 export function TableNoResults({
   filters = [],
   total,
@@ -677,12 +631,6 @@ export function TableNoResults({
   );
 }
 
-/**
- * The corpus case. The column headers stay rendered and their widths are pinned
- * by the caller, so an empty table shows the shape of what belongs in it. The
- * `hint` explains how a row is created — no dashboard form can make one, so the
- * caller passes the MCP tool that does rather than a button that would lie.
- */
 export function TableEmptyState({
   title,
   description,
@@ -729,7 +677,6 @@ export function TableEmptyState({
         </motion.div>
       )}
 
-      {/* Ghost rows hold the table's height so an empty body is a body, not a 40px strip. */}
       <div
         aria-hidden
         className="flex w-full flex-col gap-3 px-5 py-4 md:px-6"
@@ -795,12 +742,6 @@ function gridFor(columns: EmptyTableColumn[]): string {
   return columns.map((column) => column.width ?? 'minmax(0,1fr)').join(' ');
 }
 
-/**
- * The search case. The term is echoed in the header and again in the copy,
- * because "no results" without the query that produced them tells the reader
- * nothing. `suggestions` are terms that do return rows; `onPick` lets the view
- * re-run the query with one of them instead of the dead term.
- */
 export function SearchEmptyState({
   query,
   title = 'No results',
@@ -891,7 +832,6 @@ export function SearchEmptyState({
   );
 }
 
-/** The block the 404 and the error boundary both ride on: a titled panel with the anatomy inside. */
 export function EmptyPanel({
   title,
   meta,
@@ -927,11 +867,6 @@ export function EmptyPanel({
   );
 }
 
-/**
- * The failure case. The request id is
- * the one string support asks for, so it is copyable; the technical detail is
- * behind a disclosure because it is only ever read on the way to a bug report.
- */
 export function ErrorEmpty({
   errorId,
   title = 'This did not load',
@@ -1028,8 +963,6 @@ export function ErrorEmpty({
           </div>
 
           {detail ? (
-            /* 0fr to 1fr, so the panel opens to exactly the height of its content
-               without measuring anything. */
             <motion.div
               initial={false}
               animate={{ gridTemplateRows: open ? '1fr' : '0fr', opacity: open ? 1 : 0 }}
@@ -1037,8 +970,6 @@ export function ErrorEmpty({
               className="grid"
             >
               <div className="overflow-hidden">
-                {/* A div, not a <pre>: host stylesheets !important their own
-                    padding onto <pre> and this box has to keep its own. */}
                 <div className="mt-2 overflow-x-auto rounded-xl border border-border bg-muted px-3 py-2 text-left">
                   <code className="font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground">
                     {detail}
@@ -1053,16 +984,6 @@ export function ErrorEmpty({
   );
 }
 
-/**
- * The 404. Two things are load
- * bearing and kept from the original: the path that was tried is printed (people
- * mistype and want to see what they asked for), and the destination list filters
- * as the reader types, so the search box is a way out rather than decoration.
- *
- * `usePathname()` is the path Next could not match, so the caller does not have
- * to thread it through. The destinations come from the caller's own nav table —
- * a 404 that offers a link the sidebar does not carry is a new way to get lost.
- */
 export function PageNotFound({
   destinations,
   homeHref = '/dashboard',

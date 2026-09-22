@@ -11,18 +11,6 @@ import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './er
 import { ok } from './result.js';
 import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
 
-/**
- * MCP tool handlers for the relations layer introduced in change
- * `convergent-saves-and-synchronous-judgment`:
- *
- *   memory.suggest_topic_key — deterministic family heuristic, no LLM
- *   memory.judge             — close a pending judgmentId from save
- *   memory.compare           — proactive verdict on two arbitrary memories
- *
- * `memory.save` itself is extended in the existing tools.ts so the
- * legacy entry point still works.
- */
-
 export const suggestTopicKeySchema = {
   type: z.enum(MEMORY_TYPES),
   title: z.string().min(1).max(500).optional(),
@@ -162,8 +150,6 @@ async function handleSuggestTopicKey(
   }
   const topicKey = suggestion.topicKey;
   if (!deps.repos) {
-    // Not wired with the memory repository — fall back to the pure
-    // suggestion with no scope awareness (should not happen in production).
     return ok({ topic_key: topicKey, occupied: false, nearby: [] });
   }
   const projectId = scope.projectId;
@@ -187,8 +173,6 @@ async function handleSuggestTopicKey(
   });
 }
 
-// A missing judgment/memory and an out-of-scope one must be indistinguishable
-// (`not_found`) so cross-scope existence never leaks — mirrors memory.get.
 function maskNotFound(code: DomainError['code']): string {
   return code === 'memory_not_found' ? 'not_found' : code;
 }
@@ -230,8 +214,6 @@ async function handleJudge(
   }
 
   if (args.judgments !== undefined) {
-    // Each item runs in its OWN RelationsService.judge transaction (no outer
-    // tx), so a bad id reports an error without rolling back the good ones.
     const results = args.judgments.map((j) => {
       try {
         const row = deps.relations.judgeInScope(j.judgmentId, scope, {
@@ -338,6 +320,4 @@ async function handleCompare(
   }
 }
 
-// Maintained import for downstream callers that thread RelationView
-// through search results.
 export type { RelationView };

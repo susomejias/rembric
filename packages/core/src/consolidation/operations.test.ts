@@ -51,12 +51,6 @@ afterEach(() => {
   db.cleanup();
 });
 
-/**
- * Seed a historical `merge` op the way the removed LLM consolidator once did
- * (two superseded predecessors + an active merged row + a journaled op). The
- * producer (`applyMerge`) is gone, but the spec requires such pre-upgrade rows
- * to stay renderable and undoable.
- */
 function seedHistoricalMerge(): { aId: string; bId: string; mergedId: string; opId: string } {
   const a = memoryService.save({ type: 'user', title: 'a', content: 'a' }, projectScope(projectId));
   const b = memoryService.save({ type: 'user', title: 'b', content: 'b' }, projectScope(projectId));
@@ -227,9 +221,6 @@ describe('undoOp preserves topic_key convergence', () => {
   });
 
   it('skips a project-less row rather than attempting a reactivation the UNIQUE index refuses', () => {
-    // A row an older image wrote with no project. `memory_topic_key_active_uidx`
-    // keys on COALESCE(project_id,''), so it occupies a slot exactly like a
-    // project-scoped one — and a second such row already holds it.
     const raw = db.handle.raw;
     const insert = raw.prepare(
       `INSERT INTO memory (id, scope, project_id, type, title, content, tags, status, topic_key, created_at, last_seen_at)
@@ -246,8 +237,6 @@ describe('undoOp preserves topic_key convergence', () => {
     expect(memoryService.unsafeGetById('legacy-decayed')!.status, 'nothing to undo').toBe(
       'archived',
     );
-    // Only now is the slot free to claim — the index refuses two active rows
-    // in it, which is the constraint the undo would hit.
     insert.run('legacy-holder', 'holder', 'holder', 'active', now, now);
 
     const result = undoOp(repos, db.handle.db, opId);
@@ -256,8 +245,6 @@ describe('undoOp preserves topic_key convergence', () => {
       { id: 'legacy-decayed', topicKey: 'legacy-k', occupiedBy: 'legacy-decayed' },
     ]);
     expect(memoryService.unsafeGetById('legacy-decayed')!.status).toBe('archived');
-    // Control: the op is still marked reverted, so the transaction committed
-    // rather than aborting on SQLITE_CONSTRAINT_UNIQUE.
     const op = db.handle.db
       .select()
       .from(consolidationOps)
@@ -446,14 +433,6 @@ describe('op-type classification is exhaustive (fix-audited-defects)', () => {
 
 describe('reactivation durability (fix-audited-defects)', () => {
   it('stamps last_seen_at on reactivate so the next sweep does not re-archive the row', () => {
-    // Save the memory with a last_seen_at far past its type's decay window
-    // (reference = 3650 days) so the ORIGINAL timestamp alone would make it
-    // decay-eligible again after undo — that is exactly the bug: reactivate()
-    // used to leave last_seen_at untouched. `reference` is used deliberately
-    // (separate-access-from-usefulness): it has no review TTL, so it can
-    // never become escalation-eligible — this test is specifically about
-    // the recency+confidence decay path, not escalation, and an ancient
-    // `createdAt` on a TTL-having type would otherwise trip escalation too.
     clock.set(new Date('2000-01-01T00:00:00Z'));
     const m = memoryService.save(
       { type: 'reference', title: 'm', content: 'm' },
@@ -502,8 +481,6 @@ describe('escalation', () => {
       projectScope(projectId),
     );
 
-    // Frequent reads keep last_seen_at fresh, so the recency rule cannot fire.
-    // project's TTL is 3 months, so 350 days is well past escalation.
     for (let i = 0; i < 10; i++) {
       clock.advance(35 * DAY_MS);
       memoryService.get(m.id, projectScope(projectId));

@@ -16,22 +16,6 @@ import { getServices } from '../lib/services';
 
 import { defaultProject } from './default-project.js';
 
-/**
- * Routing-level coverage for roots discovery, over the real Next `/mcp` route
- * handler.
- *
- * The arm below that asserts the client's optional standalone GET stream never
- * reaches the server needs a server-side request log. That boundary is the
- * adapter that
- * hands the SDK's request to `route.ts`, so `httpLog` records exactly what the
- * handler received (and, unlike a socket-level log, could not be confused by a
- * GET Next itself answered before the handler).
- *
- * `loadEmbedder` is replaced as in `mcp-transport.test.ts`: the service graph is
- * the production one, only the ONNX factory is swapped for the deterministic,
- * offline fixture.
- */
-
 vi.mock('@rembric/core', async (importOriginal) => {
   const actual = await importOriginal<typeof CoreModule>();
   const { FakeEmbedder } = await import('./embedder.js');
@@ -50,9 +34,7 @@ const globalForApp = globalThis as MutableGlobal;
 function resetAppGlobals(): void {
   try {
     globalForApp.__rembricDb?.close();
-  } catch {
-    // ignore double-close of a fixture the process already closed
-  }
+  } catch {}
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
@@ -61,7 +43,6 @@ function resetAppGlobals(): void {
 
 const ORIGIN = 'http://127.0.0.1:8787';
 
-/** Drive the real route handler with the request the SDK would have sent. */
 function routeFetch(url: string | URL, init?: RequestInit): Promise<Response> {
   const pathname = new URL(url).pathname;
   const segments = pathname.split('/').filter((s) => s.length > 0);
@@ -76,7 +57,6 @@ describe('roots discovery routing (in-process route handler)', () => {
   let dataDir: string;
   let adminToken: string;
   let services: ReturnType<typeof getServices>;
-  /** Every request the route handler received, in arrival order. */
   const httpLog: string[] = [];
 
   interface ToolResult {
@@ -121,7 +101,6 @@ describe('roots discovery routing (in-process route handler)', () => {
     client: Client;
     clientMethods: string[];
     rootsCalls: () => number;
-    /** Change what the client's `roots/list` handler answers; `null` = empty list. */
     setRoot: (uri: string | null) => void;
   }
 
@@ -131,7 +110,6 @@ describe('roots discovery routing (in-process route handler)', () => {
     listChanged?: boolean;
     suppressStandaloneStream?: boolean;
     dropFirstRootsList?: boolean;
-    /** Answer this many `roots/list` requests, then go silent forever. */
     answerLimit?: number;
   }): Promise<RootsConnection> {
     const clientMethods: string[] = [];
@@ -139,9 +117,6 @@ describe('roots discovery routing (in-process route handler)', () => {
       const method = (init?.method ?? 'GET').toUpperCase();
       clientMethods.push(method);
       if (opts.suppressStandaloneStream === true && method === 'GET') {
-        // 405 is the SDK's "this server offers no GET stream" path, taken
-        // without raising: the route never sees the GET, so no standalone
-        // server→client stream is ever registered.
         return Promise.resolve(new Response(null, { status: 405 }));
       }
       httpLog.push(`${method} ${new URL(url).pathname}`);
@@ -167,9 +142,6 @@ describe('roots discovery routing (in-process route handler)', () => {
           (opts.dropFirstRootsList === true && calls === 1) ||
           (silentFrom !== undefined && calls > silentFrom)
         ) {
-          // No answer of ANY kind, so the server's own budget expires. A
-          // rejection would instead be an answer, which legitimately consumes
-          // the once-only discovery slot.
           await new Promise(() => {});
         }
         return rootUri === null ? { roots: [] } : { roots: [{ uri: rootUri, name: rootUri }] };
@@ -211,7 +183,6 @@ describe('roots discovery routing (in-process route handler)', () => {
     return readJson(result) as CurrentProject;
   }
 
-  /** End-to-end tool-call latency at the SDK client — the only instrument used below. */
   async function timedScope(client: Client): Promise<{ scope: string; ms: number }> {
     const started = performance.now();
     const scope = await contextScope(client);
@@ -237,7 +208,6 @@ describe('roots discovery routing (in-process route handler)', () => {
 
     expect(clientMethods, 'the client did attempt the standalone GET').toContain('GET');
     expect(mine.filter((line) => line.startsWith('GET /mcp'))).toEqual([]);
-    // The instrument is live: this connection's POSTs did reach the server.
     expect(mine.some((line) => line.startsWith('POST /mcp'))).toBe(true);
     expect(scope).toBe(`project:${project.id}`);
 
@@ -266,8 +236,6 @@ describe('roots discovery routing (in-process route handler)', () => {
     await client.close();
   });
 
-  // Control: without it, "the discovered project" above could be the default
-  // project under another name.
   it('resolves the default project when the client advertises no roots capability', async () => {
     const dflt = defaultProject(services.db);
     const project = createProject('routing-not-discovered');
@@ -280,15 +248,7 @@ describe('roots discovery routing (in-process route handler)', () => {
     await client.close();
   });
 
-  /**
-   * `notifications/roots/list_changed`. The notification's POST is answered 202
-   * only after the server transport has dispatched it, so no arm below needs to
-   * wait for the flag to land.
-   */
   describe('roots/list_changed lifecycle', () => {
-    // Control for every arm below: it passes on both sides of the change, so a
-    // harness that never reaches the discovery path is distinguishable from a
-    // correct one.
     it('asks once and suggests nothing across three scope-resolving calls', async () => {
       const project = createProject('probe-control');
       const { client, rootsCalls } = await connectRoots({
@@ -365,8 +325,6 @@ describe('roots discovery routing (in-process route handler)', () => {
 
       await a.client.sendRootsListChanged();
 
-      // The first call after the notification may spend one budget — the
-      // accepted cost of one attempt per notification.
       const first = await timedScope(a.client);
       const second = await timedScope(a.client);
       expect(first.scope).toBe(`project:${project.id}`);
@@ -446,7 +404,6 @@ describe('roots discovery routing (in-process route handler)', () => {
       await a.client.sendRootsListChanged();
 
       expect(await contextScope(a.client)).toBe(`project:${project.id}`);
-      // One request for that tool call, not one for discovery and one for the refresh.
       expect(a.rootsCalls()).toBe(2);
       expect(await projectCurrent(a.client)).toMatchObject({
         projectId: project.id,

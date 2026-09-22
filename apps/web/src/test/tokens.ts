@@ -1,10 +1,6 @@
 import { TokensService, type CreatedToken, type TokenGrant } from '@rembric/core';
 import { createRepositories, type DbHandle } from '@rembric/db';
 
-/**
- * Helper to mint a token quickly inside a test. Returns the plaintext so
- * tests can send it as a Bearer header.
- */
 export function mintTestToken(
   handle: DbHandle,
   grant: TokenGrant = { scope: '*' },

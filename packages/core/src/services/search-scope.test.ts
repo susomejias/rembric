@@ -61,11 +61,6 @@ describe('the widened scope reaches the search path and nothing else', () => {
   });
 
   it('is refused by every write and non-search read', () => {
-    // Enforced by `tsc`, not by the assertion below: give any of these a
-    // `SearchScope` parameter and its directive goes unused, which reds the
-    // build (openspec/specs/auth/spec.md, a widening "SHALL be of a type no
-    // write path can hold"). Never invoked — a call would write a row with no
-    // project and prove something else entirely.
     const refused = () => {
       // @ts-expect-error a write cannot hold a widened scope
       mem.save({ type: 'project', title: 'x', content: 'x' }, widened);

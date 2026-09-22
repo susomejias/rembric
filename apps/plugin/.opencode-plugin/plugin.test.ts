@@ -5,10 +5,6 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Imports from the shared dotenv lib (single source of truth, used by the
-// MCP bridge AND the opencode plugin). The distributed plugin.ts exports
-// ONLY `RembricPlugin`; opencode invokes every named export as a Plugin
-// function, so the helpers MUST stay outside plugin.ts's export surface.
 import { parseDotenv, readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import { RembricPlugin } from './plugin.js';
@@ -269,10 +265,6 @@ describe('RembricPlugin handlers', () => {
     const out: { context: string[] } = { context: [] };
     await handlers['experimental.session.compacting']!({ sessionID: 's1' } as never, out as never);
     const text = out.context[0];
-    // Constructed at runtime, not embedded verbatim: `grep`ping the repo for
-    // these exact phrases is itself a verification step (fix-audited-defects
-    // successor), and a literal copy here — even in a negative assertion —
-    // would be a false positive of that grep.
     const bannedWindowFraming = [
       ['content of the compact', 'ed summary'].join(''),
       ['compacted summ', 'ary above'].join(''),
@@ -317,8 +309,6 @@ describe('RembricPlugin handlers', () => {
         parts: [{ type: 'text', text }],
         message: {},
       };
-      // Each case is a fresh session's turn 1, so the summary nudge ALSO
-      // fires alongside the recall nudge — assert on presence, not position.
       await handlers['chat.message']!({ sessionID: `s-recall-${i}` } as never, output as never);
       const recallPart = output.parts.find((p) => p.text?.includes('rembric: User intent: recall'));
       expect(recallPart?.text).toContain('memory.search');
@@ -337,8 +327,6 @@ describe('RembricPlugin handlers', () => {
         parts: [{ type: 'text', text }],
         message: {},
       };
-      // Fresh session per case (turn 1) so the summary nudge's turn-1 fire
-      // doesn't get confused with the recall nudge under test here.
       await handlers['chat.message']!({ sessionID: `s-no-recall-${i}` } as never, output as never);
       expect(output.parts.some((p) => p.text?.includes('rembric: User intent: recall'))).toBe(
         false,
@@ -436,9 +424,6 @@ describe('RembricPlugin handlers', () => {
     await handlers.event!({
       event: { type: 'session.idle', properties: { sessionID: 's-notice' } },
     } as never);
-    // The report is fire-and-forget from the handler's point of view
-    // (`void core.reportTurn(...)`), so its promise chain (fetch → res.json()
-    // → cache) settles on a later microtask than this `await` observes.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(turnCalls).toBe(1);
 
@@ -476,12 +461,6 @@ describe('RembricPlugin handlers', () => {
     expect(turnCalls).toBe(1);
   });
 
-  /**
-   * Drives one whole turn — session.created, the given part types, then
-   * session.idle — and returns the body the `/turn` POST carried. The three
-   * `usedTools` cases differ ONLY in the part types and the expected
-   * boolean, so the scaffold is shared and the cases are data.
-   */
   async function turnBody(
     sessionId: string,
     partTypes: readonly string[],
@@ -568,8 +547,6 @@ describe('RembricPlugin handlers', () => {
     await startTurn('turn two');
     await endTurn();
 
-    // The first element is the control: an in-turn part really does arm the
-    // latch, so the second being false cannot be a report that never fired.
     expect(reported).toEqual([true, false]);
   });
 
@@ -800,8 +777,6 @@ describe('RembricPlugin handlers', () => {
       { sessionID: 'mu1' } as never,
       { parts: [{ type: 'text', text: 'please fix the bug' }], message: {} } as never,
     );
-    // message.updated carries no `parts` on the real Message type (Assistant |
-    // User) — only metadata. It exists solely to record id → role.
     await handlers.event!({
       event: {
         type: 'message.updated',
@@ -1010,8 +985,6 @@ describe('RembricPlugin handlers', () => {
       await handlers.event!({
         event: { type: 'session.compacted', properties: { sessionID: 'auth-1' } },
       } as never);
-      // The dispose path builds its own fetch init rather than going through
-      // rembricPost, so the header has to be asserted on both.
       await handlers.event!({ event: { type: 'server.instance.disposed' } } as never);
 
       expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
@@ -1050,8 +1023,6 @@ describe('RembricPlugin handlers', () => {
       sessionID?: string;
       messageID?: string;
     }>;
-    // first-prompt + recall + sessionId + session-opening, since the stub
-    // ensure reports created:true.
     expect(injected.length).toBeGreaterThanOrEqual(4);
     for (const part of injected) {
       expect(part.id).toMatch(/^prt_[0-9a-f]{32}$/);
@@ -1114,9 +1085,6 @@ describe('RembricPlugin handlers', () => {
         }
       }
 
-      // Inverted on purpose: session.created returns early for a sub-agent, so
-      // marking it after chat.message is the only way the dispose loop's
-      // sub-agent guard is reachable at all.
       await handlers['chat.message']!(
         { sessionID: 'd-sub' } as never,
         { parts: [{ type: 'text', text: 'sub work' }], message: {} } as never,
@@ -1162,8 +1130,6 @@ describe('RembricPlugin handlers', () => {
       vi.useRealTimers();
     });
 
-    // Past the cap is where the two maps keyed by assistant message id can grow
-    // without bound, since forgetSession reports only the surviving entries.
     async function fillPastTheCap(
       handlers: Awaited<ReturnType<typeof RembricPlugin>>,
       sessionId: string,
@@ -1194,8 +1160,6 @@ describe('RembricPlugin handlers', () => {
       const calls = summaryCallsFor('cap-evict');
       expect(calls.length).toBeGreaterThan(0);
       const summary = jsonBodyOf(calls[calls.length - 1]!).summary as string;
-      // Control: the flush really carried this session's transcript, so the
-      // absence below is not an empty body.
       expect(summary).toContain('turn 399');
       expect(summary).not.toContain('OLDEST TURN');
       expect(summary).not.toContain('RESURRECTED');
@@ -1321,11 +1285,6 @@ describe('RembricPlugin handlers', () => {
       expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(true);
     });
 
-    // `reportedThisTurn` is this client's own per-session container — the one
-    // piece of turn state the core does not hold, because unifying it would
-    // give Pi a once-per-turn gate it deliberately does not have. It is
-    // therefore the one whose eviction beside `core.forgetSession` nothing
-    // else would notice, so it is pinned here.
     it('session.deleted re-arms the once-per-turn report gate for a reused id', async () => {
       const handlers = await RembricPlugin({ directory: dir } as never);
       const turnCalls = () =>
@@ -1338,8 +1297,6 @@ describe('RembricPlugin handlers', () => {
         event: { type: 'session.idle', properties: { sessionID: 'del-report' } },
       } as never);
       await vi.advanceTimersByTimeAsync(10);
-      // Control: the first idle did report, so the count below is measured
-      // against a gate that really closed rather than one that never opened.
       expect(turnCalls()).toHaveLength(1);
 
       await handlers.event!({
@@ -1423,9 +1380,6 @@ describe('RembricPlugin handlers', () => {
         event: { type: 'session.deleted', properties: { info: { id: 'del-timer' } } },
       } as never);
 
-      // Re-registered and re-filled WITHOUT re-arming: neither message.updated
-      // nor message.part.updated touches the debounce, so a POST at t=500ms can
-      // only come from the timer session.deleted was meant to clear.
       await handlers.event!(created('del-timer') as never);
       for (const event of assistantText('del-timer', 'm-dt', 'p-dt', 'still here')) {
         await handlers.event!(event as never);
@@ -1454,8 +1408,6 @@ describe('the shared accumulator reports what its per-session cap evicts', () =>
       }
     }
 
-    // No cap size is asserted, only that every entry that left the window was
-    // reported exactly once and in order.
     expect(evicted.length).toBeGreaterThan(0);
     expect(evicted).toEqual(Array.from({ length: evicted.length }, (_, i) => `m-${i}`));
     expect(evicted.length).toBeLessThan(total);
@@ -1487,8 +1439,6 @@ describe('RembricPlugin without credentials', () => {
     fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     written = [];
-    // The diagnostic is written while RembricPlugin is being constructed, so
-    // the spy has to be installed before it runs.
     stderrSpy = spyOnStderr(written);
   });
 
@@ -1534,8 +1484,6 @@ describe('RembricPlugin without credentials', () => {
         await vi.advanceTimersByTimeAsync(1000);
 
         expect(fetchMock).not.toHaveBeenCalled();
-        // Control: nudges are deliberately unaffected by the missing
-        // configuration, so their presence is what proves the handlers ran.
         expect(output.parts.some((p) => p.text === nudgeFixtures.firstPromptRelevance)).toBe(true);
       } finally {
         vi.useRealTimers();

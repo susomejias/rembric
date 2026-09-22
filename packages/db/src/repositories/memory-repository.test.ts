@@ -278,8 +278,6 @@ describe('MemoryRepository', () => {
       });
       expect(strict.map((r) => r.id)).toEqual(['09P1']);
 
-      // The control: both excluded ids are readable in their own scope, so the
-      // assertion above is about the predicate, not about missing rows.
       expect(
         repo
           .textByIds({ ids: ['09G', '09P1', '09P2'], scope: projectScope('p2') })
@@ -409,9 +407,6 @@ describe('MemoryRepository', () => {
         defaultThresholdMs: 1_000, // covers 'feedback' (no explicit entry)
         confidenceFloor: 1,
       });
-      // P_OLD: project age 200 > 100 → in.  P_NEW: 50 < 100 → out.
-      // U_SAME: user age 200 < 10_000 → out (longer threshold than project).
-      // F_OLD: feedback age 2_000 > default 1_000 → in.  F_NEW: 500 < 1_000 → out.
       expect([...ids].sort()).toEqual(['F_OLD', 'P_OLD']);
     });
   });
@@ -466,9 +461,6 @@ describe('MemoryRepository', () => {
     });
 
     it('sorts refuted rows ahead of TTL-expired ones so a capped page still shows them', () => {
-      // Refutation does not advance the baseline, so a freshly-created refuted
-      // row has the NEWEST baseline and would sort last under baseline-only
-      // ordering — invisible behind memory.context's 3-row cap.
       const old = new Date(1_000);
       t.handle.db
         .insert(memory)
@@ -630,8 +622,6 @@ describe('MemoryRepository', () => {
       });
 
       it('refutations older than the priority window stop starving TTL-expired rows', () => {
-        // Three unattended refutations, each older than the lead window, all
-        // with baselines newer than the TTL-expired row's.
         refuted('r1', NOW - 20 * DAY);
         refuted('r2', NOW - 21 * DAY);
         refuted('r3', NOW - 22 * DAY);

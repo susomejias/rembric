@@ -25,12 +25,6 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * Strict path-scoping contract — see src/services/memory.ts and
- * src/services/scope.ts for the application-level RLS pattern this
- * encodes.
- */
-
 let db: TestDb;
 let projects: ProjectsService;
 let memory: MemoryService;
@@ -92,10 +86,6 @@ afterEach(() => {
 });
 
 describe('memory.save — strict path scoping', () => {
-  // Premise changed: an unscoped connection resolves to the default project, so
-  // there is no scopeless state left for `project_required` to describe, and no
-  // argument by which the agent could redirect the write (the retired
-  // `scope_locked` refusal existed only to police one).
   it('saves into the default project on an unscoped connection', async () => {
     const r = await runWithContext(fakeContext(null), () =>
       Promise.resolve(handlers.save({ type: 'user', title: 'x', content: 'x' })),
@@ -320,8 +310,6 @@ describe('memory.save — candidatesDetected', () => {
     const h = handlersWithCap(5);
     for (let i = 0; i < 12; i++) await save(h, `Rule ${i}`, `${RULE}, revision ${i}`, {}, projectB);
 
-    // The same save in the project holding the lookalikes DOES count them, so
-    // the zero below is scope isolation rather than detection failing to run.
     const inB = parseText<SavePayload>(
       await save(h, 'Rule final', `${RULE}, revision final`, {}, projectB),
     );
@@ -378,9 +366,6 @@ describe('memory.get / memory.search — entitiesTotal', () => {
   });
 
   function linkMixed(repos: ReturnType<typeof createRepositories>, id: string): void {
-    // The measured worst case: paths dominate, three kinds have exactly one link.
-    // Under (kind, value) the surviving 10 are env_var + 9 paths; ticket and url
-    // — the two that address exactly one thing each — are evicted.
     repos.entities.linkMemory(
       id,
       projectA.id,
@@ -414,11 +399,6 @@ describe('memory.get / memory.search — entitiesTotal', () => {
         row.entities.slice(0, 4).map((e) => e.kind),
         surface,
       ).toEqual(['env_var', 'path', 'ticket', 'url']);
-      // The exact values, not just the kinds. Within a kind the projection
-      // preserves its input order, which is the repository's `ORDER BY (kind,
-      // value)` — so `src/f1.ts` is followed by `src/f10.ts`, not `src/f2.ts`.
-      // Asserting only the kinds leaves that ORDER BY unprotected: removing it
-      // failed nothing until this line existed.
       expect(
         row.entities.map((e) => e.value),
         surface,
@@ -526,8 +506,6 @@ describe('memory.get / memory.search — entitiesTotal', () => {
     );
     const payload = parseText<Record<string, unknown>>(raw);
     expect(payload).not.toHaveProperty('entitiesTruncated');
-    // `truncated`/`headTruncated` describe the predecessor chain and stay; what
-    // must not exist is a boolean about the ENTITY projection.
     const entityBooleans = Object.entries(payload).filter(
       ([k, v]) => /entit/i.test(k) && typeof v === 'boolean',
     );
@@ -1187,12 +1165,6 @@ describe('memory.get — batch (ids)', () => {
 });
 
 describe('memory.* — router-activated project on an unscoped /mcp connection', () => {
-  // Reproduces the bug where calling `project.use({slug})` on a path-less
-  // /mcp connection correctly updates the SessionRouter and is reported by
-  // `project.current`, yet subsequent `memory.save({scope:'project'})`
-  // calls still returned `project_required` because the memory handlers
-  // only consulted `ctx.project` (URL-derived) and never the router.
-
   const MCP_SESSION = 'mcp-sess-1';
 
   function unscopedContextWithSession(): RequestContext {
@@ -1292,15 +1264,6 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
 });
 
 describe('memory.save — eager roots discovery race (option B fix)', () => {
-  // Reproduces the bug where the very first scope-aware call on a fresh
-  // transport (e.g. `memory.save({scope:'project'})`) returned
-  // `project_required` because roots discovery had not run yet — it was
-  // only wired into `project.current` / `memory.session_start`. The fix:
-  // `createMcpServer` fires discovery eagerly from `oninitialized` and
-  // stashes the in-flight Promise on the router so any tool handler
-  // that resolves project scope awaits the same promise (single-flight)
-  // instead of falling through to `project_required`.
-
   const MCP_SESSION = 'mcp-sess-eager';
 
   function unscopedContextWithSession(): RequestContext {
@@ -1324,10 +1287,6 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
     };
   }
 
-  // Minimal stand-in for the McpServer that the handler's `getServer`
-  // factory returns. `resolveEffectiveProject` only forwards it to
-  // `ensureRootsDiscoveryRun`, which short-circuits when there is an
-  // in-flight promise on the router — so the stub is never dereferenced.
   const fakeServer = {} as unknown as Parameters<
     typeof buildMemoryHandlers
   >[0]['getServer'] extends (() => infer S) | undefined
@@ -1349,10 +1308,6 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
   });
 
   it('memory.save awaits an in-flight discovery promise and resolves the activated project', async () => {
-    // Simulate the state created by `server.oninitialized`: discovery
-    // is in flight; its resolution will activate `projectA` on this
-    // transport (mirrors what `maybeDiscoverViaRoots`'s
-    // `applyDerivedSlug` does once `listRoots` returns).
     let resolveDiscovery: () => void = () => undefined;
     const discoveryPromise = new Promise<void>((resolve) => {
       resolveDiscovery = resolve;
@@ -1361,9 +1316,6 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
     });
     router.setDiscoveryPromise('tk_test', MCP_SESSION, discoveryPromise);
 
-    // Kick off the save BEFORE discovery settles. With the fix in place
-    // the save awaits the in-flight promise; without it the save would
-    // return `project_required` immediately.
     const pending = runWithContext(unscopedContextWithSession(), async () =>
       routerHandlers.save({
         type: 'project',
@@ -1412,11 +1364,6 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
 });
 
 describe('memory.save — session attachment via HTTP-created sessions', () => {
-  // Verifies the bridge that makes `POST /api/<slug>/sessions` (hook) and
-  // subsequent `memory.save` (MCP) cohere: when no SessionRouter entry
-  // exists, the save attaches to the most-recently-active session for
-  // `(tokenId, projectId)`.
-
   let agentSessions: AgentSessionsService;
   let fallbackHandlers: ReturnType<typeof buildMemoryHandlers>;
   let realTokenId: string;
@@ -1667,11 +1614,6 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
 });
 
 describe('memory.search — no argument widens the resolved scope', () => {
-  // What the retired `include_global` gate protected: a read must not admit a
-  // scope the token was never authorized for. With the argument deleted there is
-  // no widening to authorize, so what remains under test is that a full-access
-  // token on a resolved scope still receives only that scope's rows.
-
   const MCP_SESSION = 'mcp-sess-gate';
 
   function scopedCtx(
@@ -1728,8 +1670,6 @@ describe('memory.search — no argument widens the resolved scope', () => {
       Promise.resolve(gateHandlers.search({ query: 'convention' })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
-    // Non-vacuity: the in-scope row IS returned, so the exclusion below is the
-    // scope predicate rather than an empty result set.
     expect(rows(r).map((m) => m.title)).toEqual(['project-A convention']);
   });
 
@@ -1759,17 +1699,11 @@ describe('memory.search — no argument widens the resolved scope', () => {
       Promise.resolve(gateHandlers.search({ entity: 'src/gate-probe.ts' })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
-    // Both halves: the linked in-scope row is present (so the lookup ran) and
-    // the equally-linked out-of-scope row is absent.
     expect(rows(r).map((m) => m.title)).toEqual(['project note on file']);
   });
 });
 
 describe('an unresolvable path slug establishes no scope', () => {
-  // Characterizes the leak this suite used to document: an unresolvable slug
-  // resolved to the global scope, so the connection read user-wide memory while
-  // presenting as path-scoped. It now resolves to nothing and the call is
-  // refused, reads included.
   it('refuses a `*` token at /mcp/<unknown-slug> instead of serving another scope', async () => {
     memory.save(
       { type: 'user', title: 'user-wide row', content: 'user-wide row' },

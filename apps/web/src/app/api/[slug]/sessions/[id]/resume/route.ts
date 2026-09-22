@@ -16,7 +16,6 @@ import { parseSessionResume } from '../../../../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 
-/** `POST /api/:slug/sessions/:id/resume` — mirrors `api-router.ts`'s resume handler. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string; id: string }> },
@@ -36,9 +35,6 @@ export async function POST(
   const parsed = parseSessionResume((await readJson(request)) ?? {});
   if (!parsed.ok) return invalidInput(parsed.message);
   try {
-    // Re-read rather than reuse the boundary check, which returns null on
-    // success: `previousEndedAt` is the only report of a value the update
-    // discards and the server does not retain.
     const before = deps.agentSessions.getById(sessionId);
     if (!before) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);

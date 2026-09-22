@@ -84,16 +84,6 @@ import {
   sessionSummarySchema,
 } from './session-tools.js';
 
-/**
- * Construct the MCP server and register every tool.
- *
- * The server is request-stateless — per-request data (token, project,
- * mcp-session-id) is carried in AsyncLocalStorage by the HTTP layer.
- *
- * The factory closes over `(requestedSlug)` so the emitted
- * `initialize.instructions` block matches the connection scope.
- */
-
 export interface CreateMcpServerOptions {
   memory: MemoryService;
   projects: ProjectsService;
@@ -117,27 +107,12 @@ export interface CreateMcpServerOptions {
   orphanAfterMs?: number;
   /** URL path slug for this connection, used to scope `instructions`. */
   requestedSlug?: string | null;
-  /**
-   * Optional — in-memory tool-call counters shared with the HTTP debug
-   * surface (proactive-entity-recall, D6). Wired once by the bootstrapper.
-   */
   usageCounters?: UsageCounters;
   name?: string;
   version?: string;
-  /**
-   * Server-side logging for an unexpected (non-`DomainError`) tool failure.
-   * Injected rather than imported: the one implementation lives
-   * application-side, so the "log server-side, return a generic message +
-   * errorId" contract is shared with the HTTP surfaces instead of duplicated in
-   * this package.
-   */
   logInternalError: LogInternalError;
 }
 
-// Claude Code 2.1.220 tail-cuts any tool description over 2048 chars (`LB`);
-// 1900 keeps an early-warning margin. Unlike INSTRUCTIONS_MAX_LENGTH this is a
-// verified client ceiling, not a token budget — see the mcp-api requirement
-// "Tool descriptions MUST stay below the client truncation ceiling".
 export const DESCRIPTION_MAX_LENGTH = 1900;
 
 const SAVE_DESCRIPTION =
@@ -145,8 +120,6 @@ const SAVE_DESCRIPTION =
 
 const SEARCH_DESCRIPTION =
   'Search memories. Call this before starting work in an area untouched this session, before diagnosing a possibly-known error, before building something that may already exist — or whenever the user references past work or asks to recall ("remember", "recall", "what did we do"). Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic\'s whole history — the active row plus every row it superseded, so you can check whether a topic already converged. Got a literal identifier? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. With `query` it narrows rather than fuses. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. `across_projects:true` also reads the other projects this token may reach. Never a default: only on an explicit ask; it dilutes the page with foreign memories. `searchedProjects[]` names what was read. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm if still true, memory.save+topic_key if it changed, memory.judge if it contradicts another memory). `abstained:true` means nothing matched — treat as "nothing relevant found", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.';
-// Length 1873 / 1900 — 27 chars headroom. Swapped reactive-only trigger wording
-// for proactive-moment triggers (proactive-recall), kept reactive triggers.
 
 const GET_DESCRIPTION =
   'Retrieve a memory by id, including its predecessor chain (replaces) and confirmation count. Use when memory.search returned a result and you need full untruncated content or history. `predecessors[]` is bounded (id/title/status/createdAt only, no content) — `truncated:true` means more predecessor history exists than was returned; `headTruncated:true` means the supersedes-chain head could not be fully resolved. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm if still true, memory.save+topic_key if changed).';
@@ -157,10 +130,6 @@ const CONFIRM_DESCRIPTION =
 const ARCHIVE_DESCRIPTION =
   'Retire a memory: flip one active memory in this scope to `archived` so it stops surfacing in recall. Call this ONLY when the user explicitly asks to retire, remove, or forget a specific memory — never as autonomous cleanup or housekeeping while recalling or saving, and never on your own judgement that a memory looks stale. If a replacement exists, do NOT archive: prefer a supersede (memory.save with the same `topic_key`, or memory.judge) which keeps a successor link — archive is the no-successor path for genuine retirement. Also use it as the second half of a user-requested cross-project move: memory.save the memory into the destination project, then memory.archive the original here. Args: { id }. Errors: `not_found` if the id is missing or in another scope, `conflict` if it is not active. Reversible: an operator can undo the archive from the dashboard.';
 
-// Rembric is append-only (rows are never deleted; supersede is a reversible,
-// journaled status flip) and a closed local store, so destructiveHint and
-// openWorldHint are false for EVERY tool — defined once here so no per-tool
-// factory can get them wrong.
 const NON_DESTRUCTIVE_CLOSED = { destructiveHint: false, openWorldHint: false } as const;
 
 const READ_ANNOTATIONS = (title: string): ToolAnnotations => ({
@@ -197,8 +166,6 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   );
   const aboutHandler = createAboutHandler(version);
 
-  // Registers strict: a raw shape becomes a plain `z.object()`, which strips
-  // unknown keys instead of refusing them.
   const registerTool = <InputArgs extends ZodRawShape, OutputArgs extends ZodRawShape>(
     name: string,
     config: {
@@ -212,8 +179,6 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     server.registerTool<OutputArgs, ZodObject<InputArgs, z.core.$strict>>(
       name,
       { ...config, inputSchema: z.object(config.inputSchema).strict() },
-      // The sole registration funnel, so every tool — including one added
-      // later — runs with its JSON-RPC id available to server→client requests.
       (args, extra) => runWithToolCallId(extra.requestId, () => cb(args, extra)),
     );
   };
@@ -466,10 +431,6 @@ Does NOT end the session — use memory.session_end for that.`,
     observabilityHandlers.stats,
   );
 
-  // ── Project management tools ──────────────────────────────────────
-  // The handlers receive a back-reference to the McpServer instance via
-  // `getServer` so the roots-discovery helper can call
-  // `server.server.listRoots()` on the underlying transport.
   const projectHandlers = buildProjectHandlers({
     repos: opts.repos,
     projects: opts.projects,
@@ -556,8 +517,6 @@ Does NOT end the session — use memory.session_end for that.`,
   );
 
   server.server.setNotificationHandler(RootsListChangedNotificationSchema, () => {
-    // Recorded, not acted on: with no tool call in flight, a `roots/list` sent
-    // from here would not be routed to the client.
     markRefreshPending(server);
   });
 

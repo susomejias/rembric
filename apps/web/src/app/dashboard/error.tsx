@@ -4,18 +4,6 @@ import { useEffect } from 'react';
 
 import { ErrorEmpty } from '@/components/bento/empty-states';
 
-/**
- * The dashboard's error boundary. Next renders this in place of the failed
- * segment, so the shell (and the operator's session) survives whatever threw —
- * `error.tsx` is the only place in the app that may be a client component for
- * that reason.
- *
- * The id handed to the block is the one string support asks for, and it has to
- * be stable: `error.digest` is what Next assigns server-side errors, and the
- * name is the fallback for a client throw that never reached the server. The
- * technical detail is the message alone — the stack is in the browser console
- * and the server log, not on the operator's screen.
- */
 export default function DashboardError({
   error,
   reset,

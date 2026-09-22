@@ -14,22 +14,10 @@ import { projectScope, type SearchScope } from '../scope.js';
 
 import { idJsonSet, projectIdsOf, scopeCondition, scopeWhere } from './scope-clause.js';
 
-// BM25 column weights for the interactive search lexical branch, in
-// `memory_fts` declaration order (content, tags, title). A title hit is a
-// strong relevance signal, so title is weighted above content. Save-time
-// candidate detection deliberately keeps default (unweighted) ranking —
-// admission is by rank position within the pool (see
-// save-time-candidates.ts), so reweighting here would silently change
-// which rows fall inside that pool.
 const FTS_WEIGHT_CONTENT = 1.0;
 const FTS_WEIGHT_TAGS = 1.0;
 const FTS_WEIGHT_TITLE = 2.0;
 
-/**
- * Ceiling on any single ancestry read, far above both call sites' bounds
- * (`PREDECESSOR_CAP + 2` and `DISMISSAL_ANCESTRY_CAP`). It exists so the one thing
- * keeping the traversal flat cannot be removed by a caller passing a large number.
- */
 const ANCESTRY_HARD_LIMIT = 1000;
 
 export interface ReviewTimestamps {
@@ -92,18 +80,6 @@ export class MemoryRepository {
       .get();
   }
 
-  /**
-   * BM25 FTS5 candidate search for save-time detection: active in-scope
-   * rows matching `matchExpr`, excluding the saved row and its links.
-   *
-   * Deliberately ordered by the DEFAULT (unweighted) `rank`, unlike the
-   * interactive `searchBm25Ids` (which applies the FTS_WEIGHT_* title boost):
-   * admission here is by rank position within the pool (see
-   * save-time-candidates.ts), so reweighting would silently change which
-   * rows are admitted. (The MATCH does now span the `title` column too, so a
-   * saved row's content tokens can match an existing row's title — a small,
-   * intentional recall widening; the rank ordering itself is unchanged.)
-   */
   searchBm25Candidates(opts: {
     matchExpr: string;
     excludeId: string;
@@ -238,11 +214,6 @@ export class MemoryRepository {
     return row?.value ?? 0;
   }
 
-  /**
-   * Chronological listing (no text query). The hybrid text-query path lives
-   * in `services/hybrid-search.ts` and reads the lexical branch via
-   * `searchBm25Ids`; this method owns only the no-query listing branch.
-   */
   searchMemoryIds(opts: SearchMemoryIdsOpts): string[] {
     const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
     const tagClause = opts.tag
@@ -268,18 +239,6 @@ export class MemoryRepository {
     return rows.map((r) => r.id);
   }
 
-  /**
-   * Lexical (FTS5/BM25) retriever for the hybrid search path: scoped ids
-   * ordered by BM25 rank for a PRE-SANITIZED MATCH expression, bounded to a
-   * rank window (no OFFSET — RRF fusion paginates in memory). Distinct from
-   * the unscoped `adminSearchFts` and the save-time `searchBm25Candidates`.
-   *
-   * `limit` is the window EACH named project draws, not a total over the union:
-   * a single bound would let a foreign project displace home rows, so adding an
-   * authorized project would subtract from what the home project contributes
-   * (memory/spec.md, "the pool grows with the set rather than being rationed
-   * across it"). The rows stay in one global BM25 order across the whole set.
-   */
   searchBm25Ids(opts: SearchBm25IdsOpts): { id: string; rank: number }[] {
     const typeClause = opts.type ? sql`AND m.type = ${opts.type}` : sql``;
     const tagClause = opts.tag
@@ -299,10 +258,6 @@ export class MemoryRepository {
           ${typeClause}
           ${tagClause}
           ${topicKeyClause}`;
-    // One project partitions into itself, so the window would only buy it a
-    // full materialisation of the match set where `ORDER BY … LIMIT` fills a
-    // bounded sorter. Emitting the narrow statement unchanged keeps that read's
-    // opcode stream identical, not merely its query plan.
     if (projectIdsOf(opts.scope).length === 1) {
       return this.db.all<{ id: string; rank: number }>(
         sql`
@@ -342,11 +297,6 @@ export class MemoryRepository {
   /** An out-of-scope id is absent from the result rather than reported. */
   textByIds(opts: TextByIdsOpts): Pick<Memory, 'id' | 'title' | 'content'>[] {
     if (opts.ids.length === 0) return [];
-    // `CROSS JOIN` is the join-order hint, not a semantic change: SQLite has no
-    // cardinality estimate for `json_each` and otherwise drives from
-    // `memory_scope_seen_idx`, bloom-filtering its way through every row in the
-    // scope — the corpus-sized scan this hot-path read exists to avoid. Pinning
-    // the id list as the outer loop makes it one PK seek per id.
     return this.db.all<Pick<Memory, 'id' | 'title' | 'content'>>(sql`
       SELECT m.id AS id, m.title AS title, m.content AS content
       FROM json_each(${JSON.stringify([...opts.ids])}) je
@@ -367,11 +317,6 @@ export class MemoryRepository {
     return new Set(rows.map((r) => r.id));
   }
 
-  /**
-   * Active in-scope topic_keys sharing a prefix with `prefix`, for
-   * `memory.suggest_topic_key`'s `nearby` hint. Excludes an exact match
-   * (surfaced separately as `occupied`). Bounded, alphabetical.
-   */
   listNearbyTopicKeys(opts: {
     projectId: string;
     prefix: string;
@@ -407,12 +352,6 @@ export class MemoryRepository {
       .all();
   }
 
-  /**
-   * Minimal scope tuple for same-scope assertions; no content leaks. Reports
-   * the row's STORED `scope` and nullable `project_id`, not a `Scope`: a row
-   * left behind by an older image can still carry the retired pair, and the
-   * same-scope guard has to see it rather than read it as a project row.
-   */
   findScopeTupleById(id: string):
     | {
         scope: MemoryScope;
@@ -544,36 +483,8 @@ export class MemoryRepository {
       ?.replaces;
   }
 
-  /**
-   * Bounded `replaces` ancestry of `startIds`, breadth-first, ids only, in one
-   * statement. Replaces two hand-rolled walks that each issued one PK probe per
-   * hop on the single synchronous connection every other caller queues behind.
-   *
-   * Walks `memory.replaces` via `json_each`, NOT the `memory_replaces` edge
-   * table. Verified rather than assumed, because the edge table is the intuitive
-   * choice and is the wrong one here: its primary key is
-   * `(predecessor_id, successor_id)` and it is `WITHOUT ROWID`, so `sqlite_master`
-   * holds no index object for it at all. The ancestor direction keys on
-   * `successor_id`, so SQLite builds a transient index per query — linear in the
-   * whole edge table. This form seeks the `memory` PK autoindex and is flat in
-   * both chain length and corpus size. `memory_replaces` keeps the forward hop
-   * (`findSuccessorId`), which is what it was built for.
-   *
-   * `UNION`, not `UNION ALL`: dedup is on the id, so a shared grandparent in a
-   * diamond is visited once. The `LIMIT` stays inside SQL — bounding in JS after
-   * the fact restores the O(chain) cost the bound exists to avoid.
-   *
-   * `unsafe*` because it is deliberately unscoped, and the prefix is the whole
-   * warning: nothing here filters by scope. It is safe only because `replaces`
-   * links never cross a scope, so an ancestor of an in-scope row is in scope by
-   * construction. The callers scope the START row, not the results.
-   */
   unsafeAncestorIds(opts: { startIds: readonly string[]; limit: number }): string[] {
     if (opts.startIds.length === 0 || opts.limit <= 0) return [];
-    // Clamped, because the bound is the ONLY thing keeping this flat: measured on a
-    // 5000-deep chain, `limit: 10` is 0.042 ms/call and an unbounded limit is
-    // 6.08 ms/call returning every row. Both call sites pass small constants, but an
-    // `unsafe*` method is callable from any service and must not depend on that.
     const limit = Math.min(Math.trunc(opts.limit), ANCESTRY_HARD_LIMIT);
     const rows = this.db.all<{ id: string }>(sql`
       WITH RECURSIVE anc(id) AS (
@@ -589,14 +500,6 @@ export class MemoryRepository {
     return rows.map((r) => r.id);
   }
 
-  /**
-   * The four fields `memory.get` publishes for a predecessor. Through the builder
-   * rather than raw SQL so `createdAt` stays drizzle-mapped instead of
-   * hand-hydrated from an integer.
-   *
-   * No `ORDER BY`: the caller re-orders to the traversal's order, which is the
-   * contract, and a SQL sort here would silently become a second one.
-   */
   unsafeProjectionByIds(
     ids: readonly string[],
   ): Pick<Memory, 'id' | 'title' | 'status' | 'createdAt'>[] {
@@ -621,8 +524,6 @@ export class MemoryRepository {
     confidenceFloor: number;
   }): string[] {
     const scopeFilter = scopeCondition(projectScope(opts.projectId));
-    // Per-type inactivity window: a row decays once last_seen_at predates
-    // (now - threshold(type)). Mirrors the CASE ladder in `runNeedsReview`.
     const thresholdExpr =
       opts.thresholdByType.length > 0
         ? sql`CASE ${sql.join(
@@ -643,11 +544,6 @@ export class MemoryRepository {
       .map((r) => r.id);
   }
 
-  /**
-   * Latest `event_ts` per memory id for BOTH verdicts in one pass — callers
-   * always need the pair (`deriveReviewState` takes both), so splitting this
-   * would double the query count on every review-state read.
-   */
   reviewTimestampsByIds(ids: readonly string[]): Map<string, ReviewTimestamps> {
     const out = new Map<string, ReviewTimestamps>();
     if (ids.length === 0) return out;
@@ -712,13 +608,6 @@ export class MemoryRepository {
     return out;
   }
 
-  /**
-   * Active in-scope memories past their review shelf life, recently-refuted
-   * first and then oldest affirmation baseline first. The per-type TTL ladder
-   * is built from `ttlByType` and the refutation lead from `refutedPriorityMs`
-   * (both passed by the service so the constants live in exactly one place); a
-   * type absent from `ttlByType` has no TTL and is excluded. Read-only.
-   */
   findNeedsReview(opts: {
     projectId: string;
     nowMs: number;
@@ -766,11 +655,6 @@ export class MemoryRepository {
     return row?.value ?? 0;
   }
 
-  /**
-   * Unscoped sibling of `findNeedsReview` for the operator dashboard. Optional
-   * project filter mirrors `adminList`; `undefined` spans all scopes. Paginates
-   * with limit/offset so the dashboard `review=needs_review` filter is correct.
-   */
   adminFindNeedsReview(opts: {
     projectId?: string;
     nowMs: number;
@@ -791,12 +675,6 @@ export class MemoryRepository {
     );
   }
 
-  /**
-   * A refutation newer than the affirmation baseline (and, when `sinceMs` is
-   * given, newer than that cutoff too). Mirrors `deriveReviewState`: such a
-   * refutation forces needs_review regardless of TTL, so a `reference` still
-   * surfaces.
-   */
   private refutedSinceExpr(baselineExpr: SQL, sinceMs?: number): SQL {
     const recency = sinceMs === undefined ? sql`` : sql` AND ${confirmations.eventTs} > ${sinceMs}`;
     return sql`EXISTS (SELECT 1 FROM ${confirmations} WHERE ${confirmations.memoryId} = ${memory.id} AND ${confirmations.verdict} = 'refute' AND ${confirmations.eventTs} > (${baselineExpr})${recency})`;
@@ -834,12 +712,6 @@ export class MemoryRepository {
     refutedPriorityMs: number,
   ): Memory[] {
     const { baselineExpr } = this.needsReviewExprs(ttlByType);
-    // Refuted rows lead: refutation deliberately does not advance the baseline,
-    // so ordering by it alone sorts a freshly-refuted memory LAST and a capped
-    // page (memory.context takes 3) never shows the agent back the memory it
-    // just called wrong. The lead is time-bounded — an unattended refutation
-    // would otherwise hold the head of the queue forever and starve every
-    // TTL-expired row.
     const recentlyRefutedExpr = this.refutedSinceExpr(baselineExpr, nowMs - refutedPriorityMs);
 
     return this.db
@@ -879,13 +751,6 @@ export class MemoryRepository {
     this.db.insert(confirmations).values(values).run();
   }
 
-  //  The ONE escape hatch in the otherwise append-only contract for the
-  //  `memory` table. The invariant test white-lists ONLY this file for
-  //  `DELETE FROM memory`. Predicate MUST stay in lock-step between the
-  //  count and the id selection, and with the spec at
-  //  `openspec/specs/memory/spec.md::"Memories MAY be physically purged
-  //  when archived and disconnected"`.
-
   countPurgeableDisconnectedArchived(): number {
     const row = this.db.get<{ v: number }>(sql`
       SELECT COUNT(*) AS v FROM memory m
@@ -905,12 +770,6 @@ export class MemoryRepository {
       .map((r) => r.id);
   }
 
-  /**
-   * Physically delete the given memory rows plus their `memory_vec`
-   * shadow rows. Derived data is dropped first so the FTS/vec triggers
-   * never observe a half-deleted state. Callers run this inside a
-   * transaction together with the journaling inserts.
-   */
   purgeByIds(ids: readonly string[]): void {
     if (ids.length === 0) return;
     const idSet = idJsonSet(ids);
@@ -996,10 +855,6 @@ export class MemoryRepository {
     return this.runCountNeedsReview(scopeFilter, opts.ttlByType, opts.nowMs);
   }
 
-  /**
-   * Server-wide needs-review counts grouped by project (null = global scope);
-   * the grouped sibling of `adminCountNeedsReview` with no scope filter.
-   */
   adminCountNeedsReviewByProject(opts: {
     nowMs: number;
     ttlByType: ReadonlyArray<readonly [MemoryType, number]>;
@@ -1062,24 +917,6 @@ export class MemoryRepository {
   }
 }
 
-/**
- * Disconnected-archived purge predicate, shared verbatim by the count
- * and the id selection:
- *   - status = 'archived'
- *   - no other memory row references this id in its `replaces` JSON
- *   - no consolidation_ops row references this id via `affected_ids`
- *     (EXCEPT an `agent_memory_archive` op: that op IS the archive that
- *     retired this memory, so it must not pin its own subject against a
- *     later operator purge) or `created_id`
- *   - no memory_relations row references this id as source or target
- *   - no confirmations row references this id as `memory_id`
- */
-// NOT IN (rather than correlated NOT EXISTS) so each reference set materializes
-// once instead of re-scanning per archived row — same result set, ~1200× faster
-// at 50k rows. NOT IN is NULL-sensitive: a single NULL in any subquery would make
-// the whole predicate NULL (excluding every row). Every column below is NOT NULL
-// EXCEPT consolidation_ops.created_id, so its `WHERE created_id IS NOT NULL`
-// filter is load-bearing — do not remove it.
 const PURGE_PREDICATE = sql`m.status = 'archived'
          AND m.id NOT IN (
              SELECT predecessor_id FROM memory_replaces)

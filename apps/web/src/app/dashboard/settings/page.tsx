@@ -19,15 +19,6 @@ import {
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
-/**
- * Settings — the workspace-defaults view, read from the runtime rather than from
- * a settings table: Rembric has none, and every default this page shows is
- * decided by an environment variable or by the service graph. Reading them here
- * is what makes the page honest; a form would be a control that cannot write
- * anything back.
- *
- * `REMBRIC_*` values are shown by name, never by secret value.
- */
 export const dynamic = 'force-dynamic';
 
 export default function SettingsPage() {
@@ -201,7 +192,6 @@ function SettingRow({
   );
 }
 
-/** PRAGMA reads do not go through a repository: the value is a property of the file, not a row. */
 function readPragma(name: 'page_count' | 'page_size'): number {
   const { db } = getServices();
   return db.raw.pragma(name, { simple: true }) as number;

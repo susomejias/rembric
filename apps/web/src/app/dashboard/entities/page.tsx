@@ -39,14 +39,8 @@ export const dynamic = 'force-dynamic';
 
 const REBUILD_FORM = 'entities.rebuild';
 
-/**
- * Bounds a manual "rebuild" click to a single request/response cycle. A corpus
- * larger than this drains the rest on the next periodic backfill tick — which is
- * soon, because the rebuild reuses the SAME live worker instance.
- */
 const REBUILD_MAX_BATCHES = 200;
 
-/** Exported so the regression test can drive the same production loop. */
 export function runEntityRebuild(worker: EntityBackfillWorker): number {
   worker.resetIndex();
   let processed = 0;
@@ -93,7 +87,6 @@ export default async function EntitiesPage({
   const backlog = repos.entities.adminBacklogCount();
   const projectById = new Map(repos.projects.adminListAll().map((p) => [p.id, p.slug]));
   const counts = repos.entities.adminCountsByKind();
-  // Whole-corpus: the "ALL KINDS" card does not shrink as the table filters.
   const corpusTotal = counts.reduce((sum, c) => sum + c.count, 0);
 
   const hasMore = offset + rows.length < total;

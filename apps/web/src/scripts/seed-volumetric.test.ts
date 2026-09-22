@@ -45,15 +45,6 @@ afterEach(() => {
   while (dirs.length > 0) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
-/**
- * Content digest + mtime of the database file itself, so "wrote nothing" is
- * checkable. Deliberately not a listing of the whole directory: any connection
- * to a WAL-mode database — including the read-only one the guard opens —
- * materialises a scratch `-shm` and a zero-length `-wal` beside it. Those are
- * SQLite's shared-memory machinery, not a modification of the data, and the
- * caller's assertion pairs this with an empty-`-wal` check so a refusal that
- * *did* commit something could not hide in them.
- */
 function dbFingerprint(dir: string): string {
   const file = join(dir, 'data.db');
   const st = statSync(file);
@@ -106,8 +97,6 @@ describe('seed-volumetric argument surface', () => {
     expect(() => parseArgs(['--db'])).toThrow(UsageError);
   });
 
-  // The executable half of design D1: a destructive flag must not be quietly
-  // ignored, it must be a usage error that says why the harness has none.
   it.each(['--reset', '--force', '--wipe', '--yes'])('rejects the destructive flag %s', (flag) => {
     expect(() => parseArgs(['--db', '/tmp/c', flag])).toThrow(/never deletes/);
   });
@@ -118,19 +107,9 @@ describe('seed-volumetric argument surface', () => {
   });
 });
 
-/**
- * Design D1 in executable form. The constraint is worth nothing if the next
- * contributor can add a flag and only a design document objects, so the shape
- * of the file is asserted rather than described: no DELETE, no destructive
- * flag, no env gate, and no entry in the invariant suite's DELETE allow-list.
- */
 describe('seed-volumetric is structurally incapable of deleting', () => {
   const harnessSrc = readFileSync(new URL('./seed-volumetric.ts', import.meta.url), 'utf8');
 
-  // Matched against what would DO the deleting, never against the words: the
-  // refusal messages must be free to say "--reset" and "never deletes" in order
-  // to explain their own absence, and a test that forbade the strings would
-  // pressure a future contributor into a vaguer message.
   it.each([
     ['a SQL delete', /DELETE\s+FROM|\bdb\.delete\(|\bdeleteAll\(/i],
     ['a schema drop', /DROP\s+(TABLE|INDEX|TRIGGER)|\bVACUUM\b/i],
@@ -145,17 +124,12 @@ describe('seed-volumetric is structurally incapable of deleting', () => {
   });
 
   it('reads no destructive environment gate', () => {
-    // seed-dev has REMBRIC_ALLOW_DESTRUCTIVE_SEED because resetting a dev stack
-    // is its job. This harness fills an empty file and must read no env at all.
     expect(harnessSrc).not.toMatch(/process\.env|REMBRIC_ALLOW/);
   });
 
   it('is absent from the DELETE allow-list in the invariant suite', () => {
     const invariants = readFileSync(new URL('../test/invariants.test.ts', import.meta.url), 'utf8');
     expect(invariants).not.toMatch(/seed-volumetric/);
-    // Positive anchor: the allow-list this change must not widen is still the
-    // closed pair design D1 argues from. Matched structurally rather than as one
-    // literal line, because prettier owns the line breaks of that array.
     expect(invariants).toMatch(
       /allow:\s*\[\s*'packages\/db\/src\/repositories\/memory-repository\.ts',\s*'apps\/web\/src\/scripts\/seed-dev\.ts',\s*\]/,
     );
@@ -210,13 +184,6 @@ describe('seed-volumetric refusals', () => {
   });
 });
 
-/**
- * A generated corpus is expensive enough that these share one. 480 memories is
- * the smallest size that keeps every declared ratio checkable: it divides by the
- * 6 scopes and by the 5-long chain period, so the scope spread and the
- * superseded fraction are exact rather than rounded, and it leaves enough rows
- * for the body-length percentiles to be meaningful.
- */
 const SHARED_MEMORIES = 480;
 const SHARED_SESSIONS = 120;
 const SHARED_RELATIONS = 240;
@@ -252,13 +219,6 @@ function scalar(handle: ReturnType<typeof createDb>, sql: string): number {
   return (handle.raw.prepare(sql).get() as { v: number }).v;
 }
 
-/**
- * Every source table the harness must populate, checked against the source of
- * truth it is derived from. Returns the divergences, so the same function can
- * assert emptiness on a real corpus (4.3) and be OBSERVED failing on a corpus
- * whose write path was bypassed (4.4) — a derived-state assertion that has never
- * been seen to fail is not an assertion.
- */
 function derivedStateProblems(handle: ReturnType<typeof createDb>): string[] {
   const problems: string[] = [];
   const memories = scalar(handle, 'SELECT COUNT(*) v FROM memory');
@@ -282,8 +242,6 @@ function derivedStateProblems(handle: ReturnType<typeof createDb>): string[] {
     scalar(handle, 'SELECT COUNT(*) v FROM memory_replaces'),
     scalar(handle, "SELECT COUNT(*) v FROM memory WHERE status = 'superseded'"),
   );
-  // Not a count comparison: every memory must carry at least one entity link,
-  // which an empty link table would fail while a row count could not.
   check(
     'memories with no entity link',
     scalar(
@@ -300,8 +258,6 @@ function derivedStateProblems(handle: ReturnType<typeof createDb>): string[] {
     ),
     0,
   );
-  // An empty FTS index would measure every lexical query as trivially fast, so
-  // the index is exercised rather than merely counted.
   const hit = scalar(
     handle,
     "SELECT COUNT(*) v FROM memory_fts WHERE memory_fts MATCH 'volumetric'",
@@ -326,14 +282,10 @@ describe('seed-volumetric generates the shape it declares', () => {
     }
   });
 
-  // Exact, not toleranced: the chain layout is arithmetic, not sampled, so a
-  // drift here is a bug in the layout rather than sampling noise.
   it('supersedes exactly the declared fraction, through real topic_key chains', () => {
     const superseded = scalar(handle, "SELECT COUNT(*) v FROM memory WHERE status = 'superseded'");
     expect(superseded / SHARED_MEMORIES).toBeCloseTo(VOLUMETRIC_SHAPE.supersededFraction, 5);
     expect(result.superseded).toBe(superseded);
-    // Via chains, not by writing `status` directly: each superseded row must
-    // have a successor pointing at it through the `replaces` edge table.
     expect(scalar(handle, 'SELECT COUNT(*) v FROM memory_replaces')).toBe(superseded);
     expect(
       scalar(
@@ -350,8 +302,6 @@ describe('seed-volumetric generates the shape it declares', () => {
     ).map((r) => r.n);
     expect(per).toHaveLength(SHARED_MEMORIES);
     const mean = per.reduce((a, b) => a + b, 0) / per.length;
-    // Tolerance ±10%: the tokens are placed exactly, so the only slack is the
-    // extractor deduping two synthesised values that happened to collide.
     expect(mean).toBeGreaterThan(VOLUMETRIC_SHAPE.entitiesPerMemory * 0.9);
     expect(mean).toBeLessThanOrEqual(VOLUMETRIC_SHAPE.entitiesPerMemory);
   });
@@ -361,26 +311,18 @@ describe('seed-volumetric generates the shape it declares', () => {
       (r) => r.L,
     );
     const pct = (p: number) => lens[Math.floor((lens.length - 1) * p)]!;
-    // ±15%: the length is drawn from a bucket mixture, so a percentile of a
-    // 480-row sample carries real sampling noise. Tighter would be a flaky test
-    // rather than a stronger guarantee.
     expect(pct(0.5)).toBeGreaterThan(VOLUMETRIC_SHAPE.bodyBytesP50 * 0.85);
     expect(pct(0.5)).toBeLessThan(VOLUMETRIC_SHAPE.bodyBytesP50 * 1.15);
     expect(pct(0.9)).toBeGreaterThan(VOLUMETRIC_SHAPE.bodyBytesP90 * 0.85);
     expect(pct(0.9)).toBeLessThan(VOLUMETRIC_SHAPE.bodyBytesP90 * 1.15);
-    // The tail D3 asks for: FTS must see documents several times the median.
     expect(pct(0.99)).toBeGreaterThan(VOLUMETRIC_SHAPE.bodyBytesP50 * 2.5);
   });
 
   it('writes the declared mean number of affirmations', () => {
     const confirmations = scalar(handle, 'SELECT COUNT(*) v FROM confirmations');
     const mean = confirmations / SHARED_MEMORIES;
-    // ±15%, same reason as the body percentiles: the count per memory is drawn
-    // from a five-bucket distribution whose mean the sample approaches slowly.
     expect(mean).toBeGreaterThan(VOLUMETRIC_SHAPE.confirmationsPerMemory * 0.85);
     expect(mean).toBeLessThan(VOLUMETRIC_SHAPE.confirmationsPerMemory * 1.15);
-    // Affirmations only — the harness writes no refutations, so a review-axis
-    // measurement is not silently reading a mixed signal.
     expect(scalar(handle, "SELECT COUNT(*) v FROM confirmations WHERE verdict = 'affirm'")).toBe(
       confirmations,
     );
@@ -413,16 +355,12 @@ describe('seed-volumetric generates the shape it declares', () => {
       ).map((r) => [r.status, r.n]),
     );
     const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
-    // Generated relations plus one `agent_topic_key` audit row per superseded memory.
     const auditRows = scalar(
       handle,
       "SELECT COUNT(*) v FROM memory_relations WHERE marked_by_kind = 'agent_topic_key'",
     );
     expect(auditRows).toBe(SHARED_MEMORIES * VOLUMETRIC_SHAPE.supersededFraction);
     expect(total).toBe(SHARED_RELATIONS + auditRows);
-    // One draw per relation, so a 240-row sample sits inside binomial noise of
-    // the declared fraction; asserted to one decimal rather than exactly.
-    // Against the generated population: the audit rows are all `judged`.
     expect((byStatus['pending'] ?? 0) / SHARED_RELATIONS).toBeCloseTo(
       VOLUMETRIC_SHAPE.relationsPendingFraction,
       1,
@@ -432,8 +370,6 @@ describe('seed-volumetric generates the shape it declares', () => {
     );
     expect(byStatus['judged']).toBeGreaterThan(0);
 
-    // Scope containment is load-bearing: endpoints straddling two scopes would
-    // make every scoped relation read wrong, not merely slow.
     expect(
       scalar(
         handle,
@@ -446,7 +382,6 @@ describe('seed-volumetric generates the shape it declares', () => {
   });
 
   it('judges `supersedes` exactly once per superseded memory, and never in the generated mix', () => {
-    // JUDGED_VERDICTS excludes `supersedes`, so every one is an audit row.
     expect(
       scalar(handle, "SELECT COUNT(*) v FROM memory_relations WHERE relation = 'supersedes'"),
     ).toBe(SHARED_MEMORIES * VOLUMETRIC_SHAPE.supersededFraction);
@@ -464,8 +399,6 @@ describe('seed-volumetric generates the shape it declares', () => {
   it('stamps the declared share of memories with a session id', () => {
     const attached = scalar(handle, 'SELECT COUNT(*) v FROM memory WHERE session_id IS NOT NULL');
     expect(attached / SHARED_MEMORIES).toBeCloseTo(VOLUMETRIC_SHAPE.memoriesWithSessionFraction, 1);
-    // Spread over many sessions, not all on one: `adminCountBySession` groups by
-    // this column, and a single-value column would make the group free.
     expect(
       scalar(
         handle,
@@ -476,12 +409,7 @@ describe('seed-volumetric generates the shape it declares', () => {
 
   it('spreads prompts over every project and soft-deletes the declared share', () => {
     expect(scalar(handle, 'SELECT COUNT(*) v FROM prompts')).toBe(SHARED_PROMPTS);
-    // No prompt may be project-less: no reader can reach one since the scope
-    // collapse, so seeding any would be dead weight the measurements count.
     expect(scalar(handle, 'SELECT COUNT(*) v FROM prompts WHERE project_id IS NULL')).toBe(0);
-    // Every project carries prompts — the axis used to be indexed one slot off
-    // the memory axis, which starved the last project and skewed the corpus
-    // that phase 2's comparisons rest on.
     expect(scalar(handle, 'SELECT COUNT(DISTINCT project_id) v FROM prompts')).toBe(
       VOLUMETRIC_SHAPE.projectCount,
     );
@@ -518,8 +446,6 @@ describe('seed-volumetric --skew builds one dominant project and several small o
     expect(result.memoriesByScopeSlot).toEqual(
       VOLUMETRIC_SHAPE.skewShares.map((s) => s * SKEWED_MEMORIES),
     );
-    // Not a restatement of the line above: it asserts the rows LANDED in the
-    // right projects, which the counter alone cannot show.
     const bySlug = Object.fromEntries(
       rows<{ slug: string; n: number }>(
         handle,
@@ -536,9 +462,6 @@ describe('seed-volumetric --skew builds one dominant project and several small o
     });
   });
 
-  // The failure mode a cumulative-threshold split would have: the dominant
-  // project holding the oldest rows, so the recency term of the ranking boost
-  // reads the skew as an age difference.
   it('spreads every project across the whole created_at span', () => {
     const span = rows<{ slug: string; lo: number; hi: number; total: number }>(
       handle,
@@ -555,11 +478,6 @@ describe('seed-volumetric --skew builds one dominant project and several small o
 
   it('still supersedes the declared fraction, through real topic_key chains', () => {
     const superseded = scalar(handle, "SELECT COUNT(*) v FROM memory WHERE status = 'superseded'");
-    // Exact rather than rounded: a slot supersedes once per completed pair, so
-    // its count is a function of its own row count and the 5-long chain period.
-    // The declared fraction is only exactly realised when every slot divides by
-    // 5, which an uneven split does not, and papering over that with a loose
-    // tolerance would hide a chain layout that had actually broken.
     const expected = result.memoriesByScopeSlot.reduce((n, m) => n + Math.floor((m + 3) / 5), 0);
     expect(superseded).toBe(expected);
     expect(superseded / SKEWED_MEMORIES).toBeCloseTo(VOLUMETRIC_SHAPE.supersededFraction, 2);
@@ -568,9 +486,6 @@ describe('seed-volumetric --skew builds one dominant project and several small o
 
   it('populates every derived table consistently with its source', () => {
     expect(derivedStateProblems(handle)).toEqual([]);
-    // The vec partitions carry the same skew, which is what the dense branch
-    // scans — an evenly-partitioned index under a skewed `memory` table would
-    // make every widened-kNN figure measure the wrong shape.
     const byPartition = rows<{ n: number }>(
       handle,
       'SELECT COUNT(*) n FROM memory_vec GROUP BY partition_key ORDER BY n DESC',
@@ -584,14 +499,7 @@ describe('seed-volumetric slot assignment', () => {
     const block = interleaveShares(VOLUMETRIC_SHAPE.skewShares, 100);
     const counts = VOLUMETRIC_SHAPE.skewShares.map((_, s) => block.filter((x) => x === s).length);
     expect(counts).toEqual(VOLUMETRIC_SHAPE.skewShares.map((s) => s * 100));
-    // Non-vacuity: a block that named a single slot would satisfy nothing above
-    // if the shares were ever flattened.
     expect(new Set(block).size).toBe(VOLUMETRIC_SHAPE.scopeCount);
-    // Pinned, not merely counted: `vec-partition-scale.md` reproduces its
-    // corpora from `--skew` alone, so which slot each index lands in is part of
-    // that recipe. The counts above survive any permutation of the block, and a
-    // reshuffle would silently produce a different corpus under the same
-    // invocation.
     expect(block.slice(0, 24)).toEqual([
       1, 2, 1, 3, 1, 1, 2, 1, 4, 1, 1, 2, 1, 5, 1, 3, 1, 1, 2, 1, 1, 0, 1, 2,
     ]);
@@ -602,8 +510,6 @@ describe('seed-volumetric slot assignment', () => {
     expect(even).toEqual(Array.from({ length: 60 }, (_, i) => i % VOLUMETRIC_SHAPE.scopeCount));
   });
 
-  // The three-argument call is what `retire-the-global-scope`'s archived fixture
-  // makes; a changed default there would silently rewrite that corpus.
   it('generates the same memory with the slot ordinal omitted as with the even split value', () => {
     for (const i of [0, 1, 7, 41, 480]) {
       const slot = i % VOLUMETRIC_SHAPE.scopeCount;
@@ -615,9 +521,6 @@ describe('seed-volumetric slot assignment', () => {
 });
 
 describe('seed-volumetric derived-state assertion can actually fail', () => {
-  // Task 4.4. The point is not that a bypass is possible — it is that the check
-  // in the test above detects one. Without this, an all-green derived-state
-  // assertion could equally mean the check is vacuous.
   it('reports a memory inserted without the harness write path', () => {
     const dir = tempDir();
     const handle = createDb({ dataDir: dir });
@@ -637,10 +540,6 @@ describe('seed-volumetric derived-state assertion can actually fail', () => {
       });
       expect(derivedStateProblems(handle)).toEqual([]);
 
-      // Straight to the repository, skipping the harness's insertEmbedding and
-      // linkMemory. `memory_fts` and `memory_replaces` are trigger-maintained
-      // and stay correct; the vec index and the entity tables do not, which is
-      // exactly the divergence the check exists to catch.
       const repos = createRepositories(handle.db);
       repos.memory.insert({
         id: '01JGFJJZ00XXWWS4ECTPBYPASS',
@@ -671,7 +570,6 @@ describe('seed-volumetric derived-state assertion can actually fail', () => {
 });
 
 describe('seed-volumetric is deterministic under a seed', () => {
-  /** Generated content only: ULIDs and token secrets are minted by the write path, not the seed. */
   function corpusDigest(handle: ReturnType<typeof createDb>): string {
     const body = rows<{ s: string }>(
       handle,
@@ -679,8 +577,6 @@ describe('seed-volumetric is deterministic under a seed', () => {
     )[0]!.s;
     const sessions = rows<{ s: string }>(
       handle,
-      // No `cwd` column: the generated cwd reaches the row through
-      // `computePlaceholderTitle`, so `title` is where it is observable.
       "SELECT group_concat(t, char(10)) s FROM (SELECT agent || char(31) || coalesce(summary,'') || char(31) || coalesce(title,'') || char(31) || coalesce(ended_at,'') AS t FROM sessions ORDER BY started_at, title)",
     )[0]!.s;
     const vectors = rows<{ s: string }>(
@@ -689,8 +585,6 @@ describe('seed-volumetric is deterministic under a seed', () => {
     )[0]!.s;
     const relations = rows<{ s: string }>(
       handle,
-      // Ordered by the digested tuple, not `id`: relations tie on `created_at`,
-      // and an `id` tiebreak would let a minted ULID decide the order.
       "SELECT group_concat(t, char(10)) s FROM (SELECT status || char(31) || coalesce(relation,'') || char(31) || coalesce(reason,'') || char(31) || coalesce(confidence,'') AS t FROM memory_relations ORDER BY created_at, status, relation, reason, confidence)",
     )[0]!.s;
     const prompts = rows<{ s: string }>(
@@ -710,16 +604,10 @@ describe('seed-volumetric is deterministic under a seed', () => {
     try {
       expect(a.result).toEqual({ ...b.result });
       expect(corpusDigest(a.handle)).toBe(corpusDigest(b.handle));
-      // Without this the first assertion would pass on a generator that ignored
-      // the seed entirely.
       expect(corpusDigest(c.handle)).not.toBe(corpusDigest(a.handle));
-      // A non-empty digest, so the comparison is not two empty strings matching.
       expect(corpusDigest(a.handle)).not.toBe(
         createHash('sha256').update('\n\n\n\n').digest('hex'),
       );
-      // Each axis contributes: a digest that matched with relations or prompts
-      // empty would not be asserting their determinism at all.
-      // 60 generated + one audit row per superseded memory.
       expect(scalar(a.handle, 'SELECT COUNT(*) v FROM memory_relations')).toBe(
         60 + 120 * VOLUMETRIC_SHAPE.supersededFraction,
       );
@@ -731,9 +619,6 @@ describe('seed-volumetric is deterministic under a seed', () => {
   });
 
   it('draws no randomness outside the seeded generator', () => {
-    // Comments stripped first: the file legitimately NAMES `Math.random()` and
-    // `Date.now()` in order to record why neither is used, and a test that
-    // forbade the strings would delete the explanation.
     const executable = readFileSync(new URL('./seed-volumetric.ts', import.meta.url), 'utf8')
       .split('\n')
       .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))

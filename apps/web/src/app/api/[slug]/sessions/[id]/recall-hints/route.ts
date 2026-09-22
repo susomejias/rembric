@@ -16,11 +16,6 @@ import { parseRecallHints } from '../../../../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * `POST /api/:slug/sessions/:id/recall-hints` — mirrors `api-router.ts`'s
- * recall-hints handler. This is a `read` action, unlike every other session
- * route but the debug one.
- */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string; id: string }> },

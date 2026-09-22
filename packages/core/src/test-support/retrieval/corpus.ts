@@ -1,13 +1,5 @@
 import type { CorpusItem } from './types.js';
 
-/**
- * Fixture corpus: hand-written coding-session memories for three fictional
- * projects — `atlas`, a billing SaaS; `nimbus`, a data pipeline; and `shared`,
- * which holds the cross-cutting conventions that apply to both. Every gold
- * memory referenced by `queries.ts` has at least one same-project,
- * vocabulary-sharing distractor here (design.md Decision 3) — see each item's
- * `distractorFor`.
- */
 export const PROJECTS = [
   { slug: 'atlas', displayName: 'Atlas Billing' },
   { slug: 'nimbus', displayName: 'Nimbus Pipeline' },
@@ -286,8 +278,6 @@ export const CORPUS: CorpusItem[] = [
     project: 'atlas',
     daysAgo: 38,
   },
-  // Isolation control for q-isolation-test-colocation: same vocabulary, other
-  // project, opposite answer — a widened scope shows up as a wrong hit here.
   {
     id: 'nimbus-test-layout-cross-project',
     type: 'project',
@@ -441,12 +431,6 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 33,
   },
 
-  // The eight steps of one atlas checklist, gold for a single query, so that a
-  // gold set reaches the largest gated k and a row filling a slot displaces an
-  // answer instead of an empty one. Older than everything above by design: the
-  // recency-ordered control retriever's page for every pre-existing query is
-  // then unchanged, which is what attributes any movement in its score to the
-  // queries added rather than to the corpus growing.
   {
     id: 'atlas-release-step-migration-dryrun',
     type: 'procedural',
@@ -540,8 +524,6 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 382,
   },
 
-  // The same shape at k=5 in a second project, so the displacement property is
-  // not carried by a single query in a single scope.
   {
     id: 'nimbus-runbook-step-lag-check',
     type: 'procedural',
@@ -598,10 +580,6 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 360,
   },
 
-  // Cross-project distractors, deliberately STRONG: near-verbatim restatements
-  // of the checklist steps above as the organisation-wide convention. A
-  // scope-blind read ranks them inside the page and they displace gold; a
-  // scoped one never sees them. `distractorFor` names the row each one shadows.
   {
     id: 'shared-release-step-migration-dryrun',
     type: 'procedural',
@@ -664,9 +642,6 @@ export const CORPUS: CorpusItem[] = [
     daysAgo: 358,
   },
 
-  // Gold for the widened queries, and the plausible home-project answer each
-  // one has to beat. The gold lives OUTSIDE the project its query is issued
-  // against, so no amount of ranking inside the home project can satisfy it.
   {
     id: 'atlas-dunning-window',
     type: 'project',

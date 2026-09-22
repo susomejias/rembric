@@ -2,17 +2,6 @@ import { partitionKeyFor, type Repositories } from '@rembric/db';
 
 import { type Embedder, embeddingInput } from '../embeddings/embedder.js';
 
-/**
- * Background worker that backfills `memory_vec` with embeddings for any
- * memory rows missing one. Designed to be re-entrant and idempotent: calls
- * are safe to repeat, and the worker can be invoked on a timer or right
- * after `memory.save`.
- *
- * The embedder is in-process and warm by construction (the model loads
- * at boot, before the server listens) — every call here is ms-scale
- * inference, never a model load.
- */
-
 export interface EmbeddingWorkerOptions {
   repos: Pick<Repositories, 'vectors'>;
   embedder: Embedder;
@@ -25,31 +14,12 @@ export interface EmbeddingWorkerOptions {
 export class EmbeddingWorker {
   private readonly batchSize: number;
   private hadWork = false;
-  // memory.save and memory.capture_passive both call embedNow inline via
-  // the shared save-time curation path (saveMemoryWithCandidates) — but
-  // ONLY when candidates.perSaveMax > 0 (the gate at
-  // mcp/memory-tools.ts:saveMemoryWithCandidates); with perSaveMax=0 (a
-  // documented setting for batch/automation paths) no save calls embedNow
-  // at all, and newly-inserted rows sit unembedded until this worker's
-  // periodic scan picks them up. So the backlog is NOT guaranteed empty in
-  // steady state. True by default (covers first-boot backfill, crash
-  // recovery, and the perSaveMax=0 case); flipped false once a scan
-  // confirms zero pending, and back to true by embedNow's own failure path.
-  // Lets processBatch skip the full-table scan once drained, instead of
-  // re-running it every tick.
   private possiblyPending = true;
 
   constructor(private readonly opts: EmbeddingWorkerOptions) {
     this.batchSize = opts.batchSize ?? 25;
   }
 
-  /**
-   * Embed one memory inline — used by `memory.save` so the row has a
-   * vector BEFORE candidate detection runs (otherwise vec candidates can
-   * never fire: a brand-new row has no embedding yet). Returns whether a
-   * vector is in place; on failure the save proceeds with FTS-only
-   * detection and the drain retries the row.
-   */
   async embedNow(
     memoryId: string,
     title: string,
@@ -65,8 +35,6 @@ export class EmbeddingWorker {
       );
       return true;
     } catch (err) {
-      // Benign race with the drain (row already embedded) or an inference
-      // failure — never break the save; the drain retries the row.
       this.possiblyPending = true;
       console.error(
         'embedNow failed (drain will retry):',
@@ -76,12 +44,6 @@ export class EmbeddingWorker {
     }
   }
 
-  /**
-   * Process up to `batchSize` memories without an embedding. Returns the
-   * number of embeddings successfully inserted. Skips the backlog scan
-   * entirely when a prior call already confirmed the queue is empty,
-   * unless `force` is set (used by a slow periodic safety-net timer).
-   */
   async processBatch(
     opts: { force?: boolean } = {},
   ): Promise<{ processed: number; failed: number }> {

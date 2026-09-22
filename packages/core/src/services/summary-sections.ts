@@ -1,11 +1,3 @@
-/**
- * Section-wise parse and merge for a curated `sessions.summary` document.
- *
- * See `sessions`, "A curated session-summary write MUST be merged
- * section-wise with the stored summary" for the normative rules this
- * implements (D3-D6 in this change's design.md).
- */
-
 interface LineToken {
   text: string;
   /** `'\n'`, `'\r\n'`, or `''` for a final line with no trailing terminator. */
@@ -47,12 +39,6 @@ function headingKey(text: string): string | null {
   return key.length > 0 ? key : null;
 }
 
-/**
- * Parse `doc` into an ordered list of sections. A repeated heading key
- * (either side may already be malformed) is concatenated into its first
- * occurrence, in document order — see D5. Text preceding the first heading
- * is a section with key `''`, present only when it carries actual content.
- */
 export function parseSummarySections(doc: string): SummarySection[] {
   const lines = splitLines(doc);
   const sections: SummarySection[] = [];
@@ -99,15 +85,6 @@ export function hasAnyHeading(doc: string): boolean {
   return parseSummarySections(doc).some((s) => s.key !== '');
 }
 
-/**
- * A section's text split at its own trailing line break: `core` is the
- * heading (if any) plus every body line up to and including the last one's
- * TEXT, with no trailing terminator; `gap` is that last terminator — the
- * separator (or blank-line run) that followed this section in whichever
- * document it was parsed from. `gap` is only valid where that document's
- * own next section is still the next thing in the merged output (see
- * `mergeSummarySections`); otherwise the merge normalises it.
- */
 function splitCoreAndGap(section: SummarySection): { core: string; gap: string } {
   if (section.body.length === 0) {
     if (!section.headingLine) return { core: '', gap: '' };
@@ -127,24 +104,6 @@ interface MergeEntry {
   naturalNextKey: string | null;
 }
 
-/**
- * Merge `incoming` into `stored`, section by section (D4): every key present
- * in `stored`, in stored order, taking `incoming`'s body where `incoming`
- * carries that key; then every key only `incoming` carries, in `incoming`'s
- * own order. Merging a document with itself reproduces it byte-for-byte
- * UNLESS it repeats a heading key, which the parse folds into that key's
- * first occurrence (D5): `## Goal\nA\n## Goal\nB\n` merged with itself is
- * `## Goal\nA\nB\n`.
- *
- * A section's own trailing line break is reused verbatim ONLY when the
- * thing that follows it in the merged output is the same thing that
- * followed it in its own source (an untouched run, or a write that
- * replaces a section without disturbing its neighbours) — reusing it
- * blindly after a reorder or an append would carry forward a line break
- * that used to separate this section from something else entirely, or
- * that reflected being that document's own end rather than the merged
- * document's.
- */
 export function mergeSummarySections(stored: string, incoming: string): string {
   const storedSections = parseSummarySections(stored);
   const incomingSections = parseSummarySections(incoming);

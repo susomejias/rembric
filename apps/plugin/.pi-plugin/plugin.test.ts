@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Resolves to the stub `apps/web/vitest.config.ts` aliases in, so the hint
-// arm asserts against whatever the harness's own helper returns.
 import { keyHint } from '@earendil-works/pi-coding-agent';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -63,8 +61,6 @@ type RegisteredTool = {
   ) => RenderComponent;
 };
 
-// Distinguishable and strippable, so an arm can compare the plain text of two
-// renderings without hard-coding either one.
 const THEME: FakeTheme = {
   fg: (color, text) => `<${color}>${text}</${color}>`,
   bold: (text) => `«${text}»`,
@@ -100,12 +96,6 @@ let project: Project;
 let baseUrl: string;
 let cwd: string;
 
-/**
- * The markers a parent Pi process may export into this runner. They tell the
- * extension to suppress session persistence, so the suite deletes them for its
- * duration (restoring them in `afterAll`) and lets the dedicated suppression
- * suite set each one explicitly.
- */
 const LEAKED_CHILD_MARKERS = [
   'REMBRIC_SUBAGENT',
   'GENTLE_PI_AGENTS_CHILD',
@@ -113,10 +103,6 @@ const LEAKED_CHILD_MARKERS = [
 ] as const;
 const savedChildMarkers: Record<string, string | undefined> = {};
 
-// An independently written wire client, so a defect in the extension's own
-// decoder cannot corrupt the reference it is compared against. The MCP SDK
-// client cannot be used here: outside the server workspace Vite inlines it and
-// its transitive imports do not resolve.
 async function rawRpc(method: string, params: Record<string, unknown>): Promise<unknown> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${ADMIN_TOKEN}`,
@@ -176,8 +162,6 @@ function makeHarness(
   const ctx = {
     cwd: dir,
     mode,
-    // `string | undefined`, as the harness declares it: a session file is absent
-    // until the manager has one, and the self-resume guard must survive that.
     sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile },
     ...(withUi ? { ui } : {}),
   };
@@ -222,10 +206,6 @@ function toolNamed(harness: Harness, canonical: string): RegisteredTool {
   return tool;
 }
 
-/**
- * A refusal is a rejection and nothing else: the harness ignores an `isError`
- * property on a returned result, so the extension throws instead of carrying one.
- */
 async function callThroughExtension(
   tool: RegisteredTool,
   args: unknown,
@@ -238,8 +218,6 @@ async function callThroughExtension(
   }
 }
 
-// Written out rather than imported, so the assertions do not depend on the same
-// pattern the code under test rewrites with.
 const DOTTED_TOOL_NAME = /\b(?:memory|project)\.[a-z]/;
 
 function withoutDescriptions(node: unknown): unknown {
@@ -271,27 +249,15 @@ function savedId(text: string): string {
 }
 
 beforeAll(async () => {
-  // The web app is the live HTTP endpoint these suites drive; the harness owns
-  // the process, the throwaway data dir and the generated admin token. This
-  // test process reaches the SAME SQLite file through its own WAL connection.
   boot = await bootWebServer();
   ADMIN_TOKEN = boot.adminToken;
   baseUrl = boot.baseUrl;
 
-  // The suite's default session is an INTERACTIVE primary one. The runner may
-  // itself be a Pi child (this file is often executed from inside a Pi
-  // process), and that harness exports the very markers that tell the
-  // extension to suppress persistence — leaving them in place makes every arm
-  // below describe a suppressed lifecycle for reasons the runner imposed. The
-  // dedicated "child and programmatic pi processes" suite sets each marker
-  // explicitly, so suppression keeps its coverage.
   for (const key of LEAKED_CHILD_MARKERS) {
     savedChildMarkers[key] = process.env[key];
     delete process.env[key];
   }
 
-  // `createDb` on the harness's already-migrated dir: the migrations the boot
-  // ran are not re-applied, they are re-opened.
   db = openTestDb(boot.dataDir);
   repos = createRepositories(db.handle.db);
   const projects = new ProjectsService(repos);
@@ -318,8 +284,6 @@ afterAll(async () => {
   await boot.close();
 });
 
-// Driven directly, with nothing stubbed: `renderToolResultLines` imports no
-// harness package, so these arms hold even against a stub that throws on use.
 describe('collapsed and expanded tool-result rendering', () => {
   const MULTILINE = [
     '{',
@@ -331,8 +295,6 @@ describe('collapsed and expanded tool-result rendering', () => {
     '}',
   ].join('\n');
 
-  // Every line long enough that a collapsed rendering containing one could not
-  // be a coincidence; `{` and `}` are excluded for exactly that reason.
   const substantialLines = MULTILINE.split('\n').filter((line) => line.trim().length >= 4);
 
   const ERROR_PAYLOAD = JSON.stringify(
@@ -443,8 +405,6 @@ describe('tool discovery over the extension’s own MCP transport', () => {
     for (const tool of discovered) {
       const registered = toolNamed(harness, tool.name);
       expect(registered.description).toBe(underscoreToolNames(tool.description ?? tool.name));
-      // Every `description` removed from both sides, so this asserts the rest of
-      // the schema is untouched without re-implementing the rewrite under test.
       expect(withoutDescriptions(registered.parameters)).toEqual(
         withoutDescriptions(tool.inputSchema),
       );
@@ -467,8 +427,6 @@ describe('tool discovery over the extension’s own MCP transport', () => {
   });
 
   it('every dotted tool the server publishes is covered by the shared rename', () => {
-    // Registration replaces every dot; the rename that rewrites guidance knows
-    // the namespaces by name, so a namespace it misses fails here.
     for (const tool of harness.tools) {
       expect(
         underscoreToolNames(tool.label),
@@ -508,8 +466,6 @@ describe('tool discovery over the extension’s own MCP transport', () => {
     }
     expect(renderPath).not.toContain('JSON.parse');
     expect(renderPath.toLowerCase()).not.toContain('ctrl+');
-    // `content` is the whole of the result the renderer is allowed to know
-    // about; anything else would be a response-shape dependency.
     const members = new Set([...renderPath.matchAll(/\bresult\.([A-Za-z_]\w*)/g)].map((m) => m[1]));
     expect([...members]).toEqual(['content']);
   });
@@ -675,8 +631,6 @@ describe('the registered renderers', () => {
     expect(rendered).toHaveLength(1);
     expect(rendered?.[0]).toContain('<error>');
 
-    // The inverse, in the suite rather than only in prose: the result argument
-    // carries no such property, so a renderer consulting it reports success.
     const offResult = renderToolResultLines(
       'line one\nline two\nline three',
       false,
@@ -747,9 +701,6 @@ describe('session registration and nudges', () => {
     const sessionId = 'pi-session-agent';
     const harness = await startedHarness(sessionId);
 
-    // `cwd` is asserted on the request body because the server keeps it only
-    // long enough to derive a placeholder title; `agent` on the row, where a
-    // wrong value would be permanent.
     const posted: Array<Record<string, unknown>> = [];
     const realFetch = globalThis.fetch;
     const spy = vi
@@ -779,8 +730,6 @@ describe('session registration and nudges', () => {
     };
 
     expect(result.message.content).toContain(underscoreToolNames(FIRST_PROMPT_NUDGE));
-    // A genuinely new session id, ensured for the first time against the
-    // real server above — the opening fires because `created` really is true.
     expect(result.message.content).toContain(underscoreToolNames(SESSION_OPENING_NUDGE));
     expect(result.message.content).toContain('## Goal');
     expect(result.message.content).toContain(
@@ -792,8 +741,6 @@ describe('session registration and nudges', () => {
   it('emits no nudge message on a turn where no cadence fires', async () => {
     const harness = await startedHarness('pi-session-quiet');
     await harness.fire('before_agent_start', { prompt: 'turn one' });
-    // The system prompt still carries the server's instructions, so the
-    // assertion is on the nudge message specifically.
     const second = (await harness.fire('before_agent_start', { prompt: 'turn two' })) as {
       message?: unknown;
     };
@@ -840,11 +787,6 @@ describe('session registration and nudges', () => {
   });
 });
 
-/**
- * Drives the REAL three-event `message_end` sequence the harness already
- * processes today, against a real (in-process) Rembric server — the
- * scenario `session-nudges` D4a requires, with its own control.
- */
 describe('tool-observation accumulation across a turn (session-nudges D4a)', () => {
   function spyOnTurnReports(): { calls: Array<{ usedTools: boolean }>; restore: () => void } {
     const calls: Array<{ usedTools: boolean }> = [];
@@ -895,9 +837,6 @@ describe('tool-observation accumulation across a turn (session-nudges D4a)', () 
     try {
       const harness = await startedHarness('pi-tool-accum-control');
       await harness.fire('before_agent_start', { prompt: 'list files' });
-      // Only the settled message — the one a naive single-event reader would
-      // inspect — is delivered here, deliberately omitting the earlier
-      // toolCall/toolResult events this same turn actually produced.
       await harness.fire('message_end', { message: settledTextOnlyMessage });
       await harness.fire('agent_settled');
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -936,13 +875,9 @@ describe('tool-observation accumulation across a turn (session-nudges D4a)', () 
     const { calls, restore } = spyOnTurnReports();
     try {
       const harness = await startedHarness('pi-tool-accum-interrupted');
-      // Turn 1: a tool call fires, but the turn is interrupted before
-      // agent_settled — the flag is left `true` with no report issued.
       await harness.fire('before_agent_start', { prompt: 'list files' });
       await harness.fire('message_end', { message: toolCallMessage });
 
-      // Turn 2: before_agent_start's own reset must clear the dangling flag,
-      // or this chat-only turn would falsely report usedTools:true.
       await harness.fire('before_agent_start', { prompt: 'just chatting' });
       await harness.fire('message_end', { message: settledTextOnlyMessage });
       await harness.fire('agent_settled');
@@ -956,9 +891,6 @@ describe('tool-observation accumulation across a turn (session-nudges D4a)', () 
   });
 
   it('a second agent_settled with no turn in between reports false, not the same tool again', async () => {
-    // The report READS AND CLEARS, so the latch cannot outlive the report
-    // that consumed it even where the host settles twice without an
-    // intervening before_agent_start.
     const { calls, restore } = spyOnTurnReports();
     try {
       const harness = await startedHarness('pi-tool-accum-double-settle');
@@ -1020,8 +952,6 @@ describe('the server’s own usage instructions reach the model', () => {
     })) as { systemPrompt: string };
     expect(occurrences(first.systemPrompt)).toBe(1);
 
-    // Stands in for a host that hands back the modified prompt instead of the
-    // base one Pi hands each turn.
     const second = (await harness.fire('before_agent_start', {
       prompt: 'turn two',
       systemPrompt: first.systemPrompt,
@@ -1072,8 +1002,6 @@ describe('summary flushes', () => {
 
     await harness.fire('session_shutdown');
 
-    // No polling, deliberately: a fire-and-forget flush would still be in flight
-    // here, which is the difference being asserted.
     const summary = summaryOf(sessionId);
     expect(summary).toContain('work happened here');
     expect(summary).toContain('and here is the reply');
@@ -1097,8 +1025,6 @@ describe('summary flushes', () => {
       await harness.fire('session_shutdown');
       expect(posts).toHaveLength(1);
 
-      // Stands in for the timer a settle just before shutdown leaves behind: the
-      // flush that fires must find the session gone.
       await harness.fire('agent_settled');
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(posts).toHaveLength(1);
@@ -1254,9 +1180,6 @@ describe('the shutdown reason decides whether the session is ended', () => {
 });
 
 describe('child and programmatic pi processes are never persisted as sessions', () => {
-  // The factory reads the environment once at construction time, so the stubs
-  // must land before the harness (and therefore the extension) exists; the
-  // mode rides the harness context, as pi delivers it to every handler.
   async function runLifecycle(
     sessionId: string,
     opts: { env?: Record<string, string>; mode?: string } = {},
@@ -1348,10 +1271,6 @@ describe('child and programmatic pi processes are never persisted as sessions', 
 });
 
 describe('the successor session attributes its memories', () => {
-  // A token of its own per arm: every other session in this file is active on
-  // the admin token, and `findActiveForTransport` resolves nothing while more
-  // than one active row matches the pair — which would make both arms below
-  // pass for a reason that has nothing to do with the reason gate.
   async function saveThroughSuccessor(
     reason: string,
   ): Promise<{ savedSessionId: string | null; attributedToSuccessor: number }> {
@@ -1399,18 +1318,12 @@ describe('the successor session attributes its memories', () => {
   it('the control — without the end, the save lands on the successor by pin, and the replaced row is untouched', async () => {
     const { savedSessionId, attributedToSuccessor } = await saveThroughSuccessor('reload');
 
-    // Before D4′ this asserted NULL: two live rows made the ambiguous fallback
-    // refuse. The declaration pins the successor transport to its own row, so
-    // the pin — not the fallback — resolves the save. The safety property the
-    // control guards is that the REPLACED row inherits nothing.
     expect(savedSessionId).toBe('pi-ambiguity-b-reload');
     expect(attributedToSuccessor).toBeGreaterThan(0);
     expect(repos.memory.adminListBySession('pi-ambiguity-a-reload')).toHaveLength(0);
   });
 });
 
-// Answers the handshake and then swallows the DELETE, so only the client's own
-// budget ends the teardown request — which is what the timing below reads.
 async function startHalfDeadServer(): Promise<{
   url: string;
   seen: string[];
@@ -1427,8 +1340,6 @@ async function startHalfDeadServer(): Promise<{
       held.add(res);
       return;
     }
-    // The awaited session write is swallowed too, so the teardown below measures
-    // the client's own budget on both requests it makes on the way out.
     if (req.url?.endsWith('/end') || req.url?.endsWith('/summary')) {
       held.add(res);
       return;
@@ -1490,11 +1401,7 @@ describe('shutdown teardown budget', () => {
     try {
       const harness = makeHarness(sessionId);
       await harness.fire('session_start');
-      // Control: without it, a close() that returned early before issuing the
-      // DELETE would read as a fast teardown.
       expect(stub.seen).toContain('initialize');
-      // One turn, so the quit branch has a session to end and its POST is really
-      // issued rather than skipped as unknown.
       await harness.fire('before_agent_start', { prompt: 'one turn before the quit' });
 
       const started = Date.now();
@@ -1588,8 +1495,6 @@ describe('missing configuration disables the extension', () => {
       const harness = makeHarness('pi-handshake-failed-ui');
       await harness.fire('session_start');
 
-      // Control: the credentials are present, so this is the discovery path and
-      // not the disabled one.
       expect(harness.tools).toEqual([]);
       expect(harness.notifications).toHaveLength(1);
       expect(harness.notifications[0].type).toBe('error');
@@ -1618,8 +1523,6 @@ describe('missing configuration disables the extension', () => {
   });
 
   it('a server that accepts and never answers fails discovery instead of hanging startup', async () => {
-    // Accepts and never replies: a refused connection fails on its own and so
-    // cannot tell whether discovery is bounded.
     const accepted = new Set<Socket>();
     const blackHole = createSocketServer((socket) => accepted.add(socket));
     await new Promise<void>((resolve) => blackHole.listen(0, '127.0.0.1', resolve));
@@ -1628,8 +1531,6 @@ describe('missing configuration disables the extension', () => {
 
     const url = process.env.REMBRIC_SERVER_URL;
     process.env.REMBRIC_SERVER_URL = `http://127.0.0.1:${port}`;
-    // Shortened from the shipped ceiling: what is under test is that the
-    // handshake is bounded at all, not the size of the bound.
     process.env.REMBRIC_DISCOVERY_TIMEOUT_MS = '100';
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     try {
@@ -1642,8 +1543,6 @@ describe('missing configuration disables the extension', () => {
       stderr.mockRestore();
       delete process.env.REMBRIC_DISCOVERY_TIMEOUT_MS;
       process.env.REMBRIC_SERVER_URL = url;
-      // `close` waits for every connection to end, and the aborted request left
-      // an accepted socket behind.
       for (const socket of accepted) socket.destroy();
       await new Promise<void>((resolve) => blackHole.close(() => resolve()));
     }
@@ -1672,8 +1571,6 @@ describe('missing configuration disables the extension', () => {
 });
 
 describe('session identity declaration on the MCP transport (D4\u2032)', () => {
-  // Seeds a second live row for the same token+project, so every heuristic
-  // lookup refuses and only the declaration's pin can resolve session_start.
   async function seedConcurrentRow(): Promise<void> {
     const resolved = await tokens.authenticate(ADMIN_TOKEN);
     sessions.ensure({
@@ -1806,8 +1703,6 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
             }
           }
           const res = await realFetch(input, init);
-          // The declaration's own response re-keys the transport: send() adopts
-          // the fresh mcp-session-id header, which is the re-init under test.
           if (url.includes('/mcp') && typeof init?.body === 'string') {
             const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
             if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
@@ -1864,8 +1759,6 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
       spy.mockRestore();
     }
 
-    // Three failures exhaust the first transport's budget; the re-keyed one gets
-    // its own, so the declaration is attempted again instead of staying dead.
     expect(attempts).toBe(5);
   });
 
@@ -1873,9 +1766,6 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
     const firstId = 'pi-concurrent-a';
     const secondId = 'pi-concurrent-b';
 
-    // The same token and the same project, two live transports: the arrangement
-    // where every lookup-based resolution refuses (two active rows) would have
-    // attached a save to the wrong row before the declaration existed.
     const a = await startedHarness(firstId);
     const b = await startedHarness(secondId);
     await a.fire('before_agent_start', { prompt: 'conversation A' });
@@ -1899,8 +1789,6 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
 
     expect(attachedA).toBe(firstId);
     expect(attachedB).toBe(secondId);
-    // The control that both rows were genuinely live at the same time, so the
-    // assertions above cannot be satisfied by one row having ended.
     expect(sessions.getById(firstId)?.status).toBe('active');
     expect(sessions.getById(secondId)?.status).toBe('active');
   });

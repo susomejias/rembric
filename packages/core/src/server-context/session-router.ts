@@ -1,28 +1,3 @@
-/**
- * In-process routing state for agent sessions.
- *
- * Maps a transport identity tuple `(tokenId, projectId, mcpSessionId)` to
- * the currently-active Rembric session id. The state is NOT persisted —
- * on server restart, the `AgentSessionsService.abandonStale` sweep walks
- * the DB and marks old `active` rows as `abandoned`, so the router
- * starts cold without coordinating with the DB.
- *
- * Identity rules:
- *   - The `mcp-session-id` HTTP header is the per-transport boundary.
- *     Two terminals using the same token but different transports get
- *     separate router entries.
- *   - `projectId` may be null (global scope) — null is a distinct key.
- *
- * Project-resolution provenance is carried alongside the active session
- * id so `project.current` can report it:
- *
- *   url-path     | the connection arrived at `/mcp/<slug>`
- *   roots        | server queried roots/list and auto-activated
- *   tool-explicit| agent called `project.use({slug})` for this session
- *   default      | nothing named a project, so the default one is in effect
- *   none         | no active project for the transport
- */
-
 export type ProjectResolutionSource = 'url-path' | 'roots' | 'tool-explicit' | 'default' | 'none';
 
 export interface RouterEntry {
@@ -32,12 +7,6 @@ export interface RouterEntry {
   projectId: string | null;
   /** How the active project was resolved. */
   projectResolutionSource: ProjectResolutionSource;
-  /**
-   * Slugs surfaced as candidates (from `roots/list` derivation that did
-   * not auto-activate, e.g. unknown slug or "switch would replace"). The
-   * agent reads these via `project.current` and decides whether to call
-   * `project.use({slug})`.
-   */
   pendingSuggestedSlugs: string[];
 }
 
@@ -47,12 +16,6 @@ function entryKey(tokenId: string, mcpSessionId: string): string {
 
 export class SessionRouter {
   private readonly entries = new Map<string, RouterEntry>();
-  /**
-   * In-flight roots-discovery promise per transport. Used to serialize
-   * concurrent discovery attempts: a tool handler that arrives while one is
-   * running awaits the same promise instead of triggering a second listRoots.
-   * Holds in-flight attempts only; a settled one is removed.
-   */
   private readonly discoveryInFlight = new Map<string, Promise<unknown>>();
 
   /** Read the entry for a given transport, returning a copy for safety. */
@@ -61,10 +24,6 @@ export class SessionRouter {
     return e ? { ...e, pendingSuggestedSlugs: [...e.pendingSuggestedSlugs] } : undefined;
   }
 
-  /**
-   * Mutate the entry for a transport. Creates a default entry if absent.
-   * Returns the post-mutation snapshot.
-   */
   update(tokenId: string, mcpSessionId: string, fn: (entry: RouterEntry) => void): RouterEntry {
     const key = entryKey(tokenId, mcpSessionId);
     const existing = this.entries.get(key);
@@ -122,10 +81,6 @@ export class SessionRouter {
     return this.discoveryInFlight.get(entryKey(tokenId, mcpSessionId));
   }
 
-  /**
-   * Drop a settled roots-discovery promise. Identity-checked so a caller whose
-   * attempt has been superseded cannot evict the live one.
-   */
   clearDiscoveryPromise(tokenId: string, mcpSessionId: string, promise: Promise<unknown>): void {
     const key = entryKey(tokenId, mcpSessionId);
     if (this.discoveryInFlight.get(key) === promise) this.discoveryInFlight.delete(key);

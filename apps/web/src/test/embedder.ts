@@ -2,18 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { EMBEDDING_DIMS, type Embedder } from '@rembric/core';
 
-/**
- * Deterministic in-memory embedder for tests. Vectors are derived from a
- * hash of the input and L2-normalized, so identical texts embed
- * identically and kNN queries are stable across runs — no model load, no
- * network. Mirrors the public `Embedder` surface.
- */
 export class FakeEmbedder implements Embedder {
   public readonly modelId = 'fake-test-embedder';
   public readonly calls: string[] = [];
   private failNext: Error | null = null;
 
-  /** Make the next embed() call reject (worker retry-path tests). */
   failOnce(err: Error = new Error('fake embedder failure')): void {
     this.failNext = err;
   }

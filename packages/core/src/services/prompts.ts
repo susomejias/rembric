@@ -7,22 +7,6 @@ import { sanitizeFtsQuery } from './hybrid-search.js';
 const PROMPT_TITLE_MAX_LENGTH = 100;
 const PROMPT_PURGE_REASONING = 'operator purge of soft-deleted prompts';
 
-/**
- * Append-only store of curated user prompts.
- *
- * Records what the user explicitly stated as a goal/constraint/directive
- * worth remembering, written via `memory.save_prompt`. Surfaced to future
- * sessions via `memory.context.recentPrompts` and retrievable via
- * `memory.search_prompts` (FTS5 over content + tags).
- *
- * Append-only contract (mirrors memory + sessions):
- *   - `content` is IMMUTABLE — no UPDATE-capable code path.
- *   - Lifecycle = `deleted_at` flips (operator soft-delete OR atomic refine
- *     via `replaces`) plus the `replaces` link itself.
- *   - This file is the ONLY emitter allowed of `DELETE FROM prompts`
- *     (via `purgeDeleted`); enforced by the invariants test.
- */
-
 export interface SavePromptInput {
   content: string;
   /** Required scannable label for retrieval lists. 1..100 chars (app-layer). */
@@ -32,11 +16,6 @@ export interface SavePromptInput {
   agent?: string | null;
   /** JSON-encoded array of categorical labels; each must be non-empty. */
   tags?: string[] | null;
-  /**
-   * Atomic refine: id of a predecessor prompt to supersede. The
-   * predecessor MUST belong to the same scope (same `project_id`) and
-   * must not already be soft-deleted; otherwise the call is rejected.
-   */
   replaces?: string | null;
 }
 
@@ -154,11 +133,6 @@ export class PromptsService {
     });
   }
 
-  /**
-   * Soft-delete a prompt by setting `deleted_at` to the current time.
-   * Idempotent: a second call on an already-deleted row is a no-op.
-   * Operator-facing — the dashboard's per-row Delete button calls this.
-   */
   softDelete(id: string, _opts: { adminBypass?: boolean } = {}): Prompt {
     void _opts;
     const existing = this.findById(id);
@@ -175,9 +149,6 @@ export class PromptsService {
     return updated;
   }
 
-  /**
-   * Clear `deleted_at`, returning the prompt to visibility. Idempotent.
-   */
   undelete(id: string, _opts: { adminBypass?: boolean } = {}): Prompt {
     void _opts;
     const existing = this.findById(id);
@@ -194,10 +165,6 @@ export class PromptsService {
     return updated;
   }
 
-  /**
-   * Physically delete soft-deleted prompts. ONLY emitter of `DELETE FROM prompts`.
-   * Journals into `consolidation_ops` with `op_type='prompt_purge'`.
-   */
   purgeDeleted(input: { adminBypass: true }): { deletedIds: string[] } {
     if (input?.adminBypass !== true) {
       throw new DomainError(
@@ -246,39 +213,16 @@ export class PromptsService {
     return this.repos.prompts.findById(id);
   }
 
-  /**
-   * N most recent active prompts for the given scope, ordered newest first.
-   * Soft-deleted rows are NEVER surfaced via this path — recentPrompts must
-   * not contain takes the operator (or the agent via refine) marked as
-   * obsolete.
-   */
   recentForContext(input: RecentPromptsForContextInput): Prompt[] {
     const limit = clamp(input.limit ?? 10, 1, 50);
     return this.repos.prompts.recentForContext(input.projectId, limit);
   }
 
-  /**
-   * Scope-aware prompt search.
-   *
-   * When `input.query` is non-empty, JOINs against `prompts_fts MATCH ?`
-   * for token-aware retrieval over content + tags. Otherwise falls back to
-   * recency. Structured filters (`sessionId`, `agent`, `includeDeleted`)
-   * apply on top of either path.
-   *
-   * Always fetches full rows via drizzle's query builder so JSON columns
-   * (`tags`, `replaces`) are properly deserialized; the FTS5 path uses raw
-   * SQL only to surface matching rowids in MATCH-rank order.
-   */
   searchByScope(input: SearchByScopeInput): SearchByScopeResult {
     const requestedLimit = input.limit ?? 25;
     const limit = clamp(requestedLimit, 1, 100);
     const offset = Math.max(0, input.offset ?? 0);
     const projectId = input.scope.projectId;
-    // Sanitize before it reaches `prompts_fts MATCH` — an arbitrary
-    // natural-language query (punctuation, an unbalanced quote, a bareword
-    // FTS5 operator) would otherwise raise a syntax error. Empty after
-    // sanitizing means "skip the FTS branch"; undefined falls back to the
-    // recency path the same as no query at all.
     const sanitized = input.query ? sanitizeFtsQuery(input.query) : undefined;
 
     const { prompts, total } = this.repos.prompts.searchByScope({

@@ -7,13 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { startProcess } from '../lib/process';
 
-/**
- * `startProcess`'s data-loss guard, driven through the real process entry — the
- * `getServices()` graph over a real migrated SQLite file, not the guard alone.
- *
- * `getServices()`/`getDb()`/`startProcess` cache on `globalThis` (Next HMR), so
- * the fixture clears those slots between cases; each case owns a fresh data dir.
- */
 type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { close?: () => void };
@@ -26,9 +19,7 @@ const MARKER = '.rembric-state.json';
 function resetProcessGlobals(): void {
   try {
     globalForTest.__rembricDb?.close?.();
-  } catch {
-    // ignore double-close of a fixture the process already closed
-  }
+  } catch {}
   delete globalForTest.__rembricServices;
   delete globalForTest.__rembricDb;
   delete globalForTest.__rembricProcessStarted;

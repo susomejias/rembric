@@ -28,13 +28,6 @@ beforeAll(async () => {
 
 afterAll(() => corpus.cleanup());
 
-/**
- * An `abstention` query that returns nothing because no candidate matched
- * scores restraint it did not earn — the gate was never consulted. These tests
- * drive the LEXICAL BRANCH ALONE (no `embedQuery`), which is the strong form of
- * the guarantee: with the dense branch wired every query has candidates
- * trivially, so the assertion would prove nothing.
- */
 describe('the abstention query set exercises the gate, not an empty candidate set', () => {
   function lexicalOnly(text: string, query: Pick<QueryItem, 'scope' | 'widened'>) {
     const { projectId } = resolveScope(corpus, query);
@@ -69,25 +62,12 @@ describe('the abstention query set exercises the gate, not an empty candidate se
     const result = await lexicalOnly('zzqqwx vvbbnm ppllkk', ABSTENTION_QUERIES[0]!);
     expect(result.ids).toEqual([]);
     expect(result.abstained).toBe(true);
-    // The empty pool's reason, not the floor's: the floor ships disabled and
-    // never ran here.
     expect(result.abstainReason).toBe(EMPTY_POOL_REASON);
     expect(result.abstainReason).not.toBe(ABSTAIN_REASON);
   });
 });
 
-/**
- * The retired `cross-scope` type scored a retriever on returning a global
- * memory alongside a project one. What survives is the isolation half: the
- * convention and its instance live in one project, and a second project holds
- * a vocabulary-sharing row that must stay out.
- */
 describe('the cross-project-isolation queries keep their control in a second project', () => {
-  // Through `hybridRetriever` — the instrument the eval scores — rather than a
-  // second call into `searchWithAbstention`: a change to the scored retriever
-  // would otherwise leave this guard measuring the old path. `pnpm run eval` is
-  // NOT a guard for isolation (design.md: the harness rewards over-widening),
-  // so these assertions are the only thing holding it.
   async function search(text: string, projectId: string): Promise<string[]> {
     const state = await hybridRetriever.init(corpus);
     const { ids } = await hybridRetriever.query(text, state, 8, {
@@ -114,9 +94,6 @@ describe('the cross-project-isolation queries keep their control in a second pro
       expect(ids.filter((id) => goldIds.includes(id)).length).toBeGreaterThan(0);
       for (const id of ids) expect(projectById.get(id)).toBe(projectId);
 
-      // Non-vacuity: this query DOES retrieve the second project's control row
-      // when asked there, so its absence above is the closed scope rather than
-      // an irrelevant row nothing would have returned anyway.
       const other = PROJECTS.find((p) => p.slug !== q.scope.project)!;
       const otherId = corpus.projectIdBySlug.get(other.slug)!;
       const control = CORPUS.filter(
@@ -130,12 +107,6 @@ describe('the cross-project-isolation queries keep their control in a second pro
   );
 });
 
-/**
- * With `|gold| < k` the Precision@k denominator is pinned at `k` and Recall@k
- * saturates at 1.0, so a row filling a leftover slot moves no gated metric —
- * including a row from another project. These assertions hold the property the
- * committed floors need in order to be able to move at all.
- */
 describe('the query set can be displaced at every gated k', () => {
   it.each(K_VALUES)('carries a gold-bearing query with at least %i gold ids', (k) => {
     const largest = Math.max(...QUERIES.map((q) => q.goldStableIds.length));
@@ -150,12 +121,6 @@ describe('the query set can be displaced at every gated k', () => {
   });
 });
 
-/**
- * A distractor a retriever would never return proves nothing about isolation.
- * These are scored with the scope predicate lifted — the widened arm reads
- * every project — and have to land inside the page there, which is what makes
- * their absence from the narrow page attributable to the scope.
- */
 describe('the cross-project distractors are strong enough to displace gold', () => {
   async function page(text: string, projectId: string, projectIds: string[]): Promise<string[]> {
     const state = await hybridRetriever.init(corpus);
@@ -164,11 +129,6 @@ describe('the cross-project distractors are strong enough to displace gold', () 
   }
 
   it.each([
-    // `evictsGold` is in the table rather than derived at runtime, so a case
-    // that stops evicting fails instead of quietly taking the other branch.
-    // It can only be observed where the narrow page was FULL: `q-nimbus`
-    // returns five rows, so a widening that adds better-scoring foreign rows
-    // fills the page rather than pushing an answer off it.
     ['q-atlas-release-checklist', 'shared-release-step-', true],
     ['q-nimbus-oncall-runbook', 'shared-runbook-step-', false],
   ])('%s: a scope-blind read pulls %s rows into the page', async (queryId, prefix, evictsGold) => {
@@ -183,15 +143,11 @@ describe('the cross-project distractors are strong enough to displace gold', () 
     const narrow = await page(q.text, projectId, [projectId]);
     const widened = await page(q.text, projectId, [...corpus.projectIdBySlug.values()]);
 
-    // Non-vacuity: the narrow page answers the query, so everything below is a
-    // scope effect and not an empty-result artefact.
     const narrowGold = narrow.filter((id: string) => goldIds.includes(id)).length;
     expect(narrowGold).toBeGreaterThan(0);
     expect(narrow.filter((id: string) => distractorIds.includes(id))).toEqual([]);
     expect(widened.filter((id: string) => distractorIds.includes(id)).length).toBeGreaterThan(0);
 
-    // Strength, stated as rank rather than as a count: a distractor that merely
-    // reached the page could have arrived last. These outrank an answer.
     const bestDistractor = widened.findIndex((id: string) => distractorIds.includes(id));
     const worstGold = widened.reduce(
       (last: number, id: string, i: number) => (goldIds.includes(id) ? i : last),
@@ -208,11 +164,6 @@ describe('the cross-project distractors are strong enough to displace gold', () 
   });
 });
 
-/**
- * Widened queries are excluded from `foreignScopeRate`'s denominator, so they
- * have to be gated by something else: gold that only the widening can reach.
- * The narrow arm is the control — it must return a full page and still miss.
- */
 describe('the widened queries are gated by gold in another project', () => {
   it('commits at least one', () => {
     expect(WIDENED_QUERIES.length).toBeGreaterThan(0);
@@ -250,15 +201,11 @@ describe('the widened queries are gated by gold in another project', () => {
         projectId: scope.projectId,
         projectIds: [scope.projectId],
       });
-      // Non-vacuity: the home project answers with something plausible, so the
-      // miss is the closed scope rather than a query nothing matches.
       expect(narrow.ids.length).toBeGreaterThan(0);
       for (const id of goldIds) expect(narrow.ids).not.toContain(id);
     },
   );
 
-  // The in-memory controls widen through `inScope`, which the SQL retriever
-  // never touches — so without this the eval is the only thing exercising it.
   it.each(WIDENED_QUERIES.map((q) => [q.id, q] as const))(
     '%s: the in-memory control widens through the same declared set',
     async (_id, q: QueryItem) => {

@@ -2,11 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 
-// The tool-observation latch and the report that reads it live in the shared
-// core, so the ordering between the two is pinned once for every client rather
-// than per client — an ordering bug here is unreachable from one host and a
-// trap for the next one to call `reportTurn` without the host's own guard.
-
 const SLUG = 'turn-report-fixture';
 
 function protocol(): ReturnType<typeof createSessionProtocol> {
@@ -49,8 +44,6 @@ describe('the shared core reads the tool latch only on a report it actually send
 
     core.markToolUsed('s-unknown');
     await core.reportTurn('s-unknown');
-    // Control: the guard really did drop this report, so the surviving latch
-    // below is not just a report that quietly succeeded.
     expect(stub.paths).toEqual([]);
 
     await core.ensureSession('s-unknown');

@@ -1,9 +1,5 @@
 import { createServer as createNetServer } from 'node:net';
 
-/**
- * Bind port 0 on loopback, read what the OS assigned, and release it. The port
- * is free but not reserved: a caller must bind it promptly.
- */
 export async function findFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const sock = createNetServer();

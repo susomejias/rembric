@@ -15,69 +15,17 @@ import { findSupplyChainViolations, readSupplyChainSources } from './supply-chai
 
 type DbRaw = ReturnType<typeof createTestDb>['handle']['raw'];
 
-/**
- * Append-only contract invariants enforced as a CI grep gate.
- *
- * The product makes load-bearing claims about memory immutability:
- *   - no row is ever DELETEd from the `memory` table
- *   - the `content` column is never UPDATEd
- *
- * Both are also enforced in the application layer, but a static check
- * shouts loudly if a future PR introduces a regression in a service we
- * haven't yet covered with unit tests. The check scans every .ts file under
- * `apps/web/src/`, `packages/db/src/`, `packages/core/src/` and
- * `packages/mcp/src` (except this file and migrations) and fails if forbidden
- * SQL fragments appear.
- *
- * Allow-list exception: the operator-only maintenance purge paths
- * (`MemoryService.purgeDisconnectedArchived` executing via
- * `packages/db/src/repositories/memory-repository.ts` and
- * `packages/core/src/services/agent-sessions.ts::purgeEmpty`) MAY emit
- * `DELETE FROM memory` and `DELETE FROM sessions` respectively. The check pins
- * the allowance to those exact files; introducing the same DELETE elsewhere
- * fails the build.
- */
-
 const here = dirname(fileURLToPath(import.meta.url));
-/** `apps/web/src` — the application's own tree. */
 const srcRoot = join(here, '..');
-/**
- * The monorepo root (`../../../` from `apps/web/src/test`). Every path this
- * file reports or allow-lists is anchored here rather than on a scan root,
- * because the scan covers four trees and "the root" stopped being one directory.
- */
 const repoRoot = join(srcRoot, '..', '..', '..');
-/** `packages/db/src` — the extracted data layer, i.e. the SQL-confinement boundary. */
 const dbRoot = join(repoRoot, 'packages/db/src');
-/**
- * `packages/core/src` — the extracted domain layer. Scanned with the app tree:
- * it holds the services, the consolidation engine and the embeddings pipeline,
- * so the rules below must police them too.
- */
 const coreRoot = join(repoRoot, 'packages/core/src');
-/**
- * `packages/mcp/src` — the extracted protocol layer (tool definitions, the
- * server factory, scope resolution, instructions). Scanned with the app tree, so
- * the rules below must police the MCP handlers too.
- */
 const mcpRoot = join(repoRoot, 'packages/mcp/src');
 
-/**
- * Paths are reported and allow-listed repo-root-relative — `apps/web/src/...`
- * for the application, `packages/core/src/...` for the domain layer and
- * `packages/db/src/...` for the data layer. One convention for every root, so an
- * allow-list entry is unambiguous.
- */
 function relToRepo(file: string): string {
   return relative(repoRoot, file).split(sep).join('/');
 }
 
-/**
- * Every scanned non-test, non-migration source file: the application tree, the
- * domain layer AND the data layer. All three, because the rules below police
- * statements that live in the db package and are called from the application —
- * a scan that dropped any side would stop enforcing half of each contract.
- */
 function scanRoots(): string[] {
   return [
     ...listSourceFiles(srcRoot),
@@ -90,10 +38,6 @@ function scanRoots(): string[] {
 interface ForbiddenRule {
   pattern: RegExp;
   description: string;
-  /**
-   * Source files (repo-root-relative) where the pattern is permitted.
-   * Empty array means the pattern is forbidden everywhere.
-   */
   allow?: readonly string[];
 }
 
@@ -128,16 +72,11 @@ const FORBIDDEN: ForbiddenRule[] = [
     description: 'raw `UPDATE memory SET title = …` is forbidden — title is immutable',
   },
   {
-    // `[^;]*` rather than `[^)]*`: the narrower form cannot cross a `)`, so a
-    // call anywhere in the object literal (`.set({ status: f(), projectId: x })`)
-    // slipped past it — measured.
     pattern: /\bupdate\(\s*memory\s*\)[^;]*\.set\([^;]*\bprojectId\s*:/i,
     description:
       '`db.update(memory).set({ projectId: … })` is forbidden — only a schema migration may move a memory between projects',
   },
   {
-    // Migrations are exempt by construction: `listSourceFiles` skips the
-    // directory and the runner reads `.sql`, which is not scanned at all.
     pattern: /UPDATE\s+memory\b[^;]*\bSET\s+project_id\s*=/i,
     description:
       'raw `UPDATE memory SET project_id = …` is forbidden outside packages/db/src/migrations/ — the append-only carve-out is a migration-only one',
@@ -166,10 +105,6 @@ const FORBIDDEN: ForbiddenRule[] = [
     description:
       'raw `UPDATE sessions SET (agent|started_at|token_id|project_id) =` is forbidden — immutable',
   },
-  // NOTE: `deleted_at` is intentionally NOT listed among immutable session
-  // columns — it is the single field that may transition NULL → timestamp
-  // (soft-delete) and back to NULL (undelete). See the `sessions` spec
-  // and `add-session-deletion` change for the narrowed contract.
   {
     pattern: /delete\s*\(\s*memoryRelations\s*\)/i,
     description:
@@ -218,7 +153,7 @@ function listSourceFiles(dir: string): string[] {
     const full = join(dir, entry);
     const st = statSync(full);
     if (st.isDirectory()) {
-      if (entry === 'migrations') continue; // raw SQL migrations are exempt
+      if (entry === 'migrations') continue;
       out.push(...listSourceFiles(full));
       continue;
     }
@@ -247,8 +182,6 @@ describe('append-only invariants (static grep)', () => {
         const lines = readFileSync(file, 'utf8').split('\n');
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!;
-          // Skip comments — a comment may legitimately reference the
-          // forbidden pattern when documenting the invariant itself.
           const trimmed = line.trim();
           if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
             continue;
@@ -265,26 +198,12 @@ describe('append-only invariants (static grep)', () => {
     });
   }
 
-  // Positive assertion: the two allow-listed files MUST actually contain
-  // their respective DELETE statements. Otherwise a future refactor could
-  // silently remove the purge implementation while keeping the allow-list
-  // in place — invariant relaxation without enforcement is worse than no
-  // allow-list at all.
   it('allow-list anchors: packages/db/src/repositories/memory-repository.ts contains DELETE FROM memory', () => {
     const file = join(dbRoot, 'repositories/memory-repository.ts');
     const src = readFileSync(file, 'utf8');
     expect(/DELETE\s+FROM\s+memory\b/i.test(src)).toBe(true);
   });
 
-  /**
-   * The DELETE-FROM rules are anchored by their allow-listed files, which must
-   * still contain the statement. The two `project_id` rules allow-list nothing —
-   * their exemption is `packages/db/src/migrations/`, which `listSourceFiles`
-   * does not scan at
-   * all — so with no file to anchor against, a pattern that matches nothing
-   * anywhere is indistinguishable from a pattern that is doing its job. Both
-   * were measured NOT CAUGHT by a mutation before this existed.
-   */
   it('grep anchors: the memory.project_id rules match a known-bad line and not a near miss', () => {
     const rule = (needle: string): ForbiddenRule => {
       const found = FORBIDDEN.filter((r) => r.description.includes(needle));
@@ -325,8 +244,6 @@ describe('append-only invariants (static grep)', () => {
   it('schema/prompts.ts declares content as immutable in its docstring', () => {
     const file = join(dbRoot, 'schema/prompts.ts');
     const src = readFileSync(file, 'utf8');
-    // Mirrors the pattern asserted for memory.content; the docstring must
-    // make the append-only contract explicit so reviewers can rely on it.
     expect(/content[^.\n]*immutable/i.test(src)).toBe(true);
   });
 
@@ -349,12 +266,6 @@ describe('append-only invariants (static grep)', () => {
   });
 });
 
-/**
- * Two files suffice: the data-access invariant above already confines every
- * session `UPDATE` to the db package, and the service is the only composer of a
- * `Partial<NewAgentSession>`. Asserted on line TEXT, not line numbers, so an
- * edit elsewhere in the file cannot break it — only a new write site can.
- */
 describe('session lifecycle-column invariants', () => {
   const SESSION_WRITERS = [
     'packages/core/src/services/agent-sessions.ts',
@@ -363,11 +274,6 @@ describe('session lifecycle-column invariants', () => {
 
   const sources = SESSION_WRITERS.map((rel) => readFileSync(join(repoRoot, rel), 'utf8'));
 
-  // The one property grep can actually carry: the terminal write path derives
-  // its `set` wholly from `precedenceSet` and never appends to it. Everything
-  // about which COLUMNS may move is enforced at runtime instead — see
-  // agent-sessions.test.ts "terminal rows are terminal" — because a mutation
-  // test proved a counting invariant here passes on `set.endedAt = …`.
   it('the terminal write path adds nothing to the precedence fields', () => {
     const svc = sources[0]!;
     const start = svc.indexOf('private writeTerminalFields');
@@ -380,22 +286,10 @@ describe('session lifecycle-column invariants', () => {
     expect(body).not.toMatch(/\bset\[/);
   });
 
-  // `merged` (the section-wise merge of `existing.summary`/`input.summary`,
-  // both already summary-precedence-approved) is a legitimate second source
-  // for the `summary` key alongside `summary.value` — see
-  // "A curated session-summary write MUST be merged section-wise with the
-  // stored summary". `laterOf` is the third: `last_summary_at` is stamped at
-  // this same single site, per `session-nudges`' "Set by the same single site
-  // that folds per-field `final` precedence into an update `set`". Deduped
-  // because the merge branch and the plain-replace branch both assign
-  // `summaryFinal: summary.final`.
   it('precedenceSet can only ever produce summary, title and last_summary_at fields', () => {
     const svc = sources[0]!;
     const start = svc.indexOf('function precedenceSet');
     const rawBody = svc.slice(start, svc.indexOf('\n}', start));
-    // Strip string/template literals first — the merged-overflow and
-    // heading-less DomainError messages contain "sessions: merged", which
-    // otherwise matches the same shape as a real object-literal key.
     const body = rawBody.replace(/`(?:[^`\\]|\\.)*`|'(?:[^'\\]|\\.)*'/gs, '""');
     const keys = [
       ...new Set(
@@ -406,36 +300,16 @@ describe('session lifecycle-column invariants', () => {
   });
 });
 
-/**
- * `pnpm-workspace.yaml::allowBuilds` is the repo's entire install-time
- * code-execution surface, because `.npmrc::ignore-scripts=true` makes lifecycle
- * scripts default-deny. Six prose copies of its membership drifted from it for
- * 54 days and 42 releases; nothing compared any of them to the file.
- *
- * Every failure path is driven against mutated in-memory copies in
- * `supply-chain-inventory.test.ts` — a gate never observed to fail is not a gate.
- */
 describe('install-time code-execution surface', () => {
   it('nothing grants install-time code execution unreviewed', () => {
     expect(findSupplyChainViolations(readSupplyChainSources(repoRoot))).toEqual([]);
   });
 });
 
-/**
- * `apps/web/Dockerfile`'s deployable stage — `runner`. Everything the image
- * assertions pin about it (it is LAST, so a bare `docker build` produces the
- * production image; it is distroless; it carries `rembric.stage=runtime`) is what
- * makes the published artifact correct.
- */
 const PROD_STAGE = 'runner';
 const prodDockerfile = (): string => readFileSync(join(repoRoot, 'apps/web/Dockerfile'), 'utf8');
 
 describe('image packaging invariants', () => {
-  /**
-   * One `inputs.<name>` block of a composite action, from its key line to the
-   * next input key. Block-scoped on purpose: a `default:` belonging to a
-   * neighbouring input must not be able to satisfy an assertion about this one.
-   */
   function compositeActionInput(action: string, name: string): string {
     const lines = action.split('\n');
     const start = lines.findIndex((line) => line === `  ${name}:`);
@@ -458,31 +332,17 @@ describe('image packaging invariants', () => {
     );
     expect(runtimeIdx).toBeGreaterThan(-1);
     const runtimeBlock = dockerfile.slice(runtimeIdx);
-    // Anchored to a whole line and built from the self-update prune-filter
-    // constant: Docker's label filter is exact-match, so a commented-out
-    // LABEL or a value drift (runtime2) must fail here, not silently stop
-    // image cleanup and resurrect the per-update leak.
     const escaped = RUNTIME_IMAGE_LABEL_FILTER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     expect(new RegExp(`^LABEL\\s+${escaped}\\s*$`, 'm').test(runtimeBlock)).toBe(true);
   });
 
   it('build-runtime-image action parameterizes file + target, defaulting to the web runtime', () => {
-    // The action serves two callers: ci.yml's docker-build-check (mode=load) and
-    // docker-publish.yml (mode=digest), and both build the web image. That is
-    // only true while BOTH build modes read `inputs.dockerfile`/`inputs.target`
-    // (a re-hard-coded `file:`/`target:` silently ignores the override) AND the
-    // defaults keep the caller that omits them on the web Dockerfile's `runner`
-    // stage — which is exactly what ci.yml's docker-build-check does.
     const action = readFileSync(
       join(repoRoot, '.github/actions/build-runtime-image/action.yml'),
       'utf8',
     );
-    // Two build steps (mode=load, mode=digest): each must consume the inputs,
-    // so one hard-coded leg cannot slip through.
     expect(action.match(/file:\s*\$\{\{\s*inputs\.dockerfile\s*\}\}/g) ?? []).toHaveLength(2);
     expect(action.match(/target:\s*\$\{\{\s*inputs\.target\s*\}\}/g) ?? []).toHaveLength(2);
-    // Anchored inside the input's own block, so a `default:` moved to another
-    // input — or a commented-out one — fails here.
     expect(compositeActionInput(action, 'dockerfile')).toMatch(
       /^ {4}default: \.\/apps\/web\/Dockerfile$/m,
     );
@@ -490,18 +350,10 @@ describe('image packaging invariants', () => {
   });
 
   it('docker-publish.yml publishes the web image through the shared action', () => {
-    // The release channel ships apps/web/Dockerfile's `runner` stage. Both the
-    // override the publish passes and the entrypoint its smoke test asserts are
-    // named here: a publish that silently reverted to the server image would
-    // otherwise still build, still pass smoke, and still move the tags.
     const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
     expect(/uses:\s*\.\/\.github\/actions\/build-runtime-image\b/.test(publish)).toBe(true);
-    // Exactly one uncommented occurrence each: a stale second `target:` or a
-    // commented-out override must not satisfy these.
     expect(publish.match(/^[ \t]*dockerfile: \.\/apps\/web\/Dockerfile$/gm) ?? []).toHaveLength(1);
     expect(publish.match(/^[ \t]*target: runner$/gm) ?? []).toHaveLength(1);
-    // The smoke must fail on a missing web entrypoint, and must no longer wait
-    // for the server image's entrypoint, which the published image does not have.
     expect(publish).toMatch(/EXPECT_ENTRY='apps\/web\/server\.js'/);
     expect(/dist\/server-entrypoint\.js/.test(publish)).toBe(false);
   });
@@ -515,9 +367,6 @@ describe('image packaging invariants', () => {
   });
 
   it('lib/process.ts calls assertDataLossGuard before the first timer', () => {
-    // The port must refuse a shrunk database before any background timer can
-    // touch it; the refusal itself (exit 78) is `bootstrap.ts`'s contract, now
-    // owned by `lib/process.ts`.
     const src = readFileSync(join(srcRoot, 'lib/process.ts'), 'utf8');
     const guardIdx = src.search(/\bassertDataLossGuard\s*\(/);
     const timerIdx = src.search(/\bset(?:Interval|Timeout)\s*\(/);
@@ -527,16 +376,6 @@ describe('image packaging invariants', () => {
   });
 });
 
-/**
- * Distroless node-path invariant.
- *
- * The runtime image is distroless (gcr.io/distroless/nodejs22): node lives at
- * /nodejs/bin/node and there is NO bare `node` on PATH. Every place that execs
- * node *against the runtime image* must use the absolute path or it dies with
- * `exec: "node": executable file not found in $PATH`. This regressed in prod
- * (self-update upgrader + compose healthcheck) when the image moved to
- * distroless — these tests pin each call site so it can't happen again.
- */
 describe('distroless runtime node-path invariants', () => {
   const NODE = '/nodejs/bin/node';
 
@@ -547,7 +386,6 @@ describe('distroless runtime node-path invariants', () => {
     );
     expect(runtimeIdx).toBeGreaterThan(-1);
     const runtime = dockerfile.slice(runtimeIdx);
-    // The reason node isn't on PATH — if this ever changes, revisit every NODE path below.
     expect(/^FROM\s+\S*distroless\S*/.test(runtime.split('\n')[0] ?? '')).toBe(true);
 
     const entry = runtime.match(/^ENTRYPOINT\s+(\[.*\])/m);
@@ -558,36 +396,22 @@ describe('distroless runtime node-path invariants', () => {
     expect(health).not.toBeNull();
     expect(health![1]).toContain(NODE);
 
-    // No bare-`node` exec form anywhere in the runtime stage.
     expect(/\[\s*"node"\s*[,\]]/.test(runtime)).toBe(false);
   });
 
   it('docker-compose healthcheck uses the absolute node path (runs in the distroless image)', () => {
     const compose = readFileSync(join(repoRoot, 'docker-compose.yml'), 'utf8');
     expect(compose).toContain(NODE);
-    // A bare `- node` list entry would exec `node` and mark the container unhealthy.
     expect(/^\s*-\s*node\s*$/m.test(compose)).toBe(false);
   });
 
   it('self-update upgrader entrypoint uses the absolute node path (runs in the NEW distroless image)', () => {
     const orch = readFileSync(join(coreRoot, 'services/self-update/orchestrator.ts'), 'utf8');
     expect(orch).toContain(`'${NODE}'`);
-    // The bare-`node` default that bricked the upgrader must be gone.
     expect(/\[\s*'node'\s*,/.test(orch)).toBe(false);
   });
 });
 
-/**
- * Standalone listen-port invariant.
- *
- * The image must listen on the port `REMBRIC_PORT` names, because
- * `docker-compose.yml` maps `${REMBRIC_PORT}:${REMBRIC_PORT}` and existing
- * installations set that variable in `.env` without editing their Compose file.
- * The Next-generated standalone server reads only `PORT`, so the entrypoint is a
- * launcher that resolves `REMBRIC_PORT` first and the HEALTHCHECK probes through
- * the same launcher. A renamed generated server or a hard-coded probe port is the
- * migration regression these assertions pin.
- */
 describe('standalone listen-port invariants', () => {
   function runtimeStage(): string {
     const dockerfile = prodDockerfile();
@@ -611,8 +435,6 @@ describe('standalone listen-port invariants', () => {
   it('the launcher starts the renamed generated server, and the assembly does rename it', () => {
     const launcher = readFileSync(join(srcRoot, '..', 'server.js'), 'utf8');
     expect(launcher).toContain('next-server.js');
-    // The rename (a builder-stage step) is what lets the launcher occupy the
-    // entrypoint path without deleting the generated server it imports.
     expect(prodDockerfile()).toMatch(
       /mv\s+\/runtime\/apps\/web\/server\.js\s+\/runtime\/apps\/web\/next-server\.js/,
     );
@@ -628,25 +450,12 @@ describe('standalone listen-port invariants', () => {
   });
 });
 
-/**
- * Scope-leak invariant.
- *
- * Application-level RLS is enforced by passing a `Scope` argument into
- * every read/write through `MemoryService`. The scope-bypassing escape
- * hatches are `unsafeGetById` / `unsafeGetByIds`. Those must NOT be
- * called from the MCP layer (which would re-open the bug we just
- * closed). Allow-listed callers: the repository that defines them, the
- * service itself (private helpers), the consolidation engine (which
- * legitimately crosses scopes), the dashboard admin views, and tests.
- */
 const SCOPE_BYPASS_PATTERN = /\.unsafeGetByIds?\b/;
 const SCOPE_BYPASS_ALLOWED_PREFIXES = [
   'packages/db/src/repositories/memory-repository.ts',
   'packages/core/src/services/memory.ts',
   'packages/core/src/consolidation/',
   'apps/web/src/app/dashboard/',
-  // Eval harness ingest re-reads its own throwaway corpus across scopes
-  // post-ingest — see add-retrieval-eval-harness.
   'packages/core/src/test-support/retrieval/ingest.ts',
 ];
 
@@ -682,20 +491,6 @@ describe('scope-leak invariant', () => {
   });
 });
 
-/**
- * Data-access confinement invariant.
- *
- * ALL SQL — Drizzle query-builder calls, the drizzle-orm `sql` tag, and raw
- * better-sqlite3 statement APIs — lives under `packages/db/src/`. Services,
- * dashboard handlers, MCP tools, the HTTP layer, consolidation, and embeddings
- * are SQL-free consumers of the repository layer + `packages/db/src/diagnostics.ts`.
- *
- * The boundary is a package rather than a directory inside this app: the guard
- * moved with the SQL, and the exemption below is now "the file came from the db
- * package", which the app-side scan cannot reach by construction. The domain
- * layer is scanned too — it holds the consolidation engine and the embeddings
- * pipeline, the two places most likely to reach for a statement directly.
- */
 const SQL_EXECUTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /from ['"]drizzle-orm['"]/, label: "import from 'drizzle-orm'" },
   { pattern: /\.raw\.prepare\(/, label: 'raw.prepare(' },
@@ -729,22 +524,10 @@ describe('data-access confinement invariant', () => {
     return hits;
   }
 
-  /**
-   * Non-vacuity control. The rule below is a negative assertion over the app
-   * tree, and it passes trivially if the SQL it is meant to be standing next to
-   * has moved somewhere the scans never look (or if `dbRoot` resolves nowhere —
-   * `readdirSync` would throw, but a renamed directory would not). This asserts
-   * the positive half: the package really is where the SQL lives.
-   */
   it('the db package is where the SQL actually is', () => {
     const hits = scanSql(dbFiles);
     expect(hits.length).toBeGreaterThan(50);
     expect(new Set(hits.map((h) => h.file)).size).toBeGreaterThan(5);
-    // The domain tree is scanned by the assertion below, so it has to be a real
-    // tree: a `coreRoot` that resolved nowhere would make "no SQL outside the db
-    // package" hold over a silently empty half of the scan. Same for the
-    // protocol layer, which moved out of the app tree in the `packages/mcp`
-    // extraction.
     expect(coreFiles.length).toBeGreaterThan(20);
     expect(mcpFiles.length).toBeGreaterThan(10);
   });
@@ -764,17 +547,9 @@ describe('data-access confinement invariant', () => {
   });
 });
 
-/**
- * Admin-method confinement invariant. `admin*` marks an unscoped repository
- * read; the allow-list below is what makes it callable. Spec: data-access,
- * "Scoped, unsafe, and admin method families".
- */
 const ADMIN_CALL_PATTERN = /\.(admin[A-Z]\w*)\(/g;
 
 const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
-  // The doctor surface in `mcp-server.ts` is the factory in
-  // `packages/core/src/doctor.ts`'s admin reads, and the dashboard views under
-  // `app/dashboard/` (exempt by prefix) carry the rest.
   'apps/web/src/lib/mcp-server.ts': [
     'adminBacklogCount',
     'adminCountByStatus',
@@ -847,11 +622,6 @@ describe('admin-method confinement invariant', () => {
   });
 });
 
-/**
- * Closed inventory of unscoped, un-keyed, unprefixed repository reads. Spec:
- * data-access, "Scoped, unsafe, and admin method families". Set equality, so
- * both directions fail: an unlisted read, and a listed read that is gone.
- */
 const REPOSITORIES_DIR = join(dbRoot, 'repositories');
 
 const SCOPED_CONTENT_REPOSITORIES = [
@@ -890,7 +660,6 @@ const UNSCOPED_UNPREFIXED_READS = [
   'vectors-repository.ts::findMissingEmbeddings',
 ] as const;
 
-/** The text between `open` and its matching close, exclusive. */
 function balancedSpan(src: string, open: number, openCh: string, closeCh: string): string {
   let depth = 0;
   for (let i = open; i < src.length; i++) {
@@ -903,7 +672,6 @@ function balancedSpan(src: string, open: number, openCh: string, closeCh: string
   return '';
 }
 
-/** A method's parameter text with the bodies of same-file `Opts` types folded in. */
 function parameterTextWithLocalTypes(src: string, params: string): string {
   let text = params;
   for (const name of new Set(params.match(/\b[A-Z]\w+\b/g) ?? [])) {
@@ -926,7 +694,6 @@ function unscopedUnprefixedReads(src: string): string[] {
       src,
       balancedSpan(src, m.index + m[0].length - 1, '(', ')'),
     );
-    // `partition_key` is `memory_vec`'s scope column; a search names a set of them.
     if (/\b(scope|projectId|partitionKeys?)\b/.test(params)) continue;
     if (/\b\w*[Ii]ds?\b/.test(params)) continue;
     found.push(name!);
@@ -982,8 +749,6 @@ const REMBRIC_DOTENV_MJS = 'apps/plugin/mcp-bridge/rembric-dotenv.mjs';
 const MCP_BRIDGE_MJS = 'apps/plugin/mcp-bridge/bridge.mjs';
 const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
-// Every helper the JS/TS clients share, with the ONE file allowed to define it.
-// The bash and Python clients keep their own, held in agreement by the fixtures.
 const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: string }> = [
   {
     symbol: 'parseDotenv',
@@ -1034,9 +799,6 @@ const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: 
   },
 ];
 
-// Tests are excluded because some legitimately re-declare the nudge constants as
-// their expected values; `.d.mts` because a declaration is a type for the
-// canonical implementation, never a second copy of it.
 const PLUGIN_JS_PATHSPECS = [
   'apps/plugin/*.ts',
   'apps/plugin/*.mts',
@@ -1049,8 +811,6 @@ const PLUGIN_JS_PATHSPECS = [
 ];
 
 describe('the JS/TS plugin clients share one implementation of each protocol helper', () => {
-  // `git grep` sees TRACKED files only, so a new client passes until it is
-  // staged; the alternative walks the working tree and flags scratch files.
   const scanned = execSync(
     `git -C ${repoRoot} grep -l -E '.' -- ${PLUGIN_JS_PATHSPECS.map((p) => `'${p}'`).join(' ')} || true`,
     { encoding: 'utf8' },
@@ -1058,8 +818,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     .split('\n')
     .filter(Boolean);
 
-  // Derived from the `.<client>-plugin/` directory shape, so a client added later
-  // is covered on the day it lands.
   const clients = scanned.filter((f) => /^apps\/plugin\/\.[\w-]+-plugin\//.test(f));
 
   it('the scanned file list is non-empty and covers every JS/TS client', () => {
@@ -1071,8 +829,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
       clients.length,
       `fewer than the two known JS/TS clients matched, so the client assertions below would prove little; scanned: ${scanned.join(', ')}`,
     ).toBeGreaterThanOrEqual(2);
-    // Explicit list: unlike the client set these are closed, so losing one is a
-    // regression rather than a rename.
     for (const known of [REMBRIC_DOTENV_MJS, MCP_BRIDGE_MJS, REMBRIC_PLUGIN_CORE_MJS]) {
       expect(scanned, `${known} is no longer scanned`).toContain(known);
     }
@@ -1094,9 +850,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     }
   });
 
-  // Derived rather than enumerated: the hand-written list above covers whichever
-  // symbols someone remembered, which left 20 of the core's 25 functions
-  // unenforced — a duplicated `flushSessionSummary` passed the whole suite.
   it('no other scanned file defines a function the protocol core owns', () => {
     const coreSrc = readFileSync(join(repoRoot, REMBRIC_PLUGIN_CORE_MJS), 'utf8');
     const owned = [
@@ -1146,13 +899,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     }
   });
 
-  // The inventory above is keyed by symbol NAME, so it is blind to two copies
-  // of one mechanism that happen to be called different things — which is
-  // exactly what the tool-observation latch was: `toolUsedFlags` (a Map, in
-  // opencode) and `toolUsedThisTurn` (a boolean, in Pi), same arm/read-and-
-  // clear/forget lifecycle, one of them also needing its own `delete` beside
-  // `core.forgetSession`. The two assertions below name the CONCEPT instead.
-
   it('the tool-observation latch is state no client holds, under any name', () => {
     const offenders: string[] = [];
     for (const rel of clients) {
@@ -1170,8 +916,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     ).toEqual([]);
   });
 
-  // Derived, like the owned-functions check above: an enumerated list covers
-  // whichever containers someone remembered, and the count only grows.
   it('every per-session container the core declares is cleared by forgetSession', () => {
     const coreSrc = readFileSync(join(repoRoot, REMBRIC_PLUGIN_CORE_MJS), 'utf8');
     const containers = [
@@ -1216,8 +960,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
 
 const PI_PACKAGE_DIR = 'apps/plugin/.pi-plugin';
 
-// `prepack`/`prepare`/`prepublishOnly` run at pack time; the install trio runs on
-// a consumer's machine.
 const FORBIDDEN_PUBLISHED_LIFECYCLE_KEYS = [
   'prepack',
   'prepare',
@@ -1295,14 +1037,6 @@ describe('the published npm packages', () => {
   });
 });
 
-// Plugin versioning (see openspec/changes/unify-plugin-release-track): all of
-// apps/plugin/ versions under ONE unified release-please `plugin` component,
-// so every client carrier (.claude-plugin/{package,plugin}.json,
-// .codex-plugin/{package,plugin}.json, .hermes-plugin/plugin.yaml,
-// .opencode-plugin/plugin.ts) shares a single version. There is no
-// node-workspace cascade and no per-client component. Documented spawn sites
-// are checked too because Hermes has no tracked MCP manifest.
-
 describe('the bridge version carriers', () => {
   const pluginVersion = (
     JSON.parse(readFileSync(join(repoRoot, 'apps/plugin/package.json'), 'utf8')) as {
@@ -1337,22 +1071,15 @@ describe('the bridge version carriers', () => {
   });
 });
 
-// Install URL drift guard. The `restructure-monorepo-apps-layout` change
-// moved the shared plugin tree from `plugin/` to `apps/plugin/` and
-// requires every install-command surface to point at the new path
-// (`open-source-distribution` + `hermes-agent-plugin` specs). The legacy
-// `…/main/plugin/…` URL returns HTTP 404 from `raw.githubusercontent.com`;
-// shipping it anywhere outside the spec files that document that 404
-// contract is always a regression.
 const LEGACY_INSTALL_URL_SUBSTRINGS = [
   'raw.githubusercontent.com/susomejias/rembric/main/plugin/',
   'github.com/susomejias/rembric/blob/main/plugin/',
 ];
 
 const LEGACY_URL_ALLOW_LIST = new Set([
-  'openspec/specs/open-source-distribution/spec.md', // 404-contract documentation
-  'openspec/specs/hermes-agent-plugin/spec.md', // 404-contract documentation
-  'apps/web/src/test/invariants.test.ts', // self-reference: this test owns the rule
+  'openspec/specs/open-source-distribution/spec.md',
+  'openspec/specs/hermes-agent-plugin/spec.md',
+  'apps/web/src/test/invariants.test.ts',
 ]);
 
 const LEGACY_URL_BINARY_EXTENSIONS = new Set([
@@ -1382,12 +1109,6 @@ describe('install URL drift invariant', () => {
     const offenders: { file: string; line: number; text: string }[] = [];
     for (const rel of tracked) {
       if (LEGACY_URL_ALLOW_LIST.has(rel)) continue;
-      // Active and archived OpenSpec changes are work-in-progress
-      // documents that may legitimately quote the legacy URL while
-      // describing the 404 contract. The canonical 404-contract
-      // documentation lives in `openspec/specs/` (allow-listed above);
-      // any drift introduced via a change is caught at archive time
-      // when the delta merges into the canonical spec.
       if (rel.startsWith('openspec/changes/')) continue;
       const dotIdx = rel.lastIndexOf('.');
       const ext = dotIdx >= 0 ? rel.slice(dotIdx).toLowerCase() : '';
@@ -1421,11 +1142,6 @@ describe('install URL drift invariant', () => {
   });
 
   it('allow-list anchors: each allow-listed spec file actually contains a legacy URL reference', () => {
-    // Symmetric to the DELETE-FROM allow-list anchor tests: if a future
-    // edit removes the 404-contract documentation from a spec, the
-    // allow-list entry becomes a silent loophole. Force the allow-list
-    // to stay tight by asserting each listed file still has a reason to
-    // be there.
     for (const rel of LEGACY_URL_ALLOW_LIST) {
       const abs = join(repoRoot, rel);
       const src = readFileSync(abs, 'utf8');
@@ -1438,16 +1154,6 @@ describe('install URL drift invariant', () => {
   });
 });
 
-// SQLite migration FK-safety: SQLite refuses `DROP TABLE` on a parent
-// table whose children reference live rows when `foreign_keys=ON`, and
-// `packages/db/src/client.ts` enables FKs before running migrations. `PRAGMA foreign_keys`
-// cannot be changed inside a transaction and `defer_foreign_keys` does NOT
-// defer the DROP-TABLE check (verified empirically). The migration runner
-// therefore MUST disable FKs around each migration transaction and run
-// `PRAGMA foreign_key_check` as the final pre-commit step. Without this
-// dance, any rebuild of a populated parent table fails at startup with
-// `rembric: FOREIGN KEY constraint failed` (the production incident that
-// motivated openspec/changes/fix-sessions-rebuild-fk-safety/).
 describe('migration runner FK-safety invariant', () => {
   const migrateSrc = readFileSync(join(dbRoot, 'migrate.ts'), 'utf8');
 
@@ -1461,10 +1167,6 @@ describe('migration runner FK-safety invariant', () => {
   });
 
   it('migrate.ts restores foreign_keys via a finally block', () => {
-    // Belt-and-suspenders: a thrown migration must not leave FKs disabled
-    // for the rest of the process. The check below is intentionally loose
-    // (greps for `finally` near a `PRAGMA foreign_keys = ON`) so a refactor
-    // that keeps the semantics passes.
     const finallyBlock = migrateSrc.match(
       /finally\s*\{[\s\S]{0,200}?PRAGMA\s+foreign_keys\s*=\s*ON/i,
     );
@@ -1473,8 +1175,6 @@ describe('migration runner FK-safety invariant', () => {
 });
 
 describe('oauth additive-migration invariant', () => {
-  // The OAuth change promises the static `tokens` table is untouched and the
-  // OAuth migration is purely additive (CREATE TABLE only — no rebuild dance).
   const oauthMigration = readFileSync(join(dbRoot, 'migrations/0013_oauth_tables.sql'), 'utf8');
 
   it('0013 never DROPs or ALTERs the static `tokens` table', () => {
@@ -1498,16 +1198,6 @@ describe('oauth additive-migration invariant', () => {
   });
 });
 
-/**
- * DS2 — migration discovery is equivalent across the extraction.
- *
- * Two facts make this the highest-consequence assertion in the file. The runner
- * records a migration by FILENAME, so a rename makes it re-apply against a real
- * database; and `defaultMigrationsDir()` resolves the directory next to the
- * loaded module — `packages/db/src/migrations/` under test, `packages/db/dist/`
- * `migrations/` in production. A build that copied the migrations elsewhere, or
- * a file renamed along the way, is exactly the silent failure DS2 exists for.
- */
 describe('migration discovery equivalence invariant (DS2)', () => {
   const srcMigrations = join(dbRoot, 'migrations');
   const distMigrations = join(repoRoot, 'packages/db/dist/migrations');
@@ -1525,9 +1215,6 @@ describe('migration discovery equivalence invariant (DS2)', () => {
           .digest('hex')}`,
     );
 
-  // Numbered, unique, contiguous from 0000: a rename cannot slip through. A
-  // changed number breaks contiguity, a changed name breaks the pattern, and a
-  // renumbering collides with the file that already held it.
   it('every migration filename is numbered, unique and contiguous from 0000', () => {
     const files = sqlFiles(srcMigrations);
     expect(files.length).toBeGreaterThan(30);
@@ -1540,16 +1227,11 @@ describe('migration discovery equivalence invariant (DS2)', () => {
     );
   });
 
-  // The directory the runner actually resolves must be the one asserted above —
-  // otherwise the checks describe a directory nobody reads.
   it('the runner resolves its migrations directory to the pinned source tree', () => {
     expect(defaultMigrationsDir()).toBe(srcMigrations);
     expect(sqlFiles(defaultMigrationsDir())).toEqual(sqlFiles(srcMigrations));
   });
 
-  // CI runs the suite BEFORE the build, so `dist/` may legitimately not exist
-  // yet; the skip is reported rather than silent. When it does exist (a local
-  // run after `pnpm run build`, and the image), the copy must be byte-identical.
   it('dist/migrations is byte-identical to src/migrations when the package is built', () => {
     if (!existsSync(distMigrations)) {
       console.warn(
@@ -1564,8 +1246,6 @@ describe('migration discovery equivalence invariant (DS2)', () => {
 });
 
 describe('MCP tool-handler module layout invariant', () => {
-  // The tool modules live in their own package now (`packages/mcp/src`), so the
-  // layout rule re-anchors there instead of on `srcRoot/mcp`.
   const mcpDir = mcpRoot;
   const sourceFiles = readdirSync(mcpDir).filter(
     (f) => f.endsWith('.ts') && !f.endsWith('.test.ts'),
@@ -1597,23 +1277,6 @@ describe('MCP tool-handler module layout invariant', () => {
   });
 });
 
-/**
- * `AsyncLocalStorage` single-instance invariant.
- *
- * The three context modules moved to `packages/core/src/server-context/`
- * (`request-context`, `session-router`, `tool-call-context`) precisely so the
- * application and `@rembric/mcp` share ONE storage instance per module. Two
- * instances do not raise a type error and do not fail a functional test: the
- * reader simply sees an empty store, so the request context silently stops
- * propagating and tool handlers answer `project_not_found` (or throw
- * "request context missing") on a correctly authenticated request.
- *
- * Static half: the module file exists once, and the only import of it anywhere
- * in the repository is `@rembric/core`. Behavioural half: the application runs a
- * context through core's own `runWithContext` and the package's reader observes
- * it — with the outside-the-run control that makes the observation mean
- * something.
- */
 describe('server-context single-instance invariant', () => {
   const CONTEXT_MODULES = ['request-context', 'session-router', 'tool-call-context'] as const;
   const barrelSpecifiers = CONTEXT_MODULES.map((m) => `./server-context/${m}.js`);
@@ -1630,8 +1293,6 @@ describe('server-context single-instance invariant', () => {
         `${mod} must exist exactly once, in packages/core/src/server-context/`,
       ).toEqual([`packages/core/src/server-context/${mod}.ts`]);
     }
-    // Non-vacuity: the directory those paths name is the one that is read, and
-    // it holds exactly these three modules.
     expect(readdirSync(join(coreRoot, 'server-context')).sort()).toEqual(
       CONTEXT_MODULES.map((m) => `${m}.ts`).sort(),
     );
@@ -1645,20 +1306,12 @@ describe('server-context single-instance invariant', () => {
       .split('\n')
       .filter(Boolean);
 
-    // Exact set, not a subset: the barrel's three internal re-exports are the
-    // only statements allowed to name a module file at all, so an app-side
-    // relative import (which would instantiate a second `AsyncLocalStorage`)
-    // shows up as an unexpected member rather than passing as an extra entry.
     const specifiers = new Set(hits.map((hit) => /from '([^']+)'/.exec(hit)?.[1] ?? '<unparsed>'));
     expect([...specifiers].sort()).toEqual([...barrelSpecifiers].sort());
     expect(hits.length).toBe(CONTEXT_MODULES.length);
   });
 
   it('every application-side consumer imports them from @rembric/core', () => {
-    // The other half of the rule: the static set above only proves nothing else
-    // *names the file*. These are the app-side consumers that would break (each
-    // wrapping or reading the store) if any of them resolved the symbol
-    // from anywhere other than the package the MCP tree reads.
     const consumers = [
       { file: 'apps/web/src/app/mcp/[[...path]]/route.ts', symbol: 'runWithContext' },
       { file: 'apps/web/src/lib/mcp-server.ts', symbol: 'SessionRouter' },
@@ -1698,12 +1351,8 @@ describe('server-context single-instance invariant', () => {
       mcpSessionId: null,
     };
 
-    // Control: the reader really does read the store, so the assertion below
-    // cannot pass by the package ignoring the context altogether.
     expect(() => mcp.isPathScoped()).toThrow(/request context missing/);
 
-    // core enters the context; the package reads it. A second instance in either
-    // tree makes this throw `request context missing` instead.
     await expect(core.runWithContext(ctx, () => Promise.resolve(mcp.isPathScoped()))).resolves.toBe(
       false,
     );
@@ -1715,9 +1364,6 @@ describe('server-context single-instance invariant', () => {
   });
 });
 
-// Per-transport discovery state in a module-level registry only misbehaves
-// observably when two transports are live, so a re-introduced global would pass
-// every single-transport test. Asserted here as well as behaviourally.
 describe('roots-discovery state ownership invariant', () => {
   const src = readFileSync(join(mcpRoot, 'roots-discovery.ts'), 'utf8');
 
@@ -1729,8 +1375,6 @@ describe('roots-discovery state ownership invariant', () => {
   });
 
   it('owns that state through a WeakMap keyed by the connection server', () => {
-    // The anti-vacuity control for the assertion above: without it, deleting the
-    // ownership mechanism outright would also pass.
     expect(/^const\s+\w+\s*=\s*new\s+WeakMap<McpServer,/m.test(src)).toBe(true);
   });
 
@@ -1739,17 +1383,7 @@ describe('roots-discovery state ownership invariant', () => {
   });
 });
 
-// A summary payload is trimmed twice: once by the client that sends it, once by
-// the server that stores it. Two tail-cuts are idempotent — the result is the
-// last min(bounds) characters — so the bounds are free to disagree. The SIDES
-// are not: a client tail-cut followed by a server head-cut yields a middle
-// window, which is what shipped until 2026-07-28. Asserting the two numbers
-// agreed would have been the wrong guard; it would fail on a correct tree and
-// pass on the broken one.
 describe('summary truncation keeps the same side in every layer', () => {
-  // One entry per language, each pinned to that language's actual tail idiom.
-  // Deliberately NOT a generic "contains a minus sign" match: the point is that
-  // switching any of these to a head-cut fails here.
   const clientTrimmers = [
     {
       file: 'apps/plugin/scripts/_transcript.sh',
@@ -1790,9 +1424,6 @@ describe('summary truncation keeps the same side in every layer', () => {
   });
 });
 
-// Asserts every surface carries the one definition AND that the enumeration is
-// complete. `design.md` said six sites; enumerating them found eight, which is
-// why the count is asserted rather than trusted.
 describe('the session-summary rubric has one source', () => {
   const surfaces = [
     'packages/mcp/src/instructions.ts',
@@ -1848,13 +1479,6 @@ describe('the session-summary rubric has one source', () => {
     }
   });
 
-  // NOTE: derived from `git grep`, so it only sees TRACKED files — a new surface
-  // passes until it is staged. That is why this caught `stop-nudge.sh` at
-  // pre-push rather than during development, and it is the correct trade: the
-  // alternative walks the working tree and flags scratch files. The pathspec
-  // covers `packages/` as well as `apps/`: `session-nudge.ts` moved to the
-  // domain layer, and a rubric surface that leaves the app tree must not leave
-  // the enumeration with it.
   it('the enumeration above is complete', () => {
     const candidates = execSync(
       `git -C ${repoRoot} ls-files -- apps/ packages/ ':!*.test.*' ':!*/tests/*' ':!apps/plugin/test/**' ':!apps/plugin/bin/rembric-bridge.mjs'`,
@@ -1884,13 +1508,6 @@ describe('the session-summary rubric has one source', () => {
   });
 });
 
-// A SECOND, independent enumeration: compaction-time protocol text is a
-// different class of surface from the always-present rubric above, and that
-// guard can only ever see surfaces that carry ITS OWN canonical section
-// list — this block's text never did, which is why .opencode-plugin/plugin.ts
-// shipped a hand-written, diverging copy for a whole phase undetected
-// (design.md D24). Grepped by a marker specific to THIS text so the two
-// enumerations stay independent.
 describe('the post-compaction protocol text has one source', () => {
   const surfaces = [
     'apps/plugin/scripts/post-compact.sh',
@@ -1899,14 +1516,6 @@ describe('the post-compaction protocol text has one source', () => {
     'apps/plugin/.hermes-plugin/__init__.py',
   ];
 
-  // NOTE: derived from `git grep`, so it only sees TRACKED files — stage the
-  // plugin files before running it, same caveat as the rubric enumeration
-  // above. `plugin.ts` carries no literal copy of the text (it imports
-  // POST_COMPACT_NUDGE_CORE), so the symbol name is grepped alongside the
-  // literal marker — `.d.mts`'s declaration and the JSON fixture also name
-  // that symbol/text and are excluded, as summary-rubric.ts is above. The
-  // pathspec covers `packages/` too: a surface that moves out of the app tree
-  // must not fall out of the enumeration.
   it('the enumeration above is complete', () => {
     const found = execSync(
       `git -C ${repoRoot} grep -l -e 'Resumed from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ packages/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
@@ -1950,7 +1559,6 @@ describe('derived-table reproducibility invariant', () => {
         'reproducible from source tables by a pinned recipe").',
     ).toEqual([]);
 
-    // A partition, not a subset: a listed table that no longer exists is drift too.
     expect([...owned].sort()).toEqual(classified);
   });
 
@@ -1974,7 +1582,6 @@ describe('derived-table reproducibility invariant', () => {
   it('every named rebuild entry point is still exported by the module it names', () => {
     for (const [table, entry] of Object.entries(DERIVED_TABLES)) {
       if (!entry.rebuild) continue;
-      // `rebuild.module` is relative to the domain layer's source root.
       const src = readFileSync(join(coreRoot, entry.rebuild.module), 'utf8');
       const exported = new RegExp(
         `export\\s+(?:async\\s+)?(?:function|const)\\s+${entry.rebuild.entryPoint}\\b`,
@@ -2001,20 +1608,6 @@ describe('derived-table reproducibility invariant', () => {
   });
 });
 
-/**
- * Scope-is-one-arm invariant.
- *
- * `Scope` carries a single `{ kind: 'project' }` arm. The global arm and every
- * symbol that served it were deleted; nothing may reintroduce one, in
- * production code OR in a fixture — the retrieval harness kept its own copy of
- * the global scope alive long after the production one stopped being reachable,
- * which is how a phantom arm survived a release.
- *
- * The `memory.scope` COLUMN is a different thing and is deliberately NOT
- * matched here: it is still written as the constant `'project'`, the migration
- * tests still construct pre-migration rows carrying `'global'`, and its removal
- * is a separate change (memory/spec.md).
- */
 const GLOBAL_SCOPE_PATTERNS: { pattern: RegExp; description: string }[] = [
   { pattern: /\bSCOPE_GLOBAL\b/, description: '`SCOPE_GLOBAL` — deleted with the global arm' },
   {
@@ -2031,11 +1624,6 @@ const GLOBAL_SCOPE_PATTERNS: { pattern: RegExp; description: string }[] = [
   },
 ];
 
-/**
- * Every `.ts` under `src/`, tests included: a fixture may not reintroduce it
- * either. This file is the one exclusion — it names the forbidden tokens in
- * order to forbid them, so it matches its own patterns.
- */
 function listAllTsFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
@@ -2068,8 +1656,6 @@ function scanForPattern(
 }
 
 describe('scope-is-one-arm invariant', () => {
-  // The protocol layer is scanned here too: it builds scopes (`projectScope`),
-  // so leaving it out would exempt it.
   const files = [
     ...listAllTsFiles(srcRoot),
     ...listAllTsFiles(coreRoot),
@@ -2077,16 +1663,7 @@ describe('scope-is-one-arm invariant', () => {
     ...listAllTsFiles(mcpRoot),
   ];
 
-  // Non-vacuity control. Every assertion below is negative, and an empty file
-  // list — or a scan that never reads a line — satisfies all of them. This
-  // greps for a token that MUST be present, through the identical scanner.
   it('the scan reaches source files and reads their non-comment lines', () => {
-    // Counted over the whole file list rather than its `.test.ts` subset: the
-    // four roots hold the app tree plus three packages, and the tests for the
-    // package half still live in the application tree, so a test-file count
-    // measured this scan's population when the app tree was the server's 137
-    // test files and now measures almost nothing. The token controls below are
-    // what prove the lines are actually read.
     expect(files.length).toBeGreaterThan(100);
     const control = scanForPattern(files, /\bprojectScope\(/);
     expect(control.length).toBeGreaterThan(20);
@@ -2104,26 +1681,10 @@ describe('scope-is-one-arm invariant', () => {
   }
 });
 
-/**
- * One-construction-site invariant for the widened search scope.
- *
- * A widened scope carries its own authorization decision, so a second place
- * that builds one is a second place that decides who may read what — the shape
- * `auth/spec.md` forbids ("constructed at exactly one site that has already
- * made that decision"). The compiler already refuses the value on every write;
- * this is the second line, for the case the compiler cannot see: another
- * request-facing module assembling the literal itself.
- */
 const WIDENED_SCOPE_DISCRIMINANT = /'authorized-projects'/;
 const WIDENED_SCOPE_SITES: Record<string, number> = {
   'packages/db/src/scope.ts': 1,
   'packages/mcp/src/_shared.ts': 1,
-  // The retrieval eval harness's in-memory retriever has to hand the search
-  // path the same value the production construction site would — it builds it
-  // from a resolved `QueryScope` instead of importing it, because that site
-  // takes an MCP request context. Not request-facing: nothing outside
-  // `src/test-support/` reads it, so it decides nobody's access. Everything
-  // else in this list stays pinned to one site.
   'packages/core/src/test-support/retrieval/retrievers/hybrid.ts': 1,
 };
 
@@ -2149,8 +1710,6 @@ describe('the widened scope has one construction site', () => {
   it('names the discriminant in exactly the declaring module and the one builder', () => {
     const matches = scanForPattern(production, WIDENED_SCOPE_DISCRIMINANT);
 
-    // Non-vacuity: a rename would empty this, and every count assertion below
-    // would then hold over nothing.
     expect(matches.length).toBeGreaterThan(0);
 
     const byFile: Record<string, number> = {};

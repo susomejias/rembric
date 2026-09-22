@@ -8,11 +8,6 @@ interface DumpState {
   items: IngestedMemory[];
 }
 
-/**
- * The "just put it in CLAUDE.md" alternative (design.md Decision 4): ignores
- * the query entirely and returns the N most recent memories in scope, up to
- * a token budget — whichever bound is hit first.
- */
 export const memoryMdDumpRetriever: Retriever<DumpState> = {
   name: 'memory-md-dump',
   discriminatingMetric: `avgTokensReturned vs 'hybrid' at comparable recall — the token cost of the context-dump alternative`,

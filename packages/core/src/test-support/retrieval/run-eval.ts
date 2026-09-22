@@ -77,8 +77,6 @@ function scoreOutcomes(
         type: o.query.type,
         k,
         retrieved: o.retrieved.slice(0, k),
-        // A retrieved id the corpus does not know is not silently treated as
-        // home: it is the shape a leak from outside the corpus would take.
         retrievedProjectIds: o.retrieved.slice(0, k).map((id) => byId.get(id)?.projectId ?? id),
         scopeProjectId: o.scope.projectId,
         widened: o.query.widened === true,
@@ -143,8 +141,6 @@ function checkSanity(corpus: IngestedCorpus, reports: RetrieverReport[]): string
       );
   }
 
-  // A cap of 0 is satisfied by an empty result set, so the denominator is
-  // asserted beside it — the same non-vacuity control the widening tests carry.
   for (const report of reports) {
     for (const k of K_VALUES) {
       const rows = report.aggregateByK[k]!.nForeignScopeRows;
@@ -209,11 +205,6 @@ interface Baseline {
   discriminatingMetric: string;
   ceilings: Record<number, MetricFloors>;
   floors: Record<number, MetricFloors>;
-  /**
-   * Lower-is-better metrics, stored apart from `floors` so the two can never be
-   * compared in the wrong direction. A run fails when a measured value rises
-   * ABOVE its cap.
-   */
   caps: Record<number, MetricCaps>;
 }
 
@@ -249,8 +240,6 @@ function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }
     tolerance: FLOOR_TOLERANCE,
     allowLowering: opts.allowLowering,
   });
-  // One query's worth of headroom on each axis, from the committed query set's
-  // own denominators, so the caps stay one-query-tight as the set grows.
   const anyK = report.aggregateByK[MAX_K]!;
   const { caps, notes: capNotes } = ratchetCaps({
     label: report.retriever,
@@ -259,10 +248,6 @@ function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }
     headroomByMetric: {
       abstentionFalsePositiveRate: anyK.nAbstention > 0 ? 1 / anyK.nAbstention : 0,
       overAbstentionRate: anyK.n > 0 ? 1 / anyK.n : 0,
-      // Zero, not one row's worth of its own denominator (1/nForeignScopeRows):
-      // the other two are tuning bounds where one query going the wrong way is
-      // measurement noise, and this one is an isolation gate where one row is
-      // the defect.
       foreignScopeRate: 0,
     },
     allowLoosening: opts.allowLowering,
@@ -306,29 +291,11 @@ function checkFloors(reports: RetrieverReport[]): string[] {
   return failures;
 }
 
-/**
- * The committed calibration grid. `null` on either axis is the shipped
- * (disabled) value and is included so the grid always contains its own control.
- * Steps are uniform so "two grid steps wide" in the acceptance bar
- * (memory/spec.md) is a well-defined distance.
- */
 const SWEEP_FLOORS: (number | null)[] = [null, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6];
-/**
- * `0` keeps every row the filter sees, so it is the control that separates "the
- * ratio changed the page" from "levelling the pool at all did". The gate now
- * levels the WHOLE fused pool, so `0` and `null` must agree on every metric;
- * a row where they do not is a defect in the level path, not a calibration
- * finding.
- */
 const SWEEP_RATIOS: (number | null)[] = [null, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 
 const fmt = (v: number | null, digits = 3) => (v === null ? 'n/a' : v.toFixed(digits));
 
-/**
- * Runs the production hybrid retriever over the committed grid. Deterministic:
- * no latency is printed and every value is a function of corpus, query set and
- * grid point alone.
- */
 async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
   const hybrid = RETRIEVERS.find((r) => r.name === 'hybrid');
   if (!hybrid) throw new Error('the sweep needs the hybrid retriever');
@@ -337,8 +304,6 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
   console.log('query'.padEnd(38), 'gold', ' pool', 'level', 'coverage', 'cosine', '   N');
   const state = await hybrid.init(corpus);
   const leaders: { id: string; hasGold: boolean; level: number; poolSize: number }[] = [];
-  // The weights, not just the levels: without them a reader cannot tell a level
-  // that moved because the row changed from one that moved because the corpus did.
   const termStats: string[] = [];
   for (const q of QUERIES) {
     const scope = resolveScope(corpus, q);
@@ -361,12 +326,8 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
       fmt(leader?.cosine ?? 0).padStart(6),
       String(leader?.documentCount ?? 0).padStart(4),
     );
-    // The index's own terms, in the order the read reported them: printing a
-    // JS-tokenised list here would show terms the weighting never looked up.
     const dfs = [...(leader?.documentFrequencies.entries() ?? [])]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      // `—`, not 0: the index reported no such term, which carries the MAXIMUM
-      // weight — a corpus cannot answer a term it does not hold.
       .map(([term, df]) => `${term}=${df ?? '—'}`)
       .join(' ');
     termStats.push(`${q.id.padEnd(38)} N=${leader?.documentCount ?? 0}  df: ${dfs}`);
@@ -376,9 +337,6 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
     'df is the document count over the WHOLE index; `—` means the index does not hold the term.',
   );
   for (const line of termStats) console.log(line);
-  // The gate covers the whole fused pool, so every query observes both
-  // mechanisms regardless of page size — the grid below is evidence for all of
-  // them, not just for the ones whose pool outgrew a prefix.
   const pools = leaders.map((l) => l.poolSize);
   console.log(
     `fused pool per query: min ${Math.min(...pools)}, max ${Math.max(...pools)} — ` +
@@ -386,9 +344,6 @@ async function sweepAbstention(corpus: IngestedCorpus): Promise<void> {
   );
   await hybrid.teardown?.(state);
 
-  // Whether ANY floor can work is a separability question, and it is decided by
-  // these two ordered lists rather than by the grid: a floor exists iff the
-  // highest abstention level is below the lowest gold-bearing one.
   const goldLevels = leaders
     .filter((l) => l.hasGold)
     .map((l) => l.level)

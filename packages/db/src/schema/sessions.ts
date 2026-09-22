@@ -2,11 +2,6 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 import { tokens } from './tokens.js';
 
-/**
- * Backing store for /dashboard cookie sessions. The cookie value carries
- * the session id plus an HMAC signature; the server validates by looking
- * up the row and checking expiration.
- */
 export const dashboardSessions = sqliteTable(
   'dashboard_sessions',
   {

@@ -10,14 +10,6 @@ export interface EntityBackfillWorkerOptions {
   now?: () => Date;
 }
 
-/**
- * Resumable batched backfill over existing memories, in the shape of
- * `EmbeddingWorker`: "done" is derived from `findMissingScans` (a LEFT JOIN
- * against `memory_entity_scan`) rather than a separate cursor, so a process
- * restart mid-backfill just resumes from whatever is still missing.
- * Extraction is pure/synchronous (no model, no network), so unlike the
- * embedding worker this never needs to be awaited mid-batch.
- */
 export class EntityBackfillWorker {
   private readonly batchSize: number;
   private readonly now: () => Date;
@@ -34,11 +26,6 @@ export class EntityBackfillWorker {
     return this.possiblyPending;
   }
 
-  /**
-   * Atomically empty the derived index so the drain re-scans the whole corpus.
-   * Resets `possiblyPending` too, so a caller that forgets `force` on the next
-   * batch still drains rather than trusting a flag from before the wipe.
-   */
   resetIndex(): void {
     resetEntityIndex(this.opts.repos, this.opts.tx);
     this.possiblyPending = true;

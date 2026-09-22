@@ -3,24 +3,6 @@ import { ulid } from 'ulid';
 
 import { DomainError } from './errors.js';
 
-/**
- * Project resolution and lifecycle.
- *
- * Projects identify the scope of a memory beyond `global`. They are
- * identified by an opaque slug — the cross-machine logical identity of
- * the project. The slug appears in the URL path `/mcp/<slug>`, the
- * `project.use({slug})` tool argument, and the `projects.slug` column.
- * Paths never appear in the API or in the DB.
- *
- * `displayName` exists so a rename via the dashboard doesn't change the
- * canonical `slug` identifier, preserving all memory associations.
- */
-
-/**
- * Strict slug regex enforced on creation. Legacy values that pre-date this
- * change (mixed case, dots, underscores) continue to function for read and
- * write — only the `create()` path enforces the new shape.
- */
 export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export interface ProjectView extends Project {
@@ -40,12 +22,6 @@ export class ProjectsService {
     return this.repos.projects.findBySlug(slug);
   }
 
-  /**
-   * Insert a new project with the given slug.
-   *
-   * The slug MUST match the strict regex; legacy-shaped values cannot be
-   * minted here (they only exist for rows created under v0.1).
-   */
   create(input: { slug: string; displayName?: string | null }): Project {
     if (!SLUG_REGEX.test(input.slug)) {
       throw new DomainError(
@@ -70,11 +46,6 @@ export class ProjectsService {
     return this.repos.projects.findById(id);
   }
 
-  /**
-   * The project a path-less `/mcp` connection resolves to. Throws rather than
-   * returning undefined: migration `0031` creates the row, so its absence is a
-   * broken database and not a recoverable request-level condition.
-   */
   getDefault(): Project {
     const row = this.repos.projects.findDefault();
     if (!row) {
@@ -101,13 +72,6 @@ export class ProjectsService {
   }
 
   archive(id: string): Project {
-    // No fallback scope sits behind the default project, so archiving it would
-    // leave a path-less connection with no resolution and refuse every write it
-    // routes. Guarded here as well as in the template, because the dashboard's
-    // archive endpoint is reachable with a crafted request carrying a valid CSRF
-    // token. `getDefault()` rather than `findDefault()?.id`: with no `is_default`
-    // row the comparison is false and the guard silently permits the archive, in
-    // exactly the broken state its reason argues from.
     if (this.getDefault().id === id) {
       throw new DomainError(
         'conflict',
@@ -129,10 +93,6 @@ export class ProjectsService {
     return updated;
   }
 
-  /**
-   * Assert that a project exists and is not archived. Used as a guard by
-   * write paths that would otherwise admit data into an archived project.
-   */
   assertWritable(id: string): void {
     const project = this.getById(id);
     if (!project) {
@@ -146,11 +106,6 @@ export class ProjectsService {
     }
   }
 
-  /**
-   * Return up to `limit` slugs whose Levenshtein distance to `input` is ≤
-   * `maxDistance` (default 3). Deterministic — no LLM, no embeddings. Used
-   * to populate `suggestedSlugs[]` in `project_not_found` responses.
-   */
   findSimilarSlugs(input: string, opts: { limit?: number; maxDistance?: number } = {}): string[] {
     const limit = opts.limit ?? 3;
     const maxDistance = opts.maxDistance ?? 3;
@@ -174,10 +129,6 @@ function withLabel(row: Project): ProjectView {
   return { ...row, label: row.displayName ?? row.slug };
 }
 
-/**
- * Iterative Levenshtein distance. O(n*m) time, O(min(n,m)) space.
- * Pure function; same input always yields same output.
- */
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (a.length === 0) return b.length;

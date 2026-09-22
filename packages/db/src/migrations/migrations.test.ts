@@ -31,8 +31,6 @@ describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () 
         "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok1', 'tok1-name', 'h', '*', 0)",
       )
       .run();
-    // > the old 2000 cap and > the new 10000 server cap: the DB no longer
-    // enforces length; the cap lives only in SUMMARY_MAX_CHARS server-side.
     expect(() =>
       raw
         .prepare(
@@ -103,10 +101,6 @@ describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () 
   });
 });
 
-// Prod-safety for 0014: the memory_vec rebuild must run over a POPULATED
-// 2-column vec0 table without losing embeddings or corrupting the vtable's
-// shadow tables (the failure mode of ALTER…RENAME), and must derive the new
-// partition_key/status/type metadata correctly from the joined memory rows.
 describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   let dataDir: string;
   let slicedDir: string;
@@ -149,8 +143,6 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   });
 
   it('preserves every embedding byte-for-byte and derives metadata, without corrupting the vtable', () => {
-    // Pre-0014 state: a project + a global and a project memory (different
-    // statuses/types) each with a 2-column memory_vec row.
     raw
       .prepare(
         "INSERT INTO projects (id, slug, display_name, created_at) VALUES ('proj1', 'proj1', 'proj1', 0)",
@@ -203,13 +195,7 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
       { memory_id: 'g1', status: 'active', type: 'user' },
       { memory_id: 'p1', status: 'superseded', type: 'project' },
     ]);
-    // The invariant, not the value: each vector sits at ITS memory's project.
-    // A later migration that moves a memory between projects moves the vector
-    // with it and this assertion needs no edit.
     for (const r of rows) {
-      // 0031 repointed every row onto a project, so this is never null after
-      // the full chain — asserted rather than assumed, which is also what
-      // licenses the non-null below.
       expect(r.project_id).not.toBeNull();
       expect(r.partition_key).toBe(partitionKeyFor(r.project_id!));
     }
@@ -230,8 +216,6 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
       .get('g1');
     expect(synced!.status).toBe('archived');
 
-    // The rebuilt vtable answers a partition+status-filtered kNN (proves the
-    // shadow tables are intact — ALTER…RENAME would have left them dangling).
     const hits = raw
       .prepare<[Buffer, string], { memory_id: string }>(
         `SELECT memory_id FROM memory_vec
@@ -296,8 +280,6 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
   });
 
   it('drops the llm_* columns, backfills NULL scope, renames consolidation_id → run_id, and preserves every row', () => {
-    // Pre-0015 state: the old shape still has llm_provider/llm_model and a
-    // nullable scope; consolidation_ops still has the consolidation_id column.
     raw
       .prepare(
         "INSERT INTO consolidation_runs (id, started_at, llm_provider, llm_model, scope, summary) VALUES ('run-a', 0, 'openai', 'gpt-x', 'global', '{}')",
@@ -359,10 +341,6 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
       .all();
     expect(runs.map((r) => r.id)).toEqual(['run-a', 'run-legacy']);
     expect(runs.find((r) => r.id === 'run-legacy')!.scope).toBe('unknown');
-    // `run-a` had a scope, so the backfill must not have touched it. Which scope
-    // it carries is a later migration's business — what holds for every one of
-    // them is that a project-scoped run names a project that exists, which is
-    // the string every reader parses.
     const runA = runs.find((r) => r.id === 'run-a')!.scope;
     expect(runA).not.toBe('unknown');
     if (runA !== 'global') {
@@ -388,11 +366,6 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
   });
 
   it('migration simulation: a fully-populated prod-like DB upgrades with no data loss and no corruption', () => {
-    // Seed every table 0015 could plausibly interact with — the rebuilt
-    // parent (consolidation_runs), its child (consolidation_ops), plus a
-    // representative spread of unrelated tables — so PRAGMA integrity_check
-    // and foreign_key_check below cover the WHOLE file, not just the two
-    // touched tables.
     raw
       .prepare(
         "INSERT INTO tokens (id, name, hash, scope, created_at) VALUES ('tok1', 'tok1-name', 'h', '*', 0)",
@@ -481,8 +454,6 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
     expect(raw.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 
-    // No row vanished from any table — stated as the invariant, so a later
-    // migration that legitimately ADDS a row does not edit this expectation.
     const after = countAll();
     expect(Object.keys(after).filter((t) => after[t]! < before[t]!)).toEqual([]);
 
@@ -517,11 +488,6 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
   });
 });
 
-// Regression for the production incident where 0011 failed with
-// `FOREIGN KEY constraint failed` because `sessions` is a FK parent
-// (prompts/memory/confirmations all reference it) and the table-rebuild
-// dance dropped a populated parent under `foreign_keys=ON`. The fix is
-// `PRAGMA defer_foreign_keys = ON` at the top of the migration.
 describe('migrations 0011 + 0012 with referencing children', () => {
   let dataDir: string;
   let slicedDir: string;
@@ -599,9 +565,6 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       .map((r) => r.filename);
     expect(before).not.toContain('0011_summary_length_check.sql');
 
-    // Re-run migrations against the FULL dir → 0011 and 0012 are new and run.
-    // Both rebuild `sessions` while it is a populated FK parent, so this
-    // exercises the FK-safe dance for both migrations.
     const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
     expect(result.applied).toEqual([
       '0011_summary_length_check.sql',
@@ -658,18 +621,12 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       expect(row.sid).toBe('sess1');
     }
 
-    // After 0012 the summary CHECK is gone — an oversized direct UPDATE
-    // succeeds at the DB level (the cap is enforced server-side only).
     expect(() =>
       raw.prepare("UPDATE sessions SET summary = ? WHERE id = 'sess1'").run('a'.repeat(20_000)),
     ).not.toThrow();
   });
 });
 
-// Prod-safety for 0016: the title backfill must produce a 1..100-char NON-EMPTY
-// title for EVERY pre-existing row — including adversarial content the DB never
-// forbade (empty/whitespace, markdown-only first line, CRLF, over-100) — or the
-// CHECK(length(title) BETWEEN 1 AND 100) aborts the irreversible migration.
 describe('migration 0016_add_memory_title backfill over adversarial content', () => {
   let dataDir: string;
   let slicedDir: string;
@@ -701,8 +658,6 @@ describe('migration 0016_add_memory_title backfill over adversarial content', ()
   });
 
   it('backfills a valid 1..100-char title for every adversarial pre-0016 row', () => {
-    // Pre-0016 schema has `content NOT NULL` but no non-empty CHECK, so each of
-    // these is a legal legacy row the backfill must survive.
     const rows: Array<{ id: string; content: string }> = [
       { id: 'normal', content: '**Bold lead** then body' },
       { id: 'empty', content: '' },
@@ -740,10 +695,6 @@ describe('migration 0016_add_memory_title backfill over adversarial content', ()
   });
 });
 
-// Prod-safety for 0026: the CHECK is added by rebuilding a POPULATED
-// `confirmations` table, so every historical affirmation and refutation must
-// survive byte-for-byte, all four indexes must come back (a DROP TABLE takes
-// every index with it), and the domain must be closed afterwards.
 describe('migration 0026_confirmation_verdict_check over populated data', () => {
   let dataDir: string;
   let slicedDir: string;
@@ -893,8 +844,6 @@ describe('migration 0026_confirmation_verdict_check over populated data', () => 
 
   it('normalizes an out-of-domain legacy verdict instead of aborting the upgrade', () => {
     seed();
-    // Only reachable by a hand-edited database: 0024 shipped the column without
-    // a CHECK, so this is the case that would otherwise brick the boot.
     raw
       .prepare(
         "INSERT INTO confirmations (id, memory_id, event_ts, verdict) VALUES ('c-legacy', 'm1', 40, 'yes')",
@@ -1145,8 +1094,6 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
       .get()!.sql;
 
     raw.exec(`DROP TABLE memory_fts`);
-    // The window between the drop and the recreate is unreachable by a serving
-    // request — migrations run before the server serves — but it is real.
     expect(() => df('ubiquitousterm')).toThrow(/no such fts5 table/);
 
     raw.exec(

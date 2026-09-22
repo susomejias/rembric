@@ -58,12 +58,6 @@ describe('deriveSlugFromUri', () => {
   });
 });
 
-/**
- * Outcome classification and single-flight bookkeeping. The once-only discovery
- * slot is consumed by an ANSWER, never by an attempt: the projects spec makes
- * the difference load-bearing, because a consumed slot misscopes the connection
- * for its whole life and no verb reassigns what it wrote.
- */
 describe('maybeDiscoverViaRoots outcome classification', () => {
   const TOKEN = 'tk_roots_unit';
   let seq = 0;
@@ -100,8 +94,6 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
     };
     seq += 1;
     return {
-      // Only the members the discovery path reads: the real McpServer and
-      // ProjectsService drag a transport and a database in behind them.
       deps: { server, router, projects } as unknown as RootsDiscoveryDeps,
       router,
       ctx: {
@@ -223,10 +215,6 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
     expect(h.listRootsCalls()).toBe(1);
   });
 
-  /**
-   * Two DISTINCT fake servers: reusing one for "two transports" would share the
-   * state record and silently invert what these arms assert.
-   */
   describe('per-transport ownership of the state record', () => {
     it('a refresh pending on one transport does not reach another', async () => {
       let aRoot = 'file:///x/known';
@@ -259,8 +247,6 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
       });
       await maybeDiscoverViaRoots(h.deps, h.ctx);
       expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
-      // A new connection reusing the same identity tuple starts cold, so no
-      // sentinel outlives the transport it describes.
       const reconnected = harness({
         listRoots: () => Promise.resolve({ roots: [{ uri: 'file:///x/known' }] }),
       });

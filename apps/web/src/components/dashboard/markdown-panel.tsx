@@ -6,19 +6,6 @@ import ReactMarkdown from 'react-markdown';
 
 import { LABEL } from './ui';
 
-/**
- * A markdown body inside the shared panel frame, with the mockup's copy control.
- *
- * `react-markdown` is safe by construction for this boundary — raw HTML in a
- * memory's content is never rendered as markup, every text node is escaped, and
- * no `rehype-raw` is installed.
- *
- * The element mapping is explicit rather than the mockup's `prose prose-invert`
- * classes: `prose` comes from `@tailwindcss/typography`, which this workspace
- * does not depend on, so those classes generate no CSS at all and the markdown
- * would render at the browser's defaults. Each element therefore names its own
- * ink role here.
- */
 export function MarkdownPanel({
   eyebrow,
   title,

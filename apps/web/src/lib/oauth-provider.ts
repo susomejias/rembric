@@ -25,32 +25,11 @@ import {
   type TokenPair,
 } from '@rembric/core';
 
-/**
- * The MCP SDK's `OAuthServerProvider` over this app's `OAuthService`. The SDK's
- * vetted `mcpAuthRouter` (installed by `lib/oauth.ts`) owns the protocol surface
- * — PKCE validation, redirect/CSRF/state handling, metadata, DCR, rate limiting
- * — while our audited service owns persistence and logic.
- *
- * `authorize()` only receives the response object, so it cannot read the
- * operator session — it signs the SDK-validated request and redirects to the
- * dashboard consent screen (which has session + CSRF), which finishes the flow
- * by issuing a code.
- *
- * The `res` parameter is deliberately untyped here: `express` is a transitive
- * dependency of the SDK and is not importable from this workspace, so the
- * parameter type comes from the `OAuthServerProvider` return annotation
- * (contextual typing) rather than an explicit `express.Response` import.
- */
-
 export interface OAuthProviderOptions {
   oauth: OAuthService;
-  /** Resolves the consented project from the RFC 8707 resource path. */
   projects: ProjectsService;
-  /** OAuth issuer / external base URL (no trailing slash). */
   issuer: string;
-  /** HMAC key for signing the consent hand-off (derived from session secret). */
   areqKey: Buffer;
-  /** Seconds an unconsented authorization request stays valid. */
   consentTtlSeconds?: number;
   now?: () => Date;
 }
@@ -58,11 +37,6 @@ export interface OAuthProviderOptions {
 const CONSENT_PATH = '/dashboard/oauth/consent';
 const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
 
-/**
- * Extract the consented project id from an RFC 8707 `resource` indicator whose
- * path is `/mcp/<slug>`. Returns null when there is no resource, the path is
- * not project-scoped, or the slug does not resolve — a global grant.
- */
 function projectIdFromResource(
   resource: URL | undefined,
   projects: ProjectsService,
@@ -163,19 +137,12 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthServerProv
       client: OAuthClientInformationFull,
       request: OAuthTokenRevocationRequest,
     ): Promise<void> {
-      // RFC 7009: only the client that owns the token may revoke it. A request
-      // for another client's token is a no-op success (handled in the service).
       oauth.revokeByToken(request.token, client.client_id);
       return Promise.resolve();
     },
   };
 }
 
-/**
- * Run a synchronous provider operation, mapping our `OAuthError` to the SDK's
- * error classes so the token handler renders the right 400-class response
- * (rather than a generic 500). Returns a rejected promise on failure.
- */
 function settled<T>(fn: () => T): Promise<T> {
   try {
     return Promise.resolve(fn());

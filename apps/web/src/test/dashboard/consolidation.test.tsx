@@ -10,11 +10,6 @@ installViewMocks('/dashboard/consolidation');
 const PAGE_SIZE = 50;
 const SEEDED = PAGE_SIZE + 2;
 
-/**
- * `summary` is a plain text column: the sweep writes structured counts, but a
- * legacy LLM run wrote prose and nothing constrains the column to JSON. The run
- * detail page must fall back to the raw text rather than throw on parse.
- */
 const MALFORMED_SUMMARY = '{not json <b>raw</b>';
 
 let t: TestDb;

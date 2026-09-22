@@ -12,7 +12,6 @@ import {
 import { NAV, navEntryForPath, type NavEntry } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
-/** Counts the bar paints as a badge, each keyed to the one nav entry that resolves it. */
 export interface NavBadges {
   readonly needsReview?: number;
   readonly pendingJudgments?: number;
@@ -20,28 +19,8 @@ export interface NavBadges {
 
 const NAV_BY_KEY = new Map(NAV.map((entry) => [entry.key, entry]));
 
-/**
- * The bar is `fixed`, so it is out of flow and cannot clear the content by
- * itself; the spacer rendered after it is what does. Header and spacer repeat
- * the same literal class because the only failure here is the two drifting
- * apart, which overlaps the first row of a view with the bar and nothing else.
- */
 const BAR_BOX = 'h-[68px]';
 
-/**
- * The dashboard navigation: Spectrum UI's expandable action bar, fixed to the
- * top of the viewport, with the brand mark at its left and the theme toggle at
- * its right.
- *
- * The active entry and the navigation target both come from `lib/nav`: the item
- * `id` is the nav entry's `key`, so the highlighted action and the route a click
- * resolves to cannot disagree with the table.
- *
- * It also owns the content column, and that is deliberate rather than an
- * oversight: `/dashboard/login` is a full-bleed screen that must keep rendering
- * without the frame, and no layout can opt out of its parent or read the
- * pathname, so the only place the exception can live is here.
- */
 export function ActionNav({
   children,
   version,
@@ -76,9 +55,6 @@ export function ActionNav({
     [router],
   );
 
-  // The sign-in screen covers the viewport and has no chrome, content column
-  // included: its own `min-h-screen` main is the whole page, and padding it
-  // would inset it against the page canvas and add a scrollbar.
   if (pathname === '/dashboard/login') return <>{children}</>;
 
   return (
@@ -126,13 +102,6 @@ function badgeCount(entry: NavEntry, badges: NavBadges): string | undefined {
   return count === undefined || count <= 0 ? undefined : String(count);
 }
 
-/**
- * `.dark` on `<html>` is the only theme state; this button removes it and
- * records the choice. There is deliberately no React state and no `useEffect`
- * read of the class: the icon is selected by the `dark:` variant, so the server
- * and the client always render the same markup and the button cannot hydrate
- * against a theme the document already has.
- */
 function ThemeToggle({ storageKey }: { storageKey: string }) {
   return (
     <button
@@ -157,9 +126,5 @@ function toggleTheme(storageKey: string): void {
   root.classList.toggle('dark', next === 'dark');
   try {
     localStorage.setItem(storageKey, next);
-  } catch {
-    // A storage that refuses to be written (private mode, disabled cookies) must
-    // not break the toggle: the class is already applied, only the preference is
-    // lost on the next load.
-  }
+  } catch {}
 }

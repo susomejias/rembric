@@ -77,7 +77,7 @@ Behavioral changes are spec-driven. Specs in `openspec/specs/<area>/`; active pr
 - No floating promises (ESLint enforces).
 - `import type` for types; imports ordered builtin → external → internal → relative (auto-fixed).
 - Co-located tests `**/*.test.ts` beside the unit they cover (every workspace). Invariant tests are `apps/web/src/test/{invariants,runtime-invariants}.test.ts` and are sacred; the confinement scan they run covers four roots — `apps/web/src/`, `packages/db/src/`, `packages/core/src/` and `packages/mcp/src/`.
-- **Default to no comments.** Comment only when absence costs a future reader real time (magic numbers, hidden invariants, library quirks, public-API docstrings). Never restate code or reference the current task/PR. **Banner/section-divider comments (`// ──────`, `// === API ===`), structural labels that just name the block below, and docstrings that paraphrase the signature are an anti-pattern — do not add them.** A licit comment documents one concrete non-obvious fact (a why, an invariant, an ordering constraint), nothing more.
+- **No narrative comments.** Narrative comments, multi-line JSDoc, banner/section dividers, and comments referencing tasks/PRs/migrations are banned repo-wide — the sweep removed them. Allowed: tool directives (`eslint-disable`, `@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`, `prettier-ignore`); one-line justifications for `as unknown as` / `any` casts and genuine magic numbers; and comments a parser or test consumes (release-please carriers, invariant-test anchors — e.g. the `IMMUTABLE` line in `packages/db/src/schema/prompts.ts`, asserted by `apps/web/src/test/invariants.test.ts`).
 
 ## Skills
 

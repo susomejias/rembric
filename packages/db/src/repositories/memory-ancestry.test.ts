@@ -4,13 +4,6 @@ import { MemoryRepository } from '@rembric/db';
 
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
-/**
- * The shipped breadth-first walks, transcribed verbatim as equivalence ORACLES —
- * the idiom `memory-repository.perf.test.ts` uses for `LEGACY_NOT_EXISTS`. Every
- * assertion below compares the recursive CTE against these rather than against a
- * hand-written expectation, so an assertion cannot silently encode the new
- * behaviour it is supposed to be checking.
- */
 function oracleAncestorIds(
   findReplaces: (id: string) => string[] | undefined,
   start: readonly string[],
@@ -119,8 +112,6 @@ describe('unsafeAncestorIds — equivalence with the walk it replaces', () => {
       { id: 'lone', replaces: [] },
       { id: 'child', replaces: ['lone'] },
     ]);
-    // `check([])` would compare [] to [] — vacuous, since the guard clause returns
-    // before any query. Asserted directly instead, then the cases that do query.
     expect(repo.unsafeAncestorIds({ startIds: [], limit: CAP })).toEqual([]);
     expect(check(['does-not-exist'])).toEqual(['does-not-exist']);
     expect(check(['lone'])).toEqual(['lone']);
@@ -149,12 +140,6 @@ describe('unsafeAncestorIds — equivalence with the walk it replaces', () => {
 
   it('the database refuses to store a malformed `replaces`, so the stricter failure mode is unreachable', () => {
     seed([{ id: 'ok', replaces: [] }]);
-    // The CTE uses `json_each(m.replaces)`, which RAISES on malformed JSON where
-    // the old per-hop loop read the column into JS and would have seen garbage.
-    // That difference cannot be reached: `memory_replaces_ai`/`_au` (migration
-    // 0021) run `json_each(NEW.replaces)` on every write, so the corrupt state is
-    // rejected at INSERT and UPDATE, not merely undocumented. No defensive
-    // `json_valid` guard is added, because there is no path to guard.
     expect(() =>
       t.handle.raw.prepare(`UPDATE memory SET replaces = 'not json' WHERE id = 'ok'`).run(),
     ).toThrow(/malformed JSON/i);
@@ -184,9 +169,6 @@ describe('unsafeAncestorIds — the plan, and why not memory_replaces', () => {
       )
       .all()
       .filter((o) => o.type === 'index');
-    // Its PK is (predecessor_id, successor_id) and it is WITHOUT ROWID, so the PK
-    // IS the table. Nothing serves a successor_id lookup, so the ancestor
-    // direction would force a transient per-query index, linear in the edge table.
     expect(objects).toEqual([]);
   });
 
@@ -207,8 +189,6 @@ describe('unsafeAncestorIds — the plan, and why not memory_replaces', () => {
       .all()
       .map((r) => r.detail)
       .join(' | ');
-    // Recorded as an executable fact rather than a comment, so nobody re-proposes
-    // it or the `memory_replaces(successor_id)` index that would prop it up.
     expect(detail).toContain('AUTOMATIC COVERING INDEX');
   });
 });

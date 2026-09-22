@@ -7,11 +7,6 @@ import { createTestDb, type TestDb } from '../test/index.js';
 
 import { runSeed } from './seed-dev.js';
 
-/**
- * Process environment the seed is driven with. `NODE_ENV` is always present
- * because Next's `ProcessEnv` augmentation declares it required — the seed
- * itself reads only `REMBRIC_ALLOW_DESTRUCTIVE_SEED`.
- */
 function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { NODE_ENV: 'test', ...extra };
 }
@@ -65,11 +60,9 @@ describe('runSeed', () => {
   it('--reset wipes the previous seed and reseeds when env gate is satisfied', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 
-    // Confirm pre-state.
     const projects = new ProjectsService(createRepositories(db.handle.db));
     expect(projects.findBySlug('demo')).toBeDefined();
 
-    // Reset + reseed (env gate present).
     const result = runSeed({
       handle: db.handle,
       reset: true,
@@ -88,10 +81,6 @@ describe('runSeed', () => {
   it('--reset does not violate FK constraints when entity links/scan rows exist (regression: add-entity-index)', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 
-    // Simulate what the boot-time EntityBackfillWorker would have already
-    // done to the seeded memories before an operator resets — memory_entity_
-    // links and memory_entity_scan both reference `memory`, and wipe() must
-    // delete them before deleting `memory` itself.
     const repos = createRepositories(db.handle.db);
     const projects = new ProjectsService(repos);
     const demo = projects.findBySlug('demo');
@@ -124,11 +113,6 @@ describe('runSeed', () => {
   it('--reset does not violate FK constraints when a token names a set of projects (regression: grant-tokens-multiple-projects)', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 
-    // A set-scoped token's reach lives in `token_projects`, whose rows
-    // reference BOTH `tokens` and `projects` — so wipe() must delete them
-    // before either parent, or the deferred check fails the whole reset at
-    // COMMIT and the dev stack cannot boot until someone deletes the row by
-    // hand.
     const repos = createRepositories(db.handle.db);
     const projects = new ProjectsService(repos);
     const demo = projects.findBySlug('demo');
@@ -175,7 +159,6 @@ describe('runSeed', () => {
       '[seed-dev] --reset requires REMBRIC_ALLOW_DESTRUCTIVE_SEED=1; refusing to wipe',
     );
 
-    // Data is untouched: same project row with same id is still there.
     const after = projects.findBySlug('demo');
     expect(after).toBeDefined();
     expect(after!.id).toBe(beforeId);
@@ -198,7 +181,6 @@ describe('runSeed', () => {
     const lines: string[] = [];
     const result = runSeed({ handle: db.handle, reset: false, log: (l) => lines.push(l) });
 
-    // Each plaintext appears in exactly one log line.
     const adminCount = lines.filter((l) => l.includes(result.adminTokenPlaintext!)).length;
     const readerCount = lines.filter((l) => l.includes(result.readerTokenPlaintext!)).length;
     const writerCount = lines.filter((l) => l.includes(result.writerTokenPlaintext!)).length;
@@ -212,7 +194,7 @@ describe('runSeed', () => {
     const before = db.handle.raw
       .prepare('SELECT count(*) AS n FROM projects WHERE is_default = 1')
       .get() as { n: number };
-    expect(before.n).toBe(1); // migration 0031's row, the control for the next line
+    expect(before.n).toBe(1);
 
     const reset = runSeed({
       handle: db.handle,
@@ -220,17 +202,14 @@ describe('runSeed', () => {
       env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
       log: () => {},
     });
-    expect(reset.refused).toBeUndefined(); // without the env gate the wipe never runs and this test measures nothing
+    expect(reset.refused).toBeUndefined();
 
     const kept = db.handle.raw.prepare('SELECT slug FROM projects WHERE is_default = 1').all() as {
       slug: string;
     }[];
     expect(kept).toHaveLength(1);
-    expect(projects.list().length).toBeGreaterThan(1); // the demo project too, so the wipe was not a no-op
+    expect(projects.list().length).toBeGreaterThan(1);
 
-    // A dev stack seeded between 0031 landing and this fix has no is_default at
-    // all, and --reset is the command a developer reaches for to get unstuck.
-    // Strip the flag to reproduce that state, then reset: it must come back.
     db.handle.raw.exec('UPDATE projects SET is_default = 0');
     const healRun = runSeed({
       handle: db.handle,

@@ -7,12 +7,6 @@ import { guardAction, guardFailure } from '@/lib/actions/guard';
 
 export const UPDATE_CHECK_FORM = 'update.check';
 
-/**
- * The guard runs first, so a refused submission never reaches the release check;
- * the check is the process's own singleton, so a manual run refreshes the cache
- * the next render reads. `redirect()` sits outside any `try`, which would swallow
- * its control-flow throw.
- */
 export async function checkForUpdates(
   _prev: ActionState,
   formData: FormData,

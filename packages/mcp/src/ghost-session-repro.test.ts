@@ -17,13 +17,6 @@ import { buildSessionHandlers } from '@rembric/mcp';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-// REGRESSION coverage for fix-pi-ghost-sessions (issue #377): one long-lived
-// agent conversation must not accumulate session rows. The resolution order
-// under test is binding → fresh-unique → sole-active-any-staleness → mint.
-// The post-sweep mint (zero active rows after the 24h abandonment sweep) and
-// the no-guess mint under ≥2 live rows are by-design controls, kept here so a
-// widening of the adoption path fails loudly.
-
 const SCOPE: TokenScope = '*';
 const PI_SESSION_ID = '9f0e1d2c-3b4a-5f6e-7d8c-9a0b1c2d3e4f';
 const OC_SESSION_ID = 'aa11bb22-cc33-4d44-8e55-ff66778899aa';
@@ -146,9 +139,6 @@ describe('session_start resolution order: binding → fresh-unique → sole-acti
     expect(afterIdle.sessionId).toBe(PI_SESSION_ID);
     expect(rowCount()).toBe(1);
 
-    // Day 3 — the periodic sweep (bootstrap + interval, outside any call)
-    // abandoned R1 while it idled >24h; the pin's guards then fail and the
-    // call mints once, by design.
     nowMs = Date.parse('2026-08-03T09:00:00Z');
     agentSessions.abandonStale({ olderThanMs: ABANDON_AFTER });
     const postSweep = await modelSessionStart(T);
@@ -160,8 +150,6 @@ describe('session_start resolution order: binding → fresh-unique → sole-acti
     ensureHostRow(PI_SESSION_ID, 'pi');
     agentSessions.resume(PI_SESSION_ID, { tokenId: adminToken.id });
 
-    // Every later call on the bound transport reuses the bound row: the row
-    // count stops growing even though two live rows coexist (the snowball case).
     const reusedIds: string[] = [];
     for (let i = 0; i < 5; i++) {
       nowMs += 2 * MIN;
@@ -180,8 +168,6 @@ describe('session_start resolution order: binding → fresh-unique → sole-acti
     expect(final).toHaveLength(2);
     expect(final.filter((r) => r.agent === 'pi')).toHaveLength(1);
     expect(final.find((r) => r.id === PI_SESSION_ID.slice(0, 12))?.status).toBe('ended');
-    // The single 'unknown' row is the accepted post-sweep mint — never a
-    // mid-conversation ghost.
     expect(final.filter((r) => r.agent === 'unknown')).toHaveLength(1);
   });
 
@@ -202,8 +188,6 @@ describe('session_start resolution order: binding → fresh-unique → sole-acti
     expect(third.sessionId).toBe(PI_SESSION_ID);
     expect(rowCount()).toBe(1);
 
-    // Weekend: the periodic sweep abandons R1 while it idles; zero active rows
-    // at the next call → one mint, by design.
     nowMs = Date.parse('2026-08-03T09:00:00Z');
     agentSessions.abandonStale({ olderThanMs: ABANDON_AFTER });
     const postSweep = await modelSessionStart();
@@ -224,8 +208,6 @@ describe('session_start resolution order: binding → fresh-unique → sole-acti
     agentSessions.end(PI_SESSION_ID, { tokenId: adminToken.id });
     const final = rows();
 
-    // The control: without a declared binding the no-guess mint is the whole
-    // story for concurrent live rows — B must not widen into adoption.
     expect(final.filter((r) => r.agent === 'unknown').length).toBeGreaterThanOrEqual(3);
   });
 

@@ -90,11 +90,6 @@ describe('errToMcp', () => {
   });
 });
 
-/**
- * The shape a bundled second copy of `@rembric/core` produces: same `name` +
- * `code` contract as `packages/core/src/services/errors.ts::DomainError`, a
- * different class, so `instanceof DomainError` is false across the two.
- */
 class DuplicatedCoreDomainError extends Error {
   constructor(
     readonly code: string,

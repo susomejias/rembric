@@ -85,8 +85,6 @@ describe('AgentSessionsService', () => {
     const { row: first } = sessions.end(s.id, { tokenId });
     expect(first.status).toBe('ended');
     const firstEndedAt = first.endedAt?.getTime();
-    // Second end returns the existing row unchanged — no throw, no
-    // re-write of ended_at.
     const { row: second } = sessions.end(s.id, { tokenId });
     expect(second.status).toBe('ended');
     expect(second.endedAt?.getTime()).toBe(firstEndedAt);
@@ -159,8 +157,6 @@ describe('AgentSessionsService', () => {
       expect(out.startsWith('…[truncated]')).toBe(true);
     });
 
-    // The discriminating assertion: length and marker presence pass under BOTH
-    // truncation directions, so only the surviving content distinguishes them.
     it('keeps the END of the text and discards the beginning', async () => {
       const { truncateSummary, SUMMARY_MAX_CHARS } = await import('@rembric/core');
       const s = 'HEAD-MARKER' + 'a'.repeat(SUMMARY_MAX_CHARS) + 'TAIL-MARKER';
@@ -266,8 +262,6 @@ describe('AgentSessionsService', () => {
   it('findActiveForTransport does not depend on row order: the sole match wins even when oldest', () => {
     const oldest = sessions.start({ tokenId, projectId, agent: 'oldest' });
     const newer = sessions.start({ tokenId, projectId, agent: 'newer' });
-    // Behind `newer` on both ordering columns, but still inside
-    // TRANSPORT_STALENESS_MS so it stays eligible.
     const past = Date.now() - 5 * 60_000;
     db.handle.raw
       .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
@@ -341,10 +335,6 @@ describe('AgentSessionsService', () => {
 
   it('abandonStale flips old active rows to abandoned', () => {
     const old = sessions.start({ tokenId, projectId, agent: 'old' });
-    // Backdate BOTH started_at and last_activity_at by 48h via raw SQL so
-    // abandonStale (keyed on COALESCE(last_activity_at, started_at) since
-    // fix-audited-defects) picks it up — a stale started_at alone no longer
-    // qualifies a row whose last_activity_at is recent.
     const oldTs = Date.now() - 2 * 24 * 3600 * 1000;
     db.handle.raw
       .prepare(`UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?`)
@@ -357,9 +347,6 @@ describe('AgentSessionsService', () => {
 
   it('abandonStale does NOT reap a session with a stale started_at but recent activity (fix-audited-defects)', () => {
     const longRunning = sessions.start({ tokenId, projectId, agent: 'long-running' });
-    // started_at is old (48h ago) but last_activity_at is recent — this is a
-    // genuinely still-live session (long-running work), not a zombie, and
-    // must survive the reap.
     db.handle.raw
       .prepare(`UPDATE sessions SET started_at = ? WHERE id = ?`)
       .run(Date.now() - 2 * 24 * 3600 * 1000, longRunning.id);
@@ -404,8 +391,6 @@ describe('AgentSessionsService', () => {
     sessions.start({ tokenId, projectId: null, agent: 'project-less-agent' });
     sessions.start({ tokenId, projectId, agent: 'project-agent' });
 
-    // Control: the project-scoped session IS counted, so the zero below is the
-    // predicate rather than an empty table.
     expect(sessions.countByStatus(projectScope(projectId)).active).toBe(1);
     expect(sessions.countByStatus(defaultProjectScope(db.handle)).active).toBe(0);
   });
@@ -974,8 +959,6 @@ describe('AgentSessionsService', () => {
       const useful = sessions.start({ tokenId, projectId, agent: 'useful-old' });
       sessions.end(useful.id, { tokenId, summary: 'older but useful', final: true });
 
-      // Three empty sessions started AFTER `useful`. Backdating started_at
-      // via raw SQL to guarantee ordering on fast machines.
       const now = Date.now();
       for (let i = 1; i <= 3; i++) {
         const e = sessions.start({ tokenId, projectId, agent: `empty-${i}` });
@@ -1127,9 +1110,6 @@ describe('AgentSessionsService', () => {
     });
   });
 
-  // Runtime rather than grep: a mutation test showed a counting invariant over
-  // `requireActive: false` passes when a revival is added inside the terminal
-  // write path itself. Driving every mutating verb is the only form that fails.
   describe('terminal rows are terminal', () => {
     function terminal(status: 'ended' | 'abandoned'): string {
       const s = sessions.start({ tokenId, projectId, agent: `t-${status}` });
@@ -1166,10 +1146,6 @@ describe('AgentSessionsService', () => {
       });
     }
 
-    // The ninth verb, asserted positively rather than appended to the refusal
-    // list above: it is the one allowed to move `status` and `ended_at`, so
-    // every OTHER column is named individually. A count of changed columns
-    // would not distinguish "moved three" from "moved three others".
     describe('resume is the one verb that may move them', () => {
       const START = new Date('2026-03-01T07:00:00.000Z');
       const RESUMED_AT = new Date('2026-03-05T18:45:00.000Z');
@@ -1322,9 +1298,6 @@ describe('AgentSessionsService', () => {
       expect(mine[0]?.endedAt).toBeNull();
     });
 
-    // The accepted limitation of `started_at DESC` ordering, pinned positively
-    // so it cannot be "fixed" without a change: recency of activity is not the
-    // sort key, and a resume does not promote a session.
     it('does not re-sort to the head of recentForContext on resume', () => {
       const older = curated('older-then-resumed');
       svc.end(older.id, { tokenId });
@@ -1669,9 +1642,6 @@ describe('AgentSessionsService', () => {
         const later = svc.getById(s.id)?.lastSummaryAt?.getTime();
         clock = minutesAfter(START, 10); // an out-of-order clock read
         svc.end(s.id, { tokenId, summary: '## Goal\nearlier', final: true });
-        // end() on an already-final summary column is a no-op for `summary`
-        // itself (last-final-wins would replace it on an ACTIVE row — this
-        // assertion is about last_summary_at specifically staying forward).
         expect(svc.getById(s.id)!.lastSummaryAt!.getTime()).toBeGreaterThanOrEqual(later!);
       });
     });
@@ -1708,8 +1678,6 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 2);
         svc.reportTurn(s.id, { tokenId, usedTools: true });
         const afterWork = svc.getById(s.id)!;
-        // The reported turn's START — the activity stamp this request found —
-        // not the moment the report arrived.
         expect(afterWork.lastWorkAt?.getTime()).toBe(minutesAfter(START, 1).getTime());
         expect(afterWork.lastActivityAt?.getTime()).toBe(clock.getTime());
       });
@@ -1719,25 +1687,17 @@ describe('AgentSessionsService', () => {
         // The curated write lands mid-turn, well past the floor…
         clock = minutesAfter(START, 30);
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
-        // …and the end-of-turn report follows it, carrying the tool_use entry
-        // that the MCP call itself put in the transcript.
         clock = minutesAfter(START, 31);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
 
         clock = minutesAfter(START, 60);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines).toEqual([]);
 
-        // A later turn that does real work without refreshing the summary
-        // still fires — the gate is suppressed, not disarmed.
         clock = minutesAfter(START, 70);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
       });
 
       it('anchors the turn on the previous report, not on whatever last touched the row', () => {
-        // The Hermes shape, and the reason `last_activity_at` cannot be the
-        // anchor: `_sync` POSTs the raw transcript to /summary and then the
-        // report, sequentially, on EVERY turn — so between the curated write
-        // and the report there is a second writer advancing last_activity_at.
         const s = svc.start({ tokenId, projectId, agent: 'hermes-agent' });
         clock = minutesAfter(START, 30);
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
@@ -1746,9 +1706,6 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 32);
 
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
-        // The raw sync did advance last_activity_at past the curated write —
-        // without this the suppression above could be an artefact of the
-        // second write never landing.
         const after = svc.getById(s.id)!;
         expect(after.lastActivityAt!.getTime()).toBeGreaterThan(after.lastSummaryAt!.getTime());
       });
@@ -1776,10 +1733,6 @@ describe('AgentSessionsService', () => {
       });
 
       it('keeps last_work_at monotone across a clock that steps backwards', () => {
-        // 20 and 25 are BEHIND the 40 already anchored, which is the only
-        // shape that reaches the monotonicity guard: the anchor is a
-        // wall-clock reading of a previous request, so an NTP step back
-        // between two reports hands this one an earlier one.
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         const seen: number[] = [];
         for (const minute of [30, 40, 20, 25]) {
@@ -1805,17 +1758,12 @@ describe('AgentSessionsService', () => {
         const after = svc.getById(s.id)!;
 
         expect(after.lastTurnReportAt?.getTime()).toBe(clock.getTime());
-        // Control: the anchor moved back from a value that was really ahead of
-        // it, and the three monotone columns did not follow.
         expect(before.lastTurnReportAt!.getTime()).toBeGreaterThan(clock.getTime());
         expect(after.lastWorkAt!.getTime()).toBeGreaterThanOrEqual(before.lastWorkAt!.getTime());
         expect(after.lastNudgeAt!.getTime()).toBe(before.lastNudgeAt!.getTime());
       });
 
       it('still suppresses the compliant turn after the clock stepped backwards', () => {
-        // Freezing the anchor at the highest value ever seen would leave it
-        // AHEAD of a curated write made after the step back, so condition (2)
-        // would hold and the notice would fire on the turn that just complied.
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         clock = minutesAfter(START, 100);
         svc.reportTurn(s.id, { tokenId, usedTools: false });
@@ -1840,10 +1788,6 @@ describe('AgentSessionsService', () => {
       });
 
       it('a lost report leaves the anchor further back, so it suppresses more and never less', () => {
-        // The interrupted-turn direction (`session-nudges`: "a report lost to
-        // an interrupted turn leaves the anchor further back, which suppresses
-        // more, never less"). Hermes drops the report outright on an
-        // interrupted turn, so this is a reachable timeline, not a hypothesis.
         const REPORTS = [10, 20, 30] as const;
         function run(dropped: number | null): { work: Array<number | null>; lines: number[] } {
           clock = START; // both runs must share a `started_at`, which anchors turn one
@@ -1852,8 +1796,6 @@ describe('AgentSessionsService', () => {
           const lines: number[] = [];
           for (const minute of REPORTS) {
             clock = minutesAfter(START, minute);
-            // The turn itself happens either way; on `dropped` only its report
-            // is lost, which is the whole difference between the two runs.
             lines.push(
               minute === dropped
                 ? 0
@@ -1871,9 +1813,6 @@ describe('AgentSessionsService', () => {
         const kept = run(null);
         const lost = run(20);
 
-        // Control: the two timelines really diverge — the kept one fires on the
-        // last turn, so the lost one's silence is a consequence and not the
-        // shape of a run that never fires at all.
         expect(kept.lines.at(-1)).toBeGreaterThan(0);
         expect(lost.lines.at(-1)).toBe(0);
         for (const [i, workAt] of lost.work.entries()) {
@@ -1898,8 +1837,6 @@ describe('AgentSessionsService', () => {
       it('refuses to evaluate the gate against a row ended concurrently', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         clock = minutesAfter(START, 26);
-        // The row is `active` when reportTurn reads it and `ended` by the time
-        // it writes — the window the `requireActive` guard exists for.
         const spy = vi.spyOn(repos.agentSessions, 'updateById').mockReturnValueOnce(undefined);
         expect(() => svc.reportTurn(s.id, { tokenId, usedTools: true })).toThrow(
           /concurrently ended/,
@@ -2008,9 +1945,6 @@ describe('AgentSessionsService', () => {
   describe('NUDGE_FLOOR_MS — the one floor constant in the domain tree', () => {
     it('no other `_FLOOR_MS` constant is defined anywhere under apps/server/src or packages/core/src', async () => {
       const { execSync } = await import('node:child_process');
-      // A second declaration must fail in the domain tree; the retired server
-      // path stays in the grep as defence in depth. Four levels up is the
-      // REPOSITORY root (this suite sits in `packages/core/src/services/`).
       const out = execSync(
         `git grep -n "_FLOOR_MS\\s*=" -- apps/server/src packages/core/src ` +
           `':(exclude)apps/server/src/**/*.test.ts' ':(exclude)packages/core/src/**/*.test.ts'`,

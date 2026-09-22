@@ -20,13 +20,6 @@ import { ConsolidationRunner } from '@rembric/core';
 
 import { createTestDb, defaultProject, type TestDb } from '../test-support/index.js';
 
-/**
- * Sweep basics for the deterministic consolidator
- * (change `remove-llm-consolidation`): run rows, throttle behavior,
- * and the session-start entry point. Deadline-orphaning correctness
- * lives in `consolidation/orphan-promotion.test.ts`.
- */
-
 let db: TestDb;
 let runner: ConsolidationRunner;
 let projects: ProjectsService;
@@ -76,8 +69,6 @@ describe('ConsolidationRunner sweep', () => {
       .from(consolidationRuns)
       .orderBy(desc(consolidationRuns.startedAt))
       .all();
-    // The SET, not the count: two rows cannot tell one scope swept twice with
-    // another never swept from one row per scope.
     expect([...rows.map((r) => r.scope)].sort()).toEqual(
       [`project:${projA.id}`, `project:${defaultProject(db.handle).id}`].sort(),
     );
@@ -135,8 +126,6 @@ describe('ConsolidationRunner sweep', () => {
       .run(Date.now() - 2 * 60 * 60 * 1000, s.id);
 
     const summary = runner.runAll({ force: true });
-    // Non-zero, stated as a count: a purge assertion over a corpus with nothing
-    // eligible passes without exercising anything.
     expect(summary.purgedSessionIds?.length ?? 0).toBeGreaterThan(0);
     expect(summary.purgedSessionIds).toContain(s.id);
     expect(sessions.getById(s.id)).toBeUndefined();
@@ -196,8 +185,6 @@ function decayRow(id: string, type: MemoryType, lastSeenAt: Date, projectId: str
 }
 
 describe('ConsolidationRunner per-type decay', () => {
-  // project/default decay after 1s; reference effectively never (1 day) on a
-  // 60s-old clock.
   const SHORT_DECAY: DecayThresholds = {
     thresholdByType: { project: 1_000, reference: 86_400_000 },
     defaultThresholdMs: 1_000,
@@ -261,8 +248,6 @@ describe('ConsolidationRunner per-type decay', () => {
       .map((r) => r.scope);
     expect(runScopes.sort()).toEqual([`project:${dflt}`, `project:${projA}`].sort());
 
-    // The work itself, not just the run row: the default project's decayed row
-    // is archived, and the exempt row in the session's project is untouched.
     const statusOf = (id: string) =>
       db.handle.db.select().from(memory).where(eq(memory.id, id)).get()?.status;
     expect(statusOf('DFLT-DECAY')).toBe('archived');

@@ -16,12 +16,6 @@ import { ProjectsService } from '@rembric/core';
 
 import { createTestDb, FakeEmbedder, type TestDb } from '../test-support/index.js';
 
-/**
- * A widened test corpus must hold rows on BOTH sides: a fixture with rows in one
- * project passes with the widening deleted, with the authorization filter
- * deleted and with the predicate inverted. Every assertion below therefore
- * carries a control on the other side.
- */
 function widened(homeProjectId: string, ...others: string[]): SearchScope {
   return {
     kind: 'authorized-projects',
@@ -92,9 +86,6 @@ describe('the widened scope reaches every project it names', () => {
     expect(ids).toContain(rows.away.id);
     expect(ids).not.toContain(rows.unreached.id);
 
-    // Controls, so the exclusion above is the predicate and not a missing row:
-    // the unreached row answers the same query from its own scope, and the
-    // narrow search still sees only the home row.
     const own = await mem.search({ query: 'rotation handoff' }, projectScope(unreached));
     expect(own.map((m) => m.id)).toEqual([rows.unreached.id]);
     const narrow = await mem.search({ query: 'rotation handoff' }, projectScope(home));
@@ -127,8 +118,6 @@ describe('the widened scope reaches every project it names', () => {
     );
     await embedAll();
 
-    // Identical text embeds identically under FakeEmbedder, so both rows are
-    // exact dense neighbours of the query and only the partition set decides.
     const denseOnly = await hybridSearch({
       repos,
       embedQuery: (t) => fake.embed(t),
@@ -210,8 +199,6 @@ describe('the widened scope reaches every project it names', () => {
     expect(narrow.map((m) => m.id)).toContain(homeRow.id);
     expect(wide.map((m) => m.id)).toContain(homeRow.id);
 
-    // Read after both searches: a widened read that recomputed statistics per
-    // set would have moved these, and the level is a pure function of them.
     expect(repos.termStatistics.adminDocumentCount()).toBe(documentCount);
     expect(repos.termStatistics.adminQueryTermFrequencies(query)).toEqual(frequencies);
     expect(documentCount).toBeGreaterThan(0);
@@ -307,8 +294,6 @@ describe('a widened dense read draws a full window per named partition', () => {
     const projectSequence = neighbours.map((n) => meta.get(n.id)?.projectId);
     const firstSmall = projectSequence.indexOf(small);
     const lastHome = projectSequence.lastIndexOf(home);
-    // Interleaved: a small-project row sits before the last home-project row,
-    // which a per-partition concatenation could not produce.
     expect(firstSmall).toBeGreaterThanOrEqual(0);
     expect(firstSmall).toBeLessThan(lastHome);
   });
@@ -500,10 +485,6 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
     const wide = (await mem.search({ query }, widened(home, away))).map((m) => m.id);
     expect(wide[0]).toBe(answer.id);
 
-    // Non-vacuity on both sides: the home rows are in the widened page too, so
-    // the foreign row won on rank rather than by being the only candidate, and
-    // the narrow page — which is what a reader gets without the argument —
-    // answers with a home row and cannot reach the answer at all.
     expect(wide.filter((id) => homeRows.some((r) => r.id === id)).length).toBeGreaterThan(0);
     const narrow = (await mem.search({ query }, projectScope(home))).map((m) => m.id);
     expect(narrow.length).toBeGreaterThan(0);
@@ -511,10 +492,6 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
   }, 60_000);
 
   it('a small project gets no free top slot', async () => {
-    // Four home rows of descending relevance against ONE unrelated foreign row.
-    // Under one globally-ordered list the foreign row is the worst match and
-    // ranks last; fusing per-project lists would hand it its own rank 1 and
-    // lift it over the home rows that are genuinely better answers.
     const homeRows = [
       mem.save(
         {
@@ -563,9 +540,6 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
       /* keep draining */
     }
 
-    // The relative filter would cut the weak row out of the page, which would
-    // make this a statement about the gate rather than about ranking; run the
-    // ranked branch with it off so the weak row is present and merely lower.
     const wide = await hybridSearch({
       repos,
       embedQuery: (t) => embedder.embed(t),
@@ -577,8 +551,6 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
       offset: 0,
     });
     expect(wide.ids[0]).toBe(homeRows[0]!.id);
-    // Non-vacuity: every row is in the page, so this is a claim about the
-    // foreign row's RANK and not about it having been filtered out.
     expect(wide.ids).toHaveLength(5);
     expect(wide.ids).toContain(weak.id);
     expect(wide.ids.indexOf(weak.id)).toBe(4);
@@ -597,13 +569,6 @@ describe('the candidates handed to fusion grow with the widened set', () => {
   const ROWS_PER_PROJECT = WINDOW + 26;
   const TERM = 'rotation';
 
-  /**
-   * Byte-identical text in every project, foreign rows written FIRST. Both
-   * halves are load-bearing: with distinguishable text BM25 and the embedder
-   * rank the home rows above the foreign ones and the window never has to
-   * choose, so a shared window passes. Only a tie the insertion order breaks
-   * against home isolates the predicate from the ranking.
-   */
   beforeEach(async () => {
     db = createTestDb();
     repos = createRepositories(db.handle.db);
@@ -649,8 +614,6 @@ describe('the candidates handed to fusion grow with the widened set', () => {
     const two = lexicalCensus(widened(home, away));
     const three = lexicalCensus(widened(home, away, third));
 
-    // Control: neither pool is empty, so a zero home count below is a
-    // statement about the window and not about a fixture that matched nothing.
     expect(narrow.size).toBe(WINDOW);
     expect(two.size).toBeGreaterThan(0);
 
@@ -661,8 +624,6 @@ describe('the candidates handed to fusion grow with the widened set', () => {
   });
 
   it('the fused pool grows with the set rather than being rationed across it', async () => {
-    // A query no FTS row matches, so the pool IS the dense pool and the size
-    // below is that branch's alone.
     const poolSizeFor = async (scope: SearchScope) => {
       let poolSize = -1;
       await hybridSearch({

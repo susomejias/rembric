@@ -12,11 +12,6 @@ installViewMocks('/dashboard/judgments');
 const PAGE_SIZE = 50;
 const SEEDED = PAGE_SIZE + 2;
 
-/**
- * `evidence` is a JSON-mode text column, so a stored string can still hold text
- * that is not itself JSON (the column parses, the inner text does not). The
- * detail page must fall back to the raw text rather than throw on the re-parse.
- */
 const MALFORMED_EVIDENCE = '{not json <b>raw</b>';
 
 function widget(id: string): NewMemory {
@@ -95,7 +90,6 @@ describe('judgments list verdict pill and routing', () => {
     const html = await renderJudgments();
     expect(html).toContain('</span>pending</span>');
     expect(html).toContain('href="/dashboard/judgments/REL-MALFORMED"');
-    // The retired /dashboard/relations surface must not leak back into links.
     expect(html).not.toContain('/dashboard/relations');
   });
 

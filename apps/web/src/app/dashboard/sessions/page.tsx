@@ -45,22 +45,6 @@ import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
-/**
- * The sessions list, in the production dashboard's composition: the numbered
- * view head, the scope/agent/status filter bar, and the runs as a table with
- * the title/agent/project/token/started/ended/status/memories/prompts columns.
- *
- * The reads and the filter model are the view's own — the same
- * `AdminSessionFilters`, the same `deleted: false` address for the filtered
- * table, the same second page-sized slice for the soft-deleted table, the same
- * `titleCascade`.
- *
- * The row actions: Abandon (warn confirmation, active rows only) and Delete
- * (danger confirmation) on a live row, Undelete on a soft-deleted one. Each
- * lands on the same query string the redirect built, which is what the flash
- * above the table reads. Every mutation carries `adminBypass` — these are the
- * operator's own verbs.
- */
 export const dynamic = 'force-dynamic';
 
 const ABANDON_FORM = 'session.abandon';
@@ -112,7 +96,6 @@ async function undeleteSession(_prev: ActionState, formData: FormData): Promise<
   redirect(`/dashboard/sessions?restored=${encodeURIComponent(id)}`);
 }
 
-/** The trimmed string field `dashboard/sessions.ts` reads; a repeated field takes its first value. */
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -165,8 +148,6 @@ export default async function SessionsPage({
   const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
   const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
 
-  // Filters apply to the non-deleted table only; the soft-deleted table is a
-  // second, unfiltered page-sized slice.
   const deletedRowsRaw = filters.includeDeleted
     ? repos.agentSessions.adminList({
         deleted: true,
@@ -470,9 +451,7 @@ function SessionRow({
   status: string;
   memories: number;
   prompts: number;
-  /** The row belongs to the soft-deleted table: it offers Undelete instead of Abandon/Delete. */
   deleted: boolean;
-  /** The soft-deleted table is rendered dimmed, as main's `?include_deleted=1` view was. */
   dim?: boolean;
 }) {
   return (
@@ -511,10 +490,6 @@ function SessionRow({
   );
 }
 
-/**
- * Main's row action stack: Undelete is the only verb a soft-deleted row offers,
- * Abandon only exists while the run is active, and Delete is always available.
- */
 function SessionActions({
   id,
   status,

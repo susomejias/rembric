@@ -9,32 +9,6 @@ import type { ScopeKey } from './candidates.js';
 import { findDecayCandidates, DEFAULT_DECAY, type DecayThresholds } from './decay.js';
 import { applyDecay, recordOrphanPromote, type ConsolidationDeps } from './operations.js';
 
-/**
- * Deterministic consolidation sweep (change `remove-llm-consolidation`).
- *
- * Two passes per scope, no LLM anywhere:
- *
- *   1. Decay — archive rows whose `last_seen_at` is older than the
- *      threshold and confidence is below the floor.
- *   2. Deadline orphaning — `memory_relations` rows still 'pending' after
- *      `orphanDeadlineMs` transition to 'orphaned' (journaled, undoable).
- *      Between `JUDGMENT_ORPHAN_AFTER_MS` and the deadline they are
- *      re-exposed to agents via `memory.context.pendingJudgments[]` for
- *      fresh-context judgment via `memory.judge`.
- *
- * Plus one server-wide (not per-scope) step piggybacked on the default
- * project's own throttle: empty-session purge, via the same
- * `AgentSessionsService.purgeEmpty` the `/dashboard/maintenance` button
- * already calls directly. `purgeEmpty` has no scope filter (sessions aren't
- * necessarily project-scoped the way memory is), so it runs once per sweep
- * call, gated on whether the default project actually ran this time (every
- * sweep call — `runAll` and `sweepFor` alike — always includes it, so this
- * reuses the existing throttle rather than adding one).
- *
- * Triggered lazily on session start (throttled per scope) and manually
- * via `POST /admin/consolidation/run` (force). There is no cron.
- */
-
 export interface ConsolidationRunnerOptions {
   repos: ConsolidationDeps & Pick<Repositories, 'projects'>;
   tx: TransactionRunner;
@@ -80,11 +54,6 @@ export class ConsolidationRunner {
     return this.sweep(scopes, opts);
   }
 
-  /**
-   * Lazy entry point for session start: sweep the session's project plus the
-   * default one, whose hygiene would otherwise starve until someone opened a
-   * session in it — the HTTP session path always names some project.
-   */
   sweepFor(projectId: string | null): ConsolidationRunSummary {
     const defaultId = this.defaultProjectId();
     const scopes: ScopeKey[] = [{ projectId: defaultId }];
@@ -153,14 +122,6 @@ export class ConsolidationRunner {
     return { scope, runId, ops };
   }
 
-  /**
-   * Orphan pending relations older than the deadline whose source +
-   * target both lie in `scope`. Candidate selection is scoped in SQL and
-   * batch-bounded per scope, so one scope's backlog cannot starve
-   * another's. Endpoints cannot be missing: `PURGE_PREDICATE`
-   * (memory-repository.ts) never purges a memory referenced by
-   * `memory_relations`.
-   */
   private orphanExpired(runId: string, scope: ScopeKey): number {
     const deadlineMs = this.opts.orphanDeadlineMs ?? DEFAULT_ORPHAN_DEADLINE_MS;
     const pending = this.opts.relations.findPendingOlderThanInScope({
@@ -184,8 +145,7 @@ export class ConsolidationRunner {
         });
         orphaned++;
       } catch {
-        // The row may have transitioned concurrently (e.g. a late
-        // memory.judge); skip it.
+        // Concurrent transition (e.g. a late memory.judge); skip the row.
       }
     }
     return orphaned;

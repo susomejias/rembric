@@ -1,27 +1,8 @@
 import { type ConsolidationOpType, type Repositories, type TransactionRunner } from '@rembric/db';
 import { ulid } from 'ulid';
 
-/**
- * Atomic consolidation operations. Each runs inside a SQLite transaction; on
- * error the whole transaction rolls back. The deterministic sweep produces
- * only `decay` (via `applyDecay`) and `orphan_promote` (via
- * `recordOrphanPromote`); `undoOp`/`undoRun` additionally unwind historical
- * `merge`/`supersede` rows from the removed LLM consolidator.
- *
- * The contract (also enforced by tests):
- *   - never DELETE FROM memory
- *   - never UPDATE memory.content
- *   - status transitions are limited to active → superseded | archived,
- *     and via undo back to active.
- */
-
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
 
-// Op types whose undo reactivates the affected memory rows (archived/superseded
-// → active). `merge` additionally re-archives its created row; the others are
-// plain reactivations. Kept in one place so `undoOp`'s guard and reactivate
-// branches can't drift. Exported so the exhaustiveness invariant test can
-// assert every CONSOLIDATION_OP_TYPES member lands in exactly one category.
 export const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
   'merge',
   'supersede',
@@ -29,12 +10,6 @@ export const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Se
   'agent_memory_archive',
 ]);
 
-// Op types whose effect physically removed rows, so undo cannot reconstruct
-// them — undo throws NotUndoableError rather than silently marking the op
-// reverted while the rows stay gone. Exported so every consumer (undoOp's
-// guard, the dashboard's undo-button gate) reads from this single set instead
-// of repeating the literal comparison — see the invariant test asserting
-// every CONSOLIDATION_OP_TYPES member falls into exactly one category.
 export const TERMINAL_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
   'session_purge',
   'archived_memory_purge',
@@ -57,9 +32,6 @@ function topicSlotOccupiedBy(
   row: { id: string; projectId: string | null; topicKey: string | null },
 ): string | null {
   if (!row.topicKey) return null;
-  // `memory_topic_key_active_uidx` keys on COALESCE(project_id,''), so a
-  // project-less row occupies a slot too — reporting it free would attempt a
-  // reactivation that aborts the whole undo on the UNIQUE constraint.
   if (row.projectId === null) return row.id;
   const active = repos.memory.findActiveByTopicKey({
     projectId: row.projectId,
@@ -100,14 +72,6 @@ export function applyDecay(
   return { opId };
 }
 
-/**
- * Journal an orphan-promotion verdict. Called by the consolidator after
- * `RelationsService.judge` / `.orphan` writes the actual relation row.
- *
- * `createdId` is set to the `judgment_id` so `undoOp` can find the
- * relation row to revert. `affectedIds` carries `[sourceId, targetId]`
- * for backwards-compatible journaling.
- */
 export function recordOrphanPromote(
   repos: ConsolidationDeps,
   input: {
@@ -133,10 +97,6 @@ export function recordOrphanPromote(
   return { opId };
 }
 
-/**
- * Raised by `undoOp` when rows referenced by the op have been physically
- * removed by the maintenance purge paths. The op stays in its current state.
- */
 export class PurgedRowMissingError extends Error {
   readonly code = 'purged_row_missing';
   readonly missing: readonly string[];
@@ -156,13 +116,6 @@ export class NotUndoableError extends Error {
   }
 }
 
-/**
- * Undo a previously applied consolidation op. Re-activates the affected
- * memories and (for merges) archives the consolidated row.
- *
- * Throws `PurgedRowMissingError` when rows referenced by the op have been
- * physically removed; throws `NotUndoableError` for terminal purge ops.
- */
 export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: string): UndoResult {
   const op = repos.consolidation.findOpById(opId);
   if (!op) throw new Error(`undoOp: ${opId} not found`);
@@ -174,8 +127,6 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
     );
   }
 
-  // `orphan_promote` operates on relation rows (append-only, unaffected by
-  // the purge paths); the others operate on memory rows.
   if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
     const expected = new Set<string>(op.affectedIds);
     if (op.opType === 'merge' && op.createdId) expected.add(op.createdId);
@@ -201,21 +152,11 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
         }
       }
       repos.memory.reactivate(reactivatable);
-      // An operator reviving a memory IS an access event: without this
-      // stamp, decay's own predicate (status='active' AND last_seen_at <
-      // now - threshold) still holds on the just-restored rows, so the very
-      // next sweep re-archives them and undo silently reverts itself. This
-      // deliberately does NOT record a confirmation — that would advance
-      // the orthogonal review-affirmation baseline, which reactivation must
-      // not touch. See openspec/changes/fix-audited-defects.
       if (reactivatable.length > 0) repos.memory.touchLastSeenBatch(reactivatable, now);
       if (op.opType === 'merge' && op.createdId) {
         repos.memory.archiveOne(op.createdId);
       }
     } else if (op.opType === 'orphan_promote' && op.createdId) {
-      // createdId carries the promoted relation's judgment_id. Undo a
-      // 'supersedes' verdict by reactivating the target and stripping it
-      // from the source's replaces[]; then flip the row back to pending.
       const rel = repos.relations.findByJudgmentId(op.createdId);
       if (rel) {
         if (rel.relation === 'supersedes' && rel.status === 'judged') {

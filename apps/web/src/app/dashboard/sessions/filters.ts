@@ -4,11 +4,6 @@ import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/das
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
-/**
- * The sessions list's filter model: the legacy `__global__` project sentinel
- * normalises to "no filter", `include_deleted` is the literal `1`, and every
- * other filter is empty-string "unset".
- */
 export interface SessionsFilters {
   project: string;
   agent: string;
@@ -28,22 +23,12 @@ export function readSessionsFilters(searchParams: SearchParams): SessionsFilters
   };
 }
 
-/**
- * A status the query string names only counts as a filter when it is a real
- * session status; anything else leaves the list unfiltered rather than
- * filtering to nothing.
- */
 export function parseSessionStatus(raw: string): AgentSessionStatus | undefined {
   return (AGENT_SESSION_STATUSES as readonly string[]).includes(raw)
     ? (raw as AgentSessionStatus)
     : undefined;
 }
 
-/**
- * Every param the current URL carries, except `page` and the `__global__`
- * sentinel — the set the pager and the filter form round-trip, `include_deleted`
- * included so the deleted table stays visible across pages.
- */
 export function sessionsQuery(searchParams: SearchParams): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(searchParams)) {
@@ -55,13 +40,6 @@ export function sessionsQuery(searchParams: SearchParams): Record<string, string
   return out;
 }
 
-/**
- * A project slug that names no live project filters to NOTHING rather than
- * silently dropping the filter: it is a stale or hand-edited URL, and the
- * operator should see the emptiness. The list views each own their filter model
- * (`memories/filters.ts` keeps the same rule privately) — this is the sessions
- * view's copy, not a second rule.
- */
 export function resolveProjectFilter(
   slug: string,
   projectRows: readonly { id: string; slug: string }[],

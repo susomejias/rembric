@@ -10,18 +10,6 @@ import { ulid } from 'ulid';
 
 import { projectScopedGrant, type TokenScope } from './tokens.js';
 
-/**
- * OAuth 2.1 authorization-server logic: Dynamic Client Registration,
- * Authorization Code + PKCE (S256) issuance and exchange, and refresh-token
- * rotation with reuse detection.
- *
- * Secrets (codes, access/refresh tokens) are high-entropy random values
- * stored only as a deterministic SHA-256 (indexed for O(1) lookup) — see
- * design decision D1: stretching adds nothing to a 256-bit random secret,
- * and a per-row salt would preclude lookup. The granted `scope` reuses the
- * static `TokenScope` grammar so `isAuthorized()` applies unchanged.
- */
-
 const SECRET_BYTES = 32;
 const CODE_TTL_MS = 120_000;
 
@@ -155,28 +143,15 @@ export class OAuthService {
     return secret;
   }
 
-  /**
-   * Return the PKCE `code_challenge` bound to an unconsumed, unexpired code.
-   * Used by the SDK token handler to validate PKCE itself (it then calls
-   * `redeemCode`). Throws `invalid_grant` on any miss.
-   */
   challengeForCode(code: string): string {
     return this.findValidCode(code).codeChallenge;
   }
 
-  /**
-   * Bind-check + atomic single-use consume + issue a token pair. PKCE is
-   * verified upstream by the SDK token handler (via `challengeForCode` +
-   * `pkce-challenge`), so it is not re-checked here.
-   */
   redeemCode(input: { code: string; clientId: string; redirectUri?: string }): TokenPair {
     const code = this.findValidCode(input.code);
     if (code.clientId !== input.clientId) {
       throw new OAuthError('invalid_grant', 'client_id does not match the authorization code');
     }
-    // OAuth 2.1: the code is always bound to a redirect_uri at /authorize, so
-    // the exchange MUST carry that same value — an omitted parameter is a
-    // mismatch, not a skip (closes the optional-redirect_uri bypass).
     if (input.redirectUri === undefined || code.redirectUri !== input.redirectUri) {
       throw new OAuthError('invalid_grant', 'redirect_uri does not match the authorization code');
     }
@@ -241,10 +216,6 @@ export class OAuthService {
     if (token.revokedAt) return null;
     if (token.expiresAt.getTime() <= this.now().getTime()) return null;
     return {
-      // Stored scope is the granted OAuth string; derive the authz TokenScope
-      // at read time, restricted to the consented project when the grant is
-      // project-bound (project:<id> / read:project:<id>), else global
-      // (* / read:*). resolveGrantedScope stays back-compatible.
       scope: projectScopedGrant(resolveGrantedScope(token.scope), token.projectId),
       subject: token.subject,
       clientId: token.clientId,
@@ -253,12 +224,6 @@ export class OAuthService {
     };
   }
 
-  /**
-   * Revoke the token family that a given access or refresh token belongs to.
-   * When `clientId` is provided (RFC 7009 client-ownership check), a token
-   * owned by a different client is a no-op — the caller still reports success,
-   * but another client's family is never revoked.
-   */
   revokeByToken(plaintext: string, clientId?: string): void {
     const hash = hashSecret(plaintext);
     const token =
@@ -320,14 +285,6 @@ export class OAuthService {
   }
 }
 
-/**
- * Map a requested OAuth `scope` string to the existing `TokenScope` grammar.
- * Fail-closed: write access (`*`) is granted ONLY when explicitly requested;
- * an unknown, empty, or read-only request yields least privilege (`read:*`).
- * The consent screen is authoritative and may downgrade further. Project
- * restriction comes from the connector path (`/mcp/<slug>`), not the scope
- * string (design D7).
- */
 export function resolveGrantedScope(requestedScope: string | undefined): TokenScope {
   const tokens = (requestedScope ?? '').toLowerCase().split(/\s+/).filter(Boolean);
   const wantsWrite = tokens.some(
@@ -339,12 +296,6 @@ export function resolveGrantedScope(requestedScope: string | undefined): TokenSc
 /** OAuth scopes advertised in the metadata and grantable at consent. */
 export const SUPPORTED_OAUTH_SCOPES = ['mcp', 'read'] as const;
 
-/**
- * The OAuth scope string to grant: the requested scopes restricted to the
- * advertised set, echoed verbatim in the token response so the client sees
- * its requested scopes as granted. Falls closed to `read` when nothing
- * supported was requested.
- */
 export function grantedOAuthScope(requestedScope: string | undefined): string {
   const supported = SUPPORTED_OAUTH_SCOPES as readonly string[];
   const kept = (requestedScope ?? '')
@@ -361,11 +312,6 @@ function hashSecret(plaintext: string): string {
   return createHash('sha256').update(plaintext).digest('hex');
 }
 
-/**
- * Registrable redirect URIs are https, or http only for loopback (RFC 8252
- * native-client guidance). Arbitrary `http://` hosts are rejected to close
- * the open-redirect surface.
- */
 function isAllowedRedirectUri(value: string): boolean {
   try {
     const u = new URL(value);

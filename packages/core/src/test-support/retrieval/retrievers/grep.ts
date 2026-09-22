@@ -11,12 +11,6 @@ function tokenize(text: string): string[] {
     .filter((t) => t.length > 0);
 }
 
-/**
- * Naive lowercase substring/keyword scoring over `title + content`, no
- * index — the honest control (design.md Decision 4). Score is the count of
- * query tokens present as a substring anywhere in the haystack; items with
- * zero matches are excluded, not merely ranked last.
- */
 export const grepRetriever: Retriever<GrepState> = {
   name: 'grep',
   discriminatingMetric: `recall@k vs 'hybrid' — how far naive substring matching gets alone`,

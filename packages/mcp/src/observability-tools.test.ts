@@ -59,8 +59,6 @@ describe('parseKeyLearnings — capture_passive parser', () => {
     expect(parseKeyLearnings(text)).toEqual(['one', 'two']);
   });
 
-  // fix-audited-defects: matching used to be case-sensitive and H2-only, so
-  // ordinary formatting variation silently discarded the whole capture.
   it('is case-insensitive on the heading (fix-audited-defects)', () => {
     expect(parseKeyLearnings('## key learnings:\n1. still works')).toEqual(['still works']);
     expect(parseKeyLearnings('## KEY LEARNINGS:\n1. still works')).toEqual(['still works']);
@@ -116,8 +114,6 @@ describe('parseKeyLearnings — capture_passive parser', () => {
 describe('doctor consolidation.lastRunOps contract', () => {
   const lastRunOpsSchema = z.object(doctorOutput).shape.consolidation.shape.lastRunOps;
 
-  // Every in-repo writer of consolidation_runs.summary. Keep in sync: a shape
-  // the output contract rejects makes memory.doctor return isError.
   const writerSummaries = [
     { archives: 0, orphaned: 0 },
     { archives: 3, orphaned: 1 },
@@ -201,8 +197,6 @@ function makeObservability(db: TestDb) {
     }),
     relations,
     candidates: { perSaveMax: 5 },
-    // No embedNow: exercises the FTS-only detection path deterministically,
-    // matching save-time-candidates.test.ts's own no-embedder convention.
   });
   return { repos, memory, agentSessions, handlers };
 }
@@ -222,9 +216,6 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
   afterEach(() => db.cleanup());
 
   it('routes through the shared curation pipeline and surfaces a candidate conflicting with an existing memory', async () => {
-    // Same fixture shape as save-time-candidates.test.ts's FTS-candidate test:
-    // near-identical title/content reliably clears the (still-unfixed,
-    // deferred) FTS threshold at this small a corpus size.
     memory.save(
       {
         type: 'feedback',
@@ -250,8 +241,6 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
     expect(out.candidates!.length).toBeGreaterThanOrEqual(1);
     expect(out.candidates!.every((c) => c.source === 'fts' || c.source === 'vec')).toBe(true);
 
-    // Every saved row went through saveWithTopicKey, not a bare insert — it
-    // has whatever save-time bookkeeping the real save path applies.
     for (const id of out.ids) {
       expect(memory.unsafeGetById(id)).toBeDefined();
     }
@@ -293,8 +282,6 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
     }>(r);
 
     expect(out.saved).toBe(2);
-    // Two saves, each detecting over the 8 lookalikes: the sum exceeds what
-    // either one could report alone, and exceeds the surfaced length.
     expect(out.candidatesDetected).toBeGreaterThan(8);
     expect(out.candidatesDetected).toBeGreaterThan(out.candidates!.length);
 
@@ -336,9 +323,6 @@ describe('memory.stats — sessionsByStatus across a resume', () => {
 
   afterEach(() => db.cleanup());
 
-  // The counter stops being monotonic once a terminal row can be revived:
-  // `ended` and `abandoned` can now decrease. Pinned so a future reader does
-  // not restore a monotonicity assumption memory.stats never guaranteed.
   it.each(['ended', 'abandoned'] as const)(
     'a resume moves one row out of %s and into active',
     async (terminal) => {

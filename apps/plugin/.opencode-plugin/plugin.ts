@@ -4,16 +4,7 @@ const MCP_BRIDGE_VERSION = '0.32.0';
 // x-release-please-end
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
-//
-// Rembric plugin for opencode (https://opencode.ai). install.sh rewrites both
-// relative dev-time import paths below to their installed paths while copying.
-//
-// message.updated, message.part.updated and session.idle dispatch via the
-// `event` hook, never as top-level Hooks keys. Assistant text arrives only via
-// message.part.updated's `properties.part` — `message.updated` carries no `parts`.
-//
-// ONLY `RembricPlugin` is exported: opencode invokes every named export of a
-// plugin module with the plugin ctx, so a helper export crashes on load.
+// ONLY `RembricPlugin` may be exported: opencode invokes every named export as a Plugin function.
 
 import {
   createSessionProtocol,
@@ -88,16 +79,12 @@ type PluginReturn = {
 
 type Plugin = (ctx: PluginContext) => Promise<PluginReturn>;
 
-// opencode validates every pushed part against the real TextPart schema
-// (id/sessionID/messageID all required) before persisting the outgoing user
-// message; a bare `{ type: 'text', text }` fails it and takes down the turn.
 function nudgePart(
   sessionId: string,
   messageId: string,
   text: string,
 ): { id: string; sessionID: string; messageID: string; type: 'text'; text: string } {
-  // opencode validates the entity-type id prefix on write, so a bare UUID is
-  // rejected.
+  // opencode validates the entity-type id prefix on write, so a bare UUID is rejected.
   return {
     id: `prt_${crypto.randomUUID().replace(/-/g, '')}`,
     sessionID: sessionId,
@@ -119,14 +106,8 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
   const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
-  // Governs the report by TURN boundary rather than by the flush's
-  // debounce timer: cleared at the next chat.message, so a burst of
-  // session.idle events within one turn reports exactly once.
   const reportedThisTurn = new Set<string>();
 
-  // Both maps are keyed by assistant message id, so they stay bounded only if
-  // every way an entry leaves the transcript feeds this: session.deleted
-  // (forgetSession) and the per-session cap (the appends' return value).
   function forgetMessageState(entries: ReadonlyArray<{ id?: string }>): void {
     for (const entry of entries) {
       if (!entry.id) continue;
@@ -209,11 +190,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
       if (event.type === 'message.part.updated') {
         const part = (event.properties as MessagePartUpdatedEventProps | undefined)?.part ?? {};
-        // Recorded BEFORE the non-text early return below, which is the
-        // branch a tool part takes (session-nudges). Pinned to the SDK's
-        // concrete `tool` type: `reasoning`, `file`, `snapshot`, `patch`,
-        // `agent`, `retry` and the step markers are not tool use. The
-        // predicate is this client's; the latch is the core's.
+        // Recorded BEFORE the non-text early return below: a tool part takes that branch.
         if (part.type === 'tool' && part.sessionID) {
           core.markToolUsed(part.sessionID);
         }
@@ -244,8 +221,6 @@ export const RembricPlugin: Plugin = async (ctx) => {
         if (core.isSubAgent(sessionId)) return;
         if (!core.isKnown(sessionId)) return;
         core.scheduleIdleFlush(sessionId);
-        // Governed by turn boundaries, not the debounce above: a burst of
-        // idle events within one turn must not report it more than once.
         if (!reportedThisTurn.has(sessionId)) {
           reportedThisTurn.add(sessionId);
           void core.reportTurn(sessionId);
@@ -256,9 +231,6 @@ export const RembricPlugin: Plugin = async (ctx) => {
     'chat.message': async (input, output) => {
       if (core.isSubAgent(input.sessionID)) return;
 
-      // A new turn starts here — the previous turn's report (if any) is
-      // done, so the next session.idle may report again, and a tool part
-      // that arrived after it must not count towards this turn.
       reportedThisTurn.delete(input.sessionID);
       core.beginTurn(input.sessionID);
 
@@ -300,8 +272,6 @@ export const RembricPlugin: Plugin = async (ctx) => {
         await core.ensureSession(input.sessionID);
       }
 
-      // The slug sentence is per-connection data, appended after the shared
-      // protocol text rather than forked from it (opencode-plugin, D24).
       output.context.push(POST_COMPACT_NUDGE_CORE + (slug ? `Use project: '${slug}'. ` : ''));
     },
   };

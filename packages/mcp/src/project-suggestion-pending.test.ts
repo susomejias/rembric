@@ -15,22 +15,6 @@ import { buildSessionHandlers } from '@rembric/mcp';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-/**
- * The `project_suggestion_pending` gate is retired: its precondition was "no
- * project is active", which a path-less connection resolving to the default
- * project can no longer satisfy. These tests pin that it stays retired — a write
- * with unminted roots suggestions pending succeeds into the default project.
- *
- * What the gate actually protected, since its own docstring claimed otherwise:
- * NOT `memory.save`, whose `scope` argument defaulted to `project` so a
- * path-less save was refused loudly rather than falling through. It was
- * load-bearing for `memory.session_start`, `memory.save_prompt` and
- * `memory.capture_passive`, which without it wrote user-wide rows silently.
- *
- * The handlers are driven via `runWithContext` with the SessionRouter seeded
- * with the suggestion list roots discovery would produce in production.
- */
-
 const MCP_SESSION_ID = 'mcp-sess-test';
 const SCOPE: TokenScope = '*';
 
@@ -199,8 +183,6 @@ describe('memory.session_start — the retired project_suggestion_pending gate',
     const { isError, payload } = decode(use);
     expect(isError).toBe(false);
     expect(payload).toMatchObject({ slug: 'acme-research', created: true, switched: false });
-    // A default-project resolution is not a project the agent was in, so there
-    // is nothing it switched away from (`mcp-api/spec.md:1045`).
     expect(payload.previousSlug).toBeNull();
   });
 });

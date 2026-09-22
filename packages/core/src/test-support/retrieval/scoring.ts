@@ -103,11 +103,6 @@ export interface AggregateMetrics {
   abstentionFalsePositiveRate: number | null;
   /** Gold-bearing queries that returned nothing; folded into recall it is indistinguishable from a confidently wrong answer. */
   overAbstentionRate: number | null;
-  /**
-   * Rows returned from outside the query's own project, over rows returned, on
-   * the queries that did NOT declare widening. An isolation gate rather than a
-   * tuning bound: its committed cap is 0.
-   */
   foreignScopeRate: number | null;
   /** Rows the rate above is a fraction of — its own denominator, and its non-vacuity control. */
   nForeignScopeRows: number;
