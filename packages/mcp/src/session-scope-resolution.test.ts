@@ -6,15 +6,16 @@ import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, projectScope, tokens as tokensSchema, type Token } from '@rembric/db';
-import { buildMemoryHandlers } from '@rembric/mcp';
-import { buildObservabilityHandlers } from '@rembric/mcp';
-import { buildPromptHandlers } from '@rembric/mcp';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { seedProject } from '../default-project.js';
-import { createTestDb, defaultProject, type TestDb } from '../index.js';
+import { buildMemoryHandlers } from '@rembric/mcp';
+import { buildObservabilityHandlers } from '@rembric/mcp';
+import { buildPromptHandlers } from '@rembric/mcp';
+
+import { seedProject } from './test-support/default-project.js';
+import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * Regression coverage for scope resolution in the session-tool surface.

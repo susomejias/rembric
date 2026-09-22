@@ -3,8 +3,8 @@ import { RELATION_ANNOTATION_MAX, RelationsService } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createTestDb, type TestDb } from '../db.js';
-import { defaultProjectScope } from '../default-project.js';
+import { createTestDb, type TestDb } from './test-support/db.js';
+import { defaultProjectScope } from './test-support/default-project.js';
 
 /**
  * The pathological corpus, measured rather than reasoned about.

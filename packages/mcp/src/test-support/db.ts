@@ -1,0 +1,44 @@
+// Duplicated from apps/server/src/test/db.ts (see also packages/db/src/test-support/db.ts
+// and packages/core/src/test-support/db.ts).
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { createDb, type DbHandle } from '@rembric/db';
+
+/**
+ * Per-test DB fixture: opens a fresh on-disk SQLite under a unique temp
+ * directory, loads sqlite-vec, applies migrations, and returns a handle
+ * the test can use. Always pair `createTestDb()` with `cleanup()` in an
+ * `afterEach`/`afterAll` so the temp dir is removed and the connection
+ * closed.
+ *
+ * On-disk (not `:memory:`) because sqlite-vec extension loading and the
+ * FTS5 triggers behave more predictably against a regular file across
+ * Node/Bun and macOS/Linux.
+ */
+export interface TestDb {
+  handle: DbHandle;
+  dataDir: string;
+  cleanup: () => void;
+}
+
+export function createTestDb(): TestDb {
+  const dataDir = mkdtempSync(join(tmpdir(), 'rembric-test-'));
+  // Silenced: every fixture applies every migration, so the announcing ones
+  // would narrate themselves once per test. Same for the startup provenance
+  // line, which would otherwise print once per throwaway database.
+  const handle = createDb({ dataDir, onMigrationProgress: () => {}, onStartupLog: () => {} });
+  return {
+    handle,
+    dataDir,
+    cleanup: () => {
+      try {
+        handle.close();
+      } catch {
+        // ignore double-close
+      }
+      rmSync(dataDir, { recursive: true, force: true });
+    },
+  };
+}

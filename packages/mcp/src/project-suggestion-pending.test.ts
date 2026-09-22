@@ -5,14 +5,15 @@ import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, tokens as tokensSchema, type Token } from '@rembric/db';
-import { buildMemoryHandlers } from '@rembric/mcp';
-import { buildProjectHandlers } from '@rembric/mcp';
-import { buildSessionHandlers } from '@rembric/mcp';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProject, type TestDb } from '../index.js';
+import { buildMemoryHandlers } from '@rembric/mcp';
+import { buildProjectHandlers } from '@rembric/mcp';
+import { buildSessionHandlers } from '@rembric/mcp';
+
+import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * The `project_suggestion_pending` gate is retired: its precondition was "no

@@ -6,12 +6,18 @@ import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
-import { buildMemoryHandlers } from '@rembric/mcp';
-import { buildObservabilityHandlers } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProjectScope, mintTestToken, type TestDb } from '../index.js';
+import { buildMemoryHandlers } from '@rembric/mcp';
+import { buildObservabilityHandlers } from '@rembric/mcp';
+
+import {
+  createTestDb,
+  defaultProjectScope,
+  mintTestToken,
+  type TestDb,
+} from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * The relevance level's term statistics are index-global aggregates read

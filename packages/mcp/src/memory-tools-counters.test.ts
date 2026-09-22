@@ -8,11 +8,12 @@ import { UsageCounters } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Project, type Token } from '@rembric/db';
-import { buildMemoryHandlers } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, type TestDb } from '../index.js';
+import { buildMemoryHandlers } from '@rembric/mcp';
+
+import { createTestDb, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * Usage counters ride the SUCCESSFUL call (proactive-entity-recall, tasks

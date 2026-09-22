@@ -12,12 +12,18 @@ import {
   type Project,
   type Token,
 } from '@rembric/db';
-import { buildMemoryHandlers } from '@rembric/mcp';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../index.js';
+import { buildMemoryHandlers } from '@rembric/mcp';
+
+import {
+  createTestDb,
+  defaultProject,
+  defaultProjectScope,
+  type TestDb,
+} from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * Strict path-scoping contract — see src/services/memory.ts and

@@ -2,10 +2,11 @@ import { ProjectsService } from '@rembric/core';
 import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { createRepositories, projectScope, type Project, type Repositories } from '@rembric/db';
-import { readableProjects, resolveSearchScope, type EffectiveScope } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createTestDb, defaultProject, type TestDb } from '../index.js';
+import { readableProjects, resolveSearchScope, type EffectiveScope } from '@rembric/mcp';
+
+import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 
 /**
  * The single site that builds a widened search scope. Its whole job is to hand

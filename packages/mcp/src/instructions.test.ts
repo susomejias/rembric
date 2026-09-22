@@ -1,7 +1,8 @@
 import { SUMMARY_MAX_CHARS } from '@rembric/core';
 import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
-import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from '@rembric/mcp';
 import { describe, expect, it } from 'vitest';
+
+import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from '@rembric/mcp';
 
 describe('MCP initialize instructions', () => {
   it('emits ≤ 1000 characters for the unscoped variant', () => {

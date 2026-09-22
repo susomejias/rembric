@@ -4,9 +4,10 @@
     "types": ["node"],
     "paths": {
       "@rembric/core": ["../core/src/index.ts"],
-      "@rembric/db": ["../db/src/index.ts"]
+      "@rembric/db": ["../db/src/index.ts"],
+      "@rembric/mcp": ["./src/index.ts"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

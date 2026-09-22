@@ -7,16 +7,22 @@ import { pinnedProjectId, TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Project, type Repositories, type Token } from '@rembric/db';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { buildMemoryHandlers } from '@rembric/mcp';
 import { buildObservabilityHandlers } from '@rembric/mcp';
 import { buildProjectHandlers } from '@rembric/mcp';
 import { buildPromptHandlers } from '@rembric/mcp';
 import { buildRelationsHandlers } from '@rembric/mcp';
 import { buildSessionHandlers } from '@rembric/mcp';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProject, defaultProjectScope, type TestDb } from '../index.js';
+import {
+  createTestDb,
+  defaultProject,
+  defaultProjectScope,
+  type TestDb,
+} from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * Cross-cutting authorization matrix — every tool handler must go through

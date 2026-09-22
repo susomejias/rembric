@@ -12,17 +12,18 @@ import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
-import { buildMemoryHandlers, RELEVANCE_LIMIT } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
+import { buildMemoryHandlers, RELEVANCE_LIMIT } from '@rembric/mcp';
+
 import {
   createTestDb,
   defaultProject,
   defaultProjectScope,
   mintTestToken,
   type TestDb,
-} from '../index.js';
+} from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * `memory.context`'s relevance channel runs the same scoped hybrid search and

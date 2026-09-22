@@ -16,6 +16,8 @@ import {
   type Repositories,
   type Token,
 } from '@rembric/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { buildInstructions } from '@rembric/mcp';
 import { buildMemoryHandlers } from '@rembric/mcp';
 import { buildObservabilityHandlers, type DoctorReport } from '@rembric/mcp';
@@ -23,10 +25,9 @@ import { buildProjectHandlers } from '@rembric/mcp';
 import { buildPromptHandlers } from '@rembric/mcp';
 import { createMcpServer } from '@rembric/mcp';
 import { buildSessionHandlers } from '@rembric/mcp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProject, mintTestToken, type TestDb } from '../index.js';
+import { createTestDb, defaultProject, mintTestToken, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * A path slug that names no project used to resolve to the global scope, so

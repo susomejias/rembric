@@ -6,6 +6,8 @@ import {
   type RequestId,
 } from '@modelcontextprotocol/sdk/types.js';
 import { SessionRouter } from '@rembric/core';
+import { describe, expect, it } from 'vitest';
+
 import {
   deriveSlugFromUri,
   ensureRootsDiscoveryRun,
@@ -15,7 +17,6 @@ import {
   type RootsDiscoveryContext,
   type RootsDiscoveryDeps,
 } from '@rembric/mcp';
-import { describe, expect, it } from 'vitest';
 
 describe('deriveSlugFromUri', () => {
   it('extracts the basename from a file:// URI', () => {
