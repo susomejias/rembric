@@ -368,7 +368,9 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       });
 
       process.env['RATE_LIMIT_ENABLED'] = 'true';
-      process.env['RATE_LIMIT_RPS'] = '10';
+      // A 1 s window keeps both requests inside it despite real-clock jitter;
+      // at 100 ms the second request could land in a fresh bucket (observed flake).
+      process.env['RATE_LIMIT_RPS'] = '1';
       process.env['RATE_LIMIT_BURST'] = '1';
       resetMcpRateLimiterForTests();
       expect((await POST(mcpRequestForToken(first.accessToken, initializeBody), ctx)).status).toBe(
