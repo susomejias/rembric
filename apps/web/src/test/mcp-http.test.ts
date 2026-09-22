@@ -7,7 +7,7 @@ import { TokensService } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { POST as loginPost } from '../app/dashboard/login/verify/route';
 import { DELETE, POST } from '../app/mcp/[[...path]]/route';
@@ -184,6 +184,95 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     );
     expect(after.status).toBe(404);
     expect(((await after.json()) as { error?: { code?: number } }).error?.code).toBe(-32001);
+  });
+
+  const initializeBody = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'c', version: '0' },
+    },
+  };
+
+  /**
+   * The two server-level hardening gates the port carried over.
+   *
+   * `apps/server` asserted these against a listening socket; here they run
+   * against the production route handler, which is where the behaviour now
+   * lives. Each arm names its own precondition, and each has the control that
+   * makes it more than a check over a constant: the 413 is compared against a
+   * matching-but-smaller body, and both 403 arms against the allowed pair.
+   */
+  describe('body cap and DNS-rebinding gates', () => {
+    for (const key of [
+      'MAX_BODY_BYTES',
+      'REMBRIC_MCP_ALLOWED_HOSTS',
+      'REMBRIC_MCP_ALLOWED_ORIGINS',
+    ]) {
+      afterEach(() => delete process.env[key]);
+    }
+
+    it('refuses a body over MAX_BODY_BYTES with 413, in the server’s exact shape', async () => {
+      process.env['MAX_BODY_BYTES'] = '1024';
+      const res = await POST(mcpRequest({ ...initializeBody, pad: 'x'.repeat(4096) }), ctx);
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({
+        ok: false,
+        code: 'payload_too_large',
+        message: 'request body exceeds the 1024-byte limit',
+      });
+    });
+
+    it('control: a body under the same cap still reaches the transport', async () => {
+      process.env['MAX_BODY_BYTES'] = '1024';
+      const res = await POST(mcpRequest(initializeBody), ctx);
+      expect(res.status).toBe(200);
+    });
+
+    it('refuses a disallowed Origin with the SDK’s 403 body, and passes an allowed one', async () => {
+      process.env['REMBRIC_MCP_ALLOWED_ORIGINS'] = 'https://allowed.example';
+
+      const denied = await POST(
+        mcpRequest(initializeBody, { origin: 'https://evil.example' }),
+        ctx,
+      );
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toEqual({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Invalid Origin header: https://evil.example' },
+        id: null,
+      });
+
+      const allowed = await POST(
+        mcpRequest(initializeBody, { origin: 'https://allowed.example' }),
+        ctx,
+      );
+      expect(allowed.status).toBe(200);
+    });
+
+    it('refuses a rebinding Host with the SDK’s 403 body, and passes an allowed one', async () => {
+      process.env['REMBRIC_MCP_ALLOWED_HOSTS'] = 'rembric.example.com:443';
+
+      const denied = await POST(mcpRequest(initializeBody, { host: '127.0.0.1:8787' }), ctx);
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toEqual({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Invalid Host header: 127.0.0.1:8787' },
+        id: null,
+      });
+
+      process.env['REMBRIC_MCP_ALLOWED_HOSTS'] = '127.0.0.1:8787';
+      const allowed = await POST(mcpRequest(initializeBody, { host: '127.0.0.1:8787' }), ctx);
+      expect(allowed.status).toBe(200);
+    });
+
+    it('control: with neither allow-list set, a request with no Origin/Host is untouched', async () => {
+      const res = await POST(mcpRequest(initializeBody), ctx);
+      expect(res.status).toBe(200);
+    });
   });
 
   function loginRequest(token: string): NextRequest {

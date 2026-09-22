@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Resolves to the stub `apps/server/vitest.config.ts` aliases in, so the hint
+// Resolves to the stub `apps/web/vitest.config.ts` aliases in, so the hint
 // arm asserts against whatever the harness's own helper returns.
 import { keyHint } from '@earendil-works/pi-coding-agent';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -13,13 +13,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createRepositories } from '../../server/src/db/repositories/index.js';
 import type { Project } from '../../server/src/db/schema/projects.js';
 import { buildInstructions } from '../../server/src/mcp/instructions.js';
-import { type BootstrappedServer, createServer } from '../../server/src/server/index.js';
 import { AgentSessionsService } from '../../server/src/services/agent-sessions.js';
 import { ProjectsService } from '../../server/src/services/projects.js';
 import { TokensService } from '../../server/src/services/tokens.js';
-import { createTestDb } from '../../server/src/test/db.js';
-import { FakeEmbedder } from '../../server/src/test/embedder.js';
-import { findFreePort } from '../../server/src/test/net.js';
+import { bootWebServer, type BootedWebServer } from '../../web/src/test-support/boot-server.js';
+import { openTestDb, type OpenedTestDb } from '../../web/src/test-support/db.js';
 import {
   FIRST_PROMPT_NUDGE,
   POST_TIMEOUT_MS,
@@ -39,7 +37,7 @@ const SERVER_TOOL_COUNT = (
   ) ?? []
 ).length;
 
-const ADMIN_TOKEN = 'pi-plugin-admin-token-with-enough-entropy-zz';
+let ADMIN_TOKEN: string;
 const PROJECT_SLUG = 'pi-plugin-test';
 
 type ToolResult = { content: Array<{ type: string; text?: string }>; details: unknown };
@@ -93,13 +91,27 @@ type Harness = {
   fire: (event: string, payload?: unknown) => Promise<unknown>;
 };
 
-let server: BootstrappedServer;
+let boot: BootedWebServer;
+let db: OpenedTestDb;
 let sessions: AgentSessionsService;
 let repos: ReturnType<typeof createRepositories>;
 let tokens: TokensService;
 let project: Project;
 let baseUrl: string;
 let cwd: string;
+
+/**
+ * The markers a parent Pi process may export into this runner. They tell the
+ * extension to suppress session persistence, so the suite deletes them for its
+ * duration (restoring them in `afterAll`) and lets the dedicated suppression
+ * suite set each one explicitly.
+ */
+const LEAKED_CHILD_MARKERS = [
+  'REMBRIC_SUBAGENT',
+  'GENTLE_PI_AGENTS_CHILD',
+  'REMBRIC_TRACK_SESSION',
+] as const;
+const savedChildMarkers: Record<string, string | undefined> = {};
 
 // An independently written wire client, so a defect in the extension's own
 // decoder cannot corrupt the reference it is compared against. The MCP SDK
@@ -259,39 +271,51 @@ function savedId(text: string): string {
 }
 
 beforeAll(async () => {
-  const tmp = createTestDb();
-  tmp.cleanup();
+  // The web app is the live HTTP endpoint these suites drive; the harness owns
+  // the process, the throwaway data dir and the generated admin token. This
+  // test process reaches the SAME SQLite file through its own WAL connection.
+  boot = await bootWebServer();
+  ADMIN_TOKEN = boot.adminToken;
+  baseUrl = boot.baseUrl;
 
-  const port = await findFreePort();
-  server = await createServer(
-    {
-      REMBRIC_HOST: '127.0.0.1',
-      REMBRIC_PORT: String(port),
-      REMBRIC_DATA_DIR: tmp.dataDir,
-      REMBRIC_ADMIN_TOKEN: ADMIN_TOKEN,
-    },
-    { embedder: new FakeEmbedder() },
-  );
-  baseUrl = `http://127.0.0.1:${port}`;
+  // The suite's default session is an INTERACTIVE primary one. The runner may
+  // itself be a Pi child (this file is often executed from inside a Pi
+  // process), and that harness exports the very markers that tell the
+  // extension to suppress persistence — leaving them in place makes every arm
+  // below describe a suppressed lifecycle for reasons the runner imposed. The
+  // dedicated "child and programmatic pi processes" suite sets each marker
+  // explicitly, so suppression keeps its coverage.
+  for (const key of LEAKED_CHILD_MARKERS) {
+    savedChildMarkers[key] = process.env[key];
+    delete process.env[key];
+  }
 
-  repos = createRepositories(server.dbHandle.db);
+  // `createDb` on the harness's already-migrated dir: the migrations the boot
+  // ran are not re-applied, they are re-opened.
+  db = openTestDb(boot.dataDir);
+  repos = createRepositories(db.handle.db);
   const projects = new ProjectsService(repos);
   project = projects.findBySlug(PROJECT_SLUG) ?? projects.create({ slug: PROJECT_SLUG });
-  sessions = new AgentSessionsService(repos, server.dbHandle.db);
-  tokens = new TokensService(repos, server.dbHandle.db);
+  sessions = new AgentSessionsService(repos, db.handle.db);
+  tokens = new TokensService(repos, db.handle.db);
 
   cwd = mkdtempSync(join(tmpdir(), 'rembric-pi-cwd-'));
   writeFileSync(join(cwd, '.rembric'), `PROJECT_SLUG=${PROJECT_SLUG}\n`);
 
   process.env.REMBRIC_SERVER_URL = baseUrl;
   process.env.REMBRIC_API_TOKEN = ADMIN_TOKEN;
-}, 30_000);
+}, 120_000);
 
 afterAll(async () => {
   delete process.env.REMBRIC_SERVER_URL;
   delete process.env.REMBRIC_API_TOKEN;
+  for (const key of LEAKED_CHILD_MARKERS) {
+    if (savedChildMarkers[key] === undefined) delete process.env[key];
+    else process.env[key] = savedChildMarkers[key];
+  }
   rmSync(cwd, { recursive: true, force: true });
-  await server.shutdown();
+  db.cleanup();
+  await boot.close();
 });
 
 // Driven directly, with nothing stubbed: `renderToolResultLines` imports no
