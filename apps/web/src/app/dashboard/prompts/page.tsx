@@ -1,6 +1,7 @@
-import { sanitizeFtsQuery } from '@rembric/core';
+import { DomainError, sanitizeFtsQuery } from '@rembric/core';
 import type { Prompt } from '@rembric/db';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 import {
   matchesFilters,
@@ -10,6 +11,9 @@ import {
   type SearchParams,
 } from './filters';
 
+import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { CsrfField } from '@/components/dashboard/csrf-field';
 import {
   FilterActions,
   FilterField,
@@ -18,7 +22,7 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, shortId, truncate } from '@/components/dashboard/support';
+import { PAGE_SIZE, shortId, singleParam, truncate } from '@/components/dashboard/support';
 import {
   DataBody,
   DataHead,
@@ -26,6 +30,7 @@ import {
   DataTd,
   DataTh,
   DataTr,
+  Flash,
   Page,
   Pill,
   SectionBar,
@@ -36,6 +41,8 @@ import {
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 
 /**
@@ -51,6 +58,55 @@ import { getServices } from '@/lib/services';
  */
 export const dynamic = 'force-dynamic';
 
+const DELETE_FORM = 'prompt.delete';
+const UNDELETE_FORM = 'prompt.undelete';
+
+/**
+ * The operator's two prompt verbs, on the per-row actions stack: Delete soft-deletes
+ * and redirects to the flash the list reads; Undelete clears `deleted_at` the same
+ * way. Both are gated by `guardAction` — session, then admin scope, then the CSRF
+ * token minted for that exact form name — and both carry `adminBypass`, because
+ * these are the operator's own verbs. Idempotence lives in the service (`softDelete`
+ * and `undelete` are no-ops on a row already in the target state); the action's job
+ * is to reach it and to flash. `redirect` is called outside the `try` so the
+ * framework's control-flow error is not caught as a service failure.
+ */
+export async function deletePrompt(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, DELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  try {
+    guard.services.prompts.softDelete(id, { adminBypass: true });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/prompts?deleted=${encodeURIComponent(id)}`);
+}
+
+export async function undeletePrompt(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, UNDELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  try {
+    guard.services.prompts.undelete(id, { adminBypass: true });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/prompts?undeleted=${encodeURIComponent(id)}`);
+}
+
+/** The trimmed string field the action reads; a repeated field takes its first value. */
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
+
 export default async function PromptsPage({
   searchParams,
 }: {
@@ -59,6 +115,8 @@ export default async function PromptsPage({
   const params = await searchParams;
   const filters = readPromptsFilters(params);
   const roundTripQuery = promptsQuery(params);
+  const justDeleted = singleParam(params['deleted']);
+  const justUndeleted = singleParam(params['undeleted']);
 
   const isFiltered =
     filters.project !== '' || filters.session !== '' || filters.agent !== '' || filters.q !== '';
@@ -125,6 +183,24 @@ export default async function PromptsPage({
           { k: 'SHOWING', v: `${visible.length} ROWS` },
         ]}
       />
+
+      {justDeleted ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="DELETED">
+            Prompt <code className="font-mono">{justDeleted}</code> soft-deleted.{' '}
+            <Link href="/dashboard/prompts?include_deleted=1" className="hover:text-primary">
+              View deleted
+            </Link>{' '}
+            to undelete.
+          </Flash>
+        </div>
+      ) : justUndeleted ? (
+        <div className="mt-6">
+          <Flash tone="lime" label="RESTORED">
+            Prompt <code className="font-mono">{justUndeleted}</code> restored.
+          </Flash>
+        </div>
+      ) : null}
 
       <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
         <StatCard
@@ -201,6 +277,7 @@ export default async function PromptsPage({
             <DataTh>status</DataTh>
             <DataTh>created</DataTh>
             <DataTh>content</DataTh>
+            <DataTh>actions</DataTh>
           </DataHead>
           <DataBody>
             {visible.map((prompt) => {
@@ -245,6 +322,9 @@ export default async function PromptsPage({
                   <DataTd className="max-w-[380px] truncate text-muted-foreground">
                     {truncate(prompt.content, 160)}
                   </DataTd>
+                  <DataTd>
+                    <PromptActions id={prompt.id} deleted={prompt.deletedAt != null} />
+                  </DataTd>
                 </DataTr>
               );
             })}
@@ -261,5 +341,41 @@ export default async function PromptsPage({
         query={roundTripQuery}
       />
     </Page>
+  );
+}
+
+/**
+ * Main's per-row action stack: a soft-deleted row offers Undelete instead of Delete,
+ * and only Delete is confirmation-gated — a `warn` tone, because the row is one
+ * Undelete away from coming back.
+ */
+function PromptActions({ id, deleted }: { id: string; deleted: boolean }) {
+  if (deleted) {
+    return (
+      <ActionForm action={undeletePrompt}>
+        <CsrfField form={UNDELETE_FORM} />
+        <input type="hidden" name="id" value={id} />
+        <Button type="submit" variant="outline" size="sm">
+          Undelete
+        </Button>
+      </ActionForm>
+    );
+  }
+
+  return (
+    <ActionForm action={deletePrompt}>
+      <CsrfField form={DELETE_FORM} />
+      <input type="hidden" name="id" value={id} />
+      <ConfirmSubmit
+        tone="warn"
+        title="Soft-delete this prompt?"
+        description="It is hidden from default lists, memory.context.recentPrompts, and memory.search_prompts; restorable via the Undelete action."
+        confirmLabel="DELETE PROMPT"
+      >
+        <Button type="button" variant="outline" size="sm">
+          Delete
+        </Button>
+      </ConfirmSubmit>
+    </ActionForm>
   );
 }

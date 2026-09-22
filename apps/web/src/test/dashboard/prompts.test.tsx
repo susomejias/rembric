@@ -37,7 +37,14 @@ beforeEach(() => {
   for (let i = 0; i < PROJECT_COUNT; i++)
     rows.push(prompt({ id: `PR${i}`, content: `scoped ${i}`, projectId: 'p1' }));
   for (let i = 0; i < DELETED_COUNT; i++)
-    rows.push(prompt({ id: `D${i}`, content: `deleted ${i}`, deletedAt: new Date(9_000) }));
+    rows.push(
+      prompt({
+        id: `D${i}`,
+        content: `deleted ${i}`,
+        createdAt: new Date(9_000),
+        deletedAt: new Date(9_500),
+      }),
+    );
   t.handle.db.insert(prompts).values(rows).run();
 });
 
@@ -69,5 +76,78 @@ describe('prompts dashboard totals and page slice', () => {
   it('a text query renders a lower-bound "+"-suffixed matching count', async () => {
     const html = await renderPrompts({ q: 'widget' });
     expect(html).toMatch(/\d+\+ MATCHING/);
+  });
+});
+
+describe('prompts row actions', () => {
+  /**
+   * The first `<tr>` of the rendered table body. Asserting against a single row
+   * rather than the whole document is what makes "this row offers Undelete" mean
+   * that row — a document-wide `toContain` is satisfied by any other row's
+   * control, which is how a `deleted`-branch inversion once passed the wrong
+   * assertion. The deleted fixture rows carry the newest `created_at`, so under
+   * `include_deleted=1` the first body row is a deleted one.
+   */
+  function firstBodyRow(html: string): string {
+    const bodyAt = html.indexOf('</thead>');
+    if (bodyAt === -1) throw new Error('rendered table has no thead');
+    const start = html.indexOf('<tr', bodyAt);
+    if (start === -1) throw new Error('rendered table has no body row');
+    return html.slice(start, html.indexOf('</tr>', start));
+  }
+
+  it('renders a Delete control on a live row and no Undelete on it', async () => {
+    const liveRow = firstBodyRow(await renderPrompts());
+
+    expect(liveRow).toContain('>Delete<');
+    expect(liveRow).not.toContain('>Undelete<');
+  });
+
+  it('renders the actions column header', async () => {
+    const html = await renderPrompts();
+    expect(html).toContain('>actions<');
+  });
+
+  it('renders an Undelete control on the soft-deleted row and no Delete on it', async () => {
+    const deletedRow = firstBodyRow(await renderPrompts({ include_deleted: '1' }));
+
+    expect(deletedRow).toContain('>Undelete<');
+    expect(deletedRow).not.toContain('>Delete<');
+  });
+
+  it('gates the Delete control behind the confirmation dialog and leaves Undelete ungated', async () => {
+    const liveRow = firstBodyRow(await renderPrompts());
+    const deleteAt = liveRow.indexOf('>Delete<');
+    // `ConfirmSubmit` composes the dialog trigger onto the Delete button itself
+    // (Radix `asChild`), and the trigger's `type="button"` keeps the click from
+    // submitting before the dialog is confirmed.
+    const deleteTag = liveRow.slice(liveRow.lastIndexOf('<button', deleteAt), deleteAt);
+    expect(deleteTag).toContain('data-slot="alert-dialog-trigger"');
+    expect(deleteTag).toContain('type="button"');
+
+    // Undelete is reversible and was bare in the baseline: no dialog trigger, and
+    // its button submits the action directly.
+    const deletedRow = firstBodyRow(await renderPrompts({ include_deleted: '1' }));
+    const undeleteAt = deletedRow.indexOf('>Undelete<');
+    const undeleteTag = deletedRow.slice(deletedRow.lastIndexOf('<button', undeleteAt), undeleteAt);
+    expect(undeleteTag).not.toContain('alert-dialog-trigger');
+    expect(undeleteTag).toContain('type="submit"');
+  });
+
+  it('submits the hidden row id alongside the per-form CSRF field', async () => {
+    const html = await renderPrompts();
+    expect(html).toContain('name="csrf"');
+    expect(html).toContain('name="id"');
+  });
+
+  it('flashes the soft-delete outcome with the link to the deleted view', async () => {
+    const html = await renderPrompts({ deleted: 'D0' });
+    expect(html).toContain('soft-deleted.');
+    expect(html).toContain('/dashboard/prompts?include_deleted=1');
+  });
+
+  it('flashes the restore outcome', async () => {
+    const html = await renderPrompts({ undeleted: 'D0' });
+    expect(html).toContain('restored.');
   });
 });
