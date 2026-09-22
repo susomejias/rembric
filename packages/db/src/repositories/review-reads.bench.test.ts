@@ -138,7 +138,7 @@ function seedCorpus(t: TestDb, repo: MemoryRepository, size: number): void {
 
 function applyIndexes(raw: Database, wanted: readonly string[]): void {
   for (const name of Object.keys(CONFIRMATION_INDEXES)) {
-    raw.exec(`DROP INDEX IF EXISTS ${name}`);
+    raw.exec(`DROP INDEX IF EXISTS "${name}"`);
   }
   for (const name of wanted) {
     raw.exec(CONFIRMATION_INDEXES[name]!);
@@ -331,16 +331,14 @@ describe.runIf(ENABLED)('review-axis read benchmark', () => {
    * the point is to measure the alternative the repository does NOT use.
    */
   function countNeedsReviewAsJoin(t: TestDb, nowMs: number): number {
-    const ttlCase = reviewTtlEntries()
-      .map(([type, ms]) => `WHEN m.type = '${type}' THEN ${ms}`)
-      .join(' ');
-    const baseline = `MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at))`;
+    const ttlCaseParams = reviewTtlEntries().flatMap(([type, ms]) => [type, ms]);
+    const ttlParams = ttlCaseParams.filter((v) => typeof v === 'number');
     const row = t.handle.raw
       .prepare<
-        [number],
+        [number, ...unknown[]],
         { v: number }
-      >(`SELECT COUNT(*) AS v FROM memory m LEFT JOIN (SELECT memory_id, MAX(event_ts) AS affirmed_at FROM confirmations WHERE verdict = 'affirm' GROUP BY memory_id) af ON af.memory_id = m.id LEFT JOIN (SELECT memory_id, MAX(event_ts) AS refuted_at FROM confirmations WHERE verdict = 'refute' GROUP BY memory_id) rf ON rf.memory_id = m.id WHERE m.status = 'active' AND m.scope = 'project' AND m.project_id = '${PROJECT_ID}' AND (((CASE ${ttlCase} ELSE NULL END) IS NOT NULL AND ${baseline} + (CASE ${ttlCase} ELSE NULL END) <= ?) OR (rf.refuted_at IS NOT NULL AND rf.refuted_at > ${baseline}))`)
-      .get(nowMs);
+      >(`SELECT COUNT(*) AS v FROM memory m LEFT JOIN (SELECT memory_id, MAX(event_ts) AS affirmed_at FROM confirmations WHERE verdict = 'affirm' GROUP BY memory_id) af ON af.memory_id = m.id LEFT JOIN (SELECT memory_id, MAX(event_ts) AS refuted_at FROM confirmations WHERE verdict = 'refute' GROUP BY memory_id) rf ON rf.memory_id = m.id WHERE m.status = 'active' AND m.scope = 'project' AND m.project_id = ? AND (((CASE WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? ELSE NULL END) IS NOT NULL AND MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at)) + (CASE WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? WHEN m.type = ? THEN ? ELSE NULL END) <= ?) OR (rf.refuted_at IS NOT NULL AND rf.refuted_at > MAX(m.created_at, COALESCE(af.affirmed_at, m.created_at))))`)
+      .get(nowMs, ...ttlCaseParams, ...ttlParams, ...ttlCaseParams, ...ttlParams);
     return row?.v ?? 0;
   }
 

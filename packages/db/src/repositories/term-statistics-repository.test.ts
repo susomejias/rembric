@@ -68,9 +68,11 @@ describe('adminQueryTermFrequencies keys the read on the index own terms', () =>
     expect([...second.keys()].sort()).toEqual(['delta', 'epsilon']);
 
     // And the tokenising table itself holds only the last query's terms.
+    const vocabSelect = `SELECT term FROM temp.${QUERY_TERMS_VOCAB_TABLE}`;
+
     expect(
       db.handle.raw
-        .prepare<[], { term: string }>(`SELECT term FROM temp.${QUERY_TERMS_VOCAB_TABLE}`)
+        .prepare<[], { term: string }>(vocabSelect)
         .all()
         .map((r) => r.term)
         .sort(),

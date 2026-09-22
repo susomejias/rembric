@@ -2,8 +2,8 @@ import { createRepositories } from '@rembric/db';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MemoryService } from '@rembric/core';
 import { EmbeddingWorker } from '@rembric/core';
+import { MemoryService } from '@rembric/core';
 
 import {
   createTestDb,
