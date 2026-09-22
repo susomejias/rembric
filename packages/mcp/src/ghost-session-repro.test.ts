@@ -9,12 +9,13 @@ import {
   tokens as tokensSchema,
   type Token,
 } from '@rembric/db';
-import { buildSessionHandlers } from '@rembric/mcp';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProject, type TestDb } from '../index.js';
+import { buildSessionHandlers } from '@rembric/mcp';
+
+import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 // REGRESSION coverage for fix-pi-ghost-sessions (issue #377): one long-lived
 // agent conversation must not accumulate session rows. The resolution order

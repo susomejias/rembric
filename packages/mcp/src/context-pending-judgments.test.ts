@@ -12,13 +12,19 @@ import {
   type Scope,
   type Token,
 } from '@rembric/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { buildMemoryHandlers } from '@rembric/mcp';
 import { buildObservabilityHandlers } from '@rembric/mcp';
 import { buildRelationsHandlers } from '@rembric/mcp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProjectScope, mintTestToken, type TestDb } from '../index.js';
+import {
+  createTestDb,
+  defaultProjectScope,
+  mintTestToken,
+  type TestDb,
+} from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 /**
  * `memory.context.pendingJudgments[]` is a page of an AGED queue: five rows,

@@ -1645,8 +1645,8 @@ describe('server-context single-instance invariant', () => {
       { file: 'apps/server/src/server/api-router.ts', symbol: 'RequestContext' },
       { file: 'apps/server/src/server/api-router.test.ts', symbol: 'runWithContext' },
       { file: 'apps/server/src/server/session-router.test.ts', symbol: 'SessionRouter' },
-      { file: 'apps/server/src/test/mcp/memory-tools.test.ts', symbol: 'runWithContext' },
-      { file: 'apps/server/src/test/mcp/unresolvable-slug.test.ts', symbol: 'SessionRouter' },
+      { file: 'packages/mcp/src/memory-tools.test.ts', symbol: 'runWithContext' },
+      { file: 'packages/mcp/src/unresolvable-slug.test.ts', symbol: 'SessionRouter' },
       { file: 'packages/mcp/src/_shared.ts', symbol: 'getRequestContext' },
       { file: 'packages/mcp/src/server.ts', symbol: 'runWithToolCallId' },
     ];

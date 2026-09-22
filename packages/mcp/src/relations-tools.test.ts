@@ -12,12 +12,13 @@ import {
   type Repositories,
   type Token,
 } from '@rembric/db';
-import { buildRelationsHandlers } from '@rembric/mcp';
-import { suggestTopicKey } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProject, type TestDb } from '../index.js';
+import { buildRelationsHandlers } from '@rembric/mcp';
+import { suggestTopicKey } from '@rembric/mcp';
+
+import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 let db: TestDb;
 let repos: Repositories;

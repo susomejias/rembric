@@ -1,8 +1,9 @@
 import { DomainError } from '@rembric/core';
-import { errToMcp, isDomainError } from '@rembric/mcp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { logInternalError } from '../../server/error-response.js';
+import { errToMcp, isDomainError } from '@rembric/mcp';
+
+import { logInternalError } from './test-support/test-logger.js';
 
 describe('errToMcp', () => {
   it('preserves a DomainError code and message verbatim', () => {

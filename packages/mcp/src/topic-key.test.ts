@@ -1,5 +1,6 @@
-import { STOPWORD_LANGUAGES, suggestTopicKey, topicKeyPrefix } from '@rembric/mcp';
 import { describe, expect, it } from 'vitest';
+
+import { STOPWORD_LANGUAGES, suggestTopicKey, topicKeyPrefix } from '@rembric/mcp';
 
 /** Throws when the suggestion is a refusal, so the fixtures below read as strings. */
 function key(input: { type: string; title?: string; content?: string }): string {

@@ -5,18 +5,19 @@ import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
 import { createRepositories, tokens as tokensTable, type Scope, type Token } from '@rembric/db';
+import fc from 'fast-check';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+
 import {
   buildObservabilityHandlers,
   doctorOutput,
   parseKeyLearnings,
   parseRunSummary,
 } from '@rembric/mcp';
-import fc from 'fast-check';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
 
-import { logInternalError } from '../../server/error-response.js';
-import { createTestDb, defaultProjectScope, type TestDb } from '../index.js';
+import { createTestDb, defaultProjectScope, type TestDb } from './test-support/index.js';
+import { logInternalError } from './test-support/test-logger.js';
 
 describe('parseKeyLearnings — capture_passive parser', () => {
   it('returns [] when no Key Learnings section exists', () => {

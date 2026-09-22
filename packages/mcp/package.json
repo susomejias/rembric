@@ -17,7 +17,8 @@
   "scripts": {
     "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -30,6 +31,9 @@
   "devDependencies": {
     "@rembric/config": "workspace:*",
     "@types/node": "^22.7.0",
-    "typescript": "^5.6.0"
+    "drizzle-orm": "^0.36.0",
+    "fast-check": "^3.22.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
   }
 }
