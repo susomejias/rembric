@@ -4,34 +4,23 @@ import type { ReactNode } from 'react';
 
 import './globals.css';
 
-const spaceGrotesk = localFont({
+const geistSans = localFont({
   src: [
-    { path: './fonts/space-grotesk-400.woff2', weight: '400', style: 'normal' },
-    { path: './fonts/space-grotesk-500.woff2', weight: '500', style: 'normal' },
-    { path: './fonts/space-grotesk-600.woff2', weight: '600', style: 'normal' },
-    { path: './fonts/space-grotesk-700.woff2', weight: '700', style: 'normal' },
+    { path: './fonts/geist-sans-400.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/geist-sans-500.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/geist-sans-600.woff2', weight: '600', style: 'normal' },
   ],
-  variable: '--font-space-grotesk',
+  variable: '--font-geist',
   display: 'swap',
 });
 
-const inter = localFont({
+const geistMono = localFont({
   src: [
-    { path: './fonts/inter-400.woff2', weight: '400', style: 'normal' },
-    { path: './fonts/inter-500.woff2', weight: '500', style: 'normal' },
-    { path: './fonts/inter-600.woff2', weight: '600', style: 'normal' },
+    { path: './fonts/geist-mono-400.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/geist-mono-500.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/geist-mono-600.woff2', weight: '600', style: 'normal' },
   ],
-  variable: '--font-inter',
-  display: 'swap',
-});
-
-const jetbrainsMono = localFont({
-  src: [
-    { path: './fonts/jetbrains-mono-400.woff2', weight: '400', style: 'normal' },
-    { path: './fonts/jetbrains-mono-500.woff2', weight: '500', style: 'normal' },
-    { path: './fonts/jetbrains-mono-600.woff2', weight: '600', style: 'normal' },
-  ],
-  variable: '--font-jetbrains-mono',
+  variable: '--font-geist-mono',
   display: 'swap',
 });
 
@@ -47,15 +36,12 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#0a0a0a',
+  themeColor: '#09090b',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html
-      lang="en"
-      className={`dark ${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`}
-    >
+    <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable}`}>
       <body className="antialiased">{children}</body>
     </html>
   );
