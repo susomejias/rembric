@@ -24,7 +24,7 @@
 # pre-created here owned by the runtime user — a named volume is initialised
 # from the image, which is what lets uid 10001 open the file at all.
 
-FROM node:22-bookworm-slim AS base
+FROM node:25-bookworm-slim AS base
 
 # build-essential + python3 are the native-module toolchain: better-sqlite3
 # builds from source when no prebuilt matches the platform/ABI.
