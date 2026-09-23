@@ -184,7 +184,7 @@ export default function DashboardOverviewPage() {
           <div className="px-5 pt-1">
             <NumberTicker
               value={activeSessions}
-              className="text-4xl font-semibold text-foreground"
+              className="text-2xl font-semibold text-foreground"
             />
           </div>
           <ul className="mt-3 flex flex-col">
@@ -227,6 +227,11 @@ export default function DashboardOverviewPage() {
                 </li>
               ))
             )}
+            {activeSessions > activeSessionRows.length ? (
+              <li className="px-5 pt-2 font-mono text-[10px] text-muted-foreground">
+                +{activeSessions - activeSessionRows.length} more active · view all →
+              </li>
+            ) : null}
           </ul>
         </WidgetCard>
       </div>
