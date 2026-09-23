@@ -1,6 +1,7 @@
 import { grantedOAuthScope, verifyAuthRequest } from '@rembric/core';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { relativeRedirect } from '../../../../lib/http-redirect';
 import { getServices } from '../../../../lib/services';
 import { resolveDashboardSession } from '../../../../lib/session';
 import { areqKey, CONSENT_FORM } from '../../oauth-consent/session';
@@ -9,8 +10,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export function GET(request: NextRequest): NextResponse {
-  const target = new URL(`/dashboard/oauth-consent${request.nextUrl.search}`, request.url);
-  return NextResponse.redirect(target, 302);
+  return relativeRedirect(`/dashboard/oauth-consent${request.nextUrl.search}`);
 }
 
 export async function POST(request: NextRequest): Promise<Response> {

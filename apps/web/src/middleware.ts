@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { relativeRedirect } from './lib/http-redirect';
+
 import { getSession } from '@/lib/session';
 
 export const runtime = 'nodejs';
@@ -26,5 +28,5 @@ export function middleware(request: NextRequest): NextResponse {
   }
   if (getSession(request.cookies) !== null) return NextResponse.next();
 
-  return NextResponse.redirect(new URL('/dashboard/login', request.url), 302);
+  return relativeRedirect('/dashboard/login');
 }

@@ -1,5 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import type { NextRequest, NextResponse } from 'next/server';
 
+import { relativeRedirect } from '@/lib/http-redirect';
 import { clearSessionCookie, destroySession, getSession } from '@/lib/session';
 
 export function POST(request: NextRequest): NextResponse {
@@ -7,7 +8,7 @@ export function POST(request: NextRequest): NextResponse {
   if (session !== null) destroySession(session.session.id);
 
   const cookie = clearSessionCookie();
-  const response = NextResponse.redirect(new URL('/dashboard/login', request.url), 302);
+  const response = relativeRedirect('/dashboard/login');
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   return response;
 }

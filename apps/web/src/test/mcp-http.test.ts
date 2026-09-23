@@ -16,6 +16,7 @@ import { resetMcpRateLimiterForTests } from '../lib/rate-limit';
 import { getServices } from '../lib/services';
 
 vi.mock('@/lib/auth', async () => await import('../lib/auth'));
+vi.mock('@/lib/http-redirect', async () => await import('../lib/http-redirect'));
 vi.mock('@/lib/services', async () => await import('../lib/services'));
 vi.mock('@/lib/session', async () => await import('../lib/session'));
 
