@@ -135,6 +135,11 @@ jobs:
       # thresholds this step used to gate PRs on lived in the retired server
       # vitest project; the web project carries no coverage block or provider,
       # so there is nothing to enforce here.
+      # The build must precede the tests: plugin.test.ts asserts the web
+      # production build exists (.next/BUILD_ID) as part of its contract.
+      - name: Build (artifact sanity)
+        run: pnpm run build
+
       - name: Test
         run: |
           pnpm run test:coverage
@@ -156,9 +161,6 @@ jobs:
 
       - name: Installer e2e (headless)
         run: pnpm run e2e:installer
-
-      - name: Build (artifact sanity)
-        run: pnpm run build
 
   retrieval-eval:
     # Separate from `test` (design.md Decision 7): this ingests a corpus
