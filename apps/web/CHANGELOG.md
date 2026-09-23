@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.28.9](https://github.com/susomejias/rembric/compare/server-v0.28.8...server-v0.28.9) (2026-09-23)
+
+
+### Features
+
+* **db,web:** port the data-loss guard and the boot counts banner ([7ed0d99](https://github.com/susomejias/rembric/commit/7ed0d992ccc7759b786dd0f92e90413b52e61d80))
+* **release:** publish the Next web image under the existing server channel ([1c749b3](https://github.com/susomejias/rembric/commit/1c749b30cae1f520abce31b5fa7ccd6eb45bc2ba))
+* **release:** reanchor the server release identity to apps/web ([f3f3ebb](https://github.com/susomejias/rembric/commit/f3f3ebb7657e3aef7f911d228f67e20af754dd40))
+* **web:** apply the v0 design to all remaining views + fix lint ([e575aeb](https://github.com/susomejias/rembric/commit/e575aeb3a9d404901c813fc24089411a7f10e14a))
+* **web:** dashboard mutations slice 1-3 with a shared guard mechanism ([0033e50](https://github.com/susomejias/rembric/commit/0033e50fe92fab1bfc9cff5f61c5e551fbbaa856))
+* **web:** dashboard mutations slice 4-6 — memories, judgments, purges ([4b587ea](https://github.com/susomejias/rembric/commit/4b587eaff527435c12bf4cea612a9ec40f29cc34))
+* **web:** dashboard mutations slice 7-8 — backups, downloads, consolidation ([d1bec43](https://github.com/susomejias/rembric/commit/d1bec434cc8d2c1bd3f4cda0b1b944d5008d59b7))
+* **web:** final mutation slice — entities rebuild, updater check, consent handler ([2b80e36](https://github.com/susomejias/rembric/commit/2b80e3624c40a599bd759dd67262f9370068aa31))
+* **web:** port all 13 dashboard views, auth, overview, Midday design lines and MCP transport ([1d73f6d](https://github.com/susomejias/rembric/commit/1d73f6d7282c76f49d4b646f97b32a50272e998f))
+* **web:** port all dashboard views, auth, overview and MCP transport ([c7fa489](https://github.com/susomejias/rembric/commit/c7fa489fddaf25ddae5ca9c98d92d603f1a076d5))
+* **web:** port consolidation, maintenance, update, oauth-consent, login and not-found ([fba8a3e](https://github.com/susomejias/rembric/commit/fba8a3e90cfd89b4e955531cbea983d6fc2bef96))
+* **web:** port memories list + detail + overview to React ([963463d](https://github.com/susomejias/rembric/commit/963463db65a85d271805506f833eec52692b850b))
+* **web:** port projects, tokens and entities views ([1c26cdf](https://github.com/susomejias/rembric/commit/1c26cdf47aa5612f761617733a83d6853965cfa8))
+* **web:** port sessions, judgments and prompts views ([3fb5e04](https://github.com/susomejias/rembric/commit/3fb5e04d5b9c010b3b3c734784591640e7362362))
+* **web:** port the entity-extraction backfill worker ([fb7a005](https://github.com/susomejias/rembric/commit/fb7a005bf65b08440a2373fa15cd489cd3391253))
+* **web:** port the MCP transport to SDK v2 ([8375c5d](https://github.com/susomejias/rembric/commit/8375c5d084dae4316ddb526ddfbbb2a9b608a345))
+* **web:** port the process bootstrap to instrumentation.ts ([8c0eab3](https://github.com/susomejias/rembric/commit/8c0eab3825ab0df3abc4f7db5215c4adb458f687))
+* **web:** port the session-lifecycle API to Next.js route handlers ([4c11e91](https://github.com/susomejias/rembric/commit/4c11e91672858f00e9def9c02a1e3887daf4d577))
+* **web:** redesign the login page with the v0 design lines ([6cce898](https://github.com/susomejias/rembric/commit/6cce898c4a61a72ceb0e53303936795e30de0a29))
+* **web:** replace the sidebar with Spectrum UI's ExpandableActionBar ([ded7bdc](https://github.com/susomejias/rembric/commit/ded7bdce42f3653098a3e47d60983168ac1c2c64))
+* **web:** replicate the main dashboard design with shadcn + Spectrum UI ([308c333](https://github.com/susomejias/rembric/commit/308c333682f82dced355b77fac50f059b75da290))
+* **web:** restore main dashboard parity across views ([28e8186](https://github.com/susomejias/rembric/commit/28e81860fce25677763bf70cb248c1819c4c94f6))
+* **web:** restore mcp route guards and boot the plugin test harness ([b9794bc](https://github.com/susomejias/rembric/commit/b9794bccc3b4ec00f80b9a75f734ed876d4600ea))
+* **web:** restore missing detail views and port the dashboard test suites ([6e2ea14](https://github.com/susomejias/rembric/commit/6e2ea14b5ecbf8b4fcf394001f6b0543da83905f))
+* **web:** restore the vertical sidebar matching main's design ([af29e9e](https://github.com/susomejias/rembric/commit/af29e9ead4bcc353a435264d158f9acdf314e7db))
+* **web:** scaffold apps/web — Next.js 16 App Router ([3883833](https://github.com/susomejias/rembric/commit/3883833eeaa2f6fa2e70b7111876788760ee4e30))
+* **web:** serve the OAuth 2.1 authorization-server surface from apps/web ([ddf4165](https://github.com/susomejias/rembric/commit/ddf41654f8aa36d2de4ba3d817c730f1b119dde0))
+* **web:** shadcn/ui init + Tailwind v4 theme + layout shell ([ab8ea98](https://github.com/susomejias/rembric/commit/ab8ea98998d0b3a078cef9a6e19e44d6b027ef36))
+* **web:** strip ALL custom styles — stock shadcn + lime primary ([aa0e53e](https://github.com/susomejias/rembric/commit/aa0e53e01bb6411985523b2e5b3dc3ea01b9c3fe))
+
+
+### Bug Fixes
+
+* **ci:** build workspace packages before lint ([80100b8](https://github.com/susomejias/rembric/commit/80100b8fe778ce33659de670080bda3d17836b70))
+* **mcp:** guard the structuredContent round-trip with a contextual re-throw ([4cffa69](https://github.com/susomejias/rembric/commit/4cffa699422b01e84638d151adfa6b1bc5c13e1f))
+* **mcp:** restore per-token rate limiting on authenticated MCP requests ([b824517](https://github.com/susomejias/rembric/commit/b82451767adbbc520969c5d32ad27d690f6c4494))
+* **web:** build 302 directly so the proxy runtime accepts relative Location ([04c8153](https://github.com/susomejias/rembric/commit/04c8153531ab9758c52c756efc58d7755702ff57))
+* **web:** derive redirect origin from Host/x-forwarded-host, not request.url ([4160154](https://github.com/susomejias/rembric/commit/416015444718f04b1022602acfc658959d2b7448))
+* **web:** honor REMBRIC_PORT as the standalone listen port ([6a1f31a](https://github.com/susomejias/rembric/commit/6a1f31a2d419e9ac0bff12a39328d12affbc9334))
+* **web:** origin-relative redirects in the standalone runtime ([b7b856d](https://github.com/susomejias/rembric/commit/b7b856d25a75ae5070a1fed3993ace5663f050c7))
+* **web:** raise the sheet close button above the header ([590b02f](https://github.com/susomejias/rembric/commit/590b02f4611f8e5e8206d30575af2437f91fc007))
+* **web:** replace instanceof DomainError with a shape check ([b187929](https://github.com/susomejias/rembric/commit/b18792911158bbeaff063acb22b829dc7e69df63))
+* **web:** resolve the workspace packages from source in the web tsconfig ([35ad9c8](https://github.com/susomejias/rembric/commit/35ad9c89d9194059e159d507029c579e087a9fd2))
+* **web:** restore prompt Delete/Undelete dashboard controls ([55d749b](https://github.com/susomejias/rembric/commit/55d749bc03e5ab79a9cd139cba0eb0b392e0c401))
+* **web:** restore the healthz bearer gate with main's exact contract ([8cc30e9](https://github.com/susomejias/rembric/commit/8cc30e9fad7c9c2646a6a696a2fce08bed8e0614))
+* **web:** sheet width + visible close button ([c3f0d09](https://github.com/susomejias/rembric/commit/c3f0d0969872c36502124b50dbb83817550d5081))
+* **web:** trace sqlite-vec binding and migrations into standalone ([a9d28c0](https://github.com/susomejias/rembric/commit/a9d28c0bcde390cb90e8890818f226db857783b3))
+* **web:** trace the onnxruntime native library into standalone ([712af7d](https://github.com/susomejias/rembric/commit/712af7d9745089a635a631dc7b4e5fbb04e05a18))
+
+
+### Refactor
+
+* **core:** single-source model identity and wire lazy vector reset ([ea50676](https://github.com/susomejias/rembric/commit/ea50676f63fc36e733db7e8933bea3f06e8085c4))
+* demolish apps/server - the next.js app is the only server ([8144ca1](https://github.com/susomejias/rembric/commit/8144ca1b0c7fc33e6cb087605ca39c7fa2adece6))
+* **test:** copy the sacred invariant suites into apps/web ([4cfc8ef](https://github.com/susomejias/rembric/commit/4cfc8ef61057767d638d39973f7a1a6f8ba22189))
+* **test:** execute items E — seeds rehomed, harness co-located, dead code retired ([2d316d0](https://github.com/susomejias/rembric/commit/2d316d005a25b9122d9b87fbb62e2b053384c604))
+
 ## [0.28.8](https://github.com/susomejias/rembric/compare/server-v0.28.7...server-v0.28.8) (2026-09-14)
 
 
