@@ -1,6 +1,5 @@
 import type { EntityBackfillWorker } from '@rembric/core';
 import { ENTITY_KINDS, type EntityKind } from '@rembric/db';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { entitiesQuery, readEntitiesFilters, type SearchParams } from './filters';
@@ -8,6 +7,7 @@ import { entitiesQuery, readEntitiesFilters, type SearchParams } from './filters
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { EntitiesTable } from '@/components/dashboard/entities-table';
 import {
   FilterActions,
   FilterField,
@@ -16,21 +16,7 @@ import {
   Pager,
 } from '@/components/dashboard/filters';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
-import {
-  Chip,
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  Flash,
-  Page,
-  StatCard,
-  StatGrid,
-  TableEmpty,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { Flash, Page, StatCard, StatGrid, TableEmpty } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -93,7 +79,14 @@ export default async function EntitiesPage({
 
   return (
     <Page>
-      <ViewHead title="Rembric Entities." hl="Rembric" />
+      <header className="min-w-0">
+        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
+          Entities
+        </h1>
+        <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
+          {`${rows.length} ROWS · ${total} MATCHING · ${corpusTotal} INDEXED`}
+        </p>
+      </header>
 
       {rebuilt !== '' ? (
         <div className="mt-5">
@@ -154,41 +147,17 @@ export default async function EntitiesPage({
       {rows.length === 0 ? (
         <TableEmpty>No entities match this filter.</TableEmpty>
       ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>kind</DataTh>
-            <DataTh>value</DataTh>
-            <DataTh>project</DataTh>
-            <DataTh>links</DataTh>
-            <DataTh>actions</DataTh>
-          </DataHead>
-          <DataBody>
-            {rows.map((entity) => (
-              <DataTr key={entity.id}>
-                <DataTd>
-                  <Chip>{entity.kind}</Chip>
-                </DataTd>
-                <DataTd className="font-mono text-xs">{entity.value}</DataTd>
-                <DataTd className="text-muted-foreground">
-                  {entity.projectId
-                    ? (projectById.get(entity.projectId) ?? shortId(entity.projectId))
-                    : '—'}
-                </DataTd>
-                <DataTd className="font-mono text-xs text-muted-foreground">
-                  {entity.linkCount}
-                </DataTd>
-                <DataTd>
-                  <Link
-                    href={`/dashboard/memories?q=${encodeURIComponent(entity.value)}`}
-                    className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
-                  >
-                    View memories →
-                  </Link>
-                </DataTd>
-              </DataTr>
-            ))}
-          </DataBody>
-        </DataTable>
+        <EntitiesTable
+          rows={rows.map((entity) => ({
+            id: entity.id,
+            kind: entity.kind,
+            value: entity.value,
+            project: entity.projectId
+              ? (projectById.get(entity.projectId) ?? shortId(entity.projectId))
+              : '—',
+            linkCount: entity.linkCount,
+          }))}
+        />
       )}
 
       <Pager
