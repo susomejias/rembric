@@ -70,11 +70,11 @@ export function installViewMocks(pathname = '/dashboard'): void {
     async () => await import('../../components/dashboard/support'),
   );
   vi.mock('@/components/dashboard/ui', async () => await import('../../components/dashboard/ui'));
-  vi.mock('@/components/dashboard/app-sidebar', async () => {
+  vi.mock('@/components/dashboard/command-bar', async () => {
     const { badgeTooltip } = await import('../../lib/nav');
     type Breakdown = { total: number; byProject: { label: string; count: number }[] };
     return {
-      SidebarFrame: ({
+      CommandFrame: ({
         children,
         counters = {},
       }: {
