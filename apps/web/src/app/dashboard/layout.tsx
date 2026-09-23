@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 import { getUpdates } from './update/update-service';
 
-import { SidebarFrame } from '@/components/dashboard/app-sidebar';
+import { CommandFrame } from '@/components/dashboard/command-bar';
 import { type BadgeBreakdown, type NavBadgeCounters } from '@/lib/nav';
 import { getServices } from '@/lib/services';
 import { REMBRIC_VERSION } from '@/lib/version';
@@ -19,7 +19,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const updates = getUpdates();
 
   return (
-    <SidebarFrame
+    <CommandFrame
       counters={badgeCounters()}
       version={REMBRIC_VERSION}
       updater={{
@@ -29,7 +29,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-    </SidebarFrame>
+    </CommandFrame>
   );
 }
 
