@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { BACKUP_PREFIX as PRE_UPDATE_BACKUP_PREFIX } from '@rembric/core';
 import { createDiagnostics, type DbDiagnostics } from '@rembric/db';
 
+import { relativeRedirect } from '../../../lib/http-redirect';
 import { getServices } from '../../../lib/services';
 import { getSession, type SessionCookieSource } from '../../../lib/session';
 
@@ -174,12 +175,9 @@ export function resolveBackupDownload(file: string | null): BackupDownload {
   };
 }
 
-export function backupDownloadDenial(request: {
-  url: string;
-  cookies: SessionCookieSource;
-}): Response | null {
+export function backupDownloadDenial(request: { cookies: SessionCookieSource }): Response | null {
   const session = getSession(request.cookies);
-  if (session === null) return Response.redirect(new URL('/dashboard/login', request.url), 302);
+  if (session === null) return relativeRedirect('/dashboard/login');
   if (session.scope !== '*') {
     return new Response('This view requires an admin-scoped token.', { status: 403 });
   }
