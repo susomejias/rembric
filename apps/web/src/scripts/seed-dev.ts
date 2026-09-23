@@ -103,6 +103,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   const readerTok = tokensSvc.create({ name: 'demo-reader', project: proj, access: 'read' });
   const writerTok = tokensSvc.create({ name: 'demo-writer', project: proj, access: 'write' });
 
+  const DAY = 24 * 60 * 60 * 1000;
   const scope = projectScope(proj.id);
   const clusters: Array<{
     topicKey: string;
@@ -164,7 +165,13 @@ export function runSeed(deps: SeedDeps): SeedResult {
   let memoryCount = 0;
   for (const cluster of clusters) {
     for (const content of cluster.items) {
-      memorySvc.save(
+      const ageDays = ((memoryCount * 11) % 29) + (memoryCount % 3) * 2;
+      const clock = ageDays === 0 ? undefined : () => new Date(Date.now() - ageDays * DAY);
+      const saver =
+        clock === undefined
+          ? memorySvc
+          : new MemoryService(createRepositories(deps.handle.db), deps.handle.db, clock);
+      saver.save(
         {
           type: cluster.type,
           title: deriveTitle(content),
@@ -178,7 +185,6 @@ export function runSeed(deps: SeedDeps): SeedResult {
     }
   }
 
-  const DAY = 24 * 60 * 60 * 1000;
   const staleSeeds: Array<{
     type: 'project' | 'feedback' | 'user' | 'reference';
     content: string;
