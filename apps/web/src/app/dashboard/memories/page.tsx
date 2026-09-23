@@ -24,22 +24,9 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, relativeTime, shortId } from '@/components/dashboard/support';
-import {
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  Page,
-  ReviewPill,
-  StatCard,
-  StatGrid,
-  StatusPill,
-  TableEmpty,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { MemoriesTable } from '@/components/dashboard/memories-table';
+import { PAGE_SIZE, shortId } from '@/components/dashboard/support';
+import { Page, StatCard, StatGrid, TableEmpty } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
 export const dynamic = 'force-dynamic';
@@ -170,7 +157,15 @@ export default async function MemoriesPage({
 
   return (
     <Page>
-      <ViewHead num="02" title="Rembric Memories." hl="Rembric" />
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Memories</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {totalMemories.toLocaleString('en-US')} total · {activeMemories.toLocaleString('en-US')}{' '}
+            active · {totalNeedsReview.toLocaleString('en-US')} need review
+          </p>
+        </div>
+      </section>
 
       <StatGrid className="mt-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
         <StatCard
@@ -259,52 +254,20 @@ export default async function MemoriesPage({
           )}
         </TableEmpty>
       ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>project</DataTh>
-            <DataTh>type</DataTh>
-            <DataTh>title</DataTh>
-            <DataTh>status</DataTh>
-            <DataTh>review</DataTh>
-            <DataTh>created</DataTh>
-          </DataHead>
-          <DataBody>
-            {visible.map((memory) => {
-              const reviewState = reviewById.get(memory.id) ?? null;
-              return (
-                <DataTr key={memory.id}>
-                  <DataTd className="text-muted-foreground">
-                    {memory.projectId
-                      ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
-                      : '—'}
-                  </DataTd>
-                  <DataTd>{memory.type}</DataTd>
-                  <DataTd className="max-w-[420px] truncate">
-                    <Link
-                      href={`/dashboard/memories/${memory.id}`}
-                      className="transition-colors hover:text-primary"
-                    >
-                      {memory.title}
-                    </Link>
-                  </DataTd>
-                  <DataTd>
-                    <StatusPill status={memory.status} />
-                  </DataTd>
-                  <DataTd>
-                    {reviewState === 'needs_review' ? (
-                      <ReviewPill />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </DataTd>
-                  <DataTd className="font-mono text-xs text-muted-foreground">
-                    {relativeTime(memory.createdAt, nowMs)}
-                  </DataTd>
-                </DataTr>
-              );
-            })}
-          </DataBody>
-        </DataTable>
+        <MemoriesTable
+          rows={visible.map((memory) => ({
+            id: memory.id,
+            title: memory.title,
+            type: memory.type,
+            project: memory.projectId
+              ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
+              : '—',
+            status: memory.status,
+            createdAt: memory.createdAt,
+            lastSeenAt: memory.lastSeenAt,
+            needsReview: (reviewById.get(memory.id) ?? null) === 'needs_review',
+          }))}
+        />
       )}
 
       <Pager
