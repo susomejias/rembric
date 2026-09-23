@@ -411,6 +411,27 @@ describe('image packaging invariants', () => {
     expect(/MAX_MB|800/.test(yml)).toBe(true);
   });
 
+  it('cross-version upgrader compat: Dockerfile ships the helper and publish smoke probes it', () => {
+    const dockerfile = prodDockerfile();
+    expect(dockerfile).toContain(
+      'cp /app/packages/core/dist/scripts/upgrade-helper.js /runtime/dist/scripts/upgrade-helper.js',
+    );
+    expect(dockerfile).toContain(
+      'cp /app/packages/core/dist/services/self-update/engine-api.js /runtime/dist/services/self-update/engine-api.js',
+    );
+    expect(dockerfile).toContain('[ -f /runtime/dist/scripts/upgrade-helper.js ]');
+    expect(dockerfile).toContain('[ -f /runtime/dist/services/self-update/engine-api.js ]');
+    expect(dockerfile).toContain('[ -f /runtime/dist/package.json ]');
+
+    const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    expect(publish).toContain('/app/dist/scripts/upgrade-helper.js');
+    expect(publish).toContain('MODULE_NOT_FOUND');
+    expect(publish).toContain(
+      'REMBRIC_UPGRADE_TARGET_CONTAINER and REMBRIC_UPGRADE_IMAGE are required',
+    );
+    expect(publish).toContain('[ "$CODE" -ne 2 ]');
+  });
+
   it('lib/process.ts calls assertDataLossGuard before the first timer', () => {
     const src = readFileSync(join(srcRoot, 'lib/process.ts'), 'utf8');
     const guardIdx = src.search(/\bassertDataLossGuard\s*\(/);

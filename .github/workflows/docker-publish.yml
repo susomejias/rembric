@@ -154,6 +154,38 @@ jobs:
           fi
           echo "✓ All three smoke-test signals passed for ${{ matrix.arch }}."
 
+      # The cross-version upgrader path a <=v0.28.9 orchestrator hardcodes. No env
+      # means the helper must self-report exit 2, never MODULE_NOT_FOUND.
+      - name: Smoke test this arch's digest (cross-version upgrader compat)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          REF="$IMAGE@$DIGEST"
+          docker pull "$REF"
+
+          set +e
+          OUT=$(docker run --rm --entrypoint /nodejs/bin/node "$REF" /app/dist/scripts/upgrade-helper.js 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+          echo "Exit code: $CODE"
+
+          if echo "$OUT" | grep -q 'MODULE_NOT_FOUND'; then
+            echo "::error::Cross-version upgrader smoke FAILED: MODULE_NOT_FOUND — the image is missing /app/dist/scripts/upgrade-helper.js." >&2
+            exit 1
+          fi
+          if [ "$CODE" -ne 2 ]; then
+            echo "::error::Cross-version upgrader smoke FAILED: expected exit 2 with no upgrade env, got $CODE." >&2
+            exit 1
+          fi
+          if ! echo "$OUT" | grep -q 'REMBRIC_UPGRADE_TARGET_CONTAINER and REMBRIC_UPGRADE_IMAGE are required'; then
+            echo "::error::Cross-version upgrader smoke FAILED: required-env diagnostic missing." >&2
+            exit 1
+          fi
+          echo "✓ Cross-version upgrader compat smoke passed for ${{ matrix.arch }}."
+
       - name: Export digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}

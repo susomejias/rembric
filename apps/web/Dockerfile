@@ -142,13 +142,18 @@ RUN pnpm run build
 #                                     `.pnpm` layout, so with a flat tree the
 #                                     glob matches nothing and the package
 #                                     arrives as an ordinary installed one
+#   dist/                           — the cross-version upgrader files the gate below asserts
 RUN set -eux; \
     rm -rf /runtime; mkdir -p /runtime; \
     cp -a /app/apps/web/.next/standalone/apps /runtime/apps; \
     cp -a /app/apps/web/.next/standalone/packages /runtime/packages; \
     mv /runtime/apps/web/server.js /runtime/apps/web/next-server.js; \
     rm -rf /runtime/apps/web/node_modules; \
-    cp -a /app/node_modules /runtime/node_modules
+    cp -a /app/node_modules /runtime/node_modules; \
+    mkdir -p /runtime/dist/scripts /runtime/dist/services/self-update; \
+    cp /app/packages/core/dist/scripts/upgrade-helper.js /runtime/dist/scripts/upgrade-helper.js; \
+    cp /app/packages/core/dist/services/self-update/engine-api.js /runtime/dist/services/self-update/engine-api.js; \
+    printf '{"type":"module"}\n' > /runtime/dist/package.json
 
 # onnxruntime-node's non-target prebuilt libs (~185MB) are pruned: its loader
 # only ever requires the running platform/arch, so every other pair is
@@ -210,6 +215,9 @@ RUN set -eux; \
       find /runtime -name '*.sql' | head -50 >&2; \
       exit 1; \
     }; \
+    [ -f /runtime/dist/scripts/upgrade-helper.js ]; \
+    [ -f /runtime/dist/services/self-update/engine-api.js ]; \
+    [ -f /runtime/dist/package.json ]; \
     [ -f /models/onnx-community/gte-multilingual-base/onnx/model_quantized.onnx ]; \
     cd /runtime/apps/web; \
     node -e 'let bad=0; \
