@@ -140,6 +140,14 @@ jobs:
           pnpm run test:coverage
           pnpm run test:hermes-plugin
 
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: apps/web/test-results.json
+          if-no-files-found: ignore
+
       # A rescued test passes after retry but carries stale failureMessages.
       # Vitest reports it green; this gate fails the run instead.
       - name: Check for rescued tests
