@@ -278,7 +278,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       expect(second.status).toBe(200);
 
       process.env['RATE_LIMIT_ENABLED'] = 'true';
-      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_RPS'] = '1';
       process.env['RATE_LIMIT_BURST'] = '1';
       resetMcpRateLimiterForTests();
       const invalid = await POST(mcpRequestForToken('not-a-real-token', initializeBody), ctx);
@@ -291,7 +291,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
 
     it('fails closed with 500 when the direct limiter returns an unexpected error', async () => {
       process.env['RATE_LIMIT_ENABLED'] = 'true';
-      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_RPS'] = '1';
       process.env['RATE_LIMIT_BURST'] = '1';
       resetMcpRateLimiterForTests();
       const consume = vi
@@ -311,7 +311,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
 
     it('isolates quotas by resolved static token id', async () => {
       process.env['RATE_LIMIT_ENABLED'] = 'true';
-      process.env['RATE_LIMIT_RPS'] = '10';
+      process.env['RATE_LIMIT_RPS'] = '1';
       process.env['RATE_LIMIT_BURST'] = '1';
       resetMcpRateLimiterForTests();
       const tokenA = services.tokens.create({ name: 'rate-a', scope: '*' }).plaintext;
