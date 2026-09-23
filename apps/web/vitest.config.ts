@@ -59,6 +59,8 @@ const rembricMcpSessionTools = fileURLToPath(
 export default defineConfig({
   resolve: {
     alias: {
+      // Lets unmocked '@/*' imports resolve in the node environment.
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@earendil-works/pi-tui': piHostStub,
       '@earendil-works/pi-coding-agent': piHostStub,
       '@rembric/db': rembricDb,

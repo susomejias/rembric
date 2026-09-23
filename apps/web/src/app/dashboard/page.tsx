@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { ActivityChart } from '@/components/dashboard/activity-chart';
 import { RowTooltip } from '@/components/dashboard/row-tooltip';
 import { formatBytes, relativeTime, truncate } from '@/components/dashboard/support';
+import { NumberTicker } from '@/components/motion/number-ticker';
 import { getServices } from '@/lib/services';
 import { cn } from '@/lib/utils';
 import { REMBRIC_VERSION } from '@/lib/version';
@@ -74,6 +75,9 @@ export default function DashboardOverviewPage() {
   }
 
   const activityDays = buildDays(activityRows59, opsByDay, 30, nowMs);
+  const swept30 = [...opsByDay.entries()]
+    .filter(([day]) => day >= today - 29)
+    .reduce((acc, [, n]) => acc + n, 0);
 
   const lastRun = repos.consolidation.adminListRuns(1, 0).at(0) ?? null;
   const lastRunOps = lastRun
@@ -133,6 +137,7 @@ export default function DashboardOverviewPage() {
         <WidgetCard
           order="order-2 lg:order-1"
           label="MEMORY ACTIVITY"
+          featured
           labelExtra={
             <span className="flex items-center gap-3">
               <span className="flex items-center gap-1.5">
@@ -148,12 +153,17 @@ export default function DashboardOverviewPage() {
           }
           link={{ href: '/dashboard/memories', label: 'memories →' }}
         >
-          <div className="flex items-baseline gap-3 px-5 pt-1">
-            <span className="text-2xl font-semibold text-foreground">
-              {savedLast30.toLocaleString('en-US')}
-            </span>
+          <div className="flex items-center gap-3 px-5 pt-1">
+            <NumberTicker
+              value={savedLast30}
+              format={(value) => value.toLocaleString('en-US')}
+              className="text-2xl font-semibold text-foreground"
+            />
             <span className="text-sm text-muted-foreground">saved</span>
-            {savedDelta !== null ? <DeltaChip value={savedDelta} /> : null}
+            {savedDelta !== null && savedPrev30 >= 10 ? <DeltaChip value={savedDelta} /> : null}
+            {swept30 > 0 ? (
+              <span className="text-sm text-muted-foreground">· {swept30} swept</span>
+            ) : null}
           </div>
           <ActivityChart days={activityDays} />
         </WidgetCard>
@@ -172,7 +182,10 @@ export default function DashboardOverviewPage() {
           featured
         >
           <div className="px-5 pt-1">
-            <span className="text-4xl font-semibold text-foreground">{activeSessions}</span>
+            <NumberTicker
+              value={activeSessions}
+              className="text-4xl font-semibold text-foreground"
+            />
           </div>
           <ul className="mt-3 flex flex-col">
             {activeSessionRows.length === 0 ? (
@@ -286,7 +299,10 @@ export default function DashboardOverviewPage() {
 
         <WidgetCard label="ACTIVE TOKENS" link={{ href: '/dashboard/tokens', label: 'tokens →' }}>
           <div className="flex items-baseline gap-2 px-5 pt-1">
-            <span className="text-4xl font-semibold text-foreground">{activeTokens.length}</span>
+            <NumberTicker
+              value={activeTokens.length}
+              className="text-4xl font-semibold text-foreground"
+            />
             <span className="text-sm text-muted-foreground">of {allTokens.length}</span>
           </div>
         </WidgetCard>
@@ -333,6 +349,7 @@ export default function DashboardOverviewPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_400px]">
         <WidgetCard
           label="LIVE AGENT ACTIVITY"
+          featured
           labelExtra={
             activeSessions > 0 ? (
               <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
