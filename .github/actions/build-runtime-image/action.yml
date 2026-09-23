@@ -21,6 +21,10 @@ inputs:
   cache-scope:
     description: GHA cache scope (keep per-arch to avoid cross-eviction).
     required: true
+  export-cache:
+    description: Export digest build cache to GHA (release imports only).
+    required: false
+    default: 'true'
   dockerfile:
     description: >
       Dockerfile to build, relative to the repo-root build context. Defaults to
@@ -75,13 +79,18 @@ runs:
         file: ${{ inputs.dockerfile }}
         target: ${{ inputs.target }}
         platforms: ${{ inputs.platform }}
-        outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true
+        outputs: "type=image,name=${{ inputs.image }},push-by-digest=true,\
+          name-canonical=true,push=true"
         cache-from: type=gha,scope=${{ inputs.cache-scope }}
-        cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}
+        cache-to: >-
+          ${{ inputs.export-cache == 'true' &&
+          format('type=gha,mode=max,scope={0}', inputs.cache-scope) || '' }}
         secrets: |
           hf_token=${{ inputs.hf-token }}
 
     - name: Surface digest
       id: digest
       shell: bash
-      run: echo "digest=${{ steps.build_digest.outputs.digest }}" >> "$GITHUB_OUTPUT"
+      run: |
+        echo "digest=${{ steps.build_digest.outputs.digest }}" \
+          >> "$GITHUB_OUTPUT"

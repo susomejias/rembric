@@ -358,6 +358,51 @@ describe('image packaging invariants', () => {
     expect(/dist\/server-entrypoint\.js/.test(publish)).toBe(false);
   });
 
+  it('release imports its per-arch cache without exporting it, while CI keeps the export default', () => {
+    const action = readFileSync(
+      join(repoRoot, '.github/actions/build-runtime-image/action.yml'),
+      'utf8',
+    );
+    const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    const digest = action
+      .split('    - name: Build and push by digest (native — no QEMU)')[1]
+      ?.split('    - name: Surface digest')[0];
+    expect(digest).toBeDefined();
+    expect(compositeActionInput(action, 'export-cache')).toMatch(/^ {4}default: 'true'$/m);
+    expect(digest).toMatch(/cache-from: type=gha,scope=\$\{\{ inputs\.cache-scope \}\}/);
+    expect(digest).toMatch(
+      /cache-to: >-\n\s+\$\{\{ inputs\.export-cache == 'true' &&\s+format\('type=gha,mode=max,scope=\{0\}', inputs\.cache-scope\) \|\| '' \}\}/,
+    );
+    expect(publish).toMatch(/^ {10}cache-scope: web-runtime-\$\{\{ matrix\.arch \}\}$/m);
+    expect(publish).toMatch(/^ {10}export-cache: 'false'$/m);
+    expect(publish).not.toMatch(/^ {10}cache-to:/m);
+    expect(action).toMatch(
+      /if: inputs\.mode == 'load'[\s\S]*?cache-to: type=gha,mode=max,scope=\$\{\{ inputs\.cache-scope \}\}/,
+    );
+  });
+
+  it('release builds the checked-out tag by digest and gates promotion on both smokes', () => {
+    const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    const build = publish.split('  build:')[1]?.split('  merge:')[0];
+    const merge = publish.split('  merge:')[1];
+    expect(build).toMatch(/ref: \$\{\{ inputs\.tag \}\}/);
+    expect(build).toMatch(/mode: digest/);
+    expect(build).toMatch(/platform: \$\{\{ matrix\.platform \}\}/);
+    expect(build).toMatch(/DIGEST: \$\{\{ steps\.build\.outputs\.digest \}\}/);
+    expect(build).toMatch(/REF="\$IMAGE@\$DIGEST"[\s\S]*?docker pull "\$REF"/);
+    expect(build).toMatch(
+      /seed-dev[\s\S]*?tsx watch[\s\S]*?EXPECT_ENTRY='apps\/web\/server\.js'[\s\S]*?\[ "\$LABEL" != "runtime" \][\s\S]*?\[ "\$SIZE_MB" -gt "\$MAX_MB" \][\s\S]*?\[ "\$fail" -ne 0 \]/,
+    );
+    expect(merge).toMatch(/needs: build/);
+    const refusal = merge
+      ?.split('      - name: Refuse to overwrite an existing immutable tag')[1]
+      ?.split('      - name: Extract Docker metadata (immutable tags)')[0];
+    expect(refusal).toMatch(
+      /if docker manifest inspect "\$IMAGE:\$VERSION" > \/dev\/null 2>&1; then[\s\S]*?exit 1/,
+    );
+    expect(merge).toMatch(/docker buildx imagetools create \$TAGARGS \$REFS/);
+  });
+
   it('docker-publish.yml: post-publish smoke test references all three signals', () => {
     const yml = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
     expect(/seed-dev/.test(yml)).toBe(true);

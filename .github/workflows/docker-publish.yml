@@ -79,20 +79,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.gh_token || secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-buildx-action@v4
-
       - name: Build the published image (web runtime, push by digest — no QEMU)
         id: build
-        uses: docker/build-push-action@v7
+        uses: ./.github/actions/build-runtime-image
         with:
-          context: .
-          file: ./apps/web/Dockerfile
+          image: ${{ env.IMAGE }}
+          platform: ${{ matrix.platform }}
+          mode: digest
+          cache-scope: web-runtime-${{ matrix.arch }}
+          export-cache: 'false'
+          dockerfile: ./apps/web/Dockerfile
           target: runner
-          platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=web-runtime-${{ matrix.arch }}
-          secrets: |
-            hf_token=${{ secrets.hf_token }}
+          hf-token: ${{ secrets.hf_token }}
 
       - name: Smoke test this arch's digest (three independent signals)
         env:
