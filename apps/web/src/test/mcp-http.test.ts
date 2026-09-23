@@ -33,7 +33,9 @@ const globalForApp = globalThis as MutableGlobal;
 function resetAppGlobals(): void {
   try {
     globalForApp.__rembricDb?.close();
-  } catch {}
+  } catch (error) {
+    console.error('[test] app-globals db close failed', error);
+  }
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
