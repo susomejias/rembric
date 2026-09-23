@@ -1,5 +1,6 @@
 'use client';
 
+import { MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -8,6 +9,13 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export interface SessionRowData {
   readonly id: string;
@@ -44,6 +52,7 @@ export function SessionsTable({
   csrf,
   quickFilter = false,
   selectable = false,
+  searchable = false,
   pageSize,
 }: {
   rows: readonly SessionRowData[];
@@ -53,6 +62,7 @@ export function SessionsTable({
   csrf: SessionCsrfTokens;
   quickFilter?: boolean;
   selectable?: boolean;
+  searchable?: boolean;
   pageSize?: number;
 }) {
   const router = useRouter();
@@ -132,6 +142,9 @@ export function SessionsTable({
       rowId={(row) => row.id}
       rowLabel={(row) => `${row.agent} session — ${row.title}`}
       caption="Agent sessions with status, memory and prompt counts"
+      searchable={searchable}
+      searchPlaceholder="Search sessions…"
+      searchText={(row) => `${row.title} ${row.agent} ${row.project} ${row.token}`}
       variant="panel"
       density="default"
       emptyState={
@@ -178,13 +191,13 @@ export function SessionsTable({
           </div>
         )
       }
-      rowActions={(row) => <SessionRowActions row={row} actions={actions} csrf={csrf} />}
+      rowActions={(row) => <SessionRowMenu row={row} actions={actions} csrf={csrf} />}
       pageSize={pageSize}
     />
   );
 }
 
-function SessionRowActions({
+function SessionRowMenu({
   row,
   actions,
   csrf,
@@ -193,56 +206,97 @@ function SessionRowActions({
   actions: SessionServerActions;
   csrf: SessionCsrfTokens;
 }) {
-  if (row.deleted) {
-    return (
-      <ActionForm action={actions.restore}>
-        <input type="hidden" name="csrf" value={csrf.restore ?? ''} />
-        <input type="hidden" name="id" value={row.id} />
-        <Button type="submit" variant="outline" size="sm">
-          Undelete
-        </Button>
-      </ActionForm>
-    );
-  }
-
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Link
-        href={`/dashboard/sessions/${row.id}`}
-        className="font-mono text-[11px] uppercase tracking-[.14em] hover:text-primary"
-      >
-        View →
-      </Link>
-      {row.status === 'active' ? (
-        <ActionForm action={actions.abandon}>
-          <input type="hidden" name="csrf" value={csrf.abandon ?? ''} />
-          <input type="hidden" name="id" value={row.id} />
-          <ConfirmSubmit
-            tone="warn"
-            title="Mark this session as abandoned?"
-            description={`Its ${row.memories} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard.`}
-            confirmLabel="ABANDON SESSION"
-          >
-            <Button type="button" variant="outline" size="sm">
-              Abandon
-            </Button>
-          </ConfirmSubmit>
-        </ActionForm>
-      ) : null}
-      <ActionForm action={actions.remove}>
-        <input type="hidden" name="csrf" value={csrf.remove ?? ''} />
-        <input type="hidden" name="id" value={row.id} />
-        <ConfirmSubmit
-          tone="danger"
-          title="Soft-delete this session?"
-          description="Its memories stay queryable but the session is hidden from the list. You can restore it with the deleted toggle."
-          confirmLabel="DELETE SESSION"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`Actions for session ${row.title}`}
+          className="size-7 text-muted-foreground hover:text-foreground"
         >
-          <Button type="button" variant="destructive" size="sm">
-            Delete
-          </Button>
-        </ConfirmSubmit>
-      </ActionForm>
-    </div>
+          <MoreHorizontal aria-hidden="true" className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44 border-border bg-popover">
+        {row.deleted ? (
+          <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}>
+            <ActionForm action={actions.restore} className="w-full">
+              <input type="hidden" name="csrf" value={csrf.restore ?? ''} />
+              <input type="hidden" name="id" value={row.id} />
+              <Button
+                type="submit"
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start font-normal"
+              >
+                Undelete session
+              </Button>
+            </ActionForm>
+          </DropdownMenuItem>
+        ) : (
+          <>
+            <DropdownMenuItem asChild>
+              <Link href={`/dashboard/sessions/${row.id}`} className="w-full cursor-pointer">
+                View details
+              </Link>
+            </DropdownMenuItem>
+            {row.status === 'active' ? (
+              <DropdownMenuItem
+                asChild
+                onSelect={(event) => event.preventDefault()}
+                className="text-warn focus:text-warn"
+              >
+                <ActionForm action={actions.abandon} className="w-full">
+                  <input type="hidden" name="csrf" value={csrf.abandon ?? ''} />
+                  <input type="hidden" name="id" value={row.id} />
+                  <ConfirmSubmit
+                    tone="warn"
+                    title="Mark this session as abandoned?"
+                    description="Its memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
+                    confirmLabel="ABANDON SESSION"
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start font-normal"
+                    >
+                      Abandon session
+                    </Button>
+                  </ConfirmSubmit>
+                </ActionForm>
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuSeparator className="bg-border" />
+            <DropdownMenuItem
+              asChild
+              onSelect={(event) => event.preventDefault()}
+              className="text-destructive focus:text-destructive"
+            >
+              <ActionForm action={actions.remove} className="w-full">
+                <input type="hidden" name="csrf" value={csrf.remove ?? ''} />
+                <input type="hidden" name="id" value={row.id} />
+                <ConfirmSubmit
+                  tone="danger"
+                  title="Soft-delete this session?"
+                  description="Its memories stay queryable but the session is hidden from the list. You can restore it from the deleted view."
+                  confirmLabel="DELETE SESSION"
+                >
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start font-normal"
+                  >
+                    Delete session
+                  </Button>
+                </ConfirmSubmit>
+              </ActionForm>
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

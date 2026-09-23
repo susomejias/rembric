@@ -977,11 +977,13 @@ export function DataTable<T>({
     const head = columns.map((column) =>
       typeof column.header === 'string' ? column.header : column.id,
     );
-    const body = chosen.map((row) =>
-      columns.map((column) => printValue(readValue(column, row))).join('\t'),
+    const body = chosen.map(
+      (row) => `| ${columns.map((column) => printValue(readValue(column, row))).join(' | ')} |`,
     );
     try {
-      await navigator.clipboard.writeText([head.join('\t'), ...body].join('\n'));
+      await navigator.clipboard.writeText(
+        [`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`, ...body].join('\n'),
+      );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -1850,7 +1852,7 @@ export function DataTable<T>({
           {/* Infrequent, and it changes what the whole toolbar means, so this
               one earns a spring. */}
           {selectable && bulkActions && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-3">
+            <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-3">
               <AnimatePresence>
                 {selected.length > 0 && (
                   <motion.div
@@ -1858,7 +1860,7 @@ export function DataTable<T>({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.98 }}
                     transition={motionOn ? SPRING_ENTRANCE : INSTANT}
-                    className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-neutral-900 p-1 ps-3 whitespace-nowrap text-neutral-100 shadow-[0_8px_24px_rgba(0,0,0,0.18)] dark:bg-neutral-100 dark:text-neutral-900"
+                    className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full border border-border bg-popover p-1 ps-3 whitespace-nowrap text-popover-foreground shadow-lg shadow-black/40"
                   >
                     <span className="pe-1 text-xs font-medium tabular-nums">
                       <FlipDigits value={selected.length} instant={!motionOn} /> selected
@@ -1868,7 +1870,7 @@ export function DataTable<T>({
                       <button
                         type="button"
                         onClick={() => void copySelection()}
-                        aria-label={`Copy ${selected.length} rows to the clipboard`}
+                        aria-label={`Copy ${selected.length} rows as markdown to the clipboard`}
                         className={cn(
                           'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-current focus-visible:outline-hidden dark:hover:bg-black/10',
                           PRESS,
