@@ -146,7 +146,12 @@ jobs:
           fi
 
           # Recalibrated 2026-06-05: in-process embeddings added ~340MB model + ~280MB onnxruntime (image measured 1263MB).
-          MAX_MB=1500
+          # Recalibrated 2026-09-23: the Next.js standalone runtime replaces the Hono image
+          # (measured 2213MB on arm64 for server-v0.28.9). The runtime carries the framework
+          # and the full vendored dependency tree; RSS at rest measured LOWER than Hono in
+          # the A/B benchmark, so the size is disk-only. Slimming the runtime is tracked as
+          # follow-up work, not a release blocker.
+          MAX_MB=2500
           if [ "$SIZE_MB" -gt "$MAX_MB" ]; then
             echo "::error::Signal 3 FAILED: image size ${SIZE_MB} MB exceeds ${MAX_MB} MB threshold." >&2
             fail=1
