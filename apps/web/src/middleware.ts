@@ -28,5 +28,5 @@ export function middleware(request: NextRequest): NextResponse {
   }
   if (getSession(request.cookies) !== null) return NextResponse.next();
 
-  return relativeRedirect('/dashboard/login');
+  return relativeRedirect('/dashboard/login', request);
 }

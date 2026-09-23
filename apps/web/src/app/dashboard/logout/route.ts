@@ -8,7 +8,7 @@ export function POST(request: NextRequest): NextResponse {
   if (session !== null) destroySession(session.session.id);
 
   const cookie = clearSessionCookie();
-  const response = relativeRedirect('/dashboard/login');
+  const response = relativeRedirect('/dashboard/login', request);
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   return response;
 }
