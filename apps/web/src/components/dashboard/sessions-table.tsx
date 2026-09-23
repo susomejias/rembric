@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export interface SessionRowData {
   readonly id: string;
@@ -26,6 +27,7 @@ export interface SessionRowData {
   readonly token: string;
   readonly startedAt: Date;
   readonly endedAt: Date | null;
+  readonly durationMs: number;
   readonly status: string;
   readonly memories: number;
   readonly prompts: number;
@@ -90,21 +92,35 @@ export function SessionsTable({
       cell: (row) => <StatusPill status={row.status} />,
     },
     {
-      id: 'started',
-      header: 'Started',
+      id: 'duration',
+      header: 'Duration',
       sortable: true,
-      value: (row) => row.startedAt.getTime(),
+      value: (row) => row.durationMs,
       cell: (row) => (
-        <Time value={row.startedAt} className="font-mono text-xs text-muted-foreground" />
-      ),
-    },
-    {
-      id: 'ended',
-      header: 'Ended',
-      hideBelow: 'lg',
-      value: (row) => row.endedAt?.getTime() ?? 0,
-      cell: (row) => (
-        <Time value={row.endedAt} className="font-mono text-xs text-muted-foreground" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-default font-mono text-xs tabular-nums text-muted-foreground">
+              {formatDuration(row.durationMs)}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent
+            side="top"
+            sideOffset={8}
+            collisionPadding={16}
+            className="flex flex-col items-stretch gap-0.5 rounded-lg border border-border bg-popover px-3 py-2 text-left text-foreground shadow-lg shadow-black/40 [&>svg]:hidden"
+          >
+            <span className="whitespace-nowrap text-xs text-foreground">
+              Started <Time value={row.startedAt} />
+            </span>
+            {row.endedAt ? (
+              <span className="whitespace-nowrap text-xs text-muted-foreground">
+                Ended <Time value={row.endedAt} />
+              </span>
+            ) : (
+              <span className="whitespace-nowrap text-xs text-primary">Active now</span>
+            )}
+          </TooltipContent>
+        </Tooltip>
       ),
     },
     {
@@ -136,64 +152,68 @@ export function SessionsTable({
   };
 
   return (
-    <DataTable
-      data={rows}
-      columns={columns}
-      rowId={(row) => row.id}
-      rowLabel={(row) => `${row.agent} session — ${row.title}`}
-      caption="Agent sessions with status, memory and prompt counts"
-      searchable={searchable}
-      searchPlaceholder="Search sessions…"
-      searchText={(row) => `${row.title} ${row.agent} ${row.project} ${row.token}`}
-      variant="panel"
-      density="default"
-      emptyState={
-        <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-          NO SESSION MATCHES THIS FILTER
-        </div>
-      }
-      quickFilter={
-        quickFilter ? { columnId: 'status', label: 'Filter by status', allLabel: 'All' } : undefined
-      }
-      selectable={selectable}
-      bulkActions={
-        selectable
-          ? (context) => (
-              <ConfirmSubmit
-                tone="danger"
-                title={`Soft-delete ${context.ids.length} selected sessions?`}
-                description="Their memories stay queryable but the sessions are hidden from the list. You can restore them from the deleted view."
-                confirmLabel="DELETE SELECTED"
-              >
-                <Button type="button" variant="destructive" size="sm">
-                  Delete selected
-                </Button>
-              </ConfirmSubmit>
-            )
-          : undefined
-      }
-      onDelete={
-        selectable
-          ? (ids) => {
-              deleteIds(ids);
-            }
-          : undefined
-      }
-      renderDetail={(row) =>
-        row.deleted ? null : (
-          <div className="flex flex-col gap-2 px-2 py-1 text-xs">
-            <p className="whitespace-pre-line leading-relaxed text-muted-foreground">
-              {row.description ?? 'No description was captured for this session.'}
-            </p>
-            <p className="font-mono text-[10px] text-muted-foreground">
-              token: {row.token} · {row.memories} memories · {row.prompts} prompts
-            </p>
+    <TooltipProvider delayDuration={100}>
+      <DataTable
+        data={rows}
+        columns={columns}
+        rowId={(row) => row.id}
+        rowLabel={(row) => `${row.agent} session — ${row.title}`}
+        caption="Agent sessions with status, memory and prompt counts"
+        searchable={searchable}
+        searchPlaceholder="Search sessions…"
+        searchText={(row) => `${row.title} ${row.agent} ${row.project} ${row.token}`}
+        variant="panel"
+        density="default"
+        emptyState={
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            NO SESSION MATCHES THIS FILTER
           </div>
-        )
-      }
-      rowActions={(row) => <SessionRowMenu row={row} actions={actions} csrf={csrf} />}
-      pageSize={pageSize}
-    />
+        }
+        quickFilter={
+          quickFilter
+            ? { columnId: 'status', label: 'Filter by status', allLabel: 'All' }
+            : undefined
+        }
+        selectable={selectable}
+        bulkActions={
+          selectable
+            ? (context) => (
+                <ConfirmSubmit
+                  tone="danger"
+                  title={`Soft-delete ${context.ids.length} selected sessions?`}
+                  description="Their memories stay queryable but the sessions are hidden from the list. You can restore them from the deleted view."
+                  confirmLabel="DELETE SELECTED"
+                >
+                  <Button type="button" variant="destructive" size="sm">
+                    Delete selected
+                  </Button>
+                </ConfirmSubmit>
+              )
+            : undefined
+        }
+        onDelete={
+          selectable
+            ? (ids) => {
+                deleteIds(ids);
+              }
+            : undefined
+        }
+        renderDetail={(row) =>
+          row.deleted ? null : (
+            <div className="flex flex-col gap-2 px-2 py-1 text-xs">
+              <p className="whitespace-pre-line leading-relaxed text-muted-foreground">
+                {row.description ?? 'No description was captured for this session.'}
+              </p>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                token: {row.token} · {row.memories} memories · {row.prompts} prompts
+              </p>
+            </div>
+          )
+        }
+        rowActions={(row) => <SessionRowMenu row={row} actions={actions} csrf={csrf} />}
+        pageSize={pageSize}
+      />
+    </TooltipProvider>
   );
 }
 
@@ -221,7 +241,7 @@ function SessionRowMenu({
       <DropdownMenuContent align="end" className="w-44 border-border bg-popover">
         {row.deleted ? (
           <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}>
-            <ActionForm action={actions.restore} className="w-full">
+            <ActionForm action={actions.restore} className="flex w-full">
               <input type="hidden" name="csrf" value={csrf.restore ?? ''} />
               <input type="hidden" name="id" value={row.id} />
               <Button
@@ -237,7 +257,10 @@ function SessionRowMenu({
         ) : (
           <>
             <DropdownMenuItem asChild>
-              <Link href={`/dashboard/sessions/${row.id}`} className="w-full cursor-pointer">
+              <Link
+                href={`/dashboard/sessions/${row.id}`}
+                className="h-8 w-full cursor-pointer items-center px-2"
+              >
                 View details
               </Link>
             </DropdownMenuItem>
@@ -247,7 +270,7 @@ function SessionRowMenu({
                 onSelect={(event) => event.preventDefault()}
                 className="text-warn focus:text-warn"
               >
-                <ActionForm action={actions.abandon} className="w-full">
+                <ActionForm action={actions.abandon} className="flex w-full">
                   <input type="hidden" name="csrf" value={csrf.abandon ?? ''} />
                   <input type="hidden" name="id" value={row.id} />
                   <ConfirmSubmit
@@ -260,7 +283,7 @@ function SessionRowMenu({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="w-full justify-start font-normal"
+                      className="h-8 w-full justify-start px-2 font-normal"
                     >
                       Abandon session
                     </Button>
@@ -274,7 +297,7 @@ function SessionRowMenu({
               onSelect={(event) => event.preventDefault()}
               className="text-destructive focus:text-destructive"
             >
-              <ActionForm action={actions.remove} className="w-full">
+              <ActionForm action={actions.remove} className="flex w-full">
                 <input type="hidden" name="csrf" value={csrf.remove ?? ''} />
                 <input type="hidden" name="id" value={row.id} />
                 <ConfirmSubmit
@@ -299,4 +322,14 @@ function SessionRowMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+function formatDuration(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const seconds = Math.floor((ms % 60_000) / 1000);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+  return `${seconds}s`;
 }

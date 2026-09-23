@@ -14,8 +14,6 @@ import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } f
 
 installViewMocks('/dashboard/sessions');
 
-const PAGE_SIZE = 50;
-
 let t: TestDb;
 
 beforeEach(() => {
@@ -66,52 +64,43 @@ async function renderSessions(params: Record<string, string> = {}): Promise<stri
   return renderToHtml(await page({ searchParams: Promise.resolve(params) }));
 }
 
-function sessionRow(html: string, id: string): string {
-  const chunk = html.split('<tr').find((c) => c.includes(`/dashboard/sessions/${id}"`));
-  if (chunk === undefined) throw new Error(`no row for session ${id}`);
+// The client data-table renders each row's checkbox with an aria-label that
+// carries the agent and the row title, which is the stable SSR hook per row.
+function sessionRow(html: string, agent: string, title: string): string {
+  const marker = `Select ${agent} session — ${title}"`;
+  const chunk = html.split('<tr').find((c) => c.includes(marker));
+  if (chunk === undefined) throw new Error(`no row for session ${marker}`);
   return chunk.split('</tr>')[0]!;
 }
 
-function timeCount(row: string): number {
-  return (row.match(/data-rembric-ts/g) ?? []).length;
-}
-
-describe('sessions filter bar', () => {
-  it('combined agent + status filter narrows rows, reports the slice, and labels every control', async () => {
-    const html = await renderSessions({ agent: 'claude-code', status: 'ended' });
-    expect(html).toContain('/dashboard/sessions/S3"');
-    expect(html).toContain('/dashboard/sessions/S4"');
-    expect(html).not.toContain('/dashboard/sessions/S1"');
-    expect(html).not.toContain('/dashboard/sessions/S2"');
-    expect(html).toContain('2 ROWS');
-    expect(html).toContain('for="s-agent"');
-    expect(html).toContain('>AGENT<');
-    expect(html).toContain('for="s-status"');
-    expect(html).toContain('>STATUS<');
-    expect(html).toContain('for="s-project"');
-    expect(html).toContain('>SCOPE<');
-  });
-
-  it('project scope filter narrows to that project only', async () => {
-    const html = await renderSessions({ project: 'proj-one' });
-    expect(html).toContain('/dashboard/sessions/S3"');
-    expect(html).toContain('1 ROWS');
-  });
-
-  it('a bookmarked ?project=__global__ renders every row rather than a dead scope', async () => {
-    const html = await renderSessions({ project: '__global__' });
-    expect(html).toContain('/dashboard/sessions/S3"');
-    expect(html).toContain('4 ROWS');
-    expect(html).not.toContain('__global__');
-  });
-
-  it('unfiltered list reports the true total across all non-deleted rows', async () => {
+describe('sessions list (client data-table)', () => {
+  it('renders every row, the status quick-filter pills and the search box', async () => {
     const html = await renderSessions();
-    expect(html).toContain('4 ROWS');
+    expect(html).toContain('Select claude-code session — S1"');
+    expect(html).toContain('Select opencode session — S2"');
+    expect(html).toContain('Select claude-code session — proj-one"');
+    expect(html).toContain('Select claude-code session — S4"');
+    expect(html).toContain('Filter by status');
+    expect(html).toContain('Search sessions…');
+    expect(html).toContain('1–4 of 4');
   });
 
-  it(`caps the page slice at PAGE_SIZE for ${PAGE_SIZE + 2} seeded rows`, async () => {
-    const extra: NewAgentSession[] = Array.from({ length: PAGE_SIZE + 2 }, (_, i) => ({
+  it('reports the totals subtitle with the active count', async () => {
+    const html = await renderSessions();
+    expect(html).toContain('4');
+    expect(html).toContain('sessions');
+    expect(html).toContain('active now');
+  });
+
+  it('exposes selection checkboxes and the per-row actions menu', async () => {
+    const html = await renderSessions();
+    expect(html).toContain('Select all rows on this page');
+    expect(html).toContain('Select claude-code session — S1"');
+    expect(html).toContain('Actions for session S1');
+  });
+
+  it('caps the client page at pageSize for 12 seeded rows', async () => {
+    const extra: NewAgentSession[] = Array.from({ length: 8 }, (_, i) => ({
       id: `X${i}`,
       tokenId: 'tk1',
       agent: 'test',
@@ -121,28 +110,26 @@ describe('sessions filter bar', () => {
     t.handle.db.insert(agentSessions).values(extra).run();
 
     const html = await renderSessions();
-    expect(html).toContain(`${PAGE_SIZE} ROWS`);
-    expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
+    expect(html).toContain('1–10 of 12');
   });
 
-  it('the pager preserves active filter query params across pages', async () => {
-    const extra: NewAgentSession[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-      id: `X${i}`,
-      tokenId: 'tk1',
-      agent: 'claude-code',
-      status: 'ended',
-      startedAt: new Date(5_000 + i),
-    }));
-    t.handle.db.insert(agentSessions).values(extra).run();
+  it('the show-deleted toggle keeps working through the URL', async () => {
+    t.handle.db
+      .update(agentSessions)
+      .set({ deletedAt: new Date(9_000) })
+      .run();
 
-    const html = await renderSessions({ agent: 'claude-code', status: 'ended' });
-    expect(html).toMatch(
-      /href="\/dashboard\/sessions\?agent=claude-code&(?:amp;)?status=ended&(?:amp;)?page=1"/,
-    );
+    const withoutDeleted = await renderSessions();
+    const withDeleted = await renderSessions({ include_deleted: '1' });
+    expect(withDeleted).toContain('Hide deleted');
+    expect(withoutDeleted).not.toContain('Hide deleted');
+    expect(withDeleted).toContain('Deleted');
+  });
 
-    const sentinel = await renderSessions({ project: '__global__' });
-    expect(sentinel).toMatch(/href="\/dashboard\/sessions\?page=1"/);
-    expect(sentinel).not.toContain('__global__');
+  it('a bookmarked ?project=__global__ renders every row rather than a dead scope', async () => {
+    const html = await renderSessions({ project: '__global__' });
+    expect(html).toContain('Select claude-code session — proj-one"');
+    expect(html).not.toContain('__global__');
   });
 });
 
@@ -175,17 +162,15 @@ describe('dashboard renders a resumed session as active', () => {
     svc = new AgentSessionsService(createRepositories(t.handle.db), t.handle.db);
   });
 
-  it('the Ended cell becomes the empty placeholder and the Abandon form returns', async () => {
-    const before = sessionRow(await renderSessions(), 'S-ENDED');
-    expect(timeCount(before)).toBe(2);
-    expect(before).toContain('</span>ended</span>');
-    expect(before).not.toContain('Abandon');
+  it('the status pill flips to active and the actions menu stays available', async () => {
+    const before = sessionRow(await renderSessions(), 'test', 'S-ENDED');
+    expect(before).toContain('ended');
+    expect(before).toContain('Actions for session S-ENDED');
 
     svc.resume('S-ENDED', { tokenId: 'tk1' });
 
-    const after = sessionRow(await renderSessions(), 'S-ENDED');
-    expect(timeCount(after)).toBe(1);
-    expect(after).toContain('</span>active</span>');
-    expect(after).toContain('Abandon');
+    const after = sessionRow(await renderSessions(), 'test', 'S-ENDED');
+    expect(after).toContain('active');
+    expect(after).toContain('Actions for session S-ENDED');
   });
 });

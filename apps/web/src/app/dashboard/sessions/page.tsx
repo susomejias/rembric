@@ -1,38 +1,12 @@
 import { DomainError } from '@rembric/core';
-import { AGENT_SESSION_STATUSES } from '@rembric/db';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import {
-  parseSessionStatus,
-  readSessionsFilters,
-  resolveProjectFilter,
-  sessionsQuery,
-  type SearchParams,
-} from './filters';
-
 import type { ActionState } from '@/components/dashboard/action-form';
-import {
-  FilterActions,
-  FilterField,
-  FilterForm,
-  FilterInput,
-  FilterSelect,
-  Pager,
-} from '@/components/dashboard/filters';
 import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
 import { SessionsTable } from '@/components/dashboard/sessions-table';
-import { PAGE_SIZE, formatBytes, singleParam } from '@/components/dashboard/support';
-import {
-  Flash,
-  Page,
-  Panel,
-  SectionBar,
-  StatCard,
-  StatGrid,
-  TableEmpty,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { singleParam } from '@/components/dashboard/support';
+import { Flash } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -42,6 +16,10 @@ export const dynamic = 'force-dynamic';
 const ABANDON_FORM = 'session.abandon';
 const DELETE_FORM = 'session.delete';
 const UNDELETE_FORM = 'session.undelete';
+
+// One-line justification: the client table owns filtering and pagination, so the
+// page loads a generous window instead of paginating server-side.
+const LIST_LIMIT = 500;
 
 async function abandonSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -93,25 +71,16 @@ function readField(form: FormData, name: string): string {
   return (typeof value === 'string' ? value : '').trim();
 }
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'all statuses' },
-  ...AGENT_SESSION_STATUSES.map((s) => ({ value: s, label: s })),
-];
-
-const DAY_MS = 86_400_000;
-const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
-
 export default async function SessionsPage({
   searchParams,
 }: {
-  searchParams: Promise<SearchParams>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const filters = readSessionsFilters(params);
-  const roundTripQuery = sessionsQuery(params);
   const justDeleted = singleParam(params['deleted']);
   const justRestored = singleParam(params['restored']);
   const justAbandoned = singleParam(params['abandoned']);
+  const includeDeleted = singleParam(params['include_deleted']) === '1';
 
   const { repos } = getServices();
   const nowMs = Date.now();
@@ -121,189 +90,108 @@ export default async function SessionsPage({
     restore: await dashboardCsrfToken(UNDELETE_FORM),
   };
 
-  const offset = filters.page * PAGE_SIZE;
-  const status = parseSessionStatus(filters.status);
-  const projectRows = repos.projects.adminListAll();
-  const resolvedProject = resolveProjectFilter(filters.project, projectRows);
-
-  const isFiltered = filters.project !== '' || filters.agent !== '' || filters.status !== '';
-
-  const address = {
+  const rows = repos.agentSessions.adminList({
     deleted: false,
-    projectId: resolvedProject.projectId,
-    agent: filters.agent || undefined,
-    status,
-  };
-  const visibleRowsRaw = resolvedProject.unknown
-    ? []
-    : repos.agentSessions.adminList({
-        ...address,
-        activeFirst: true,
-        limit: PAGE_SIZE + 1,
-        offset,
-      });
-  const visibleHasMore = visibleRowsRaw.length > PAGE_SIZE;
-  const visibleRows = visibleRowsRaw.slice(0, PAGE_SIZE);
-
-  const deletedRowsRaw = filters.includeDeleted
+    activeFirst: true,
+    limit: LIST_LIMIT,
+    offset: 0,
+  });
+  const deletedRows = includeDeleted
     ? repos.agentSessions.adminList({
         deleted: true,
         activeFirst: false,
-        limit: PAGE_SIZE + 1,
-        offset,
+        limit: LIST_LIMIT,
+        offset: 0,
       })
     : [];
-  const deletedHasMore = deletedRowsRaw.length > PAGE_SIZE;
-  const deletedRows = deletedRowsRaw.slice(0, PAGE_SIZE);
 
-  const memoryCounts = repos.memory.adminCountBySession(
-    [...visibleRows, ...deletedRows].map((r) => r.id),
-  );
+  const memoryCounts = repos.memory.adminCountBySession([...rows, ...deletedRows].map((r) => r.id));
   const promptCounts = repos.prompts.adminCountBySession(
-    [...visibleRows, ...deletedRows].map((r) => r.id),
+    [...rows, ...deletedRows].map((r) => r.id),
   );
 
-  const total = resolvedProject.unknown ? 0 : repos.agentSessions.adminCount(address);
-  const statusCounts = sessionStatusCounts(repos.agentSessions.adminCountByStatus());
-  const allSessions = repos.agentSessions.adminCount({ deleted: false });
-
-  const activity = sevenDayActivity(
-    repos.memory.adminCountCreatedByDay(new Date(nowMs - 6 * DAY_MS)),
-  );
-  const lifetimeMemoryWrites = visibleRows.reduce(
-    (acc, row) => acc + (memoryCounts[row.id] ?? 0),
-    0,
-  );
-  const averageDurationMs = averageDuration(visibleRows, nowMs);
-  const contextCaptured = visibleRows.reduce((acc, row) => acc + (row.description?.length ?? 0), 0);
+  const statusCounts = repos.agentSessions.adminCountByStatus();
+  const active = statusCounts.find((row) => row.status === 'active')?.count ?? 0;
+  const total = repos.agentSessions.adminCount({ deleted: false });
 
   return (
-    <Page>
-      <ViewHead num="03" title="Rembric Sessions." hl="Rembric" meta={[{ k: 'TOTAL', v: total }]} />
+    <div className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Sessions</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {total.toLocaleString('en-US')} sessions · {active} active now
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          {includeDeleted ? (
+            <Link
+              href="/dashboard/sessions"
+              className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              Hide deleted
+            </Link>
+          ) : (
+            <Link
+              href="/dashboard/sessions?include_deleted=1"
+              className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              Show deleted
+            </Link>
+          )}
+        </div>
+      </section>
 
       {justDeleted ? (
         <SessionUndoPill id={justDeleted} restoreAction={undeleteSession} />
       ) : justRestored ? (
-        <div className="mt-6">
-          <Flash tone="lime" label="RESTORED">
-            Session <code className="font-mono">{justRestored}</code> restored.
-          </Flash>
-        </div>
+        <Flash tone="lime" label="RESTORED">
+          Session <code className="font-mono">{justRestored}</code> restored.
+        </Flash>
       ) : justAbandoned ? (
-        <div className="mt-6">
-          <Flash tone="lime" label="ABANDONED">
-            Session <code className="font-mono">{justAbandoned}</code> marked as abandoned.{' '}
-            <Link href={`/dashboard/sessions/${justAbandoned}`} className="hover:text-primary">
-              View
-            </Link>
-            .
-          </Flash>
-        </div>
+        <Flash tone="lime" label="ABANDONED">
+          Session <code className="font-mono">{justAbandoned}</code> marked as abandoned.{' '}
+          <Link
+            href={`/dashboard/sessions/${justAbandoned}`}
+            className="underline-offset-2 hover:underline"
+          >
+            View
+          </Link>
+          .
+        </Flash>
       ) : null}
 
-      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
-        <StatCard
-          k="ACTIVE"
-          v={statusCounts.active}
-          tone={statusCounts.active > 0 ? 'lime' : 'dim'}
-          sub={<span>OPEN RIGHT NOW</span>}
-        />
-        <StatCard
-          k="ABANDONED"
-          v={statusCounts.abandoned}
-          sub={<span>SWEPT AFTER INACTIVITY</span>}
-        />
-        <StatCard k="ENDED" v={statusCounts.ended} sub={<span>CLOSED BY THE CLIENT</span>} />
-      </StatGrid>
-
-      <FilterForm action="/dashboard/sessions" className="mt-6">
-        <FilterField label="SCOPE" htmlFor="s-project">
-          <FilterSelect
-            id="s-project"
-            name="project"
-            value={filters.project}
-            options={[
-              { value: '', label: 'all scopes' },
-              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
-            ]}
-          />
-        </FilterField>
-        <FilterField label="AGENT" htmlFor="s-agent">
-          <FilterInput
-            id="s-agent"
-            name="agent"
-            value={filters.agent}
-            placeholder="e.g. claude-code"
-          />
-        </FilterField>
-        <FilterField label="STATUS" htmlFor="s-status">
-          <FilterSelect
-            id="s-status"
-            name="status"
-            value={filters.status}
-            options={STATUS_OPTIONS}
-          />
-        </FilterField>
-        {filters.includeDeleted ? <input type="hidden" name="include_deleted" value="1" /> : null}
-        <FilterActions
-          clearHref={`/dashboard/sessions${filters.includeDeleted ? '?include_deleted=1' : ''}`}
-        />
-      </FilterForm>
-
-      <p className="mb-4 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
-        {filters.includeDeleted ? (
-          <Link href="/dashboard/sessions" className="hover:text-primary">
-            Hide deleted
-          </Link>
-        ) : (
-          <Link href="/dashboard/sessions?include_deleted=1" className="hover:text-primary">
-            Show deleted
-          </Link>
-        )}
-      </p>
-
-      <SectionBar name="Sessions" meta={`${visibleRows.length} ROWS`} />
-      {visibleRows.length === 0 ? (
-        <TableEmpty>
-          {isFiltered ? 'NO SESSION MATCHES THIS FILTER' : 'NO SESSION HAS BEEN RECORDED YET'}
-        </TableEmpty>
-      ) : (
-        <SessionsTable
-          rows={visibleRows.map((session) => ({
-            id: session.id,
-            title: sessionTitle(session),
-            description: session.description ?? null,
-            agent: session.agent,
-            project: session.projectSlug ?? '—',
-            token: session.tokenName ?? '—',
-            startedAt: session.startedAt,
-            endedAt: session.endedAt,
-            status: session.status,
-            memories: memoryCounts[session.id] ?? 0,
-            prompts: promptCounts[session.id] ?? 0,
-            deleted: false,
-          }))}
-          memoryCounts={memoryCounts}
-          promptCounts={promptCounts}
-          actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
-          csrf={csrf}
-        />
-      )}
-
-      <Pager
-        page={filters.page}
-        hasMore={visibleHasMore || (filters.includeDeleted && deletedHasMore)}
-        total={total}
-        totalLabel={`${visibleRows.length} ROWS`}
-        path="/dashboard/sessions"
-        query={roundTripQuery}
+      <SessionsTable
+        rows={rows.map((session) => ({
+          id: session.id,
+          title: sessionTitle(session),
+          description: session.description ?? null,
+          agent: session.agent,
+          project: session.projectSlug ?? '—',
+          token: session.tokenName ?? '—',
+          startedAt: session.startedAt,
+          endedAt: session.endedAt,
+          durationMs: (session.endedAt ?? new Date(nowMs)).getTime() - session.startedAt.getTime(),
+          status: session.status,
+          memories: memoryCounts[session.id] ?? 0,
+          prompts: promptCounts[session.id] ?? 0,
+          deleted: false,
+        }))}
+        memoryCounts={memoryCounts}
+        promptCounts={promptCounts}
+        actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
+        csrf={csrf}
+        quickFilter
+        selectable
+        searchable
+        pageSize={10}
       />
 
-      {filters.includeDeleted && deletedRows.length > 0 ? (
+      {includeDeleted && deletedRows.length > 0 ? (
         <>
-          <div className="mt-8">
-            <SectionBar name="Deleted" meta={`${deletedRows.length} ROWS`} />
-          </div>
+          <h2 className="mt-4 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+            Deleted
+          </h2>
           <SessionsTable
             rows={deletedRows.map((session) => ({
               id: session.id,
@@ -314,6 +202,8 @@ export default async function SessionsPage({
               token: session.tokenName ?? '—',
               startedAt: session.startedAt,
               endedAt: session.endedAt,
+              durationMs:
+                (session.endedAt ?? new Date(nowMs)).getTime() - session.startedAt.getTime(),
               status: session.status,
               memories: memoryCounts[session.id] ?? 0,
               prompts: promptCounts[session.id] ?? 0,
@@ -323,94 +213,12 @@ export default async function SessionsPage({
             promptCounts={promptCounts}
             actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
             csrf={csrf}
+            pageSize={10}
           />
         </>
       ) : null}
-
-      <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
-        <Panel padded>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-                <span aria-hidden="true" className="inline-block size-[0.55em] bg-primary" />
-                RECENT ACTIVITY
-              </p>
-              <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
-                {allSessions} total runs
-              </h2>
-            </div>
-            <span className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-              MEMORY WRITES · 7 DAYS
-            </span>
-          </div>
-          <div
-            className="mt-6 flex items-end gap-2"
-            aria-label="Memory writes over the last seven days"
-          >
-            {activity.days.map((day, index) => (
-              <div key={day.day} className="flex flex-1 flex-col items-center gap-2">
-                <div className="flex h-28 w-full items-end bg-muted">
-                  <div
-                    className="w-full bg-primary"
-                    style={{
-                      height: `${Math.max(4, Math.round((day.count / activity.peak) * 100))}%`,
-                    }}
-                    title={`${day.count} memories`}
-                  />
-                </div>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {WEEKDAYS[index]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Panel>
-        <Panel padded>
-          <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-            <span aria-hidden="true" className="inline-block size-[0.55em] bg-primary" />
-            SESSION FOOTPRINT
-          </p>
-          <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
-            Lightweight by design
-          </h2>
-          <div className="mt-6 flex flex-col gap-4 text-xs">
-            <FootprintRow label="Rows on this page" value={visibleRows.length} />
-            <FootprintRow
-              label="Average duration"
-              value={averageDurationMs === null ? '—' : formatDuration(averageDurationMs)}
-            />
-            <FootprintRow label="Context text captured" value={formatBytes(contextCaptured)} />
-            <FootprintRow label="Memory writes" value={lifetimeMemoryWrites} accent />
-          </div>
-        </Panel>
-      </div>
-    </Page>
-  );
-}
-
-function FootprintRow({
-  label,
-  value,
-  accent = false,
-}: {
-  label: string;
-  value: string | number;
-  accent?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={accent ? 'text-primary' : undefined}>{value}</span>
     </div>
   );
-}
-
-function sessionStatusCounts(
-  rows: readonly { readonly status: 'active' | 'ended' | 'abandoned'; readonly count: number }[],
-): Record<'active' | 'ended' | 'abandoned', number> {
-  const counts = { active: 0, ended: 0, abandoned: 0 };
-  for (const row of rows) counts[row.status] = row.count;
-  return counts;
 }
 
 function sessionTitle(row: {
@@ -420,35 +228,4 @@ function sessionTitle(row: {
   projectSlug: string | null;
 }): string {
   return row.title ?? row.description ?? row.projectSlug ?? row.id;
-}
-
-function averageDuration(
-  rows: readonly { startedAt: Date; endedAt: Date | null }[],
-  nowMs: number,
-): number | null {
-  if (rows.length === 0) return null;
-  const total = rows.reduce((acc, row) => {
-    const end = row.endedAt ? row.endedAt.getTime() : nowMs;
-    return acc + Math.max(0, end - row.startedAt.getTime());
-  }, 0);
-  return Math.round(total / rows.length);
-}
-
-function formatDuration(ms: number): string {
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.floor((ms % 60_000) / 1000);
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-}
-
-function sevenDayActivity(rows: readonly { readonly day: number; readonly n: number }[]): {
-  days: { day: number; count: number }[];
-  peak: number;
-} {
-  const byDay = new Map(rows.map((row) => [row.day, row.n]));
-  const today = Math.floor(Date.now() / DAY_MS);
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const day = today - 6 + index;
-    return { day, count: byDay.get(day) ?? 0 };
-  });
-  return { days, peak: Math.max(1, ...days.map((entry) => entry.count)) };
 }

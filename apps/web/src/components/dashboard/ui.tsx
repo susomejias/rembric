@@ -368,10 +368,58 @@ const STATUS_TONE: Record<string, Tone> = {
   orphaned: 'danger',
   judged: 'lime',
   deleted: 'danger',
+  abandoned: 'amber',
+  ended: 'dim',
+};
+
+const TONE_PILL: Record<Tone, { border: string; bg: string; text: string; dot: string }> = {
+  lime: {
+    border: 'border-primary/40',
+    bg: 'bg-primary/10',
+    text: 'text-primary',
+    dot: 'bg-primary',
+  },
+  fg: {
+    border: 'border-border',
+    bg: 'bg-accent',
+    text: 'text-foreground',
+    dot: 'bg-foreground',
+  },
+  amber: {
+    border: 'border-warn/40',
+    bg: 'bg-warn/10',
+    text: 'text-warn',
+    dot: 'bg-warn',
+  },
+  danger: {
+    border: 'border-destructive/40',
+    bg: 'bg-destructive/10',
+    text: 'text-destructive',
+    dot: 'bg-destructive',
+  },
+  dim: {
+    border: 'border-border',
+    bg: 'bg-input/60',
+    text: 'text-muted-foreground',
+    dot: 'bg-muted-foreground',
+  },
 };
 
 export function StatusPill({ status }: { status: string }) {
-  return <Pill tone={STATUS_TONE[status] ?? 'dim'}>{status}</Pill>;
+  const tone = TONE_PILL[STATUS_TONE[status] ?? 'dim'];
+  return (
+    <span
+      className={cn(
+        'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
+        tone.border,
+        tone.bg,
+        tone.text,
+      )}
+    >
+      <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', tone.dot)} />
+      {status}
+    </span>
+  );
 }
 
 export function ReviewPill() {
