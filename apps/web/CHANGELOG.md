@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.11](https://github.com/susomejias/rembric/compare/server-v0.28.10...server-v0.28.11) (2026-09-23)
+
+
+### Bug Fixes
+
+* **web:** ship the cross-version upgrader in the runtime image ([3c40fce](https://github.com/susomejias/rembric/commit/3c40fce82ba477ce7d40c918f8246dbf6ac8aa22))
+
 ## [0.28.10](https://github.com/susomejias/rembric/compare/server-v0.28.9...server-v0.28.10) (2026-09-23)
 
 
