@@ -4,6 +4,20 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.33.0](https://github.com/susomejias/rembric/compare/plugin-v0.32.0...plugin-v0.33.0) (2026-09-23)
+
+
+### Features
+
+* **web:** restore mcp route guards and boot the plugin test harness ([b9794bc](https://github.com/susomejias/rembric/commit/b9794bccc3b4ec00f80b9a75f734ed876d4600ea))
+
+
+### Refactor
+
+* demolish apps/server - the next.js app is the only server ([8144ca1](https://github.com/susomejias/rembric/commit/8144ca1b0c7fc33e6cb087605ca39c7fa2adece6))
+* **mcp:** extract @rembric/mcp workspace package ([3294245](https://github.com/susomejias/rembric/commit/329424506b2b46917b63ef94190de9677fe70fb7))
+* **test:** execute items E — seeds rehomed, harness co-located, dead code retired ([2d316d0](https://github.com/susomejias/rembric/commit/2d316d005a25b9122d9b87fbb62e2b053384c604))
+
 ## [0.32.0](https://github.com/susomejias/rembric/compare/plugin-v0.31.1...plugin-v0.32.0) (2026-09-15)
 
 
