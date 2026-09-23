@@ -175,9 +175,12 @@ export function resolveBackupDownload(file: string | null): BackupDownload {
   };
 }
 
-export function backupDownloadDenial(request: { cookies: SessionCookieSource }): Response | null {
+export function backupDownloadDenial(request: {
+  headers: Headers;
+  cookies: SessionCookieSource;
+}): Response | null {
   const session = getSession(request.cookies);
-  if (session === null) return relativeRedirect('/dashboard/login');
+  if (session === null) return relativeRedirect('/dashboard/login', request);
   if (session.scope !== '*') {
     return new Response('This view requires an admin-scoped token.', { status: 403 });
   }

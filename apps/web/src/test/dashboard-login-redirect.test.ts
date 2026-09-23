@@ -31,11 +31,13 @@ vi.mock('@/lib/session', async () => await import('../lib/session'));
  * a handler that leaks it into `Location` fails here.
  *
  * The `0.0.0.0` in the request URL is the point, not an accident: it is the only
- * input that distinguishes an origin-relative `Location` from the absolute URL
+ * input that distinguishes a `Host`-derived `Location` from the absolute URL
  * the browser cannot reach.
  */
 
 const INTERNAL_ORIGIN = 'http://0.0.0.0:8787';
+const BROWSER_HOST = '127.0.0.1:18790';
+const PROTO = 'http';
 const LOGIN_PATH = '/dashboard/login';
 const VERIFY_PATH = '/dashboard/login/verify';
 
@@ -61,7 +63,10 @@ function resetAppGlobals(): void {
 function formPost(path: string, fields: Record<string, string>): NextRequest {
   return new NextRequest(`${INTERNAL_ORIGIN}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-forwarded-host': BROWSER_HOST,
+    },
     body: new URLSearchParams(fields).toString(),
   });
 }
@@ -70,14 +75,16 @@ function formPost(path: string, fields: Record<string, string>): NextRequest {
  * The assertion the whole file rests on. Returns the value so a caller can pin
  * the exact path without repeating the three host checks.
  */
-function expectRelativeLocation(response: Response): string {
+function expectHostOriginLocation(response: Response): string {
   const location = response.headers.get('location');
   expect(location, 'the response must carry a Location').not.toBeNull();
   const value = location ?? '';
-  expect(value.startsWith('/'), `Location must be origin-relative, got ${value}`).toBe(true);
-  expect(value.startsWith('http')).toBe(false);
+  expect(
+    value.startsWith(`${PROTO}://${BROWSER_HOST}/`),
+    `Location must sit on the browser-reachable origin, got ${value}`,
+  ).toBe(true);
   expect(value).not.toContain('0.0.0.0');
-  return value;
+  return value.slice(`${PROTO}://${BROWSER_HOST}`.length);
 }
 
 describe('dashboard redirects stay on the origin the browser used', () => {
@@ -104,7 +111,7 @@ describe('dashboard redirects stay on the origin the browser used', () => {
     const response = await loginPost(formPost(VERIFY_PATH, { token: adminToken }));
 
     expect(response.status).toBe(302);
-    expect(expectRelativeLocation(response)).toBe('/dashboard');
+    expect(expectHostOriginLocation(response)).toBe('/dashboard');
     // The relative Location must not cost the cookie: the redirect and the
     // `Set-Cookie` are set on the same response object.
     expect(response.headers.get('set-cookie') ?? '').toContain('rembric_session=');
@@ -115,7 +122,7 @@ describe('dashboard redirects stay on the origin the browser used', () => {
     const response = await loginPost(formPost(VERIFY_PATH, { token: adminToken, next }));
 
     expect(response.status).toBe(302);
-    expect(expectRelativeLocation(response)).toBe(next);
+    expect(expectHostOriginLocation(response)).toBe(next);
   });
 
   it('answers a refused login with a relative login Location carrying the reason', async () => {
@@ -124,7 +131,7 @@ describe('dashboard redirects stay on the origin the browser used', () => {
     );
 
     expect(response.status).toBe(302);
-    const location = expectRelativeLocation(response);
+    const location = expectHostOriginLocation(response);
     expect(location.startsWith(`${LOGIN_PATH}?`)).toBe(true);
     expect(new URLSearchParams(location.split('?')[1] ?? '').get('error')).toBe('invalid');
   });
@@ -133,36 +140,43 @@ describe('dashboard redirects stay on the origin the browser used', () => {
     const response = logoutPost(formPost('/dashboard/logout', {}));
 
     expect(response.status).toBe(302);
-    expect(expectRelativeLocation(response)).toBe(LOGIN_PATH);
+    expect(expectHostOriginLocation(response)).toBe(LOGIN_PATH);
   });
 
   it('sends an anonymous dashboard request to the relative login page', () => {
-    const response = middleware(new NextRequest(`${INTERNAL_ORIGIN}/dashboard`));
+    const response = middleware(
+      new NextRequest(`${INTERNAL_ORIGIN}/dashboard`, {
+        headers: { 'x-forwarded-host': BROWSER_HOST },
+      }),
+    );
 
     expect(response.status).toBe(302);
-    expect(expectRelativeLocation(response)).toBe(LOGIN_PATH);
+    expect(expectHostOriginLocation(response)).toBe(LOGIN_PATH);
   });
 
   it('hands the consent hand-off to the relative consent path, query intact', () => {
     const search = '?client=abc&state=xyz';
     const response = consentGet(
-      new NextRequest(`${INTERNAL_ORIGIN}/dashboard/oauth/consent${search}`),
+      new NextRequest(`${INTERNAL_ORIGIN}/dashboard/oauth/consent${search}`, {
+        headers: { 'x-forwarded-host': BROWSER_HOST },
+      }),
     );
 
     expect(response.status).toBe(302);
-    expect(expectRelativeLocation(response)).toBe(`/dashboard/oauth-consent${search}`);
+    expect(expectHostOriginLocation(response)).toBe(`/dashboard/oauth-consent${search}`);
   });
 
   it('sends an anonymous backup download to the relative login page', () => {
     const denied = backupDownloadDenial(
       new NextRequest(
         `${INTERNAL_ORIGIN}/dashboard/maintenance/backup/download/on-demand-1.sqlite`,
+        { headers: { 'x-forwarded-host': BROWSER_HOST } },
       ),
     );
 
     expect(denied, 'an anonymous download must be denied').not.toBeNull();
     const response = denied as Response;
     expect(response.status).toBe(302);
-    expect(expectRelativeLocation(response)).toBe(LOGIN_PATH);
+    expect(expectHostOriginLocation(response)).toBe(LOGIN_PATH);
   });
 });

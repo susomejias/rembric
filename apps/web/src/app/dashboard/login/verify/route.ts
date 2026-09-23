@@ -15,9 +15,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const identity = networkIdentity(request);
   const locked = services.authLockout.check(identity);
-  if (locked.locked) return backToLogin('locked', next);
+  if (locked.locked) return backToLogin(request, 'locked', next);
 
-  if (tokenPlain.length === 0) return backToLogin('missing', next);
+  if (tokenPlain.length === 0) return backToLogin(request, 'missing', next);
 
   let resolved: Awaited<ReturnType<typeof services.tokens.authenticate>>;
   try {
@@ -25,19 +25,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (err) {
     if (!isDomainError(err)) throw err;
     services.authLockout.recordFailure(identity);
-    return backToLogin('invalid', next);
+    return backToLogin(request, 'invalid', next);
   }
 
   if (resolved.scope !== '*') {
     services.authLockout.recordFailure(identity);
-    return backToLogin('invalid', next);
+    return backToLogin(request, 'invalid', next);
   }
   services.authLockout.recordSuccess(identity);
 
   const cookie = createSessionCookie(resolved.token.id);
-  if (cookie === null) return backToLogin('unavailable', next);
+  if (cookie === null) return backToLogin(request, 'unavailable', next);
 
-  const response = relativeRedirect(next ?? '/dashboard');
+  const response = relativeRedirect(next ?? '/dashboard', request);
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   return response;
 }
@@ -54,10 +54,14 @@ function stringField(value: FormDataEntryValue | null): string {
   return typeof value === 'string' ? value : '';
 }
 
-function backToLogin(code: LoginErrorCode, next: string | null): NextResponse {
+function backToLogin(
+  request: NextRequest,
+  code: LoginErrorCode,
+  next: string | null,
+): NextResponse {
   const params = new URLSearchParams({ error: code });
   if (next !== null) params.set('next', next);
-  return relativeRedirect(`/dashboard/login?${params}`);
+  return relativeRedirect(`/dashboard/login?${params}`, request);
 }
 
 function networkIdentity(request: Request): string {

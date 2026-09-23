@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export function GET(request: NextRequest): NextResponse {
-  return relativeRedirect(`/dashboard/oauth-consent${request.nextUrl.search}`);
+  return relativeRedirect(`/dashboard/oauth-consent${request.nextUrl.search}`, request);
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
