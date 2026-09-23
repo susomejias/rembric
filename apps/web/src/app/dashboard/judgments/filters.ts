@@ -5,7 +5,7 @@ import {
   type RelationStatus,
 } from '@rembric/db';
 
-import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/dashboard/support';
+import { pageParam, singleParam } from '@/components/dashboard/support';
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -45,16 +45,5 @@ export function relationFilters(filters: JudgmentsFilters): AdminRelationFilters
   if (status) out.status = status;
   const kind = parseRelationKind(filters.kind);
   if (kind) out.kind = kind;
-  return out;
-}
-
-export function judgmentsQuery(searchParams: SearchParams): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(searchParams)) {
-    if (key === 'page') continue;
-    const value = singleParam(raw);
-    if (key === 'project' && value === RETIRED_PROJECT_FILTER) continue;
-    out[key] = value;
-  }
   return out;
 }
