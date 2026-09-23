@@ -169,9 +169,9 @@ When `cwd` is missing or fails to parse, the placeholder SHALL be `"session · H
 
 ### Requirement: Every model-facing session-summary surface MUST teach the exact Markdown heading format
 
-The session-summary format SHALL be identical across the seven model-facing files pinned by the server invariant: `apps/server/src/mcp/instructions.ts`, `apps/server/src/mcp/server.ts`, `apps/server/src/services/session-nudge.ts`, `apps/plugin/scripts/post-compact.sh`, `apps/plugin/commands/summary.md`, `apps/plugin/bin/rembric-plugin-core.mjs`, and `apps/plugin/.hermes-plugin/__init__.py`. Each SHALL carry the canonical directive from `sessions`: exactly `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`, in that order, as level-2 Markdown headings that belong on separate lines. A surface that INTERPOLATES the shared `SUMMARY_SECTIONS` constant rather than embedding the literal SHALL satisfy this by that interpolation, which is stronger — the server's notice composer is the one surface that does so (`session-nudges`).
+The session-summary format SHALL be identical across the seven model-facing files pinned by the server invariant: `packages/mcp/src/instructions.ts`, `packages/mcp/src/server.ts`, `packages/core/src/services/session-nudge.ts`, `apps/plugin/scripts/post-compact.sh`, `apps/plugin/commands/summary.md`, `apps/plugin/bin/rembric-plugin-core.mjs`, and `apps/plugin/.hermes-plugin/__init__.py`. Each SHALL carry the canonical directive from `sessions`: exactly `## Goal`, `## Accomplished`, `## Decisions+why`, `## Verified+how`, `## Unfinished+why`, and `## Files`, in that order, as level-2 Markdown headings that belong on separate lines. A surface that INTERPOLATES the shared `SUMMARY_SECTIONS` constant rather than embedding the literal SHALL satisfy this by that interpolation, which is stronger — the server's notice composer is the one surface that does so (`session-nudges`).
 
-**The set changed shape when the nudge gate moved to the server, and the membership rule is what makes that safe rather than the list.** Two bash surfaces left it — `apps/plugin/scripts/prompt-nudge.sh`, which no longer composes a reminder, and `apps/plugin/scripts/stop-nudge.sh`, which no longer exists — and one server surface joined it, `apps/server/src/services/session-nudge.ts`. Membership is "emits model-facing text that asks for a session summary", and the invariant asserts its own completeness from a repository-wide search, so a surface that keeps the directive but leaves the list fails the test rather than escaping it.
+**The set changed shape when the nudge gate moved to the server, and the membership rule is what makes that safe rather than the list.** Two bash surfaces left it — `apps/plugin/scripts/prompt-nudge.sh`, which no longer composes a reminder, and `apps/plugin/scripts/stop-nudge.sh`, which no longer exists — and one server surface joined it, `packages/core/src/services/session-nudge.ts`. Membership is "emits model-facing text that asks for a session summary", and the invariant asserts its own completeness from a repository-wide search, so a surface that keeps the directive but leaves the list fails the test rather than escaping it.
 
 This seven-file set reaches all five bundled clients through the existing sharing boundaries: Claude Code and Codex CLI reach it through the bash hook that survives plus the server-composed notice, opencode and Pi consume the JS/TS core and server tool metadata, and Hermes carries the fixture-pinned Python text. No client-specific wording SHALL be introduced. A file with several summary instruction paths SHALL use the canonical directive in every one of them; one passing occurrence SHALL NOT license another flat occurrence in the same file.
 
@@ -526,7 +526,7 @@ When a session-lifecycle HTTP POST fails (non-2xx, connection error, timeout), t
 
 - The awk fallbacks SHALL NOT pass a regexp constant (`/re/`) as a function argument. A regexp constant used outside a direct match operator evaluates to a boolean in awk, which corrupts the parse (it yields the literal string `"1"` instead of the message). Regex literals SHALL be used directly in `match()` at the call site; helper functions SHALL receive only already-sliced strings.
 - Applies to all four fallbacks: `_rembric_format_transcript_{claude_code,codex_cli}_fallback` and `_rembric_extract_first_assistant_{claude_code,codex_cli}_fallback`.
-- The shared fixtures test (`apps/server/src/test/transcript-parser.test.ts`) SHALL genuinely exercise the awk fallback — its "awk fallback" cases MUST NOT silently fall through to `jq` when `jq` happens to be on the stripped test `PATH`.
+- The shared fixtures test (`apps/plugin/test/transcript-parser.test.ts`) SHALL genuinely exercise the awk fallback — its "awk fallback" cases MUST NOT silently fall through to `jq` when `jq` happens to be on the stripped test `PATH`.
 
 #### Scenario: First-assistant extraction on a host without jq
 
@@ -615,7 +615,7 @@ The resume SHALL be issued by the core's session-registration entry point itself
 
 The resume SHALL be skipped when the ensure that precedes it did not land. Whatever prevented the ensure — an unreachable server, a revoked token, an unresolvable slug — prevents the resume too, so issuing it anyway buys nothing and doubles the wait a quitting or starting user absorbs, each POST being separately bounded by the client's timeout. The id SHALL nevertheless remain in the known-session set, so the pair is not retried on the next call.
 
-An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the build when a second JS/TS definition of any of these appears. The test SHALL (a) assert a **non-zero count** of scanned files, so an empty file list cannot satisfy the negative assertions vacuously, and (b) derive its scanned file list from a repository-wide search rather than a hard-coded list, so a client added later is scanned on the day it is added. The failure message SHALL name the offending `<file>:<line>`.
+An invariant test in `apps/web/src/test/invariants.test.ts` SHALL fail the build when a second JS/TS definition of any of these appears. The test SHALL (a) assert a **non-zero count** of scanned files, so an empty file list cannot satisfy the negative assertions vacuously, and (b) derive its scanned file list from a repository-wide search rather than a hard-coded list, so a client added later is scanned on the day it is added. The failure message SHALL name the offending `<file>:<line>`.
 
 **The scanned set is every JS/TS source file under `apps/plugin/`, which is broader than the set of clients, and the two halves of the invariant apply to different sets.** The repository ships a JS/TS artifact under `apps/plugin/` that is deliberately not a session client — the transport package `apps/plugin/mcp-bridge/` — and the distinction has to be normative rather than an accident of the pattern the test happens to use:
 
@@ -629,7 +629,7 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 #### Scenario: A second redaction implementation fails the build
 
 - **GIVEN** a change introduces a local `function stripPrivateTags` in any JS/TS client file
-- **WHEN** `pnpm vitest run apps/server/src/test/invariants.test.ts` runs
+- **WHEN** `pnpm vitest run apps/web/src/test/invariants.test.ts` runs
 - **THEN** the test SHALL fail with a message naming the offending file and line
 
 #### Scenario: No cadence constant survives anywhere in the plugin tree
@@ -721,7 +721,7 @@ This nudge is the only mechanism that covers the case where Codex CLI cannot inj
 
 #### Scenario: No surface claims Hermes consumes `initialize.instructions`
 
-- **WHEN** every tracked surface that names the consumers of `initialize.instructions` is read — at minimum `apps/server/src/mcp/instructions.ts`'s header comment, `docs/agents.md`, `docs/troubleshooting.md`, `apps/plugin/.hermes-plugin/README.md`, and this capability's own rationale
+- **WHEN** every tracked surface that names the consumers of `initialize.instructions` is read — at minimum `packages/mcp/src/instructions.ts`'s header comment, `docs/agents.md`, `docs/troubleshooting.md`, `apps/plugin/.hermes-plugin/README.md`, and this capability's own rationale
 - **THEN** none of them SHALL list Hermes Agent among the clients that receive the block
 - **AND** each SHALL name Pi among the clients that do
 - **AND** where a surface explains how Hermes reaches the same guidance, it SHALL name `system_prompt_block` rather than `initialize.instructions`
@@ -843,7 +843,7 @@ Three findings, each with a different consequence for this contract:
 2. **The injected block is what makes a weak model read.** Without it the weaker model called `memory.session_get` zero times and lost all four anchors, writing a full-looking summary of the new stretch alone; with it, it read once and kept all four. This is the measurement that makes the injection normative rather than best-effort.
 3. **Detail erodes even when the model obeys.** The stronger model lost `50rps` in BOTH arms, by paraphrasing rather than by dropping a section. A rewrite is therefore NOT a durability mechanism for facts: a fact that must survive belongs in `memory.save`, and the summary is a state description that may lose precision on every pass. No requirement SHALL be written that depends on a specific fact surviving an unbounded number of rewrites.
 
-**A stronger tool description is not the remedy, and that is measured too.** `memory.session_summary`'s description already carries the read directive verbatim (`apps/server/src/mcp/server.ts:326`: `Can't see your earlier work? Call memory.session_get first, then write the whole updated state.`), and the weaker model with no injected block ignored it. Strengthening description text against that result would be speculation; what the datum supports is the injected block.
+**A stronger tool description is not the remedy, and that is measured too.** `memory.session_summary`'s description already carries the read directive verbatim (`packages/mcp/src/server.ts:326`: `Can't see your earlier work? Call memory.session_get first, then write the whole updated state.`), and the weaker model with no injected block ignored it. Strengthening description text against that result would be speculation; what the datum supports is the injected block.
 
 This finding is scoped to the READ directive specifically: it says a stronger nudge toward `memory.session_get` would not have moved the arm that already ignored the one there. It says nothing about a description obligation the tool did not carry at all — copying concrete facts verbatim instead of paraphrasing them, which finding 3 above (the stronger model losing `50rps` to paraphrase, not omission) targets and which `mcp-api`'s `memory.session_summary` requirement adds as its own, separate fact. That addition is not a repeat of the rejected experiment.
 

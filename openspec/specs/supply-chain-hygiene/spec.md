@@ -85,8 +85,8 @@ The repository SHALL set `pnpm-workspace.yaml::minimumReleaseAge: 4320` (4320 mi
 The repository SHALL invoke `pnpm install --frozen-lockfile` in:
 
 - `.github/workflows/ci.yml` (the `test` job's Install step).
-- `apps/server/Dockerfile` `builder` stage.
-- `apps/server/Dockerfile` `dev` stage.
+- `apps/web/Dockerfile` `builder` stage.
+- `apps/web/Dockerfile` `dev` stage.
 
 `--frozen-lockfile` SHALL enforce three independent invariants in a single step:
 
@@ -126,7 +126,7 @@ The repository SHALL set `.npmrc::engine-strict=true`. `pnpm install` SHALL refu
 
 ### Requirement: Routine dependency updates MUST be bot-driven under manual review
 
-The repository SHALL contain `.github/dependabot.yml` configuring Dependabot for three ecosystems: `npm` (root), `docker` (`apps/server/`), and `github-actions` (root). All three SHALL be scheduled `weekly` with `open-pull-requests-limit: 5` per ecosystem. Dependabot SHALL NOT be configured for automerge in this file; every PR SHALL require manual review and merge.
+The repository SHALL contain `.github/dependabot.yml` configuring Dependabot for three ecosystems: `npm` (root), `docker` (`apps/web/`), and `github-actions` (root). All three SHALL be scheduled `weekly` with `open-pull-requests-limit: 5` per ecosystem. Dependabot SHALL NOT be configured for automerge in this file; every PR SHALL require manual review and merge.
 
 Additionally, the repository SHALL have **Dependabot security updates** and **Dependency graph** enabled via the GitHub repository Settings → Security & analysis page. These toggles produce per-CVE PRs from the GitHub Advisory Database, complementing the routine version-update PRs from `dependabot.yml`. They are not file-versioned but are part of the supply-chain contract.
 
@@ -150,7 +150,7 @@ A separate scheduled workflow running `pnpm audit` is NOT required, because Depe
 
 - **WHEN** `node:22-bookworm-slim` ships a new minor (security patches in the base image)
 - **THEN** the `docker` ecosystem entry SHALL trigger a PR within the next weekly cycle
-- **AND** the PR SHALL update the `FROM` directive(s) in `apps/server/Dockerfile`
+- **AND** the PR SHALL update the `FROM` directive(s) in `apps/web/Dockerfile`
 
 #### Scenario: GitHub Actions version bump
 
@@ -297,7 +297,7 @@ Where a runtime dependency is unavoidable, three further rules apply:
 2. **The dependency SHALL NOT be bundled or vendored to make the count look like zero.** A consumer's dependency tree is what lets their advisory tooling see the version they are running; a bundled copy makes a CVE in it invisible to them, and makes the package's behaviour auditable only by reading a build artifact. This repository has paid that cost directly: confirming a dependency's HTTP-status handling required reading its bundled `dist` rather than its dependency tree.
 3. **The cost SHALL be measured, not characterised.** The proposal SHALL state the installed package count and size the dependency adds, measured against the alternative it replaces, so the trade is recorded as a number rather than as an adjective.
 
-`@rembric/mcp-bridge` SHALL declare no runtime dependencies, and the reasoning is recorded here because the obvious alternative was specified first and reversed on measurement. Depending on `@modelcontextprotocol/sdk` alone — the protocol's reference implementation, already an `apps/server` dependency and therefore already reviewed and lockfile-pinned here — would have avoided owning any wire protocol. **Measured 2026-08-15** (`npm install --ignore-scripts` into an empty directory): the delegate being replaced, `mcp-remote@0.1.38`, installs 80 packages / 7.0 MB, while `@modelcontextprotocol/sdk` installs 93 packages / 25 MB at `1.29.0` (97 / 24 MB at `1.30.0`), because the SDK ships its server-side halves (`express`, `hono`, `cors`, `jose`, `pkce-challenge`, `express-rate-limit`) in `dependencies` even though only the client transport would be imported. A package whose purpose includes reducing what runs on a user's machine cannot install a larger tree than the delegate it removes, so the dependency was dropped rather than accepted.
+`@rembric/mcp-bridge` SHALL declare no runtime dependencies, and the reasoning is recorded here because the obvious alternative was specified first and reversed on measurement. Depending on `@modelcontextprotocol/sdk` alone — the protocol's reference implementation, already an `apps/web` dependency and therefore already reviewed and lockfile-pinned here — would have avoided owning any wire protocol. **Measured 2026-08-15** (`npm install --ignore-scripts` into an empty directory): the delegate being replaced, `mcp-remote@0.1.38`, installs 80 packages / 7.0 MB, while `@modelcontextprotocol/sdk` installs 93 packages / 25 MB at `1.29.0` (97 / 24 MB at `1.30.0`), because the SDK ships its server-side halves (`express`, `hono`, `cors`, `jose`, `pkce-challenge`, `express-rate-limit`) in `dependencies` even though only the client transport would be imported. A package whose purpose includes reducing what runs on a user's machine cannot install a larger tree than the delegate it removes, so the dependency was dropped rather than accepted.
 
 What the bridge owns instead is bounded, and smaller than the SDK's full surface suggests: newline-delimited stdio framing, `fetch` with a bearer header, and `data:` line parsing on the response stream. It does **not** own SSE resumability or `Last-Event-ID` (this server does not offer resumable streams), nor OAuth, nor the server half of the protocol. `apps/plugin/.pi-plugin/index.ts` already carries the same surface with `dependencies: {}`, and the one mechanism without precedent there — relaying a server-initiated `roots/list` and posting the host's answer back — was measured working before this was settled (`../own-the-mcp-bridge/measurements/gate-arm3-roots-relay.log`).
 

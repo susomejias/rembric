@@ -29,7 +29,7 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ## Skill catalog
 
-- The plugin SHALL NOT ship any skills. The proactive-save protocol (when to save, when to recall, how to close a session, topic_key usage, candidate-resolution) is delivered server-side via Rembric's MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`), so it applies uniformly to every MCP client (Claude Code plugin, Codex CLI, Cursor, custom integrations) without per-client duplication.
+- The plugin SHALL NOT ship any skills. The proactive-save protocol (when to save, when to recall, how to close a session, topic_key usage, candidate-resolution) is delivered server-side via Rembric's MCP `initialize.instructions` handshake (`packages/mcp/src/instructions.ts`), so it applies uniformly to every MCP client (Claude Code plugin, Codex CLI, Cursor, custom integrations) without per-client duplication.
 - An earlier iteration shipped a `rembric-memory` skill with the same content; it was removed once `initialize.instructions` was verified to carry equivalent guidance under the 800-character hard limit enforced by `instructions.test.ts`.
 
 ## Requirements
@@ -285,7 +285,7 @@ This capability SHALL NOT specify migration prompts, import flows, side-by-side 
 
 #### Scenario: Protocol guidance does not instruct the agent to migrate from or compare with other memory systems
 
-- **WHEN** the protocol guidance the agent receives is read — server-side via the MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`) and the server-composed stretch-close notice, and client-side via the command bodies under `apps/plugin/commands/` and the hook-emitted lines
+- **WHEN** the protocol guidance the agent receives is read — server-side via the MCP `initialize.instructions` handshake (`packages/mcp/src/instructions.ts`) and the server-composed stretch-close notice, and client-side via the command bodies under `apps/plugin/commands/` and the hook-emitted lines
 - **THEN** none SHALL direct the agent to import from, deduplicate against, prefer Rembric over, or otherwise reason about parallel memory tools
 - **AND** each SHALL describe Rembric's memory protocol on its own terms, without comparison to other agent memory systems
 
@@ -692,7 +692,7 @@ The active Rembric project is signalled per directory by a `.rembric` config fil
 
 **Bootstrap for new slugs:**
 
-- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, the agent — guided by the protocol text the server delivers through the MCP `initialize.instructions` handshake (`apps/server/src/mcp/instructions.ts`) — can call `project.use({slug, autocreate: true})` once to create it. Subsequent connections find the project already created and skip the bootstrap.
+- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, the agent — guided by the protocol text the server delivers through the MCP `initialize.instructions` handshake (`packages/mcp/src/instructions.ts`) — can call `project.use({slug, autocreate: true})` once to create it. Subsequent connections find the project already created and skip the bootstrap.
 
 **Manual override during a session:**
 

@@ -75,7 +75,7 @@ Because the `inputSchema` travels verbatim, the harness validates arguments agai
 
 #### Scenario: Every server tool is registered with no per-tool plugin code
 
-- **GIVEN** the server registers N tools (N is 23 at the time of writing, at `apps/server/src/mcp/server.ts`)
+- **GIVEN** the server registers N tools (N is 23 at the time of writing, at `packages/mcp/src/server.ts`)
 - **WHEN** the extension initialises against that server
 - **THEN** exactly N tools SHALL be registered with the harness
 - **AND** each registered tool SHALL correspond to exactly one server tool under the name mapping fixed by the provider-safe-names requirement, with no tool dropped and none invented
@@ -116,7 +116,7 @@ Because the `inputSchema` travels verbatim, the harness validates arguments agai
 
 ### Requirement: Tool results render collapsed by default and expand to the complete original text
 
-The extension SHALL supply a `renderResult` for every tool it registers, so a Rembric tool result occupies one line of the transcript by default. Without one, the harness renders the whole payload: `hasRendererDefinition()` is true for any registered tool (`dist/modes/interactive/components/tool-execution.js:75-77` of `@earendil-works/pi-coding-agent@0.84.1`), so the result slot falls back to `createResultFallback()` (`:109-115`), which wraps the entire text, and the server pretty-prints — `apps/server/src/mcp/result.ts:7` is `const text = JSON.stringify(payload, null, 2);`.
+The extension SHALL supply a `renderResult` for every tool it registers, so a Rembric tool result occupies one line of the transcript by default. Without one, the harness renders the whole payload: `hasRendererDefinition()` is true for any registered tool (`dist/modes/interactive/components/tool-execution.js:75-77` of `@earendil-works/pi-coding-agent@0.84.1`), so the result slot falls back to `createResultFallback()` (`:109-115`), which wraps the entire text, and the server pretty-prints — `packages/mcp/src/result.ts:7` is `const text = JSON.stringify(payload, null, 2);`.
 
 Collapsing SHALL apply to **every** tool returned by `tools/list`, unconditionally. No line-count, byte-count or per-tool condition SHALL select between collapsed and expanded rendering. A threshold would make the collapsed state depend on a number the operator cannot see, and would require per-tool knowledge this client deliberately does not have.
 
@@ -194,7 +194,7 @@ This SHALL NOT alter the handling of transport or protocol failures, which alrea
 
 A renderer SHALL read the error state from the render **context**, never from the result argument. The harness narrows the first renderer argument to `{ content, details }` (`dist/modes/interactive/components/tool-execution.js:248`) and supplies the flag only on the render context, built as `isError: this.result?.isError ?? false` (`:103`). A renderer reading it from the result argument would be permanently false and its error branch dead.
 
-A failed call SHALL render collapsed with a visibly distinct outcome indication, and expansion SHALL reveal its complete diagnostic text by the same path as a successful result. The diagnostic text is the server's error payload — `JSON.stringify({ ok: false, code, message, ...extra }, null, 2)` (`apps/server/src/mcp/errors.ts:15`) — so the `code` field an operator needs is inside the text the expansion reveals, and no requirement here depends on parsing it.
+A failed call SHALL render collapsed with a visibly distinct outcome indication, and expansion SHALL reveal its complete diagnostic text by the same path as a successful result. The diagnostic text is the server's error payload — `JSON.stringify({ ok: false, code, message, ...extra }, null, 2)` (`packages/mcp/src/errors.ts:15`) — so the `code` field an operator needs is inside the text the expansion reveals, and no requirement here depends on parsing it.
 
 #### Scenario: An MCP error result marks the call failed
 
@@ -240,11 +240,11 @@ The reason no runtime dependency is permitted is measured behaviour of the harne
 
 The extension MAY import from the harness's own packages, and such an import SHALL be static and SHALL be declared as a `peerDependency` with range `"*"` — never as a `dependency`, never bundled, and never through a lazily-resolved dynamic import invented to avoid declaring it. The harness prescribes exactly this shape (`docs/packages.md:171` of `@earendil-works/pi-coding-agent@0.84.1`: "If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them"), and its extension loader resolves those specifiers to the host's own already-loaded entries through an alias map (`dist/core/extensions/loader.js:89-110`), so the import adds nothing to the tarball and shares the host's singletons rather than instantiating a second copy.
 
-Because those specifiers resolve **only** inside the harness, a static host import is unresolvable from this repository, where `apps/plugin/.pi-plugin/` matches no workspace glob and no such package is installed. The extension's test file imports the extension module at load time, so an unaliased host import fails the entire test file rather than one assertion. `apps/server/vitest.config.ts` SHALL therefore alias each imported host specifier to a stub, and the alias SHALL carry a comment naming the reason.
+Because those specifiers resolve **only** inside the harness, a static host import is unresolvable from this repository, where `apps/plugin/.pi-plugin/` matches no workspace glob and no such package is installed. The extension's test file imports the extension module at load time, so an unaliased host import fails the entire test file rather than one assertion. `apps/web/vitest.config.ts` SHALL therefore alias each imported host specifier to a stub, and the alias SHALL carry a comment naming the reason.
 
 That stub SHALL NOT become the subject of the tests. Logic whose behaviour this capability specifies SHALL be reachable through an export that does not import a host package, so the behavioural assertions run against real code with nothing stubbed, and the host-importing wrapper stays thin enough that the stub is exercised by module loading alone.
 
-Because the extension connects to `/mcp/<slug>`, the server resolves its project through the existing path-scoping contract (`apps/server/src/mcp/_shared.ts::resolveEffectiveScope`): the connection is fixed to that one project and no tool argument can name another. This extension introduces no new scope-resolution path.
+Because the extension connects to `/mcp/<slug>`, the server resolves its project through the existing path-scoping contract (`packages/mcp/src/_shared.ts::resolveEffectiveScope`): the connection is fixed to that one project and no tool argument can name another. This extension introduces no new scope-resolution path.
 
 #### Scenario: Package declares no runtime dependencies
 
@@ -263,7 +263,7 @@ Because the extension connects to `/mcp/<slug>`, the server resolves its project
 
 #### Scenario: The test config aliases every host specifier the extension imports
 
-- **WHEN** `apps/plugin/.pi-plugin/index.ts` and `apps/server/vitest.config.ts` are read at HEAD
+- **WHEN** `apps/plugin/.pi-plugin/index.ts` and `apps/web/vitest.config.ts` are read at HEAD
 - **THEN** every bare `@earendil-works/*` specifier imported by the extension SHALL have a corresponding alias entry
 - **AND** the extension's test file SHALL load without a module-resolution error
 
@@ -427,7 +427,7 @@ The package SHALL declare **no lifecycle scripts of its own** — in particular 
 
 ### Requirement: Publication is gated on a plugin release and uses trusted publishing
 
-The publish job SHALL live in `.github/workflows/release-please.yml` and SHALL be gated on the release-please output indicating that the `apps/plugin` component was released (`steps.release.outputs['apps/plugin--release_created']`, the plugin analogue of the existing `apps/server` output). It SHALL NOT run on a `server`-only release, and it SHALL NOT run on a merge that produced no release.
+The publish job SHALL live in `.github/workflows/release-please.yml` and SHALL be gated on the release-please output indicating that the `apps/plugin` component was released (`steps.release.outputs['apps/plugin--release_created']`, the plugin analogue of the existing `apps/web` output). It SHALL NOT run on a `server`-only release, and it SHALL NOT run on a merge that produced no release.
 
 The workflow SHALL declare `permissions: id-token: write` and SHALL authenticate to the registry by trusted-publishing OIDC. A long-lived publish credential (`NPM_TOKEN` or equivalent) SHALL NOT be added to the repository.
 
@@ -469,7 +469,7 @@ All plugin clients SHALL share the one `plugin` version and SHALL never diverge.
 #### Scenario: The manifest still declares exactly two entries
 
 - **WHEN** `.release-please-manifest.json` is read at HEAD
-- **THEN** it SHALL declare exactly two entries, `apps/server` and `apps/plugin`
+- **THEN** it SHALL declare exactly two entries, `apps/web` and `apps/plugin`
 
 ### Requirement: The documented install command SHALL NOT pin a version
 
@@ -489,13 +489,13 @@ Measured against the harness's documented behaviour: a package spec that names a
 
 ### Requirement: The extension's tests SHALL actually execute
 
-`apps/server/vitest.config.ts::test.include` SHALL capture every per-client test file **by directory shape** — one glob whose directory segment is a pattern matching the dot-prefixed `*-plugin` manifest directories under `apps/plugin/` — rather than one literal glob per client. The failure this closes is a test file that is written, committed, reviewed and never run: a green suite that executes none of its assertions. A per-client literal only forbids that for the clients someone remembered to enumerate; a shape glob makes it structurally impossible for the next one too, with no config edit at all.
+`apps/web/vitest.config.ts::test.include` SHALL capture every per-client test file **by directory shape** — one glob whose directory segment is a pattern matching the dot-prefixed `*-plugin` manifest directories under `apps/plugin/` — rather than one literal glob per client. The failure this closes is a test file that is written, committed, reviewed and never run: a green suite that executes none of its assertions. A per-client literal only forbids that for the clients someone remembered to enumerate; a shape glob makes it structurally impossible for the next one too, with no config edit at all.
 
 The test SHALL exercise the extension against a **real in-process MCP server** over a temporary SQLite file, not a mocked transport: it SHALL assert the discovered tool count, that registration covers every discovered tool, that a proxied save reaches the database as read back by an independent tool call, and it SHALL include the discriminating control that a fabricated id returns `not_found`.
 
 #### Scenario: The include list matches client directories by shape, not by name
 
-- **WHEN** `apps/server/vitest.config.ts` is read at HEAD
+- **WHEN** `apps/web/vitest.config.ts` is read at HEAD
 - **THEN** `test.include` SHALL contain a glob whose directory segment is a pattern spanning the per-client manifest directories under `apps/plugin/`
 - **AND** no client's tests SHALL depend on an entry naming that client's directory literally
 
@@ -503,7 +503,7 @@ The test SHALL exercise the extension against a **real in-process MCP server** o
 
 - **GIVEN** the `include` list at HEAD
 - **WHEN** a test file is placed in a `apps/plugin/.<name>-plugin/` directory that no `include` entry names
-- **THEN** the file SHALL appear in the collected test-file list without any change to `apps/server/vitest.config.ts`
+- **THEN** the file SHALL appear in the collected test-file list without any change to `apps/web/vitest.config.ts`
 
 #### Scenario: The suite runs the extension's tests
 
@@ -513,7 +513,7 @@ The test SHALL exercise the extension against a **real in-process MCP server** o
 
 ### Requirement: Pi is listed as a supported client everywhere clients are enumerated
 
-Every tracked surface that enumerates Rembric's bundled clients SHALL include Pi: `README.md` (the tagline, the supported-agents table, and the architecture diagram's client count), `docs/agents.md` (its lead sentence, its per-client section, and the redaction section's client list), `CLAUDE.md` (the architecture paragraph, the plugin-development rules, and the legitimate-divergence list, which SHALL name `.pi-plugin/`), `apps/plugin/README.md`, `apps/plugin/package.json::description`, `apps/server/src/mcp/instructions.ts`'s header comment, and the `rembric-plugin-development`, `rembric-tui-installer`, and `rembric-tui-installer-e2e` skills.
+Every tracked surface that enumerates Rembric's bundled clients SHALL include Pi: `README.md` (the tagline, the supported-agents table, and the architecture diagram's client count), `docs/agents.md` (its lead sentence, its per-client section, and the redaction section's client list), `CLAUDE.md` (the architecture paragraph, the plugin-development rules, and the legitimate-divergence list, which SHALL name `.pi-plugin/`), `apps/plugin/README.md`, `apps/plugin/package.json::description`, `packages/mcp/src/instructions.ts`'s header comment, and the `rembric-plugin-development`, `rembric-tui-installer`, and `rembric-tui-installer-e2e` skills.
 
 A surface that says "four clients" after this change is a documentation defect, not a stylistic lag.
 

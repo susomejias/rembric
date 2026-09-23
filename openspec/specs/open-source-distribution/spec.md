@@ -221,7 +221,7 @@ This is a hard cutover by design — maintaining shim files (and remembering to 
 
 ### Requirement: Install URL freshness is CI-enforced via static-grep invariant
 
-The repository SHALL include a Vitest invariant test (in `apps/server/src/test/invariants.test.ts`) that fails when any tracked file under `git ls-files` contains the literal substring `raw.githubusercontent.com/susomejias/rembric/main/plugin/` or `github.com/susomejias/rembric/blob/main/plugin/`, **outside an explicit file-path allow-list**. The allow-list SHALL be limited to the spec files that intentionally document the legacy 404 contract:
+The repository SHALL include a Vitest invariant test (in `apps/web/src/test/invariants.test.ts`) that fails when any tracked file under `git ls-files` contains the literal substring `raw.githubusercontent.com/susomejias/rembric/main/plugin/` or `github.com/susomejias/rembric/blob/main/plugin/`, **outside an explicit file-path allow-list**. The allow-list SHALL be limited to the spec files that intentionally document the legacy 404 contract:
 
 - `openspec/specs/open-source-distribution/spec.md`
 - `openspec/specs/hermes-agent-plugin/spec.md`

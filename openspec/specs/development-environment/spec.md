@@ -12,7 +12,7 @@ The repo SHALL ship a `docker-compose.dev.yml` at the root that, when combined w
 
 - Declare `name: rembric-dev` (distinct compose project name).
 - Override `container_name` to `rembric-dev`.
-- Build the image from local source via `build: { context: ., dockerfile: apps/server/Dockerfile, target: dev }` — targeting the dev stage defined in the server's Dockerfile.
+- Build the image from local source via `build: { context: ., dockerfile: apps/web/Dockerfile, target: dev }` — targeting the dev stage defined in the server's Dockerfile.
 - Override `image:` to a name outside the published repository (`rembric-dev:local`). The canonical compose must keep an `image:` for its pull-based path, and a service declaring both `image:` and `build:` tags the build with that name — so inheriting it makes `up --build` replace the published production tag on the developer's host with the dev artifact. The image tag is therefore an isolation axis alongside the project name, container name, port and bind mount, and its omission from this list is what let that collision ship.
 - Use a distinct bind-mount: `./data-dev:/data` (not `./data:/data`).
 - Bind-mount `./apps/server/src:/app/src` so the container's `tsx watch` sees host-side edits and restarts the Node child sub-second.
@@ -20,7 +20,7 @@ The repo SHALL ship a `docker-compose.dev.yml` at the root that, when combined w
 - Set `LOG_LEVEL=debug` and `restart: 'no'` (crash visibility).
 - Inherit `env_file: .env` from the canonical compose (no duplicated secrets).
 
-The Dockerfile at `apps/server/Dockerfile` SHALL contain a `dev` stage (in addition to the existing `builder` and `runtime` stages) that keeps the full dev-deps install (NO prune) and sets `ENTRYPOINT ["tsx", "watch"]` with `CMD ["src/cli.ts", "start"]`. The prod `runtime` stage SHALL remain unchanged and SHALL continue to be the implicit final target for canonical `docker build`.
+The Dockerfile at `apps/web/Dockerfile` SHALL contain a `dev` stage (in addition to the existing `builder` and `runtime` stages) that keeps the full dev-deps install (NO prune) and sets `ENTRYPOINT ["tsx", "watch"]` with `CMD ["src/cli.ts", "start"]`. The prod `runtime` stage SHALL remain unchanged and SHALL continue to be the implicit final target for canonical `docker build`.
 
 The docker-compose build context SHALL remain the repo root (`.`) so the pnpm workspace lockfile and `pnpm-workspace.yaml` are available to the Docker build. The Dockerfile SHALL copy `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `package.json`, and each workspace's `package.json` separately before running `pnpm install --frozen-lockfile --filter @rembric/server...` to install only the server's dependency closure.
 
@@ -49,7 +49,7 @@ The docker-compose build context SHALL remain the repo root (`.`) so the pnpm wo
 
 ### Requirement: The repo MUST provide a dev seed script with `--reset` semantics
 
-The repo SHALL ship a seed script at `apps/server/src/scripts/seed-dev.ts` that populates the dev database with thematic baseline data. The script SHALL:
+The repo SHALL ship a seed script at `apps/web/src/scripts/seed-dev.ts` that populates the dev database with thematic baseline data. The script SHALL:
 
 - Open the database via the same `createDb` helper used by the server's bootstrap, honoring `REMBRIC_DATA_DIR` (which is `/data` inside the dev container).
 - On invocation without `--reset`: check whether a project with slug `demo` already exists. If yes, emit a one-line stderr message of the form `[seed-dev] data already present; pass --reset to wipe and reseed` and exit `0` without modifying any rows. If no, proceed with the seed.
@@ -64,13 +64,13 @@ The dev container's boot chain SHALL always invoke the seed with `--reset` AND S
 
 Operators who want to preserve manually-added rows across container restarts SHALL run the seed manually without `--reset` (or modify the boot chain locally), accepting that the canonical dev contract is fresh-canvas-per-up.
 
-The `apps/server/src/test/invariants.test.ts` source-file allow-list for `DELETE FROM` statements SHALL include `scripts/seed-dev.ts` (relative to `apps/server/src/`), and SHALL retain a positive assertion that this file contains the expected `DELETE FROM` strings (so the allow-list does not silently expire). The invariants test SHALL additionally assert that the `DELETE FROM` block in `seed-dev.ts` is reached only after a runtime check of `process.env.REMBRIC_ALLOW_DESTRUCTIVE_SEED === '1'`.
+The `apps/web/src/test/invariants.test.ts` source-file allow-list for `DELETE FROM` statements SHALL include `scripts/seed-dev.ts` (relative to `apps/web/src/`), and SHALL retain a positive assertion that this file contains the expected `DELETE FROM` strings (so the allow-list does not silently expire). The invariants test SHALL additionally assert that the `DELETE FROM` block in `seed-dev.ts` is reached only after a runtime check of `process.env.REMBRIC_ALLOW_DESTRUCTIVE_SEED === '1'`.
 
 #### Scenario: Fresh DB seed populates the expected counts
 
 - **GIVEN** an empty dev database (`./data-dev/data.db` does not exist or has no rows)
 - **AND** the dev compose sets `REMBRIC_ALLOW_DESTRUCTIVE_SEED=1` in the container's environment
-- **WHEN** the dev container's boot chain runs `tsx apps/server/src/scripts/seed-dev.ts --reset` (invoked automatically as part of `pnpm run dev:docker:up`)
+- **WHEN** the dev container's boot chain runs `tsx apps/web/src/scripts/seed-dev.ts --reset` (invoked automatically as part of `pnpm run dev:docker:up`)
 - **THEN** the script SHALL exit `0`
 - **AND** the database SHALL contain exactly 1 project, 3 tokens, ~20 memories across 5 `topic_key` clusters, 3 ended sessions with summaries, 2 active sessions, and 1 pending judgment
 - **AND** the container's stderr SHALL contain the plaintext value of the 3 minted tokens
@@ -79,7 +79,7 @@ The `apps/server/src/test/invariants.test.ts` source-file allow-list for `DELETE
 
 - **GIVEN** the dev database has been seeded (contains data the operator cares about) OR is empty (doesn't matter for the gate)
 - **AND** `REMBRIC_ALLOW_DESTRUCTIVE_SEED` is unset OR set to a value other than `1`
-- **WHEN** `tsx apps/server/src/scripts/seed-dev.ts --reset` is invoked (from any context — manual `docker exec`, prod container by accident, a misrouted CI job)
+- **WHEN** `tsx apps/web/src/scripts/seed-dev.ts --reset` is invoked (from any context — manual `docker exec`, prod container by accident, a misrouted CI job)
 - **THEN** the script SHALL emit `[seed-dev] --reset requires REMBRIC_ALLOW_DESTRUCTIVE_SEED=1; refusing to wipe` to stderr
 - **AND** the script SHALL exit with a non-zero code
 - **AND** NO rows SHALL be deleted from the protected tables
@@ -97,7 +97,7 @@ The `apps/server/src/test/invariants.test.ts` source-file allow-list for `DELETE
 #### Scenario: Running the seed script directly without `--reset` skips
 
 - **GIVEN** the dev database is currently seeded
-- **WHEN** the operator runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec rembric node apps/server/src/scripts/seed-dev.ts` (no `--reset`)
+- **WHEN** the operator runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec rembric node apps/web/src/scripts/seed-dev.ts` (no `--reset`)
 - **THEN** the script SHALL exit `0`
 - **AND** stderr SHALL contain `[seed-dev] data already present; pass --reset to wipe and reseed`
 - **AND** the row counts in the database SHALL be unchanged
@@ -106,7 +106,7 @@ The `apps/server/src/test/invariants.test.ts` source-file allow-list for `DELETE
 
 - **GIVEN** the dev database has already been seeded and the dev container is running
 - **AND** the dev compose has set `REMBRIC_ALLOW_DESTRUCTIVE_SEED=1` for the container
-- **WHEN** the operator runs the seed with `--reset` (via `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec rembric tsx apps/server/src/scripts/seed-dev.ts --reset`)
+- **WHEN** the operator runs the seed with `--reset` (via `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec rembric tsx apps/web/src/scripts/seed-dev.ts --reset`)
 - **THEN** the env var inherited from the container environment SHALL be present
 - **AND** the previous rows SHALL be deleted from the protected tables in a single transaction
 - **AND** the seed SHALL run to completion producing the same target counts as a fresh seed
@@ -117,12 +117,12 @@ The root `package.json::scripts` block SHALL contain one entry for the dev stack
 
 - `dev:docker:up` → `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` (foreground — logs stream to the operator's terminal; Ctrl-C stops the container)
 
-The dev container's startup chain — defined in the `apps/server/Dockerfile` `dev` stage's `CMD` — SHALL run the seed automatically before launching `tsx watch`:
+The dev container's startup chain — defined in the `apps/web/Dockerfile` `dev` stage's `CMD` — SHALL run the seed automatically before launching `tsx watch`:
 
 ```
 pnpm run --filter @rembric/server build:css \
   && node apps/server/scripts/copy-assets.mjs \
-  && tsx apps/server/src/scripts/seed-dev.ts --reset \
+  && tsx apps/web/src/scripts/seed-dev.ts --reset \
   && exec tsx watch apps/server/src/cli.ts start
 ```
 
@@ -160,7 +160,7 @@ Foreground `up` is intentional: logs go straight to the operator's terminal, Ctr
 
 The repo's CI workflows SHALL include a `docker-build-check` job that triggers on `pull_request` and `push` to `main` and **mirrors the release-publish path** so a build break is caught at PR time rather than at publish. Because the publish builds the (distroless) `runtime` stage natively on two architectures, the check SHALL too — **without QEMU**:
 
-- It SHALL build the `runtime` stage of `apps/server/Dockerfile` natively on **both** `linux/amd64` (`ubuntu-latest`) and `linux/arm64` (`ubuntu-24.04-arm`) using `docker/build-push-action@v7` with `push: false`, `load: true`, `context: .`, `file: apps/server/Dockerfile`.
+- It SHALL build the `runtime` stage of `apps/web/Dockerfile` natively on **both** `linux/amd64` (`ubuntu-latest`) and `linux/arm64` (`ubuntu-24.04-arm`) using `docker/build-push-action@v7` with `push: false`, `load: true`, `context: .`, `file: apps/web/Dockerfile`.
 - On `amd64` it SHALL additionally build the `dev` stage and run the **installer e2e** (`install.sh --server --up` against the locally-loaded image, asserting `/healthz` → 200 and `/dashboard` → 200/302).
 - On `arm64` it SHALL run a **boot smoke**: start the just-built distroless image and assert `/healthz` → 200 and that the eagerly-loaded embedding model warmed (proving the arm64 glibc native modules — `onnxruntime-node`, `better-sqlite3`, `sqlite-vec` — and the baked model work).
 
@@ -179,11 +179,11 @@ The `docker-publish.yml` workflow SHALL build the multi-arch image **without QEM
 - Tags SHALL be created only in a **merge job** that `needs:` both build jobs (so it runs only if **every** architecture passed its smoke test). The merge job SHALL resolve the version, run the **refuse-to-overwrite** guard (fail if the immutable `:<version>` tag already exists), then create the `:<version>` and `:sha-<short>` **manifest list** from the two per-arch digests via `docker buildx imagetools create`, and only then promote the alias tags (`:latest`, major, minor).
 - If ANY architecture fails its smoke test, the merge job SHALL NOT run: no `:<version>`, `:sha-<short>`, `:latest`, or alias tag SHALL be created. The per-arch digests remain pushed (untagged) in the registry as forensic evidence of the failed build.
 
-The composite action `.github/actions/build-runtime-image/action.yml` SHALL declare `dockerfile` and `target` inputs, and BOTH of its build modes (`load` and `digest`) SHALL read them. Their defaults SHALL be the server image's `./apps/server/Dockerfile` and `runtime`, so a caller that omits them keeps building exactly what it built before. A build mode that re-hard-codes a Dockerfile path or a stage name SHALL NOT be accepted: it would silently ignore the caller's override, which is the failure mode the inputs exist to remove.
+The composite action `.github/actions/build-runtime-image/action.yml` SHALL declare `dockerfile` and `target` inputs, and BOTH of its build modes (`load` and `digest`) SHALL read them. Their defaults SHALL be the server image's `./apps/web/Dockerfile` and `runtime`, so a caller that omits them keeps building exactly what it built before. A build mode that re-hard-codes a Dockerfile path or a stage name SHALL NOT be accepted: it would silently ignore the caller's override, which is the failure mode the inputs exist to remove.
 
 The published artifact SHALL be the `runner` stage of `apps/web/Dockerfile`, and that stage SHALL be the **last** `FROM ... AS <name>` declaration in the file. It SHALL be built from a distroless glibc Node base, SHALL run as a numeric non-root user with an exec-form `HEALTHCHECK`, and SHALL declare `LABEL rembric.stage=runtime`. The last of those is load-bearing beyond this workflow: the updater prunes previous images by an exact-match filter on that label, so a published image without it leaks an image per update.
 
-The `apps/server/Dockerfile` SHALL be structured so that:
+The `apps/web/Dockerfile` SHALL be structured so that:
 
 - The `runtime` stage is the **last** `FROM ... AS <name>` declaration. This makes `docker build .` (without `--target`) produce the runtime image by default.
 - The `runtime` stage SHALL be built from a **distroless glibc Node base** (`gcr.io/distroless/nodejs22-debian12`) — keeping glibc so the prebuilt `onnxruntime-node`, `better-sqlite3`, and `sqlite-vec` native modules work unchanged. The runtime `HEALTHCHECK` SHALL use **exec form** and the stage SHALL run as a **numeric non-root user** (`USER 10001:10001`), since the distroless base has no shell or `useradd`.
@@ -194,14 +194,14 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 
 #### Scenario: PR with a broken Dockerfile is caught before merge
 
-- **GIVEN** a PR that introduces a change to `apps/server/Dockerfile` causing the `runtime` stage to fail to build
+- **GIVEN** a PR that introduces a change to `apps/web/Dockerfile` causing the `runtime` stage to fail to build
 - **WHEN** the PR's CI workflow runs
 - **THEN** the `docker-build-check` job SHALL fail
 - **AND** the PR's overall status check SHALL be red
 
 #### Scenario: docker-build-check catches an arm64-native or distroless regression before publish
 
-- **GIVEN** a PR that changes `apps/server/Dockerfile` such that the `runtime` image builds on amd64 but fails to build or boot on arm64 (e.g. an arm64-native module break, or a distroless change that prevents the embedder from loading)
+- **GIVEN** a PR that changes `apps/web/Dockerfile` such that the `runtime` image builds on amd64 but fails to build or boot on arm64 (e.g. an arm64-native module break, or a distroless change that prevents the embedder from loading)
 - **WHEN** the PR's CI workflow runs the `docker-build-check` matrix
 - **THEN** the `arm64` leg (`ubuntu-24.04-arm`) SHALL fail at the runtime build or the boot smoke (`/healthz` never reaching 200, or the embedding model never loading)
 - **AND** the PR's overall status check SHALL be red — the break is caught at PR time, not at release publish
@@ -237,7 +237,7 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 
 #### Scenario: A publish that falls back to the server image fails smoke before any tag exists
 
-- **GIVEN** a regression that makes `docker-publish.yml` build `apps/server/Dockerfile`'s `runtime` stage instead of the web image (e.g. the override inputs are dropped)
+- **GIVEN** a regression that makes `docker-publish.yml` build `apps/web/Dockerfile`'s `runtime` stage instead of the web image (e.g. the override inputs are dropped)
 - **WHEN** a build job runs its per-arch smoke test
 - **THEN** the Cmd/Entrypoint check SHALL fail because `Config.Entrypoint` does not include `apps/web/server.js`
 - **AND** that build job SHALL fail
@@ -246,20 +246,20 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 #### Scenario: A build mode that ignores its inputs is caught (invariant test)
 
 - **GIVEN** a change to `.github/actions/build-runtime-image/action.yml` that re-hard-codes `file:` or `target:` in either build mode, or that moves the `default:` of `dockerfile`/`target` to another input
-- **WHEN** `apps/server/src/test/invariants.test.ts` runs the composite-action check
+- **WHEN** `apps/web/src/test/invariants.test.ts` runs the composite-action check
 - **THEN** the test SHALL fail: it asserts that both build modes consume `inputs.dockerfile` and `inputs.target`, and that each default sits inside its own input block
 
 #### Scenario: A publish override that reverts to the server image is caught (invariant test)
 
 - **GIVEN** a change to `docker-publish.yml` that removes the web override, or that restores the server entrypoint as the smoke's expected substring
-- **WHEN** `apps/server/src/test/invariants.test.ts` runs the publish check
+- **WHEN** `apps/web/src/test/invariants.test.ts` runs the publish check
 - **THEN** the test SHALL fail: it asserts exactly one uncommented `dockerfile: ./apps/web/Dockerfile`, exactly one uncommented `target: runner`, and that the smoke's expected entrypoint is `apps/web/server.js` and no longer `dist/server-entrypoint.js`
 
 #### Scenario: CI keeps building the server image from the action's defaults
 
 - **GIVEN** `ci.yml`'s `docker-build-check` calls the shared composite action without the `dockerfile`/`target` inputs
 - **WHEN** that job builds the image
-- **THEN** it SHALL build `apps/server/Dockerfile`'s `runtime` stage — the defaults — and the installer e2e SHALL keep exercising it
+- **THEN** it SHALL build `apps/web/Dockerfile`'s `runtime` stage — the defaults — and the installer e2e SHALL keep exercising it
 
 #### Scenario: A single arch failing smoke blocks all tags
 
@@ -305,12 +305,12 @@ This catches Dockerfile-level regressions before they reach a release publish, p
 
 #### Scenario: Dockerfile last stage is runtime (invariant test)
 
-- **WHEN** `apps/server/src/test/invariants.test.ts` runs the "Dockerfile stage order" check
-- **THEN** the test SHALL parse `apps/server/Dockerfile`, identify all `FROM ... AS <name>` lines in order, and assert the final entry's name is `runtime`
+- **WHEN** `apps/web/src/test/invariants.test.ts` runs the "Dockerfile stage order" check
+- **THEN** the test SHALL parse `apps/web/Dockerfile`, identify all `FROM ... AS <name>` lines in order, and assert the final entry's name is `runtime`
 
 #### Scenario: Dockerfile declares stage labels (invariant test)
 
-- **WHEN** `apps/server/src/test/invariants.test.ts` runs the "image labels" check
+- **WHEN** `apps/web/src/test/invariants.test.ts` runs the "image labels" check
 - **THEN** the test SHALL verify the `runtime` stage block contains a line matching `LABEL rembric.stage=runtime`
 - **AND** the test SHALL verify the `dev` stage block contains a line matching `LABEL rembric.stage=dev`
 
@@ -424,7 +424,7 @@ The repository root SHALL contain a `pnpm-workspace.yaml` that declares a `packa
 
 The `apps/` directory SHALL contain two workspace members on day one:
 
-- `apps/server/` — the Node MCP+dashboard server (the Docker image target).
+- `apps/web/` — the Node MCP+dashboard server (the Docker image target).
 - `apps/plugin/` — the multi-client plugin tree (Claude Code, Codex CLI, Hermes Agent, opencode, Pi all under one directory).
 
 The `packages/` directory SHALL exist (even if initially empty) so the layout convention is in place for future library extractions (e.g., a future `packages/bridge/` npm-published bridge) without requiring a follow-up restructure.
@@ -435,7 +435,7 @@ Each workspace member SHALL contain a `package.json` declaring `"name": "@rembri
 
 - **GIVEN** a fresh clone of the repo
 - **WHEN** the contributor runs `pnpm install --frozen-lockfile`
-- **THEN** pnpm SHALL recognize both `apps/server` and `apps/plugin` as workspace members
+- **THEN** pnpm SHALL recognize both `apps/web` and `apps/plugin` as workspace members
 - **AND** `pnpm -r ls` SHALL list at minimum `@rembric/server` and `@rembric/plugin`
 - **AND** the existing supply-chain policy (allowBuilds, blockExoticSubdeps, minimumReleaseAge) SHALL still apply
 
@@ -447,7 +447,7 @@ Each workspace member SHALL contain a `package.json` declaring `"name": "@rembri
 
 ### Requirement: CI MUST enforce the coverage gate and keep developer-facing scripts, docs, and thresholds honest
 
-CI SHALL run the server test suite WITH coverage so the thresholds configured in `apps/server/vitest.config.ts` actually gate every pull request. Those thresholds SHALL be set at or below the current real coverage (an enforced floor, never an aspirational number that reds the build), and the ratchet direction SHALL be up-only. `CONTRIBUTING.md` SHALL state the SAME threshold numbers that the config enforces and SHALL NOT claim a coverage behavior CI does not perform. Any developer command documented in `README.md` or `CONTRIBUTING.md` as runnable from the repository root SHALL resolve from the root, and any file path referenced in those docs (e.g. the invariants tests) SHALL point at a path that exists. Runtime plugin code shipped to users (`apps/plugin/bin/**`) SHALL be covered by ESLint. The installer test suite SHALL execute at most once per CI run.
+CI SHALL run the server test suite WITH coverage so the thresholds configured in `apps/web/vitest.config.ts` actually gate every pull request. Those thresholds SHALL be set at or below the current real coverage (an enforced floor, never an aspirational number that reds the build), and the ratchet direction SHALL be up-only. `CONTRIBUTING.md` SHALL state the SAME threshold numbers that the config enforces and SHALL NOT claim a coverage behavior CI does not perform. Any developer command documented in `README.md` or `CONTRIBUTING.md` as runnable from the repository root SHALL resolve from the root, and any file path referenced in those docs (e.g. the invariants tests) SHALL point at a path that exists. Runtime plugin code shipped to users (`apps/plugin/bin/**`) SHALL be covered by ESLint. The installer test suite SHALL execute at most once per CI run.
 
 #### Scenario: A PR that drops coverage below the floor fails CI
 
@@ -457,13 +457,13 @@ CI SHALL run the server test suite WITH coverage so the thresholds configured in
 
 #### Scenario: Documented thresholds equal enforced thresholds
 
-- **WHEN** a contributor compares the coverage numbers in `CONTRIBUTING.md` against `apps/server/vitest.config.ts`
+- **WHEN** a contributor compares the coverage numbers in `CONTRIBUTING.md` against `apps/web/vitest.config.ts`
 - **THEN** the two SHALL be identical, and CI SHALL run the coverage command that enforces them
 
 #### Scenario: Root-level documented commands resolve
 
 - **WHEN** a fresh clone runs a command the docs present as a repo-root command (e.g. `pnpm run dev`, `pnpm run test:coverage`)
-- **THEN** the command SHALL resolve (via a root script or an equally-documented `cd apps/server`) rather than failing with "No script found"
+- **THEN** the command SHALL resolve (via a root script or an equally-documented `cd apps/web`) rather than failing with "No script found"
 
 #### Scenario: The shipped bridges are linted
 
@@ -475,7 +475,7 @@ CI SHALL run the server test suite WITH coverage so the thresholds configured in
 - **WHEN** the CI workflow for a PR completes
 - **THEN** `install.test.ts` SHALL have been executed exactly once, and the shell-syntax (`sh -n`) checks SHALL still run
 
-**Amendment for the plugin bridge workspace:** The lint and test coverage paths in this requirement extend to the published bridge package. `apps/plugin/mcp-bridge/` SHALL be explicitly included in the ESLint set, and its `*.test.ts` files SHALL be explicitly included in `apps/server/vitest.config.ts`. The shipped-bridge scenario's historical paths are replaced for this change by `apps/plugin/mcp-bridge/{bridge,cli,slug}.mjs` and `apps/plugin/mcp-bridge/rembric-dotenv.mjs`; the deleted `apps/plugin/bin/rembric-bridge.mjs` is not a live lint requirement. The installer suite SHALL remain single-run, and the existing root commands and coverage obligations remain unchanged.
+**Amendment for the plugin bridge workspace:** The lint and test coverage paths in this requirement extend to the published bridge package. `apps/plugin/mcp-bridge/` SHALL be explicitly included in the ESLint set, and its `*.test.ts` files SHALL be explicitly included in `apps/web/vitest.config.ts`. The shipped-bridge scenario's historical paths are replaced for this change by `apps/plugin/mcp-bridge/{bridge,cli,slug}.mjs` and `apps/plugin/mcp-bridge/rembric-dotenv.mjs`; the deleted `apps/plugin/bin/rembric-bridge.mjs` is not a live lint requirement. The installer suite SHALL remain single-run, and the existing root commands and coverage obligations remain unchanged.
 
 ### Requirement: CI MUST reject a published-spec edit that arrives without an archive in the same diff
 
@@ -669,7 +669,7 @@ A previous version of this requirement instead demanded that "the Dockerfile's `
 
 ### Requirement: The repo MUST provide a non-destructive volumetric seeding harness
 
-The repo SHALL ship a harness at `apps/server/src/scripts/`, exposed as a pnpm script, that builds a corpus of a caller-specified size for performance measurement. It is a separate script from `seed-dev.ts`, whose job is a small hand-authored demo fixture, and neither SHALL be expressed in terms of the other.
+The repo SHALL ship a harness at `apps/web/src/scripts/`, exposed as a pnpm script, that builds a corpus of a caller-specified size for performance measurement. It is a separate script from `seed-dev.ts`, whose job is a small hand-authored demo fixture, and neither SHALL be expressed in terms of the other.
 
 **It SHALL NOT be capable of deleting data.** The harness SHALL take an explicit database path, SHALL exit non-zero without writing when that database already contains memories, and SHALL NOT accept a `--reset`, a `--force`, or any environment-gated destructive path. It SHALL refuse to operate on the dev stack's data directory.
 

@@ -1047,7 +1047,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: An MCP client connects on `/mcp` without a project
 
 - **WHEN** the `initialize` handshake completes against `/mcp`
-- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect, roots-based auto-detection where the client supports it, and `project.use` as the way to switch. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `apps/server/src/mcp/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect, roots-based auto-detection where the client supports it, and `project.use` as the way to switch. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `packages/mcp/src/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
 
 #### Scenario: Instructions length is checked at build time
 
@@ -1065,7 +1065,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 #### Scenario: instructions.test.ts asserts the protocol flows are present
 
-- **WHEN** `apps/server/src/mcp/instructions.test.ts` runs against `buildInstructions({requestedSlug: 'demo'})` and `buildInstructions({requestedSlug: null})`
+- **WHEN** `packages/mcp/src/instructions.test.ts` runs against `buildInstructions({requestedSlug: 'demo'})` and `buildInstructions({requestedSlug: null})`
 - **THEN** both outputs SHALL contain the substrings `memory.save`, `memory.context`, `memory.session_summary`, AND `memory.about`
 - **AND** both outputs SHALL be ≤1000 chars
 - **AND** existing assertions for `memory.search`, the scope note, the `10000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass, with the scope-note assertion updated to the project-only wording
@@ -1607,11 +1607,11 @@ This requirement is additive and SHALL NOT change:
 
 ### Requirement: MCP tool handlers MUST be organized one domain per module
 
-The MCP tool-handler layer at `apps/server/src/mcp/` SHALL place each tool domain in its own `<domain>-tools.ts` module that exports exactly one `build<Domain>Handlers` factory and its `<Domain>ToolDeps` interface. There SHALL be no generically-named `tools.ts` handler module. Cross-cutting helpers shared by more than one handler module (the `DomainError`→MCP error mapper, the session-router key resolver, scope resolution, and serialization helpers) SHALL be defined exactly once in a shared module and imported, never copied. `server.ts` SHALL remain a thin registration manifest that wires the per-domain factories without containing handler logic.
+The MCP tool-handler layer at `packages/mcp/src/` SHALL place each tool domain in its own `<domain>-tools.ts` module that exports exactly one `build<Domain>Handlers` factory and its `<Domain>ToolDeps` interface. There SHALL be no generically-named `tools.ts` handler module. Cross-cutting helpers shared by more than one handler module (the `DomainError`→MCP error mapper, the session-router key resolver, scope resolution, and serialization helpers) SHALL be defined exactly once in a shared module and imported, never copied. `server.ts` SHALL remain a thin registration manifest that wires the per-domain factories without containing handler logic.
 
 #### Scenario: Invariant test rejects a generic or duplicated handler module
 
-- **WHEN** the invariants suite (`apps/server/src/test/invariants.test.ts`) scans `apps/server/src/mcp/` for handler modules
+- **WHEN** the invariants suite (`apps/web/src/test/invariants.test.ts`) scans `packages/mcp/src/` for handler modules
 - **THEN** the suite SHALL fail if a file named `tools.ts` exists, if any `*-tools.ts` module does not export exactly one `build*Handlers` factory, or if `errToMcp` / `routerKey` are defined in more than one module
 
 #### Scenario: Tool surface is unchanged by the reorganization
@@ -2816,7 +2816,7 @@ Both adoption paths report the same way: `reused: true` carrying the adopted row
 
 The tool's description SHALL additionally tell the model not to repeat the call on a connection that already has a session — once a session is active on this connection, do not call `memory.session_start` again, because writes attach automatically. The description is the only surface that can reduce the volume of defensive calls that create these rows in the first place; the resolution order above bounds the damage per call, and this clause is what reduces the number of calls.
 
-`memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `apps/server/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
+`memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `packages/core/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
 
 `memory.session_summary` and `memory.session_end` SHALL NOT reject a call because the resolved row is in a terminal state. `memory.session_summary` SHALL apply its summary/title write subject to the `final` precedence rules regardless of `status`; `memory.session_end` takes no summary/title arguments, so on a terminal row it SHALL be a pure no-op returning the existing `ended_at`. Neither SHALL mutate `status`, `ended_at` or `last_activity_at` on a terminal row — see the `sessions` capability, "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`". `session_already_ended` SHALL NOT be a possible error code for either tool. This matters because the plugin's `PreCompact`, `SessionStart:compact` and `Stop` nudges instruct the agent to call `memory.session_summary`, and the stale-active retirement sweep can have flipped the row to `abandoned` (the documented steady state for two of the clients) before the agent gets there.
 

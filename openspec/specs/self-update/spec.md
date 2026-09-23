@@ -138,12 +138,12 @@ When the capability state is `pinned`, the server SHALL refuse to execute a one-
 
 ### Requirement: The self-update implementation MUST NOT add runtime npm dependencies
 
-All Docker Engine API interaction SHALL be implemented with Node built-ins (`node:http` over the unix socket). The feature SHALL NOT introduce new entries in `apps/server/package.json` `dependencies`.
+All Docker Engine API interaction SHALL be implemented with Node built-ins (`node:http` over the unix socket). The feature SHALL NOT introduce new entries in `apps/web/package.json` `dependencies`.
 
 #### Scenario: Dependency audit
 
 - **WHEN** the feature is fully implemented
-- **THEN** `apps/server/package.json` SHALL contain no new runtime dependencies attributable to it
+- **THEN** `apps/web/package.json` SHALL contain no new runtime dependencies attributable to it
 
 ### Requirement: The socket opt-in and update behavior MUST be documented in compose, docs, and README
 
