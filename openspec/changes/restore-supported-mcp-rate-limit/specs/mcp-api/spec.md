@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Every MCP request MUST be authenticated and optionally rate limited after authentication
+### Requirement: Every MCP request MUST be authenticated
 
 The server SHALL reject any request to `/mcp` that does not include a valid bearer token in the `Authorization` header. Tokens SHALL be matched against the `tokens` table by hash; revoked or expired tokens SHALL be rejected. The pre-auth failed-attempt lockout SHALL remain separate from the post-auth request limiter.
 
