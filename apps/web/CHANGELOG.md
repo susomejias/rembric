@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.10](https://github.com/susomejias/rembric/compare/server-v0.28.9...server-v0.28.10) (2026-09-23)
+
+
+### Bug Fixes
+
+* **web:** unblock release publishing through shared cache controls ([8d4bdd0](https://github.com/susomejias/rembric/commit/8d4bdd065f08c7253fd165366467cc97537c3ee6))
+
 ## [0.28.9](https://github.com/susomejias/rembric/compare/server-v0.28.8...server-v0.28.9) (2026-09-23)
 
 
