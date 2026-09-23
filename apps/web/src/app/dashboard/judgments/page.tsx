@@ -1,48 +1,41 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import {
-  judgmentsQuery,
-  readJudgmentsFilters,
-  relationFilters,
-  type SearchParams,
-} from './filters';
+import { readJudgmentsFilters, relationFilters, type SearchParams } from './filters';
 
-import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
-import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
-import { CsrfField } from '@/components/dashboard/csrf-field';
+import type { ActionState } from '@/components/dashboard/action-form';
 import {
   FilterActions,
   FilterField,
   FilterForm,
   FilterSelect,
-  Pager,
 } from '@/components/dashboard/filters';
+import { JudgmentsTable } from '@/components/dashboard/judgments-table';
 import { PAGE_SIZE } from '@/components/dashboard/support';
-import {
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  Page,
-  Pill,
-  SectionBar,
-  StatCard,
-  StatGrid,
-  StatusPill,
-  TableEmpty,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
-import { Button } from '@/components/ui/button';
+import { Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
 const ORPHAN_FORM = 'judgment.orphan';
+const TABLE_PAGE_SIZE = 10;
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'all statuses' },
+  { value: 'pending', label: 'pending' },
+  { value: 'judged', label: 'judged' },
+  { value: 'orphaned', label: 'orphaned' },
+];
+
+const KIND_OPTIONS = [
+  { value: '', label: 'all kinds' },
+  { value: 'pending', label: 'pending (unjudged)' },
+  { value: 'compatible', label: 'compatible' },
+  { value: 'supersedes', label: 'supersedes' },
+  { value: 'not_conflict', label: 'not_conflict' },
+];
 
 async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -60,21 +53,6 @@ function readField(form: FormData, name: string): string {
   return (typeof value === 'string' ? value : '').trim();
 }
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'all statuses' },
-  { value: 'pending', label: 'pending' },
-  { value: 'judged', label: 'judged' },
-  { value: 'orphaned', label: 'orphaned' },
-];
-
-const KIND_OPTIONS = [
-  { value: '', label: 'all kinds' },
-  { value: 'pending', label: 'pending (unjudged)' },
-  { value: 'compatible', label: 'compatible' },
-  { value: 'supersedes', label: 'supersedes' },
-  { value: 'not_conflict', label: 'not_conflict' },
-];
-
 export default async function JudgmentsPage({
   searchParams,
 }: {
@@ -82,44 +60,32 @@ export default async function JudgmentsPage({
 }) {
   const params = await searchParams;
   const filters = readJudgmentsFilters(params);
-  const roundTripQuery = judgmentsQuery(params);
+  const isFiltered = filters.status !== '' || filters.kind !== '';
 
   const { repos } = getServices();
+  const csrf = { orphan: await dashboardCsrfToken(ORPHAN_FORM) };
 
-  const address = relationFilters(filters);
-  const offset = filters.page * PAGE_SIZE;
-  const rowsRaw = repos.relations.adminListWithContent(address, PAGE_SIZE + 1, offset);
-  const hasMore = rowsRaw.length > PAGE_SIZE;
-  const rows = rowsRaw.slice(0, PAGE_SIZE);
-  const total = repos.relations.adminCountWithFilters(address);
+  const rows = isFiltered
+    ? repos.relations.adminListWithContent(relationFilters(filters), PAGE_SIZE, 0)
+    : [
+        ...repos.relations.adminListWithContent({ status: 'pending' }, PAGE_SIZE, 0),
+        ...repos.relations.adminRecentJudged(PAGE_SIZE),
+      ].slice(0, PAGE_SIZE);
 
   const pending = repos.relations.adminCountByStatus('pending');
   const judged = repos.relations.adminCountByStatus('judged');
   const orphaned = repos.relations.adminCountByStatus('orphaned');
-  const isFiltered = filters.status !== '' || filters.kind !== '';
 
   return (
     <Page>
-      <ViewHead
-        num="04"
-        title="Rembric Judgments."
-        hl="Rembric"
-        meta={[
-          { k: 'TOTAL', v: total },
-          { k: 'SHOWING', v: `${rows.length} ROWS` },
-        ]}
-      />
-
-      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
-        <StatCard
-          k="PENDING"
-          v={pending}
-          tone={pending > 0 ? 'amber' : 'dim'}
-          sub={<span>NEEDS YOUR ATTENTION</span>}
-        />
-        <StatCard k="JUDGED" v={judged} tone="lime" sub={<span>VERDICTS RECORDED</span>} />
-        <StatCard k="ORPHANED" v={orphaned} sub={<span>ENDPOINTS NO LONGER ACTIVE</span>} />
-      </StatGrid>
+      <header className="min-w-0">
+        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
+          Judgments
+        </h1>
+        <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
+          {`${rows.length} ROWS · ${pending} PENDING · ${judged} JUDGED · ${orphaned} ORPHANED`}
+        </p>
+      </header>
 
       <FilterForm action="/dashboard/judgments" className="mt-6">
         <FilterField label="STATUS" htmlFor="j-status">
@@ -136,93 +102,26 @@ export default async function JudgmentsPage({
         <FilterActions clearHref="/dashboard/judgments" />
       </FilterForm>
 
-      <SectionBar name="Decision queue" meta={`${total} MATCHING`} />
-      {rows.length === 0 ? (
-        <TableEmpty>
-          {isFiltered ? 'NO JUDGMENT MATCHES THIS FILTER' : 'NO CANDIDATE PAIR HAS BEEN RECORDED'}
-        </TableEmpty>
-      ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>status</DataTh>
-            <DataTh>verdict</DataTh>
-            <DataTh>source → target</DataTh>
-            <DataTh>actor</DataTh>
-            <DataTh>created</DataTh>
-            <DataTh>actions</DataTh>
-          </DataHead>
-          <DataBody>
-            {rows.map((relation) => (
-              <DataTr key={relation.id}>
-                <DataTd>
-                  <StatusPill status={relation.status} />
-                </DataTd>
-                <DataTd>
-                  <Pill tone={relation.relation === null ? 'dim' : 'lime'}>
-                    {relation.relation ?? 'pending'}
-                  </Pill>
-                </DataTd>
-                <DataTd className="max-w-[420px] truncate">
-                  <Link
-                    href={`/dashboard/memories/${relation.sourceId}`}
-                    className="transition-colors hover:text-primary"
-                  >
-                    {relation.sourceTitle}
-                  </Link>
-                  <span className="mx-2 text-muted-foreground">→</span>
-                  <Link
-                    href={`/dashboard/memories/${relation.targetId}`}
-                    className="transition-colors hover:text-primary"
-                  >
-                    {relation.targetTitle}
-                  </Link>
-                </DataTd>
-                <DataTd className="text-muted-foreground">{relation.markedByActor ?? '—'}</DataTd>
-                <DataTd className="font-mono text-xs text-muted-foreground">
-                  <Link href={`/dashboard/judgments/${relation.id}`} className="hover:text-primary">
-                    <Time value={relation.createdAt} />
-                  </Link>
-                </DataTd>
-                <DataTd>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/dashboard/judgments/${relation.id}`}
-                      className="font-mono text-[11px] uppercase tracking-[.14em] hover:text-primary"
-                    >
-                      View →
-                    </Link>
-                    {relation.status === 'pending' ? (
-                      <ActionForm action={orphanJudgment}>
-                        <CsrfField form={ORPHAN_FORM} />
-                        <input type="hidden" name="judgmentId" value={relation.judgmentId} />
-                        <ConfirmSubmit
-                          tone="danger"
-                          title="Mark this judgment as orphaned?"
-                          description="It will be removed from the pending queue and won't be re-judged automatically."
-                          confirmLabel="MARK ORPHANED"
-                        >
-                          <Button type="button" variant="outline" size="sm">
-                            MARK ORPHANED
-                          </Button>
-                        </ConfirmSubmit>
-                      </ActionForm>
-                    ) : null}
-                  </div>
-                </DataTd>
-              </DataTr>
-            ))}
-          </DataBody>
-        </DataTable>
-      )}
-
-      <Pager
-        page={filters.page}
-        hasMore={hasMore}
-        total={total}
-        totalLabel={`${rows.length} ROWS`}
-        path="/dashboard/judgments"
-        query={roundTripQuery}
-      />
+      <div className="mt-6">
+        <JudgmentsTable
+          rows={rows.map((relation) => ({
+            id: relation.id,
+            judgmentId: relation.judgmentId,
+            sourceId: relation.sourceId,
+            targetId: relation.targetId,
+            sourceTitle: relation.sourceTitle,
+            targetTitle: relation.targetTitle,
+            relation: relation.relation,
+            status: relation.status,
+            actor: relation.markedByActor,
+            createdAt: relation.createdAt,
+            judgedAt: relation.judgedAt,
+          }))}
+          actions={{ orphan: orphanJudgment }}
+          csrf={csrf}
+          pageSize={TABLE_PAGE_SIZE}
+        />
+      </div>
 
       <aside className="mt-8 border border-border bg-card p-5 md:p-6">
         <p className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
