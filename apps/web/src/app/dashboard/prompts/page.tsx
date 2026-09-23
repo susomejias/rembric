@@ -11,9 +11,7 @@ import {
   type SearchParams,
 } from './filters';
 
-import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
-import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
-import { CsrfField } from '@/components/dashboard/csrf-field';
+import type { ActionState } from '@/components/dashboard/action-form';
 import {
   FilterActions,
   FilterField,
@@ -22,28 +20,12 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, shortId, singleParam, truncate } from '@/components/dashboard/support';
-import {
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  Flash,
-  Page,
-  Pill,
-  SectionBar,
-  StatCard,
-  StatGrid,
-  TableEmpty,
-  Tag,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
-import { Button } from '@/components/ui/button';
+import { PromptsTable } from '@/components/dashboard/prompts-table';
+import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
+import { Flash, Page, StatCard, StatGrid, TableEmpty } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,6 +82,10 @@ export default async function PromptsPage({
     filters.project !== '' || filters.session !== '' || filters.agent !== '' || filters.q !== '';
 
   const { repos } = getServices();
+  const csrf = {
+    remove: await dashboardCsrfToken(DELETE_FORM),
+    restore: await dashboardCsrfToken(UNDELETE_FORM),
+  };
 
   const offset = filters.page * PAGE_SIZE;
   const projectRows = repos.projects.adminListAll();
@@ -148,17 +134,18 @@ export default async function PromptsPage({
   const activeCount = repos.prompts.adminCount({ includeDeleted: false });
   const deletedCount = repos.prompts.adminCount({ includeDeleted: true }) - activeCount;
 
+  const matching = totalCount === undefined ? `${visible.length}+` : `${totalCount}`;
+
   return (
     <Page>
-      <ViewHead
-        num="03b"
-        title="Rembric Prompts."
-        hl="Rembric"
-        meta={[
-          { k: 'TOTAL', v: totalCount === undefined ? `${visible.length}+` : totalCount },
-          { k: 'SHOWING', v: `${visible.length} ROWS` },
-        ]}
-      />
+      <header className="min-w-0">
+        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
+          Prompts
+        </h1>
+        <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
+          {`${matching} MATCHING · ${visible.length} ROWS · ${activeCount} LIVE · ${deletedCount} DELETED`}
+        </p>
+      </header>
 
       {justDeleted ? (
         <div className="mt-6">
@@ -234,78 +221,31 @@ export default async function PromptsPage({
         <FilterActions clearHref="/dashboard/prompts" />
       </FilterForm>
 
-      <SectionBar
-        name="Library"
-        meta={ftsQuery ? `${visible.length}+ MATCHING` : `${totalCount ?? 0} MATCHING`}
-      />
       {visible.length === 0 ? (
         <TableEmpty>
           {isFiltered ? 'NO PROMPT MATCHES THIS FILTER' : 'NO PROMPT HAS BEEN CAPTURED YET'}
         </TableEmpty>
       ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>title</DataTh>
-            <DataTh>project</DataTh>
-            <DataTh>session</DataTh>
-            <DataTh>agent</DataTh>
-            <DataTh>tags</DataTh>
-            <DataTh>status</DataTh>
-            <DataTh>created</DataTh>
-            <DataTh>content</DataTh>
-            <DataTh>actions</DataTh>
-          </DataHead>
-          <DataBody>
-            {visible.map((prompt) => {
-              const project = prompt.projectId ? projectById.get(prompt.projectId) : undefined;
-              const state = prompt.deletedAt
-                ? 'deleted'
-                : (prompt.replaces?.length ?? 0) > 0
-                  ? 'refined'
-                  : 'active';
-              return (
-                <DataTr key={prompt.id} className={prompt.deletedAt ? 'opacity-60' : undefined}>
-                  <DataTd className="max-w-[220px] truncate">{truncate(prompt.title, 60)}</DataTd>
-                  <DataTd className="text-muted-foreground">{project?.slug ?? '—'}</DataTd>
-                  <DataTd className="font-mono text-xs text-muted-foreground">
-                    {prompt.sessionId ? (
-                      <Link
-                        href={`/dashboard/sessions/${prompt.sessionId}`}
-                        className="hover:text-primary"
-                      >
-                        {shortId(prompt.sessionId)}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                  </DataTd>
-                  <DataTd>{prompt.agent}</DataTd>
-                  <DataTd>
-                    <div className="flex flex-wrap gap-1">
-                      {(prompt.tags ?? []).length === 0 ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        (prompt.tags ?? []).map((tag) => <Tag key={tag}>{tag}</Tag>)
-                      )}
-                    </div>
-                  </DataTd>
-                  <DataTd>
-                    <Pill tone={state === 'deleted' ? 'dim' : 'lime'}>{state}</Pill>
-                  </DataTd>
-                  <DataTd className="font-mono text-xs text-muted-foreground">
-                    <Time value={prompt.createdAt} />
-                  </DataTd>
-                  <DataTd className="max-w-[380px] truncate text-muted-foreground">
-                    {truncate(prompt.content, 160)}
-                  </DataTd>
-                  <DataTd>
-                    <PromptActions id={prompt.id} deleted={prompt.deletedAt != null} />
-                  </DataTd>
-                </DataTr>
-              );
-            })}
-          </DataBody>
-        </DataTable>
+        <PromptsTable
+          rows={visible.map((prompt) => ({
+            id: prompt.id,
+            title: prompt.title,
+            content: prompt.content,
+            project: prompt.projectId ? (projectById.get(prompt.projectId)?.slug ?? '—') : '—',
+            sessionId: prompt.sessionId ?? null,
+            agent: prompt.agent ?? '—',
+            tags: prompt.tags ?? [],
+            status: prompt.deletedAt
+              ? 'deleted'
+              : (prompt.replaces?.length ?? 0) > 0
+                ? 'refined'
+                : 'active',
+            createdAt: prompt.createdAt,
+            deleted: prompt.deletedAt != null,
+          }))}
+          actions={{ remove: deletePrompt, restore: undeletePrompt }}
+          csrf={csrf}
+        />
       )}
 
       <Pager
@@ -317,36 +257,5 @@ export default async function PromptsPage({
         query={roundTripQuery}
       />
     </Page>
-  );
-}
-
-function PromptActions({ id, deleted }: { id: string; deleted: boolean }) {
-  if (deleted) {
-    return (
-      <ActionForm action={undeletePrompt}>
-        <CsrfField form={UNDELETE_FORM} />
-        <input type="hidden" name="id" value={id} />
-        <Button type="submit" variant="outline" size="sm">
-          Undelete
-        </Button>
-      </ActionForm>
-    );
-  }
-
-  return (
-    <ActionForm action={deletePrompt}>
-      <CsrfField form={DELETE_FORM} />
-      <input type="hidden" name="id" value={id} />
-      <ConfirmSubmit
-        tone="warn"
-        title="Soft-delete this prompt?"
-        description="It is hidden from default lists, memory.context.recentPrompts, and memory.search_prompts; restorable via the Undelete action."
-        confirmLabel="DELETE PROMPT"
-      >
-        <Button type="button" variant="outline" size="sm">
-          Delete
-        </Button>
-      </ConfirmSubmit>
-    </ActionForm>
   );
 }

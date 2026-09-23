@@ -97,7 +97,7 @@ describe('prompts row actions', () => {
 
   it('renders the actions column header', async () => {
     const html = await renderPrompts();
-    expect(html).toContain('>actions<');
+    expect(html).toContain('>Actions<');
   });
 
   it('renders an Undelete control on the soft-deleted row and no Delete on it', async () => {
