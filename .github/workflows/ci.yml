@@ -103,7 +103,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.model-cache
-          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts') }}
+          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
 
       - name: Prefetch embedding model (retried, offline-resolvable)
         if: steps.model-cache.outputs.cache-hit != 'true'
@@ -186,7 +186,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.model-cache
-          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts') }}
+          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
 
       - name: Prefetch embedding model (retried, offline-resolvable)
         if: steps.model-cache.outputs.cache-hit != 'true'
