@@ -156,7 +156,7 @@ export default function DashboardOverviewPage() {
           <div className="flex items-center gap-3 px-5 pt-1">
             <NumberTicker
               value={savedLast30}
-              format={(value) => value.toLocaleString('en-US')}
+              locale
               className="text-2xl font-semibold text-foreground"
             />
             <span className="text-sm text-muted-foreground">saved</span>
