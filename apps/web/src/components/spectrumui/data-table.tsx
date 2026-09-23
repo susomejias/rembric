@@ -250,7 +250,7 @@ export interface DataTableProps<T> {
    * shortcuts. The grid takes one Tab stop and moves a ring instead of focus.
    */
   keyboardNavigation?: boolean;
-  /** Copy the selected rows to the clipboard as TSV, ready to paste into a sheet. */
+  /** Copy the selected rows to the clipboard as a markdown table, ready to paste into a note. */
   clipboard?: boolean;
   /** Column ids to sum in a footer row that recounts as you filter. */
   totals?: string[];
@@ -980,9 +980,16 @@ export function DataTable<T>({
     const body = chosen.map(
       (row) => `| ${columns.map((column) => printValue(readValue(column, row))).join(' | ')} |`,
     );
+    const heading = `Copied ${chosen.length} selected rows — ${new Date().toISOString()} (markdown table)`;
     try {
       await navigator.clipboard.writeText(
-        [`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`, ...body].join('\n'),
+        [
+          heading,
+          '',
+          `| ${head.join(' | ')} |`,
+          `| ${head.map(() => '---').join(' | ')} |`,
+          ...body,
+        ].join('\n'),
       );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
@@ -1906,7 +1913,7 @@ export function DataTable<T>({
                               exit={motionOn ? { y: -8, opacity: 0 } : { opacity: 0 }}
                               transition={motionOn ? SPRING_SNAPPY : INSTANT}
                             >
-                              {copied ? 'Copied' : 'Copy'}
+                              {copied ? 'Copied' : 'Copy markdown'}
                             </motion.span>
                           </AnimatePresence>
                         </span>
