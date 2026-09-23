@@ -1,6 +1,6 @@
 {
   "name": "@rembric/web",
-  "version": "0.28.8",
+  "version": "0.28.9",
   "private": true,
   "type": "module",
   "description": "Rembric web application — Next.js App Router. Owns every HTTP surface once the port completes.",
