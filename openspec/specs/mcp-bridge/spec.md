@@ -14,7 +14,7 @@ There SHALL NOT be a second component that resolves the URL and then hands off t
 
 The directory SHALL sit inside `apps/plugin/` because release-please attributes a release to a component by the paths of the commits under that component's `path`: a package outside it would never itself _cause_ a `plugin` release, so its version carrier would be rewritten only when some unrelated change triggered one.
 
-The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which `apps/server/src/test/invariants.test.ts` derives "is this a JS/TS session client", every member of which must import `apps/plugin/bin/rembric-plugin-core.mjs`. The bridge is a transport and SHALL NOT import the session-protocol core.
+The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which `apps/web/src/test/invariants.test.ts` derives "is this a JS/TS session client", every member of which must import `apps/plugin/bin/rembric-plugin-core.mjs`. The bridge is a transport and SHALL NOT import the session-protocol core.
 
 `apps/plugin/mcp-bridge` SHALL be declared in `pnpm-workspace.yaml::packages`, unlike `.pi-plugin/`. Both declare no runtime dependencies, so the reason is not lockfile resolution: this package carries the whole client side for every shell client, and its session-recovery and relay logic SHALL be covered by executable tests, which requires it to be a workspace member the test runner reaches.
 

@@ -1265,7 +1265,7 @@ List and table views SHALL NOT render Markdown: truncated `content` snippets in 
 
 Every paginated dashboard list view SHALL render a header total chip whose value equals the true number of rows matching the view's current filter set, computed independently of pagination — NOT the count of rows present on the current page. The page-slice count SHALL remain available as a distinct `SHOWING N ROWS` indicator (in the header meta and/or the pager footer), and the `SHOWING` value SHALL equal the number of rows actually rendered on the page (never including any pagination lookahead row). This requirement applies to the memories (`/dashboard/memories`), sessions (`/dashboard/sessions`), judgments (`/dashboard/judgments`), consolidation-runs (`/dashboard/consolidation`), and prompts (`/dashboard/prompts`) list views.
 
-The true count SHALL be produced by an `admin*`-prefixed repository read that applies the SAME filter conditions as the view's corresponding `admin*List*` query and omits `LIMIT`/`OFFSET`/`ORDER BY`. All such counting SQL SHALL live under `apps/server/src/db/repositories/` and SHALL be invoked only from `apps/server/src/dashboard/`, satisfying the data-access and admin-method confinement invariants. No new MCP tool, HTTP route, DB migration, or design token SHALL be introduced.
+The true count SHALL be produced by an `admin*`-prefixed repository read that applies the SAME filter conditions as the view's corresponding `admin*List*` query and omits `LIMIT`/`OFFSET`/`ORDER BY`. All such counting SQL SHALL live under `packages/db/src/repositories/` and SHALL be invoked only from `apps/web/src/app/dashboard/`, satisfying the data-access and admin-method confinement invariants. No new MCP tool, HTTP route, DB migration, or design token SHALL be introduced.
 
 The tokens list (`/dashboard/tokens`) already reports the true count because its source list is unpaginated; it is the reference pattern and is exempt from any change under this requirement.
 
@@ -1303,8 +1303,8 @@ The tokens list (`/dashboard/tokens`) already reports the true count because its
 #### Scenario: Counting SQL stays in the repository layer
 
 - **WHEN** a contributor inspects the dashboard handlers and runs the data-access confinement invariant test
-- **THEN** all counting SQL for these totals SHALL reside under `apps/server/src/db/repositories/`
-- **AND** every count method SHALL carry the `admin*` prefix and be called only from a call site the `data-access` allow-list names as a `(file, method)` pair — for these totals `apps/server/src/dashboard/` plus `apps/server/src/server/dashboard-router.ts`, which renders the operator overview directly
+- **THEN** all counting SQL for these totals SHALL reside under `packages/db/src/repositories/`
+- **AND** every count method SHALL carry the `admin*` prefix and be called only from a call site the `data-access` allow-list names as a `(file, method)` pair — for these totals `apps/web/src/app/dashboard/` plus `apps/server/src/server/dashboard-router.ts`, which renders the operator overview directly
 
 #### Scenario: Tokens list is unchanged
 

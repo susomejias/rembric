@@ -3,9 +3,9 @@ version: alpha
 name: Rembric
 description: >-
   Brutalist editorial design system for the Rembric self-hosted MCP memory
-  dashboard. Dark + lime, monospace-forward, flat (no shadows, no radius),
-  SSR-only (no client framework). Visual identity locked by spec; changing
-  any token requires an OpenSpec change.
+  dashboard. Dark + lime, monospace-forward, a React surface on Tailwind v4 +
+  shadcn/ui with a `--radius` token scale. Visual identity locked by spec;
+  changing any token requires an OpenSpec change.
 
 colors:
   primary: '#c6f24e'
@@ -201,8 +201,9 @@ Visual choices:
   pills use JetBrains Mono in uppercase with generous letter-spacing.
   Body text uses Inter; hero titles use Space Grotesk. Each font is
   self-hosted as woff2 — no CDN at runtime.
-- **No radius, no shadow.** Everything is sharp-cornered; depth is
-  conveyed by tonal layers and 1-px lines, never drop-shadows.
+- **Radius from the token scale.** Corner shape comes from the `--radius`
+  scale (`--radius`, `--radius-sm`, `--radius-md`, `--radius-lg`,
+  `--radius-xl`); depth is conveyed primarily by tonal layers and 1-px lines.
 - **One product, one operator.** No theming, no light mode, no per-user
   preferences. The system looks the same for every operator.
 
@@ -352,8 +353,8 @@ horizontally. Touch targets at ≤980 px: **≥44 × 44 px**.
 
 ## Elevation & Depth
 
-Rembric is a **flat** design system. There are no box-shadows anywhere
-in production CSS. Visual hierarchy is conveyed by three mechanisms:
+Rembric is a **flat** design system — depth is conveyed by tokens and
+lines rather than by elevation. Visual hierarchy uses three mechanisms:
 
 - **Tonal layers**: the canvas is `#0a0a0a`; cards and inputs sit on
   `#141414`; hovered rows shift to `#15170d`. Each step is small (~5%
@@ -370,14 +371,14 @@ shifts to lime, but the element does not enlarge or float.
 
 ## Shapes
 
-The shape language is **architectural sharpness**. Every interactive
-element, container, input, pill, button, and dialog uses a corner
-radius of **0**. The `rounded` token group in the frontmatter exposes
-only `none: 0px` for this reason — there is no scale beyond it.
+The shape language is driven by the `--radius` token scale (`--radius`,
+`--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`). Surfaces
+take their rounding from the shadcn/ui primitives that consume those
+tokens, so the exact radius is a token decision rather than a hard-coded
+zero.
 
-Rounded corners would soften the brutalist character and make the
-dashboard read as a generic SaaS product. Pills, buttons, cards,
-inputs — all rectangles.
+Keep the scale restrained: the brutalist character comes from the
+typography, the palette and the 1-px lines, not from heavy rounding.
 
 ## Components
 
@@ -526,12 +527,14 @@ allowing submit. Tone via `data-confirm-tone` (`warn` / `danger`).
   data array, a width %). Anything reusable belongs in CSS.
 - Don't use `localStorage` for UI state. Cookies are the rule — they
   render correctly on first paint without a flash.
-- Don't add `border-radius`. The shape language is square.
-- Don't add `box-shadow`. Depth comes from tonal layers and borders.
+- Don't hard-code a corner radius. Use the `--radius` tokens so shape
+  stays consistent across primitives.
+- Don't layer on decorative `box-shadow`s. Depth comes from tonal layers
+  and borders; keep any shadow a shadcn primitive ships with.
 - Don't use a CDN at runtime — vendor fonts, HTMX, favicons. The
   dashboard must work offline.
-- Don't introduce a client-side JS framework (React, Vue, Svelte,
-  Tailwind, Alpine). HTMX + tiny vanilla scripts is the cap.
+- This dashboard is a React + Tailwind v4 surface. Don't add a second
+  client framework or a competing styling system on top of it.
 - Don't use the lime accent on more than one element per "decision
   unit" — primary action, active nav item, or hero highlight. If two
   lime elements compete for attention on the same screen, demote one.

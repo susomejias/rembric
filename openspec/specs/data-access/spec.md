@@ -8,21 +8,21 @@ Defines where SQL may execute, the repository API contract (scoped vs `admin*` v
 
 ### Requirement: SQL execution confined to the db layer
 
-All SQL execution — Drizzle query-builder calls, the drizzle-orm `sql` template tag, and raw better-sqlite3 statement APIs — SHALL occur only in files under `apps/server/src/db/` (repositories, `diagnostics.ts`, `migrate.ts`, `client.ts`, migrations). Files under `src/services/`, `src/dashboard/`, `src/server/`, `src/mcp/`, `src/consolidation/`, and `src/embeddings/` SHALL NOT execute SQL. Test files (`**/*.test.ts`) and `src/scripts/seed-dev.ts` are exempt.
+All SQL execution — Drizzle query-builder calls, the drizzle-orm `sql` template tag, and raw better-sqlite3 statement APIs — SHALL occur only in files under `packages/db/src/` (repositories, `diagnostics.ts`, `migrate.ts`, `client.ts`, migrations). Files under `src/services/`, `src/dashboard/`, `src/server/`, `src/mcp/`, `src/consolidation/`, and `src/embeddings/` SHALL NOT execute SQL. Test files (`**/*.test.ts`) and `src/scripts/seed-dev.ts` are exempt.
 
 #### Scenario: Invariant test rejects SQL outside the db layer
 
-- **WHEN** the invariants suite (`apps/server/src/test/invariants.test.ts`) scans non-test source files outside `apps/server/src/db/` for SQL-execution patterns (Drizzle builder entry points, the drizzle-orm `sql` tag import, `db.all`/`db.get`/`db.run`, `db.query.`, `raw.prepare`)
+- **WHEN** the invariants suite (`apps/web/src/test/invariants.test.ts`) scans non-test source files outside `packages/db/src/` for SQL-execution patterns (Drizzle builder entry points, the drizzle-orm `sql` tag import, `db.all`/`db.get`/`db.run`, `db.query.`, `raw.prepare`)
 - **THEN** the suite SHALL fail with a message naming the offending file when any match is found outside the exempt set
 
 #### Scenario: Dashboard handlers render without a db dependency
 
-- **WHEN** a dashboard page module under `apps/server/src/dashboard/` declares its `*Deps` interface
+- **WHEN** a dashboard page module under `apps/web/src/app/dashboard/` declares its `*Deps` interface
 - **THEN** the interface SHALL NOT expose the Drizzle `Db` or raw better-sqlite3 handle; handlers consume repositories and services only
 
 ### Requirement: Repositories per aggregate own all SQL for their tables
 
-The data layer SHALL provide one repository per aggregate at `apps/server/src/db/repositories/`: `memory` (owning `memory` and `memory_fts`), `relations` (`memory_relations`), `agent-sessions` (`sessions`), `prompts` (`prompts` and `prompts_fts`), `projects`, `tokens`, `consolidation` (`consolidation_ops`, `consolidation_runs`), `vectors` (`memory_vec`, including sqlite-vec kNN queries), and `dashboard-sessions` (`dashboard_sessions`, the cookie-auth table). Each repository SHALL be a class receiving the database handle via constructor injection, instantiated once during server bootstrap. Raw SQL inside repositories SHALL be limited to constructs the Drizzle builder cannot express: FTS5 `MATCH`, sqlite-vec functions, `json_each`, recursive common table expressions (`WITH RECURSIVE`), PRAGMA, and `VACUUM INTO`.
+The data layer SHALL provide one repository per aggregate at `packages/db/src/repositories/`: `memory` (owning `memory` and `memory_fts`), `relations` (`memory_relations`), `agent-sessions` (`sessions`), `prompts` (`prompts` and `prompts_fts`), `projects`, `tokens`, `consolidation` (`consolidation_ops`, `consolidation_runs`), `vectors` (`memory_vec`, including sqlite-vec kNN queries), and `dashboard-sessions` (`dashboard_sessions`, the cookie-auth table). Each repository SHALL be a class receiving the database handle via constructor injection, instantiated once during server bootstrap. Raw SQL inside repositories SHALL be limited to constructs the Drizzle builder cannot express: FTS5 `MATCH`, sqlite-vec functions, `json_each`, recursive common table expressions (`WITH RECURSIVE`), PRAGMA, and `VACUUM INTO`.
 
 The `agent-sessions` aggregate owns exactly one table. It briefly owned a second, `session_summary_versions`, whose membership was justified by a write-ordering constraint — the version row was appended in the same transaction as the `UPDATE` it recorded. That table is retired by `persistence`, "The `session_summary_versions` table MUST be dropped by a dedicated migration, with `0033` retained on disk" — the requirement that imposed the write-ordering constraint is removed rather than relocated, so nothing here points at it — the constraint went with it, and the aggregate's repository SHALL NOT carry a summary-version method of any name.
 
@@ -63,7 +63,7 @@ Four `admin*` call sites legitimately sit outside `src/dashboard/`, and each is 
 
 #### Scenario: Invariant test pins admin call sites to the allow-list
 
-- **WHEN** the invariants suite scans non-test source files outside the dashboard modules, the named call sites, and `apps/server/src/db/repositories/` for invocations of `admin`-prefixed repository methods
+- **WHEN** the invariants suite scans non-test source files outside the dashboard modules, the named call sites, and `packages/db/src/repositories/` for invocations of `admin`-prefixed repository methods
 - **THEN** the suite SHALL fail, naming the offending file and the method, when any such call site is found
 
 #### Scenario: An unscoped aggregate reachable from the doctor carries the prefix
@@ -107,7 +107,7 @@ Four `admin*` call sites legitimately sit outside `src/dashboard/`, and each is 
 
 #### Scenario: A new repository cannot be added unclassified
 
-- **WHEN** a repository file is added under `apps/server/src/db/repositories/` and is named in neither the covered nor the control-plane classification
+- **WHEN** a repository file is added under `packages/db/src/repositories/` and is named in neither the covered nor the control-plane classification
 - **THEN** the invariants suite SHALL fail, so a new aggregate cannot escape the inventory by not being scanned
 
 ### Requirement: Services own transaction boundaries
@@ -135,7 +135,7 @@ The physical-purge statements (`DELETE FROM memory`, `DELETE FROM sessions`, `DE
 
 ### Requirement: Database diagnostics module
 
-A function-style module at `apps/server/src/db/diagnostics.ts` SHALL own database-level introspection and administration: PRAGMA reads (`journal_mode`, `quick_check`, `page_count`, `page_size`, `freelist_count`), `dbstat` aggregation, dynamic table row counts, a liveness `ping`, and `VACUUM INTO`. Bootstrap, the data-loss guard, the healthz endpoint, and the maintenance dashboard SHALL consume this module instead of executing these statements themselves.
+A function-style module at `packages/db/src/diagnostics.ts` SHALL own database-level introspection and administration: PRAGMA reads (`journal_mode`, `quick_check`, `page_count`, `page_size`, `freelist_count`), `dbstat` aggregation, dynamic table row counts, a liveness `ping`, and `VACUUM INTO`. Bootstrap, the data-loss guard, the healthz endpoint, and the maintenance dashboard SHALL consume this module instead of executing these statements themselves.
 
 #### Scenario: Maintenance page reads diagnostics through the module
 
@@ -257,7 +257,7 @@ Neither form removes the `O(active rows)` outer scan. That scan is inherent — 
 
 ### Requirement: Bounded ancestry traversal MUST be one recursive query over `memory.replaces`
 
-Walking a memory's `replaces` ancestry SHALL be a single bounded statement issued by `MemoryRepository`, not a loop in a service issuing one probe per ancestor. Two consumers need it — save-time dismissal suppression (ids) and `memory.get`'s predecessor projection — and both SHALL be served by that one traversal. There SHALL NOT be a second implementation of the walk outside `apps/server/src/db/repositories/`, because the graph is the memory aggregate's own edge structure and the layer that materialises it is the layer that traverses it.
+Walking a memory's `replaces` ancestry SHALL be a single bounded statement issued by `MemoryRepository`, not a loop in a service issuing one probe per ancestor. Two consumers need it — save-time dismissal suppression (ids) and `memory.get`'s predecessor projection — and both SHALL be served by that one traversal. There SHALL NOT be a second implementation of the walk outside `packages/db/src/repositories/`, because the graph is the memory aggregate's own edge structure and the layer that materialises it is the layer that traverses it.
 
 The traversal is deliberately unscoped: `replaces` links never cross a `(scope, project_id)` boundary, and the caller has already resolved scope for the row it starts from. It SHALL therefore carry the `unsafe` prefix, mirroring the `MemoryService.unsafe*` reads it replaces on this path, rather than being left unprefixed and invisible to the confinement gate.
 
@@ -559,7 +559,7 @@ The lifecycle predicate SHALL NOT be folded into `endpointsInScope`. That helper
 
 #### Scenario: The filter is moved to the caller
 
-- **WHEN** a change removes the predicate from the repository and filters the returned rows in `apps/server/src/mcp/memory-tools.ts` instead
+- **WHEN** a change removes the predicate from the repository and filters the returned rows in `packages/mcp/src/memory-tools.ts` instead
 - **THEN** the change SHALL be rejected
 - **AND** the reasons SHALL be both the truncated page (the limit is applied before the filter) and the data-access confinement rule
 

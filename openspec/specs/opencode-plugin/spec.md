@@ -43,7 +43,7 @@ Its canonical location SHALL be `apps/plugin/mcp-bridge/rembric-dotenv.mjs`. It 
 
 Bash (`apps/plugin/scripts/_api.sh::rembric_parse_dotenv` and `::rembric_read_project_slug`) and Python (`apps/plugin/.hermes-plugin/__init__.py::_SLUG_RE`) clients keep their own implementations because cross-language wrapping a 20-line parser costs more than the duplication. Those implementations MUST agree on the regex.
 
-An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the build if any JS/TS file under `apps/plugin/` declares its own `parseDotenv` function or `SLUG_RE` constant. The scanned set SHALL be every JS/TS source file under `apps/plugin/` — not only client files — so a non-client artefact such as the bridge is covered by contract rather than by the incidental reach of a glob. The invariant test SHALL reference the canonical path in its assertions, and moving the module SHALL therefore require updating that reference in the same change.
+An invariant test in `apps/web/src/test/invariants.test.ts` SHALL fail the build if any JS/TS file under `apps/plugin/` declares its own `parseDotenv` function or `SLUG_RE` constant. The scanned set SHALL be every JS/TS source file under `apps/plugin/` — not only client files — so a non-client artefact such as the bridge is covered by contract rather than by the incidental reach of a glob. The invariant test SHALL reference the canonical path in its assertions, and moving the module SHALL therefore require updating that reference in the same change.
 
 The set of files the invariant scans SHALL be **derived by a repository-wide search**, not hard-coded, and the invariant SHALL assert a **non-zero** scanned-file count. A hard-coded two-file list does not scan a client added later, and a negative assertion over an empty list passes vacuously — both were true of the version this requirement replaces.
 
@@ -79,7 +79,7 @@ Any tracked file that names the module's path as a literal SHALL be updated in t
 #### Scenario: Invariant test catches drift
 
 - **GIVEN** a future change introduces a local `function parseDotenv` inside any JS/TS file under `apps/plugin/`
-- **WHEN** `pnpm vitest run apps/server/src/test/invariants.test.ts` runs
+- **WHEN** `pnpm vitest run apps/web/src/test/invariants.test.ts` runs
 - **THEN** the test FAILS with a message naming the offending file
 
 #### Scenario: The invariant scans a derived, non-empty file list
@@ -200,7 +200,7 @@ The plugin SHALL NOT register `experimental.chat.system.transform` (no system-pr
 
 If Plan B of the cwd spike applies (see "cwd spike" requirement), the plugin SHALL additionally register `"shell.env": async (input, output) => { output.env.REMBRIC_PROJECT_DIR = ctx.directory }`. The hook SHALL be omitted otherwise.
 
-The `chat.message` handler and the `event` dispatcher's `message.updated`/`message.part.updated`/`session.idle` branches MUST treat the `sessionMessages` Map (plus the `messageRoles`/`assistantParts` accumulators for the message branches, and the debounce-timer map for `session.idle`) as their only side effects beyond the deliberate HTTP POST each performs. An invariant test (`apps/server/src/test/invariants.test.ts`) SHALL fail the build if the `chat.message` handler invokes `rembricPost`, `fetch`, or any other HTTP work (the `event` dispatcher's `message.updated`, `message.part.updated`, and `session.idle` branches are exempted from this specific invariant since `session.idle`'s HTTP POST is the intended primary flush mechanism — see "Session.idle handler (periodic flush)").
+The `chat.message` handler and the `event` dispatcher's `message.updated`/`message.part.updated`/`session.idle` branches MUST treat the `sessionMessages` Map (plus the `messageRoles`/`assistantParts` accumulators for the message branches, and the debounce-timer map for `session.idle`) as their only side effects beyond the deliberate HTTP POST each performs. An invariant test (`apps/web/src/test/invariants.test.ts`) SHALL fail the build if the `chat.message` handler invokes `rembricPost`, `fetch`, or any other HTTP work (the `event` dispatcher's `message.updated`, `message.part.updated`, and `session.idle` branches are exempted from this specific invariant since `session.idle`'s HTTP POST is the intended primary flush mechanism — see "Session.idle handler (periodic flush)").
 
 #### Scenario: Handler set is exactly the documented set
 
@@ -312,7 +312,7 @@ The `"experimental.session.compacting"` handler SHALL:
 
 **The instruction SHALL NOT ask the agent to call `memory.session_summary` with the content of the compacted summary**, and SHALL NOT ask for a summary of the surviving window. That was the shipped framing when this requirement was first rewritten — `apps/plugin/.opencode-plugin/plugin.ts:244-252` pushed "call `memory.session_summary` with the content of the compacted summary above." and then "This preserves what was accomplished before compaction." — and against a merging write it still produces loss, now as staleness rather than as replacement.
 
-This handler was the one compaction surface the read-then-rewrite rewrite missed, and the reason is worth recording because it is a property of the guard rather than of the author: the enumeration that pins the model-facing summary surfaces (`apps/server/src/test/invariants.test.ts::'the session-summary rubric has one source'`) asserts its own completeness from a `git grep` for the canonical section list, and this block never carried that list, so it was never in the enumeration and no test could notice it disagreeing.
+This handler was the one compaction surface the read-then-rewrite rewrite missed, and the reason is worth recording because it is a property of the guard rather than of the author: the enumeration that pins the model-facing summary surfaces (`apps/web/src/test/invariants.test.ts::'the session-summary rubric has one source'`) asserts its own completeness from a `git grep` for the canonical section list, and this block never carried that list, so it was never in the enumeration and no test could notice it disagreeing.
 
 The obligations of "The post-compaction instruction SHALL direct the model to read the stored summary and then rewrite the session's current state in full" apply to this string in full; this handler is the opencode compaction surface named there.
 
@@ -783,7 +783,7 @@ The branch MUST be idempotent under streaming updates: opencode fires `message.p
 
 ### Requirement: Dispose spike result MUST be recorded
 
-The plugin's source file (`apps/plugin/.opencode-plugin/plugin.ts`) MUST declare the comment line `// dispose-spike-result: fire-and-forget` within the first 10 lines, recording the outcome of the pre-implementation runtime spike. Outcome: opencode kills the subprocess before async handlers complete; awaited fetches do not land (full evidence in design.md::Decision 4 resolved). An invariant test (`apps/server/src/test/invariants.test.ts`) MUST fail the build if the line is absent. The plugin SHALL NOT contain any other `// dispose-spike-result:` line.
+The plugin's source file (`apps/plugin/.opencode-plugin/plugin.ts`) MUST declare the comment line `// dispose-spike-result: fire-and-forget` within the first 10 lines, recording the outcome of the pre-implementation runtime spike. Outcome: opencode kills the subprocess before async handlers complete; awaited fetches do not land (full evidence in design.md::Decision 4 resolved). An invariant test (`apps/web/src/test/invariants.test.ts`) MUST fail the build if the line is absent. The plugin SHALL NOT contain any other `// dispose-spike-result:` line.
 
 #### Scenario: Spike-result comment is recorded
 

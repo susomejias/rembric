@@ -16,7 +16,7 @@ One carve-out is added, scoped as narrowly as the case requires: **a schema migr
 
 #### Scenario: Code path attempts to physically delete a memory
 
-- **WHEN** any service or migration emits a `DELETE FROM memory` statement from any file OTHER than `apps/server/src/services/memory.ts`
+- **WHEN** any service or migration emits a `DELETE FROM memory` statement from any file OTHER than `packages/core/src/services/memory.ts`
 - **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
 
 #### Scenario: Code path attempts to mutate `content`
@@ -31,7 +31,7 @@ One carve-out is added, scoped as narrowly as the case requires: **a schema migr
 
 #### Scenario: A runtime path attempts to rewrite `project_id`
 
-- **WHEN** any file under `apps/server/src` other than `apps/server/src/db/migrations/` emits an `UPDATE memory SET project_id` statement
+- **WHEN** any file under `apps/server/src` other than `packages/db/src/migrations/` emits an `UPDATE memory SET project_id` statement
 - **THEN** a CI invariant test SHALL fail and the build SHALL be rejected
 
 #### Scenario: A migration rewriting `project_id` conserves the corpus
@@ -1052,7 +1052,7 @@ For an `active` memory of type `T`:
 - `reviewState` SHALL be `'needs_review'` when `reviewAfter` is non-null AND `reviewAfter <= now`; otherwise `'fresh'`.
 - A refutation newer than `reviewBaseline` SHALL force `reviewState = 'needs_review'` regardless of `T`'s TTL, and `reviewAfter` SHALL then report the refutation's timestamp.
 
-`REVIEW_TTL_MS` SHALL be a per-`type` shelf-life map exported from a single source (`apps/server/src/services/review.ts`). A type with no entry SHALL never produce `needs_review` on the clock. The shelf life is a soft re-verification nudge, not a hard expiry: a `needs_review` memory SHALL remain `active` and SHALL be unaffected in ranking, scope isolation, or decay eligibility.
+`REVIEW_TTL_MS` SHALL be a per-`type` shelf-life map exported from a single source (`packages/core/src/services/review.ts`). A type with no entry SHALL never produce `needs_review` on the clock. The shelf life is a soft re-verification nudge, not a hard expiry: a `needs_review` memory SHALL remain `active` and SHALL be unaffected in ranking, scope isolation, or decay eligibility.
 
 Memories whose `status` is `superseded` or `archived` SHALL NOT carry a review state (`reviewState` is omitted / null for them).
 
