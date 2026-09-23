@@ -82,6 +82,27 @@ Capability detection is cached for 30 s — reload the dashboard after `docker c
 
 If `.env` pins `REMBRIC_VERSION=x.y.z`, one-click is refused by design (the next `docker compose up` would silently revert a self-update). The modal explains the pin; see [docs/updates.md](./updates.md#pinned-versions-disable-one-click).
 
+### `MODULE_NOT_FOUND /app/dist/scripts/upgrade-helper.js` when updating from v0.28.9 or older
+
+Versions up to and including **v0.28.9** start the one-shot upgrader at `/app/dist/scripts/upgrade-helper.js`. The Next.js runtime image published as **v0.28.10** did not ship that path, so the upgrader container exits immediately with:
+
+```text
+Error: Cannot find module '/app/dist/scripts/upgrade-helper.js'
+```
+
+Your running container is **not harmed**: the failure happens while launching the upgrader, before the old container is stopped or renamed, so the healthy version keeps serving and `./data` is untouched. The dashboard reports the update as failed.
+
+Fix it with a manual upgrade in your compose directory:
+
+```bash
+# from a version <= v0.28.9: the manual path is the safe one, the socket/dashboard path is not
+docker compose pull && docker compose up -d
+```
+
+`docker compose down` is **not** needed and changes nothing about the fix. If your `.env` pins `REMBRIC_VERSION`, bump the pin to the new version before running the two commands above.
+
+Fixed in **v0.28.11**; from that version the dashboard one-click update works again.
+
 ### `exec: "node": executable file not found in $PATH` when updating to v0.21.14+
 
 The runtime image moved to a distroless base in v0.21.14 (node is at `/nodejs/bin/node`, not bare `node`). Updating _from_ a pre-fix version (≤ v0.21.14) via the dashboard fails this way, because the old server launches the upgrader with bare `node`. Your live container is untouched — you keep serving the old version. This is a one-time hop; see [docs/updates.md](./updates.md#updating-across-the-distroless-boundary-one-time-v02114).

@@ -2,6 +2,16 @@
 
 Rembric tells you when a new version is out and — if you opt in — updates itself from the dashboard, Arcane-style: backup → pull → container swap → automatic page reload.
 
+> [!WARNING]
+> **Updating from server-v0.28.9 or older (e.g. v0.28.8) to v0.28.10 fails.** Those versions start the one-shot upgrader at `/app/dist/scripts/upgrade-helper.js`, a path the Next.js runtime image no longer shipped in v0.28.10, so the upgrader container exits with `MODULE_NOT_FOUND /app/dist/scripts/upgrade-helper.js`. Your running container stays healthy and untouched — the failure happens before any swap. The safe path from those versions is a **manual** upgrade: `docker compose pull && docker compose up -d` (`docker compose down` is unnecessary and `./data` is untouched). If `.env` pins `REMBRIC_VERSION`, bump the pin instead. Fixed in v0.28.11. Two further
+> limitations of one-click **from those versions** (both fail safe — automatic rollback, data
+> untouched — measured in rehearsals): a custom `REMBRIC_PORT` never completes (the replacement
+> inherits the old image's healthcheck, which probes the hardcoded 8787 default instead of the
+> env-aware compose healthcheck, so it never reports healthy within the 150s window — use the
+> manual command), and the replacement keeps the **new image's** healthcheck rather than your
+> compose one, which is the correct outcome when the compose file predates the current
+> `/nodejs/bin/node` healthcheck shape.
+
 ## What you get with zero configuration
 
 Nothing to enable. Every deployment that runs `docker compose pull && docker compose up -d` gets:
