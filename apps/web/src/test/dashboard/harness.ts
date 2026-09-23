@@ -31,6 +31,14 @@ export function installViewMocks(pathname = '/dashboard'): void {
   }));
   vi.mock('next/navigation', () => ({
     usePathname: () => pathname,
+    useRouter: () => ({
+      refresh: vi.fn(),
+      push: vi.fn(),
+      replace: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      prefetch: vi.fn(),
+    }),
     notFound: () => {
       throw new Error('NEXT_NOT_FOUND');
     },

@@ -11,9 +11,7 @@ import {
   type SearchParams,
 } from './filters';
 
-import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
-import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
-import { CsrfField } from '@/components/dashboard/csrf-field';
+import type { ActionState } from '@/components/dashboard/action-form';
 import {
   FilterActions,
   FilterField,
@@ -22,28 +20,22 @@ import {
   FilterSelect,
   Pager,
 } from '@/components/dashboard/filters';
+import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
+import { SessionsTable } from '@/components/dashboard/sessions-table';
 import { PAGE_SIZE, formatBytes, singleParam } from '@/components/dashboard/support';
 import {
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
   Flash,
   Page,
   Panel,
   SectionBar,
   StatCard,
   StatGrid,
-  StatusPill,
   TableEmpty,
-  Time,
   ViewHead,
 } from '@/components/dashboard/ui';
-import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -123,6 +115,11 @@ export default async function SessionsPage({
 
   const { repos } = getServices();
   const nowMs = Date.now();
+  const csrf = {
+    abandon: await dashboardCsrfToken(ABANDON_FORM),
+    remove: await dashboardCsrfToken(DELETE_FORM),
+    restore: await dashboardCsrfToken(UNDELETE_FORM),
+  };
 
   const offset = filters.page * PAGE_SIZE;
   const status = parseSessionStatus(filters.status);
@@ -185,15 +182,7 @@ export default async function SessionsPage({
       <ViewHead num="03" title="Rembric Sessions." hl="Rembric" meta={[{ k: 'TOTAL', v: total }]} />
 
       {justDeleted ? (
-        <div className="mt-6">
-          <Flash tone="lime" label="DELETED">
-            Session <code className="font-mono">{justDeleted}</code> soft-deleted.{' '}
-            <Link href={`/dashboard/sessions/${justDeleted}`} className="hover:text-primary">
-              View
-            </Link>{' '}
-            to undelete.
-          </Flash>
-        </div>
+        <SessionUndoPill id={justDeleted} restoreAction={undeleteSession} />
       ) : justRestored ? (
         <div className="mt-6">
           <Flash tone="lime" label="RESTORED">
@@ -279,39 +268,26 @@ export default async function SessionsPage({
           {isFiltered ? 'NO SESSION MATCHES THIS FILTER' : 'NO SESSION HAS BEEN RECORDED YET'}
         </TableEmpty>
       ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>title</DataTh>
-            <DataTh>agent</DataTh>
-            <DataTh>project</DataTh>
-            <DataTh>token</DataTh>
-            <DataTh>started</DataTh>
-            <DataTh>ended</DataTh>
-            <DataTh>status</DataTh>
-            <DataTh>memories</DataTh>
-            <DataTh>prompts</DataTh>
-            <DataTh>actions</DataTh>
-          </DataHead>
-          <DataBody>
-            {visibleRows.map((session) => (
-              <SessionRow
-                key={session.id}
-                id={session.id}
-                href={`/dashboard/sessions/${session.id}`}
-                title={sessionTitle(session)}
-                agent={session.agent}
-                project={session.projectSlug ?? '—'}
-                token={session.tokenName ?? '—'}
-                startedAt={session.startedAt}
-                endedAt={session.endedAt}
-                status={session.status}
-                memories={memoryCounts[session.id] ?? 0}
-                prompts={promptCounts[session.id] ?? 0}
-                deleted={false}
-              />
-            ))}
-          </DataBody>
-        </DataTable>
+        <SessionsTable
+          rows={visibleRows.map((session) => ({
+            id: session.id,
+            title: sessionTitle(session),
+            description: session.description ?? null,
+            agent: session.agent,
+            project: session.projectSlug ?? '—',
+            token: session.tokenName ?? '—',
+            startedAt: session.startedAt,
+            endedAt: session.endedAt,
+            status: session.status,
+            memories: memoryCounts[session.id] ?? 0,
+            prompts: promptCounts[session.id] ?? 0,
+            deleted: false,
+          }))}
+          memoryCounts={memoryCounts}
+          promptCounts={promptCounts}
+          actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
+          csrf={csrf}
+        />
       )}
 
       <Pager
@@ -328,39 +304,26 @@ export default async function SessionsPage({
           <div className="mt-8">
             <SectionBar name="Deleted" meta={`${deletedRows.length} ROWS`} />
           </div>
-          <DataTable>
-            <DataHead>
-              <DataTh>title</DataTh>
-              <DataTh>agent</DataTh>
-              <DataTh>project</DataTh>
-              <DataTh>token</DataTh>
-              <DataTh>started</DataTh>
-              <DataTh>ended</DataTh>
-              <DataTh>status</DataTh>
-              <DataTh>memories</DataTh>
-              <DataTh>prompts</DataTh>
-              <DataTh>actions</DataTh>
-            </DataHead>
-            <DataBody>
-              {deletedRows.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  id={session.id}
-                  href={`/dashboard/sessions/${session.id}`}
-                  title={sessionTitle(session)}
-                  agent={session.agent}
-                  project={session.projectSlug ?? '—'}
-                  token={session.tokenName ?? '—'}
-                  startedAt={session.startedAt}
-                  endedAt={session.endedAt}
-                  status={session.status}
-                  memories={memoryCounts[session.id] ?? 0}
-                  prompts={promptCounts[session.id] ?? 0}
-                  deleted
-                />
-              ))}
-            </DataBody>
-          </DataTable>
+          <SessionsTable
+            rows={deletedRows.map((session) => ({
+              id: session.id,
+              title: sessionTitle(session),
+              description: session.description ?? null,
+              agent: session.agent,
+              project: session.projectSlug ?? '—',
+              token: session.tokenName ?? '—',
+              startedAt: session.startedAt,
+              endedAt: session.endedAt,
+              status: session.status,
+              memories: memoryCounts[session.id] ?? 0,
+              prompts: promptCounts[session.id] ?? 0,
+              deleted: true,
+            }))}
+            memoryCounts={memoryCounts}
+            promptCounts={promptCounts}
+            actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
+            csrf={csrf}
+          />
         </>
       ) : null}
 
@@ -422,130 +385,6 @@ export default async function SessionsPage({
         </Panel>
       </div>
     </Page>
-  );
-}
-
-function SessionRow({
-  id,
-  href,
-  title,
-  agent,
-  project,
-  token,
-  startedAt,
-  endedAt,
-  status,
-  memories,
-  prompts,
-  deleted,
-  dim = false,
-}: {
-  id: string;
-  href: string;
-  title: string;
-  agent: string;
-  project: string;
-  token: string;
-  startedAt: Date;
-  endedAt: Date | null;
-  status: string;
-  memories: number;
-  prompts: number;
-  deleted: boolean;
-  dim?: boolean;
-}) {
-  return (
-    <DataTr className={dim ? 'opacity-60' : undefined}>
-      <DataTd className="max-w-[280px] truncate">
-        <Link href={href} className="transition-colors hover:text-primary">
-          {title}
-        </Link>
-      </DataTd>
-      <DataTd>{agent}</DataTd>
-      <DataTd className="text-muted-foreground">{project}</DataTd>
-      <DataTd className="text-muted-foreground">{token}</DataTd>
-      <DataTd className="font-mono text-xs text-muted-foreground">
-        <Time value={startedAt} />
-      </DataTd>
-      <DataTd className="font-mono text-xs text-muted-foreground">
-        <Time value={endedAt} />
-      </DataTd>
-      <DataTd>
-        <StatusPill status={status} />
-      </DataTd>
-      <DataTd>{memories}</DataTd>
-      <DataTd>{prompts}</DataTd>
-      <DataTd>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={href}
-            className="font-mono text-[11px] uppercase tracking-[.14em] hover:text-primary"
-          >
-            View →
-          </Link>
-          <SessionActions id={id} status={status} memories={memories} deleted={deleted} />
-        </div>
-      </DataTd>
-    </DataTr>
-  );
-}
-
-function SessionActions({
-  id,
-  status,
-  memories,
-  deleted,
-}: {
-  id: string;
-  status: string;
-  memories: number;
-  deleted: boolean;
-}) {
-  if (deleted) {
-    return (
-      <ActionForm action={undeleteSession}>
-        <CsrfField form={UNDELETE_FORM} />
-        <input type="hidden" name="id" value={id} />
-        <Button type="submit" variant="outline" size="sm">
-          Undelete
-        </Button>
-      </ActionForm>
-    );
-  }
-
-  return (
-    <>
-      {status === 'active' ? (
-        <ActionForm action={abandonSession}>
-          <CsrfField form={ABANDON_FORM} />
-          <input type="hidden" name="id" value={id} />
-          <ConfirmSubmit
-            tone="warn"
-            title="Mark this session as abandoned?"
-            description={`Its ${memories} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard.`}
-            confirmLabel="ABANDON SESSION"
-          >
-            <Button type="button" variant="outline" size="sm">
-              Abandon
-            </Button>
-          </ConfirmSubmit>
-        </ActionForm>
-      ) : null}
-      <ActionForm action={deleteSession}>
-        <CsrfField form={DELETE_FORM} />
-        <input type="hidden" name="id" value={id} />
-        <ConfirmSubmit
-          tone="danger"
-          title="Soft-delete this session?"
-          description="Its memories stay queryable but the session is hidden from the list. You can restore it with ?include_deleted=1."
-          confirmLabel="DELETE SESSION"
-        >
-          <Button type="button" variant="destructive" size="sm">
-            Delete
-          </Button>
-        </ConfirmSubmit>
-      </ActionForm>
-    </>
   );
 }
 
