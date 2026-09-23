@@ -3,25 +3,10 @@ import type { Token } from '@rembric/db';
 import { redirect } from 'next/navigation';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
-import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { singleParam } from '@/components/dashboard/support';
-import {
-  Chip,
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  LABEL,
-  Page,
-  Pill,
-  SectionBar,
-  TableEmpty,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { TokensTable } from '@/components/dashboard/tokens-table';
+import { LABEL, Page, SectionBar } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -36,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +29,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 const CREATE_FORM = 'token.create';
 const REVOKE_FORM = 'token.revoke';
+const TOKEN_PAGE_SIZE = 10;
 
 async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -139,6 +126,7 @@ export default async function TokensPage({
 
   const { repos, projects, tokens: tokensService } = getServices();
   const nowMs = Date.now();
+  const csrf = { revoke: await dashboardCsrfToken(REVOKE_FORM) };
 
   const tokens = tokensService.list();
 
@@ -164,6 +152,8 @@ export default async function TokensPage({
     };
   });
 
+  const activeCount = rows.filter((row) => row.state.label === 'active').length;
+
   const selectable = projectRows.filter((p) => p.archivedAt === null);
 
   const minted = tokens.find((t) => t.name === mintedName);
@@ -172,12 +162,14 @@ export default async function TokensPage({
 
   return (
     <Page>
-      <ViewHead
-        num="07"
-        title="Rembric Tokens."
-        hl="Rembric"
-        meta={[{ k: 'TOTAL', v: rows.length }]}
-      />
+      <header className="min-w-0">
+        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
+          Tokens
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {`${rows.length} tokens · ${activeCount} active`}
+        </p>
+      </header>
 
       {justCreated ? (
         <div className="mt-6 border border-primary/40 bg-card p-5">
@@ -215,62 +207,23 @@ export default async function TokensPage({
       ) : null}
 
       <div className="mt-8">
-        <SectionBar name="Existing" />
-        {rows.length === 0 ? (
-          <TableEmpty>No tokens yet.</TableEmpty>
-        ) : (
-          <DataTable>
-            <DataHead>
-              <DataTh>name</DataTh>
-              <DataTh>scope</DataTh>
-              <DataTh>project</DataTh>
-              <DataTh>created</DataTh>
-              <DataTh>expires</DataTh>
-              <DataTh>state</DataTh>
-              <DataTh>actions</DataTh>
-            </DataHead>
-            <DataBody>
-              {rows.map(({ token, scope, members, slug, state }) => (
-                <DataTr key={token.id}>
-                  <DataTd>{token.name}</DataTd>
-                  <DataTd>{scopeBadge(scope)}</DataTd>
-                  <DataTd className="text-muted-foreground">
-                    {members.length > 0 ? members.join(', ') : (slug ?? '—')}
-                  </DataTd>
-                  <DataTd className="font-mono text-xs text-muted-foreground">
-                    <Time value={token.createdAt} />
-                  </DataTd>
-                  <DataTd className="font-mono text-xs text-muted-foreground">
-                    <Time value={token.expiresAt} />
-                  </DataTd>
-                  <DataTd>
-                    <Pill tone={state.tone}>{state.label}</Pill>
-                  </DataTd>
-                  <DataTd>
-                    {token.revokedAt ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <ActionForm action={revokeToken}>
-                        <CsrfField form={REVOKE_FORM} />
-                        <input type="hidden" name="name" value={token.name} />
-                        <ConfirmSubmit
-                          tone="danger"
-                          title={`Revoke token "${token.name}"?`}
-                          description="This is IRREVERSIBLE. Any agent using this token will lose access immediately."
-                          confirmLabel="REVOKE TOKEN"
-                        >
-                          <Button type="button" variant="destructive" size="sm">
-                            Revoke
-                          </Button>
-                        </ConfirmSubmit>
-                      </ActionForm>
-                    )}
-                  </DataTd>
-                </DataTr>
-              ))}
-            </DataBody>
-          </DataTable>
-        )}
+        <SectionBar name="Existing" meta={`${rows.length} ROWS`} />
+        <TokensTable
+          rows={rows.map(({ token, scope, members, slug, state }) => ({
+            id: token.id,
+            name: token.name,
+            scope,
+            project: members.length > 0 ? members.join(', ') : (slug ?? '—'),
+            createdAt: token.createdAt,
+            expiresAt: token.expiresAt,
+            state: state.label,
+            stateTone: state.tone,
+            revoked: token.revokedAt !== null,
+          }))}
+          actions={{ revoke: revokeToken }}
+          csrf={csrf}
+          pageSize={TOKEN_PAGE_SIZE}
+        />
       </div>
 
       <div className="mt-8">
@@ -340,13 +293,6 @@ export default async function TokensPage({
       </div>
     </Page>
   );
-}
-
-function scopeBadge(scope: TokenScope) {
-  if (scope === '*' || scope === 'read:*' || isProjectSetScope(scope)) {
-    return <Chip>{scope}</Chip>;
-  }
-  return <code className="font-mono text-xs">{scope}</code>;
 }
 
 function tokenState(
