@@ -1,443 +1,528 @@
+import { REVIEW_TTL_MS } from '@rembric/core';
+import type { MemoryType } from '@rembric/db';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { resolveDataDir } from '@/app/dashboard/maintenance/data';
-import { formatBytes, relativeTime, shortId, truncate } from '@/components/dashboard/support';
-import {
-  LABEL,
-  Page,
-  Pill,
-  SectionBar,
-  StatCard,
-  StatGrid,
-  StatusPill,
-  TableEmpty,
-  ViewHead,
-} from '@/components/dashboard/ui';
-import { Button } from '@/components/ui/button';
+import { ActivityChart } from '@/components/dashboard/activity-chart';
+import { RowTooltip } from '@/components/dashboard/row-tooltip';
+import { formatBytes, relativeTime, truncate } from '@/components/dashboard/support';
 import { getServices } from '@/lib/services';
 import { cn } from '@/lib/utils';
+import { REMBRIC_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
 
-const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
 const DAY_MS = 86_400_000;
+
+const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
+  (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
+);
+
+type FeedItem = {
+  readonly key: string;
+  readonly at: number;
+  readonly text: string;
+  readonly href: string;
+  readonly live: boolean;
+};
 
 export default function DashboardOverviewPage() {
   const { agentSessions, db, repos } = getServices();
-  const now = new Date();
-  const nowMs = now.getTime();
+  const nowMs = Date.now();
 
   const memoriesByStatus = repos.memory.countRowsByStatus();
   const totalMemories = memoriesByStatus.reduce((acc, row) => acc + row.count, 0);
-  const activeMemories = memoriesByStatus.find((row) => row.status === 'active')?.count ?? 0;
-  const archivedMemories = memoriesByStatus.find((row) => row.status === 'archived')?.count ?? 0;
-  const supersededMemories = Math.max(0, totalMemories - activeMemories - archivedMemories);
 
-  const projects = repos.projects.count();
-  const archivedProjects = repos.projects.adminCountArchived();
-  const activeSessions = agentSessions.adminCountByStatus().active;
-  const orphanedPendings = repos.relations.adminCountByStatus('orphaned');
+  const needsReview = repos.memory
+    .adminCountNeedsReviewByProject({ nowMs, ttlByType: TTL_BY_TYPE })
+    .reduce((acc, row) => acc + row.count, 0);
+  const pendingJudgments = repos.relations
+    .adminPendingAdjudicableByProject()
+    .reduce((acc, row) => acc + row.count, 0);
+  const reviewTotal = needsReview + pendingJudgments;
 
-  const activity = sevenDayActivity(
-    repos.memory.adminCountCreatedByDay(new Date(nowMs - 6 * DAY_MS)),
+  const allTokens = repos.tokens.listAll();
+  const activeTokens = allTokens.filter(
+    (token) =>
+      token.revokedAt === null && (token.expiresAt === null || token.expiresAt.getTime() > nowMs),
   );
 
-  const recentJudgments = repos.relations.adminRecentJudged(4);
-  const recentSessions = repos.agentSessions.adminRecent(5);
+  const activeSessions = agentSessions.adminCountByStatus().active;
+  const activeSessionRows = repos.agentSessions
+    .adminRecent(20)
+    .filter((session) => session.status === 'active')
+    .slice(0, 5);
+  const recentJudgments = repos.relations.adminRecentJudged(3);
+
+  const activityRows59 = repos.memory.adminCountCreatedByDay(new Date(nowMs - 59 * DAY_MS));
+  const today = Math.floor(nowMs / DAY_MS);
+  const savedLast30 = sumDayCounts(activityRows59.filter((row) => row.day >= today - 29));
+  const savedPrev30 = sumDayCounts(activityRows59.filter((row) => row.day < today - 29));
+  const savedDelta =
+    savedPrev30 > 0 ? Math.round(((savedLast30 - savedPrev30) / savedPrev30) * 100) : null;
+
+  const consolidationRunsRecent = repos.consolidation
+    .adminListRuns(200, 0)
+    .filter((run) => run.startedAt.getTime() >= nowMs - 29 * DAY_MS);
+  const opsByDay = new Map<number, number>();
+  for (const run of consolidationRunsRecent) {
+    for (const op of repos.consolidation.adminListOps(run.id)) {
+      if (op.opType === 'noop' || op.opType === 'failed') continue;
+      const day = Math.floor(op.appliedAt.getTime() / DAY_MS);
+      opsByDay.set(day, (opsByDay.get(day) ?? 0) + 1);
+    }
+  }
+
+  const activityDays = buildDays(activityRows59, opsByDay, 30, nowMs);
 
   const lastRun = repos.consolidation.adminListRuns(1, 0).at(0) ?? null;
   const lastRunOps = lastRun
     ? repos.consolidation.adminOpCounts(lastRun.id)
     : { total: 0, reverted: 0 };
+  const orphanedPendings = repos.relations.adminCountByStatus('orphaned');
+  const healthy = orphanedPendings === 0;
 
   const pageCount = db.raw.pragma('page_count', { simple: true }) as number;
   const pageSize = db.raw.pragma('page_size', { simple: true }) as number;
   const dbSize = formatBytes(pageCount * pageSize);
-  const dbPath = `${resolveDataDir()}/data.db`;
-  const host = `${process.env.REMBRIC_HOST ?? '127.0.0.1'}:${process.env.REMBRIC_PORT ?? '8787'}`;
+  const mcpHost = `${process.env.REMBRIC_HOST ?? '127.0.0.1'}:${process.env.REMBRIC_PORT ?? '8787'}`;
+
+  const feed: FeedItem[] = [
+    ...activeSessionRows.map((session) => ({
+      key: `session-${session.id}`,
+      at: session.startedAt.getTime(),
+      text: `session · ${session.agent}${session.summary ? ` · ${truncate(session.summary, 48)}` : ''}`,
+      href: `/dashboard/sessions/${session.id}`,
+      live: session.status === 'active',
+    })),
+    ...recentJudgments.map((relation) => ({
+      key: `judgment-${relation.id}`,
+      at: (relation.judgedAt ?? relation.createdAt).getTime(),
+      text: `judgment · ${relation.relation ?? 'pending'} · ${truncate(relation.sourceTitle, 40)}`,
+      href: `/dashboard/judgments/${relation.id}`,
+      live: false,
+    })),
+  ].sort((a, b) => b.at - a.at);
 
   return (
-    <Page>
-      <ViewHead num="01" title="Rembric Overview." hl="Rembric" />
-
-      <StatGrid className="mt-6">
-        <StatCard
-          k="TOTAL MEMORIES"
-          v={totalMemories}
-          tone="fg"
-          sub={
-            <>
-              <Sparkline data={activity.days.map((day) => day.count)} />
-              <span>LAST 7 DAYS</span>
-            </>
-          }
-          href="/dashboard/memories"
-        />
-        <StatCard
-          k="ACTIVE MEMORIES"
-          v={activeMemories}
-          tone="lime"
-          sub={
-            <>
-              <span>{pctOfTotal(activeMemories, totalMemories)}</span>
-              <span>OF TOTAL</span>
-            </>
-          }
-          href="/dashboard/memories?status=active"
-        />
-        <StatCard
-          k="SUPERSEDED MEMORIES"
-          v={supersededMemories}
-          tone={supersededMemories > 0 ? 'amber' : 'lime'}
-          sub={
-            <>
-              <span>SAFE TO ARCHIVE</span>
-              <span aria-hidden="true">›</span>
-            </>
-          }
-          href="/dashboard/memories?status=superseded"
-        />
-        <StatCard
-          k="ARCHIVED MEMORIES"
-          v={archivedMemories}
-          tone="fg"
-          sub={
-            <>
-              <span>DECAYED</span>
-              <span aria-hidden="true">›</span>
-            </>
-          }
-          href="/dashboard/memories?status=archived"
-        />
-        <StatCard
-          k="PROJECTS"
-          v={projects}
-          tone="lime"
-          sub={
-            <>
-              <span>{archivedProjects}</span>
-              <span>ARCHIVED</span>
-            </>
-          }
-          href="/dashboard/projects"
-        />
-        <StatCard
-          k="ACTIVE SESSIONS"
-          v={activeSessions}
-          tone={activeSessions > 0 ? 'lime' : 'fg'}
-          sub={
-            <>
-              <span>CONNECTED NOW</span>
-              <span aria-hidden="true">›</span>
-            </>
-          }
-          href="/dashboard/sessions"
-        />
-      </StatGrid>
-
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+    <div className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <SectionBar
-            name="Recent judgments"
-            meta="NEWEST FIRST"
-            more={<OpenAll href="/dashboard/judgments" />}
-          />
-          {recentJudgments.length === 0 ? (
-            <TableEmpty>NO JUDGMENTS YET</TableEmpty>
-          ) : (
-            <div className="border border-border">
-              {recentJudgments.map((relation) => (
-                <div
-                  key={relation.id}
-                  className="grid gap-4 border-b border-border px-5 py-4 last:border-b-0 md:grid-cols-[1fr_220px]"
-                >
-                  <div className="flex min-w-0 flex-col gap-2">
-                    <div className="flex flex-wrap items-baseline gap-3">
-                      <Pill tone={relation.relation === null ? 'dim' : 'lime'}>
-                        {relation.relation ?? 'pending'}
-                      </Pill>
-                      <span className={cn('text-muted-foreground', LABEL)}>
-                        {relativeTime(relation.judgedAt ?? relation.createdAt, nowMs)}
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Good evening</h1>
+          <p className="mt-2 truncate text-sm text-muted-foreground">
+            {totalMemories.toLocaleString('en-US')} memories · v{REMBRIC_VERSION} · db {dbSize}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <Link
+            href="/dashboard/maintenance"
+            className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
+          >
+            Maintenance
+          </Link>
+          <Link
+            href="/dashboard/judgments"
+            className="rounded-[10px] bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            {reviewTotal > 0 ? `Review · ${reviewTotal}` : 'Review'}
+          </Link>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_460px]">
+        <WidgetCard
+          order="order-2 lg:order-1"
+          label="MEMORY ACTIVITY"
+          labelExtra={
+            <span className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="size-1.5 rounded-[2px] bg-primary" />
+                <span className="font-mono text-[10px] text-muted-foreground">saves</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="size-1.5 rounded-[2px] bg-warn" />
+                <span className="font-mono text-[10px] text-muted-foreground">sweep ops</span>
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground">30d</span>
+            </span>
+          }
+          link={{ href: '/dashboard/memories', label: 'memories →' }}
+        >
+          <div className="flex items-baseline gap-3 px-5 pt-1">
+            <span className="text-2xl font-semibold text-foreground">
+              {savedLast30.toLocaleString('en-US')}
+            </span>
+            <span className="text-sm text-muted-foreground">saved</span>
+            {savedDelta !== null ? <DeltaChip value={savedDelta} /> : null}
+          </div>
+          <ActivityChart days={activityDays} />
+        </WidgetCard>
+
+        <WidgetCard
+          order="order-1 lg:order-2"
+          label="ACTIVE SESSIONS"
+          labelExtra={
+            activeSessions > 0 ? (
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
+                {activeSessions} LIVE
+              </span>
+            ) : null
+          }
+          link={{ href: '/dashboard/sessions', label: 'view all →' }}
+          featured
+        >
+          <div className="px-5 pt-1">
+            <span className="text-4xl font-semibold text-foreground">{activeSessions}</span>
+          </div>
+          <ul className="mt-3 flex flex-col">
+            {activeSessionRows.length === 0 ? (
+              <li className="px-5 py-3 text-sm text-muted-foreground">
+                No active sessions right now
+              </li>
+            ) : (
+              activeSessionRows.map((session, index) => (
+                <li key={session.id}>
+                  <RowTooltip
+                    placement={index === 0 ? 'bottom' : 'top'}
+                    tooltip={
+                      <div className="flex flex-col gap-1">
+                        <p className="whitespace-pre-line text-xs leading-relaxed text-foreground">
+                          {session.summary ?? 'No summary yet'}
+                        </p>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          {session.agent} · {session.projectSlug ?? 'global'} · {session.memCount}{' '}
+                          mems
+                        </p>
+                      </div>
+                    }
+                  >
+                    <Link
+                      href={`/dashboard/sessions/${session.id}`}
+                      className="flex items-center gap-3 rounded-lg px-5 py-2 hover:bg-accent/50"
+                    >
+                      <span className="w-20 shrink-0 whitespace-nowrap rounded bg-primary/15 px-1.5 py-0.5 text-center font-mono text-[9px] uppercase text-primary">
+                        {session.agent}
                       </span>
-                      {relation.markedByKind ? (
-                        <span className={cn('text-muted-foreground', LABEL)}>
-                          · {relation.markedByKind}
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                        {session.summary ?? session.projectSlug ?? '—'}
+                      </span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        {relativeTime(session.startedAt, nowMs)}
+                      </span>
+                    </Link>
+                  </RowTooltip>
+                </li>
+              ))
+            )}
+          </ul>
+        </WidgetCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[440fr_180fr_628fr]">
+        <WidgetCard
+          label="LATEST JUDGMENTS"
+          link={{ href: '/dashboard/judgments', label: 'view all →' }}
+        >
+          <ul className="mt-1 flex flex-col">
+            {recentJudgments.length === 0 ? (
+              <li className="px-5 py-3 text-sm text-muted-foreground">No judgments yet</li>
+            ) : (
+              recentJudgments.map((relation, index) => (
+                <li key={relation.id}>
+                  <RowTooltip
+                    placement={index === 0 ? 'bottom' : 'top'}
+                    tooltip={
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs text-foreground">{relation.sourceTitle}</p>
+                        <p className="text-xs text-muted-foreground">↳ {relation.targetTitle}</p>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          {relation.relation ?? 'pending'} ·{' '}
+                          {relativeTime(relation.judgedAt ?? relation.createdAt, nowMs)}
+                        </p>
+                      </div>
+                    }
+                  >
+                    <Link
+                      href={`/dashboard/judgments/${relation.id}`}
+                      className="flex items-center gap-3 rounded-lg px-5 py-2.5 hover:bg-accent/50"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'size-2 shrink-0 rounded-full',
+                          index === 0 ? 'bg-primary' : 'bg-chart-4',
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          'min-w-0 flex-1 truncate text-sm',
+                          index === 0 ? 'text-foreground' : 'text-muted-foreground',
+                        )}
+                      >
+                        {truncate(relation.sourceTitle, 34)}
+                      </span>
+                      {relation.relation !== null ? (
+                        <span
+                          className={cn(
+                            'shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px]',
+                            index === 0
+                              ? 'bg-primary/15 text-primary'
+                              : 'bg-input text-muted-foreground',
+                          )}
+                        >
+                          {relation.relation}
                         </span>
                       ) : null}
-                    </div>
-                    <div className="flex min-w-0 items-baseline gap-3">
-                      <Link
-                        href={`/dashboard/memories/${relation.sourceId}`}
-                        className="min-w-0 truncate text-xs text-primary hover:underline"
-                      >
-                        {truncate(relation.sourceTitle, 70)}
-                      </Link>
-                    </div>
-                    <div className="flex min-w-0 items-baseline gap-3">
-                      <span aria-hidden="true" className="font-mono text-xs text-primary">
-                        ↳
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        {relativeTime(relation.judgedAt ?? relation.createdAt, nowMs)}
                       </span>
-                      <Link
-                        href={`/dashboard/memories/${relation.targetId}`}
-                        className="min-w-0 truncate text-xs text-primary hover:underline"
-                      >
-                        {truncate(relation.targetTitle, 70)}
-                      </Link>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-start gap-2 md:justify-end">
-                    <Button asChild size="sm">
-                      <Link href={`/dashboard/judgments/${relation.id}`} className="font-mono">
-                        <span className="text-xs">VIEW →</span>
-                      </Link>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    </Link>
+                  </RowTooltip>
+                </li>
+              ))
+            )}
+          </ul>
+        </WidgetCard>
 
-        <div className="min-w-0">
-          <SectionBar
-            name="Recent sessions"
-            meta="NEWEST FIRST"
-            more={<OpenAll href="/dashboard/sessions" />}
-          />
-          {recentSessions.length === 0 ? (
-            <TableEmpty>NO SESSIONS YET</TableEmpty>
-          ) : (
-            <div className="border border-border">
-              {recentSessions.map((session) => (
-                <Link
-                  key={session.id}
-                  href={`/dashboard/sessions/${session.id}`}
-                  className="grid gap-1 border-b border-border px-4 py-3 last:border-b-0 hover:bg-muted/50 md:grid-cols-[130px_1fr_auto] md:items-baseline md:gap-4"
-                >
-                  <span className={cn('text-muted-foreground uppercase', LABEL)}>
-                    {relativeTime(session.startedAt, nowMs)}
-                  </span>
-                  <span className="flex min-w-0 flex-wrap items-baseline gap-3">
-                    <span className={cn('text-foreground uppercase', LABEL)}>
-                      ▸ {session.agent}
-                    </span>
-                    <span className={cn('text-muted-foreground', LABEL)}>
-                      / {session.projectSlug ?? '—'}
-                    </span>
-                    <span className="min-w-0 truncate text-xs text-foreground">
-                      {truncate(session.summary ?? '—', 60)}
-                    </span>
-                    {session.summary && !session.summaryFinal ? <Pill tone="dim">raw</Pill> : null}
-                  </span>
-                  <span className={cn('flex flex-wrap items-baseline gap-3', LABEL)}>
-                    <span className="text-muted-foreground">
-                      <b className="font-semibold text-primary tabular-nums">{session.memCount}</b>{' '}
-                      MEM
-                    </span>
-                    <StatusPill status={session.status === 'active' ? 'active' : 'judged'} />
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+        <WidgetCard label="ACTIVE TOKENS" link={{ href: '/dashboard/tokens', label: 'tokens →' }}>
+          <div className="flex items-baseline gap-2 px-5 pt-1">
+            <span className="text-4xl font-semibold text-foreground">{activeTokens.length}</span>
+            <span className="text-sm text-muted-foreground">of {allTokens.length}</span>
+          </div>
+        </WidgetCard>
 
-      <div className="mt-8">
-        <SectionBar
-          name="Consolidation health"
-          meta={lastRun ? `LAST RUN · ${shortId(lastRun.id)}` : 'NO RUN YET'}
-          more={
-            lastRun ? (
-              <Link
-                href={`/dashboard/consolidation/${lastRun.id}`}
-                className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
-              >
-                Open run →
-              </Link>
-            ) : undefined
+        <WidgetCard
+          label="CONSOLIDATION HEALTH"
+          labelExtra={
+            <span
+              className={cn(
+                'font-mono text-[10px] font-semibold',
+                healthy ? 'text-primary' : 'text-warn',
+              )}
+            >
+              {healthy ? 'healthy' : 'attention'}
+            </span>
           }
-        />
-        <div className="grid border-t border-l border-border sm:grid-cols-2 xl:grid-cols-4">
-          <HealthCell
-            label="Last run"
-            value={lastRun ? 'OK' : '—'}
-            tone={lastRun ? 'lime' : 'dim'}
-            sub={
-              lastRun ? `${relativeTime(lastRun.finishedAt ?? lastRun.startedAt, nowMs)}` : 'NEVER'
-            }
-          />
-          <HealthCell
-            label="Ops applied"
-            value={lastRunOps.total}
-            sub={`${lastRunOps.reverted} REVERTED`}
-          />
-          <HealthCell
-            label="Orphaned pendings"
-            value={orphanedPendings}
-            tone={orphanedPendings > 0 ? 'amber' : 'lime'}
-            sub="ORPHANED BY THE SWEEP"
-          />
-          <HealthCell label="Trigger" value="ON SESSION START" sub="THROTTLED PER SCOPE" mono />
-        </div>
-      </div>
-
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <div className="min-w-0">
-          <SectionBar name="Activity · 7 days" meta="MEMORIES CREATED · PER DAY" />
-          <div
-            className="flex items-end gap-2 border border-border bg-card p-5"
-            aria-label="Memories created per day, last seven days"
-          >
-            {activity.days.map((day, index) => (
+          link={{ href: '/dashboard/consolidation', label: 'consolidation →' }}
+        >
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 pt-1 sm:grid-cols-4">
+            <Metric value={lastRunOps.total} label="OPS APPLIED" />
+            <Metric
+              value={lastRun ? relativeTime(lastRun.finishedAt ?? lastRun.startedAt, nowMs) : '—'}
+              label="LAST SWEEP"
+            />
+            <Metric value={lastRunOps.reverted} label="REVERTED" />
+            <Metric value={orphanedPendings} label="ORPHANED" tone={healthy ? 'lime' : 'warn'} />
+          </div>
+          <div className="px-5 pt-4">
+            <div className="h-1 overflow-hidden rounded-full bg-input">
               <div
-                key={day.day}
-                className="flex flex-1 flex-col items-center gap-2"
-                title={`${new Date(day.day * DAY_MS).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${day.count} memories`}
-              >
-                <div className="flex h-24 w-full items-end bg-muted">
-                  <div
-                    className="w-full bg-primary"
-                    style={{
-                      height: `${Math.max(4, Math.round((day.count / activity.peak) * 100))}%`,
-                    }}
-                    title={`${day.count} memories`}
-                  />
-                </div>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {WEEKDAYS[index]}
-                </span>
-              </div>
-            ))}
+                className="h-full rounded-full bg-primary/50"
+                style={{
+                  width:
+                    lastRunOps.total > 0
+                      ? `${Math.round(((lastRunOps.total - lastRunOps.reverted) / lastRunOps.total) * 100)}%`
+                      : '100%',
+                }}
+              />
+            </div>
           </div>
-        </div>
-
-        <div className="min-w-0">
-          <SectionBar name="System" meta="SQLITE · NODE · MCP" />
-          <div className="flex flex-col gap-3 border border-border bg-card p-5">
-            <SystemRow label="DB FILE" value={dbPath} tone="lime" />
-            <SystemRow label="DB SIZE" value={dbSize} />
-            <SystemRow label="FTS INDEX" value="memory_fts · contentless" />
-            <SystemRow label="MCP SERVER" value={host} tone="lime" />
-            <SystemRow label="NODE" value={process.versions.node} />
-          </div>
-        </div>
+        </WidgetCard>
       </div>
-    </Page>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_400px]">
+        <WidgetCard
+          label="LIVE AGENT ACTIVITY"
+          labelExtra={
+            activeSessions > 0 ? (
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
+                LIVE
+              </span>
+            ) : null
+          }
+          link={{ href: '/dashboard/sessions', label: 'view all →' }}
+        >
+          <ul className="mt-1 flex flex-col">
+            {feed.length === 0 ? (
+              <li className="px-5 py-3 text-sm text-muted-foreground">No activity yet</li>
+            ) : (
+              feed.map((item) => (
+                <li key={item.key}>
+                  <RowTooltip
+                    tooltip={
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs text-foreground">{item.text}</p>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          {new Date(item.at).toLocaleString('en-GB', {
+                            dateStyle: 'medium',
+                            timeStyle: 'short',
+                          })}
+                        </p>
+                      </div>
+                    }
+                  >
+                    <Link
+                      href={item.href}
+                      className="flex items-center gap-3 rounded-lg px-5 py-2.5 hover:bg-accent/50"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'size-2 shrink-0 rounded-full',
+                          item.live ? 'animate-pulse bg-primary' : 'bg-chart-4',
+                        )}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                        {item.text}
+                      </span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        {relativeTime(new Date(item.at), nowMs)}
+                      </span>
+                    </Link>
+                  </RowTooltip>
+                </li>
+              ))
+            )}
+          </ul>
+        </WidgetCard>
+
+        <WidgetCard label="SYSTEM HEALTH">
+          <div className="flex flex-col px-5 pt-1">
+            <HealthRow label="MCP endpoint" value={mcpHost} tone="lime" />
+            <HealthRow label="FTS index" value="memory_fts · contentless" />
+            <HealthRow label="Node" value={process.versions.node} />
+          </div>
+          <div className="px-5 pt-4">
+            <Link
+              href="/dashboard/maintenance"
+              className="flex h-10 items-center justify-center rounded-lg bg-input text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              Run maintenance…
+            </Link>
+          </div>
+        </WidgetCard>
+      </div>
+    </div>
   );
 }
 
-function OpenAll({ href }: { href: string }) {
-  return (
-    <Link
-      href={href}
-      className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
-    >
-      OPEN ALL ›
-    </Link>
-  );
-}
-
-function Sparkline({ data }: { data: ReadonlyArray<number> }) {
-  if (data.length === 0) return <span>·</span>;
-  const width = 64;
-  const height = 16;
-  const max = Math.max(...data, 1);
-  const step = data.length > 1 ? width / (data.length - 1) : 0;
-  const points = data
-    .map((value, index) => {
-      const x = (index * step).toFixed(1);
-      const y = (height - (value / max) * height).toFixed(1);
-      return `${x},${y}`;
-    })
-    .join(' ');
-  return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      aria-hidden="true"
-      className="text-muted-foreground"
-    >
-      <polyline fill="none" stroke="currentColor" strokeWidth={1.5} points={points} />
-    </svg>
-  );
-}
-
-function HealthCell({
+function WidgetCard({
   label,
-  value,
-  tone,
-  sub,
-  mono = false,
+  labelExtra,
+  link,
+  featured = false,
+  order,
+  children,
 }: {
   label: string;
-  value: ReactNode;
-  tone?: 'lime' | 'amber' | 'dim';
-  sub: string;
-  mono?: boolean;
+  labelExtra?: ReactNode;
+  link?: { readonly href: string; readonly label: string };
+  featured?: boolean;
+  order?: string;
+  children: ReactNode;
 }) {
-  const toneClass = tone === 'lime' ? 'text-primary' : tone === 'amber' ? 'text-warn' : '';
   return (
-    <div className="flex flex-col gap-2 border-r border-b border-border px-5 py-4">
-      <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-        <span aria-hidden="true" className="inline-block size-[0.55em] bg-primary" />
-        {label}
-      </span>
-      <span
-        className={
-          mono
-            ? 'font-mono text-xs'
-            : `font-display text-xl font-bold tracking-[-.02em] ${toneClass}`
-        }
+    <section
+      className={cn(
+        'flex min-w-0 flex-col rounded-2xl border pb-3 pt-4',
+        featured
+          ? 'border-[#2a3310] bg-[linear-gradient(180deg,#131b08,#101012)]'
+          : 'border-border bg-card',
+        order,
+      )}
+    >
+      <header className="flex items-center gap-3 px-5 pb-1">
+        <h2 className="font-mono text-[10px] tracking-[.14em] text-muted-foreground">{label}</h2>
+        {labelExtra}
+        {link ? (
+          <Link
+            href={link.href}
+            className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {link.label}
+          </Link>
+        ) : null}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function DeltaChip({ value }: { value: number }) {
+  const label = `${value >= 0 ? '+' : ''}${value}%`;
+  return (
+    <span
+      className={cn(
+        'rounded-md px-2 py-0.5 font-mono text-[11px] font-semibold',
+        value >= 0 ? 'bg-primary/15 text-primary' : 'bg-input text-muted-foreground',
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Metric({
+  value,
+  label,
+  tone,
+}: {
+  value: ReactNode;
+  label: string;
+  tone?: 'lime' | 'warn';
+}) {
+  return (
+    <div className="min-w-0">
+      <div
+        className={cn(
+          'truncate text-lg font-semibold',
+          tone === 'lime' ? 'text-primary' : tone === 'warn' ? 'text-warn' : 'text-foreground',
+        )}
       >
         {value}
-      </span>
-      <span className="font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-        {sub}
+      </div>
+      <div className="mt-0.5 font-mono text-[9px] tracking-[.12em] text-muted-foreground">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function HealthRow({ label, value, tone }: { label: string; value: string; tone?: 'lime' }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-border/60 py-2.5 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span
+        className={cn(
+          'max-w-[60%] truncate font-mono text-[11px]',
+          tone === 'lime' ? 'text-primary' : 'text-muted-foreground',
+        )}
+      >
+        {value}
       </span>
     </div>
   );
 }
 
-function SystemRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: ReactNode;
-  tone?: 'lime' | 'dim';
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-border pb-3 text-xs last:border-0 last:pb-0">
-      <span className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-        {label}
-      </span>
-      <span
-        className={`max-w-[60%] truncate font-mono ${tone === 'lime' ? 'text-primary' : 'text-muted-foreground'}`}
-      >
-        {value}
-      </span>
-    </div>
-  );
+function sumDayCounts(rows: readonly { readonly day: number; readonly n: number }[]): number {
+  return rows.reduce((acc, row) => acc + row.n, 0);
 }
 
-function pctOfTotal(part: number, total: number): string {
-  if (total <= 0) return '0%';
-  return `${Math.round((part / total) * 100)}%`;
-}
-
-function sevenDayActivity(rows: readonly { readonly day: number; readonly n: number }[]): {
-  days: { day: number; count: number }[];
-  peak: number;
-} {
+function buildDays(
+  rows: readonly { readonly day: number; readonly n: number }[],
+  opsByDay: ReadonlyMap<number, number>,
+  count: number,
+  nowMs: number,
+): { day: number; saves: number; ops: number; isToday: boolean }[] {
   const byDay = new Map(rows.map((row) => [row.day, row.n]));
-  const today = Math.floor(Date.now() / DAY_MS);
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const day = today - 6 + index;
-    return { day, count: byDay.get(day) ?? 0 };
+  const today = Math.floor(nowMs / DAY_MS);
+  return Array.from({ length: count }, (_, index) => {
+    const day = today - count + 1 + index;
+    return {
+      day,
+      saves: byDay.get(day) ?? 0,
+      ops: opsByDay.get(day) ?? 0,
+      isToday: day === today,
+    };
   });
-  return { days, peak: Math.max(1, ...days.map((entry) => entry.count)) };
 }
