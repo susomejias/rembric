@@ -2,6 +2,7 @@ import { AgentSessionsService } from '@rembric/core';
 import {
   agentSessions,
   createRepositories,
+  memory,
   projects,
   tokens,
   type NewAgentSession,
@@ -97,6 +98,29 @@ describe('sessions list (client data-table)', () => {
     expect(html).toContain('Select all rows on this page');
     expect(html).toContain('Select claude-code session — S1"');
     expect(html).toContain('Actions for session S1');
+  });
+
+  it('renders the memory sparkline when the session has writes in the window', async () => {
+    t.handle.db
+      .insert(memory)
+      .values({
+        id: 'M1',
+        sessionId: 'S1',
+        title: 'sparkline fixture',
+        content: 'sparkline fixture content',
+        scope: 'global',
+        type: 'project',
+        tags: [],
+        status: 'active',
+        replaces: [],
+        createdAt: new Date(),
+        lastSeenAt: new Date(),
+      })
+      .run();
+
+    const html = await renderSessions();
+    // The Memories cell renders the count plus the 14-bar sparkline container.
+    expect(html).toContain('w-[52px]');
   });
 
   it('caps the client page at pageSize for 12 seeded rows', async () => {

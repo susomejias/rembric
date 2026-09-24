@@ -21,6 +21,11 @@ const UNDELETE_FORM = 'session.undelete';
 // page loads a generous window instead of paginating server-side.
 const LIST_LIMIT = 500;
 
+const DAY_MS = 86_400_000;
+
+// Sparkline slots = days including today, so the oldest bar is `today - 13`.
+const SPARKLINE_SLOTS = 14;
+
 async function abandonSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, ABANDON_FORM);
@@ -105,9 +110,16 @@ export default async function SessionsPage({
       })
     : [];
 
-  const memoryCounts = repos.memory.adminCountBySession([...rows, ...deletedRows].map((r) => r.id));
-  const promptCounts = repos.prompts.adminCountBySession(
-    [...rows, ...deletedRows].map((r) => r.id),
+  const sessionIds = [...rows, ...deletedRows].map((r) => r.id);
+
+  const memoryCounts = repos.memory.adminCountBySession(sessionIds);
+  const promptCounts = repos.prompts.adminCountBySession(sessionIds);
+  const sparklines = buildSparklines(
+    repos.memory.adminMemoryWritesBySessionPerDay(
+      sessionIds,
+      new Date((Math.floor(nowMs / DAY_MS) - (SPARKLINE_SLOTS - 1)) * DAY_MS),
+    ),
+    nowMs,
   );
 
   const statusCounts = repos.agentSessions.adminCountByStatus();
@@ -179,6 +191,7 @@ export default async function SessionsPage({
         }))}
         memoryCounts={memoryCounts}
         promptCounts={promptCounts}
+        sparklines={sparklines}
         actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
         csrf={csrf}
         quickFilter
@@ -211,6 +224,7 @@ export default async function SessionsPage({
             }))}
             memoryCounts={memoryCounts}
             promptCounts={promptCounts}
+            sparklines={sparklines}
             actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
             csrf={csrf}
             pageSize={10}
@@ -228,4 +242,25 @@ function sessionTitle(row: {
   projectSlug: string | null;
 }): string {
   return row.title ?? row.description ?? row.projectSlug ?? row.id;
+}
+
+function buildSparklines(
+  rows: readonly { readonly sessionId: string; readonly day: number; readonly n: number }[],
+  nowMs: number,
+): Record<string, number[]> {
+  const bySession = new Map<string, Map<number, number>>();
+  for (const row of rows) {
+    const days = bySession.get(row.sessionId) ?? new Map<number, number>();
+    days.set(row.day, row.n);
+    bySession.set(row.sessionId, days);
+  }
+  const today = Math.floor(nowMs / DAY_MS);
+  const sparklines: Record<string, number[]> = {};
+  for (const [sessionId, days] of bySession) {
+    sparklines[sessionId] = Array.from(
+      { length: SPARKLINE_SLOTS },
+      (_, index) => days.get(today - SPARKLINE_SLOTS + 1 + index) ?? 0,
+    );
+  }
+  return sparklines;
 }

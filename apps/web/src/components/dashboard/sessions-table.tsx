@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
 export interface SessionRowData {
   readonly id: string;
@@ -34,6 +35,9 @@ export interface SessionRowData {
   readonly deleted: boolean;
 }
 
+/** Daily memory-write counts for one session, oldest slot first, today last. */
+export type SessionSparklines = Record<string, number[]>;
+
 export interface SessionServerActions {
   abandon: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   remove: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
@@ -50,6 +54,7 @@ export function SessionsTable({
   rows,
   memoryCounts,
   promptCounts,
+  sparklines,
   actions,
   csrf,
   quickFilter = false,
@@ -60,6 +65,7 @@ export function SessionsTable({
   rows: readonly SessionRowData[];
   memoryCounts: Record<string, number>;
   promptCounts: Record<string, number>;
+  sparklines?: SessionSparklines;
   actions: SessionServerActions;
   csrf: SessionCsrfTokens;
   quickFilter?: boolean;
@@ -129,7 +135,15 @@ export function SessionsTable({
       numeric: true,
       sortable: true,
       value: (row) => row.memories,
-      cell: (row) => memoryCounts[row.id] ?? row.memories,
+      cell: (row) => {
+        const sparkline = sparklines?.[row.id];
+        return (
+          <div className="flex min-w-0 flex-col items-end gap-1">
+            <span>{memoryCounts[row.id] ?? row.memories}</span>
+            {sparkline ? <SessionSparkline values={sparkline} /> : null}
+          </div>
+        );
+      },
       formatTotal: (sum) => sum.toLocaleString('en-US'),
     },
     {
@@ -214,6 +228,25 @@ export function SessionsTable({
         pageSize={pageSize}
       />
     </TooltipProvider>
+  );
+}
+
+function SessionSparkline({ values }: { values: readonly number[] }) {
+  const peak = Math.max(1, ...values);
+  const last = values.length - 1;
+  return (
+    <span aria-hidden="true" className="flex h-3.5 w-[52px] items-end gap-px">
+      {values.map((value, index) => (
+        <span
+          key={index}
+          style={{ height: `${value === 0 ? 2 : Math.max(3, Math.round((value / peak) * 14))}px` }}
+          className={cn(
+            'min-w-0 flex-1 rounded-[1px]',
+            index === last ? 'bg-primary' : 'bg-primary/50',
+          )}
+        />
+      ))}
+    </span>
   );
 }
 
