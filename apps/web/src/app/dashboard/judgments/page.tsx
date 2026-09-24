@@ -69,11 +69,9 @@ export default async function JudgmentsPage() {
   return (
     <Page>
       <header className="min-w-0">
-        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
-          Judgments
-        </h1>
-        <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
-          {`${rows.length} ROWS · ${pending} PENDING · ${judged} JUDGED · ${orphaned} ORPHANED`}
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Judgments</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {`${rows.length} rows · ${pending} pending · ${judged} judged · ${orphaned} orphaned`}
         </p>
       </header>
 

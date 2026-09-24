@@ -112,11 +112,9 @@ export default async function PromptsPage({
     <Page>
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
-            Prompts
-          </h1>
-          <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
-            {`${total} MATCHING · ${rows.length} ROWS · ${activeCount} LIVE · ${deletedCount} DELETED`}
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Prompts</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {`${total} MATCHING · ${rows.length} rows · ${activeCount} live · ${deletedCount} deleted`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
@@ -140,7 +138,7 @@ export default async function PromptsPage({
 
       {justDeleted ? (
         <div className="mt-6">
-          <Flash tone="lime" label="DELETED">
+          <Flash tone="lime" label="deleted">
             Prompt <code className="font-mono">{justDeleted}</code> soft-deleted.{' '}
             <Link href="/dashboard/prompts?include_deleted=1" className="hover:text-primary">
               View deleted
@@ -158,13 +156,13 @@ export default async function PromptsPage({
 
       <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
         <StatCard
-          k="LIVE PROMPTS"
+          k="live PROMPTS"
           v={activeCount}
           tone="lime"
           sub={<span>VISIBLE TO AGENTS</span>}
         />
         <StatCard
-          k="SOFT-DELETED"
+          k="SOFT-deleted"
           v={deletedCount}
           tone={deletedCount > 0 ? 'amber' : 'dim'}
           sub={<span>HIDDEN UNLESS SHOWN</span>}
