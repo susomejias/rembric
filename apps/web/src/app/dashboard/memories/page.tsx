@@ -6,26 +6,13 @@ import {
   sanitizeFtsQuery,
   type ReviewState,
 } from '@rembric/core';
-import {
-  MEMORY_TYPES,
-  projectScope,
-  type Memory,
-  type MemoryStatus,
-  type MemoryType,
-} from '@rembric/db';
+import { projectScope, type Memory, type MemoryStatus, type MemoryType } from '@rembric/db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './filters';
 
 import type { ActionState } from '@/components/dashboard/action-form';
-import {
-  FilterActions,
-  FilterField,
-  FilterForm,
-  FilterInput,
-  FilterSelect,
-} from '@/components/dashboard/filters';
 import { MemoriesTable } from '@/components/dashboard/memories-table';
 import { shortId, singleParam } from '@/components/dashboard/support';
 import { Flash, Page } from '@/components/dashboard/ui';
@@ -46,12 +33,6 @@ const LIST_LIMIT = 500;
 const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
   (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
 );
-
-const STATUS_OPTIONS = [
-  { value: 'active', label: 'active' },
-  { value: 'superseded', label: 'superseded' },
-  { value: 'archived', label: 'archived' },
-];
 
 const NO_PROJECT_MESSAGE =
   'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.';
@@ -229,54 +210,6 @@ export default async function MemoriesPage({
           Memory <code className="font-mono">{shortId(justConfirmed)}</code> re-affirmed.
         </Flash>
       ) : null}
-
-      <FilterForm action="/dashboard/memories" className="mt-6">
-        <FilterField label="SCOPE" htmlFor="f-project">
-          <FilterSelect
-            id="f-project"
-            name="project"
-            value={filters.project}
-            options={[
-              { value: '', label: 'all scopes' },
-              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
-            ]}
-          />
-        </FilterField>
-        <FilterField label="STATUS" htmlFor="f-status">
-          <FilterSelect
-            id="f-status"
-            name="status"
-            value={filters.status}
-            options={STATUS_OPTIONS}
-          />
-        </FilterField>
-        <FilterField label="TYPE" htmlFor="f-type">
-          <FilterSelect
-            id="f-type"
-            name="type"
-            value={filters.type}
-            options={[
-              { value: '', label: 'all types' },
-              ...MEMORY_TYPES.map((t) => ({ value: t, label: t })),
-            ]}
-          />
-        </FilterField>
-        <FilterField label="REVIEW" htmlFor="f-review">
-          <FilterSelect
-            id="f-review"
-            name="review"
-            value={filters.review}
-            options={[
-              { value: '', label: 'any review' },
-              { value: 'needs_review', label: 'needs_review' },
-            ]}
-          />
-        </FilterField>
-        <FilterField label="SEARCH" htmlFor="f-q" className="min-w-56 flex-1">
-          <FilterInput id="f-q" name="q" value={filters.q} placeholder="FTS5 keyword, tag, topic" />
-        </FilterField>
-        <FilterActions clearHref="/dashboard/memories" />
-      </FilterForm>
 
       <div className="mt-6">
         <MemoriesTable

@@ -1,15 +1,8 @@
+import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import { readJudgmentsFilters, relationFilters, type SearchParams } from './filters';
-
 import type { ActionState } from '@/components/dashboard/action-form';
-import {
-  FilterActions,
-  FilterField,
-  FilterForm,
-  FilterSelect,
-} from '@/components/dashboard/filters';
 import { JudgmentsTable } from '@/components/dashboard/judgments-table';
 import { PAGE_SIZE } from '@/components/dashboard/support';
 import { Page } from '@/components/dashboard/ui';
@@ -20,22 +13,8 @@ import { dashboardCsrfToken } from '@/lib/session';
 export const dynamic = 'force-dynamic';
 
 const ORPHAN_FORM = 'judgment.orphan';
+const BULK_ORPHAN_FORM = 'judgment.bulk-orphan';
 const TABLE_PAGE_SIZE = 10;
-
-const STATUS_OPTIONS = [
-  { value: '', label: 'all statuses' },
-  { value: 'pending', label: 'pending' },
-  { value: 'judged', label: 'judged' },
-  { value: 'orphaned', label: 'orphaned' },
-];
-
-const KIND_OPTIONS = [
-  { value: '', label: 'all kinds' },
-  { value: 'pending', label: 'pending (unjudged)' },
-  { value: 'compatible', label: 'compatible' },
-  { value: 'supersedes', label: 'supersedes' },
-  { value: 'not_conflict', label: 'not_conflict' },
-];
 
 async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -48,29 +27,40 @@ async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<A
   redirect('/dashboard/judgments');
 }
 
+export async function bulkOrphanJudgments(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_ORPHAN_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const judgmentIds = formData
+    .getAll('judgmentId')
+    .filter((value): value is string => typeof value === 'string');
+  for (const judgmentId of judgmentIds) {
+    guard.services.relations.orphanByOperator(judgmentId);
+  }
+  revalidatePath('/dashboard/judgments');
+  return { error: null };
+}
+
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
 }
 
-export default async function JudgmentsPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const params = await searchParams;
-  const filters = readJudgmentsFilters(params);
-  const isFiltered = filters.status !== '' || filters.kind !== '';
-
+export default async function JudgmentsPage() {
   const { repos } = getServices();
-  const csrf = { orphan: await dashboardCsrfToken(ORPHAN_FORM) };
+  const csrf = {
+    orphan: await dashboardCsrfToken(ORPHAN_FORM),
+    bulkOrphan: await dashboardCsrfToken(BULK_ORPHAN_FORM),
+  };
 
-  const rows = isFiltered
-    ? repos.relations.adminListWithContent(relationFilters(filters), PAGE_SIZE, 0)
-    : [
-        ...repos.relations.adminListWithContent({ status: 'pending' }, PAGE_SIZE, 0),
-        ...repos.relations.adminRecentJudged(PAGE_SIZE),
-      ].slice(0, PAGE_SIZE);
+  const rows = [
+    ...repos.relations.adminListWithContent({ status: 'pending' }, PAGE_SIZE, 0),
+    ...repos.relations.adminRecentJudged(PAGE_SIZE),
+  ].slice(0, PAGE_SIZE);
 
   const pending = repos.relations.adminCountByStatus('pending');
   const judged = repos.relations.adminCountByStatus('judged');
@@ -87,21 +77,6 @@ export default async function JudgmentsPage({
         </p>
       </header>
 
-      <FilterForm action="/dashboard/judgments" className="mt-6">
-        <FilterField label="STATUS" htmlFor="j-status">
-          <FilterSelect
-            id="j-status"
-            name="status"
-            value={filters.status}
-            options={STATUS_OPTIONS}
-          />
-        </FilterField>
-        <FilterField label="KIND" htmlFor="j-kind">
-          <FilterSelect id="j-kind" name="kind" value={filters.kind} options={KIND_OPTIONS} />
-        </FilterField>
-        <FilterActions clearHref="/dashboard/judgments" />
-      </FilterForm>
-
       <div className="mt-6">
         <JudgmentsTable
           rows={rows.map((relation) => ({
@@ -114,11 +89,15 @@ export default async function JudgmentsPage({
             relation: relation.relation,
             status: relation.status,
             actor: relation.markedByActor,
+            kind: relation.markedByKind,
             createdAt: relation.createdAt,
             judgedAt: relation.judgedAt,
           }))}
-          actions={{ orphan: orphanJudgment }}
+          actions={{ orphan: orphanJudgment, bulkOrphan: bulkOrphanJudgments }}
           csrf={csrf}
+          quickFilter
+          selectable
+          searchable
           pageSize={TABLE_PAGE_SIZE}
         />
       </div>

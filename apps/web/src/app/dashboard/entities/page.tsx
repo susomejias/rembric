@@ -8,12 +8,6 @@ import { ActionForm, type ActionState } from '@/components/dashboard/action-form
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { EntitiesTable } from '@/components/dashboard/entities-table';
-import {
-  FilterActions,
-  FilterField,
-  FilterForm,
-  FilterSelect,
-} from '@/components/dashboard/filters';
 import { shortId, singleParam } from '@/components/dashboard/support';
 import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
@@ -52,11 +46,6 @@ async function rebuildEntities(_prev: ActionState, formData: FormData): Promise<
   redirect(`/dashboard/entities?rebuilt=${processed}`);
 }
 
-const KIND_OPTIONS = [
-  { value: '', label: 'all kinds' },
-  ...ENTITY_KINDS.map((kind) => ({ value: kind, label: kind })),
-];
-
 export default async function EntitiesPage({
   searchParams,
 }: {
@@ -69,7 +58,7 @@ export default async function EntitiesPage({
   const { repos } = getServices();
 
   const kind = filters.kind === '' ? undefined : (filters.kind as EntityKind);
-  const rowFilters = { kind, singleReferenceOnly: filters.singleReferenceOnly };
+  const rowFilters = { kind };
 
   const rows = repos.entities.adminListEntities(rowFilters, LIST_LIMIT, 0);
   const total = repos.entities.adminCountEntities(rowFilters);
@@ -125,24 +114,6 @@ export default async function EntitiesPage({
           />
         ))}
       </StatGrid>
-
-      <FilterForm action="/dashboard/entities" className="mt-6">
-        <FilterField label="KIND" htmlFor="e-kind">
-          <FilterSelect id="e-kind" name="kind" value={filters.kind} options={KIND_OPTIONS} />
-        </FilterField>
-        <FilterField label="REFERENCES" htmlFor="e-single">
-          <FilterSelect
-            id="e-single"
-            name="single_ref"
-            value={filters.singleReferenceOnly ? '1' : ''}
-            options={[
-              { value: '', label: 'any' },
-              { value: '1', label: 'single reference only' },
-            ]}
-          />
-        </FilterField>
-        <FilterActions clearHref="/dashboard/entities" />
-      </FilterForm>
 
       <EntitiesTable
         rows={rows.map((entity) => ({

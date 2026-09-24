@@ -1,4 +1,4 @@
-import { pageParam, RETIRED_PROJECT_FILTER, singleParam } from '@/components/dashboard/support';
+import { RETIRED_PROJECT_FILTER, singleParam } from '@/components/dashboard/support';
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -10,7 +10,6 @@ export interface MemoriesFilters {
   type: string;
   review: string;
   q: string;
-  page: number;
 }
 
 export function readMemoriesFilters(searchParams: SearchParams): MemoriesFilters {
@@ -22,19 +21,7 @@ export function readMemoriesFilters(searchParams: SearchParams): MemoriesFilters
     type: singleParam(searchParams['type']),
     review: singleParam(searchParams['review']),
     q: singleParam(searchParams['q']),
-    page: pageParam(searchParams['page']),
   };
-}
-
-export function memoriesQuery(searchParams: SearchParams): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(searchParams)) {
-    if (key === 'page') continue;
-    const value = singleParam(raw);
-    if (key === 'project' && value === RETIRED_PROJECT_FILTER) continue;
-    out[key] = value;
-  }
-  return out;
 }
 
 export function resolveProjectFilter(
