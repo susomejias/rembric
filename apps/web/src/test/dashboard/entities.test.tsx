@@ -116,7 +116,7 @@ describe('dashboard entities view', () => {
     );
 
     const html = await renderEntities();
-    expect(html).toContain('REBUILD ENTITY INDEX');
+    expect(html).toContain('Rebuild entity index');
     expect(html).not.toContain('PENDING');
   });
 
@@ -127,7 +127,7 @@ describe('dashboard entities view', () => {
     );
 
     const html = await renderEntities();
-    expect(html).toMatch(/REBUILD ENTITY INDEX[\s\S]{0,40}\(1 PENDING\)/);
+    expect(html).toMatch(/Rebuild entity index[\s\S]{0,40}\(1 pending\)/);
   });
 
   it('renders the kind quick-filter pills, the search box and one client page of ten', async () => {

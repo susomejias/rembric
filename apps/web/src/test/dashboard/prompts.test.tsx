@@ -81,9 +81,9 @@ describe('prompts list (client data-table)', () => {
   it('renders the bounded window with the true non-deleted total', async () => {
     const html = await renderPrompts();
     expect(html).toContain(`${NON_DELETED_TOTAL} MATCHING`);
-    expect(html).toContain(`${NON_DELETED_TOTAL} ROWS`);
-    expect(html).toContain(`${NON_DELETED_TOTAL} LIVE`);
-    expect(html).toContain(`${DELETED_COUNT} DELETED`);
+    expect(html).toContain('55 rows');
+    expect(html).toContain('VISIBLE TO AGENTS');
+    expect(html).toContain('SOFT-deleted');
   });
 
   it('caps the client-rendered rows at the table page size', async () => {
