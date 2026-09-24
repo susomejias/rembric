@@ -145,6 +145,7 @@ export function ProjectsTable({
             : undefined
         }
         selectable={selectable}
+        clipboard={false}
         bulkActions={
           selectable
             ? (context) => {
@@ -152,29 +153,51 @@ export function ProjectsTable({
                   (row) => projectArchiveAction(row) === 'archive',
                 );
                 const skipped = context.rows.length - archivable.length;
+                const selected = context.rows.length === 1 ? context.rows[0] : undefined;
+                const renameRow =
+                  selected !== undefined &&
+                  !selected.isDefault &&
+                  projectArchiveAction(selected) !== 'none'
+                    ? selected
+                    : null;
                 return (
-                  <ActionForm action={bulkArchiveAction} className="flex">
-                    <input type="hidden" name="csrf" value={csrf.bulkArchive ?? ''} />
-                    {archivable.map((row) => (
-                      <input key={row.id} type="hidden" name="id" value={row.id} />
-                    ))}
-                    <ConfirmSubmit
-                      tone="warn"
-                      title={`Archive ${archivable.length} selected ${
-                        archivable.length === 1 ? 'project' : 'projects'
-                      }?`}
-                      description={`${archivable.length} ${
-                        archivable.length === 1 ? 'project' : 'projects'
-                      } will reject new writes while existing memories stay queryable. ${skipped} ${
-                        skipped === 1 ? 'project' : 'projects'
-                      } will be skipped — the default project cannot be archived, and an archived one is left as it is.`}
-                      confirmLabel="ARCHIVE SELECTED"
-                    >
-                      <Button type="button" size="sm" className={BULK_BUTTON}>
-                        Archive selected
+                  <>
+                    {renameRow === null ? null : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setRenameTarget(renameRow);
+                          setRenameOpen(true);
+                        }}
+                      >
+                        Rename selected
                       </Button>
-                    </ConfirmSubmit>
-                  </ActionForm>
+                    )}
+                    <ActionForm action={bulkArchiveAction} className="flex">
+                      <input type="hidden" name="csrf" value={csrf.bulkArchive ?? ''} />
+                      {archivable.map((row) => (
+                        <input key={row.id} type="hidden" name="id" value={row.id} />
+                      ))}
+                      <ConfirmSubmit
+                        tone="warn"
+                        title={`Archive ${archivable.length} selected ${
+                          archivable.length === 1 ? 'project' : 'projects'
+                        }?`}
+                        description={`${archivable.length} ${
+                          archivable.length === 1 ? 'project' : 'projects'
+                        } will reject new writes while existing memories stay queryable. ${skipped} ${
+                          skipped === 1 ? 'project' : 'projects'
+                        } will be skipped — the default project cannot be archived, and an archived one is left as it is.`}
+                        confirmLabel="ARCHIVE SELECTED"
+                      >
+                        <Button type="button" size="sm" className={BULK_BUTTON}>
+                          Archive selected
+                        </Button>
+                      </ConfirmSubmit>
+                    </ActionForm>
+                  </>
                 );
               }
             : undefined
