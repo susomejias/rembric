@@ -1,28 +1,13 @@
-import { DomainError, sanitizeFtsQuery } from '@rembric/core';
+import { DomainError } from '@rembric/core';
 import type { Prompt } from '@rembric/db';
+import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import {
-  matchesFilters,
-  promptsQuery,
-  readPromptsFilters,
-  resolveProjectFilter,
-  type SearchParams,
-} from './filters';
-
 import type { ActionState } from '@/components/dashboard/action-form';
-import {
-  FilterActions,
-  FilterField,
-  FilterForm,
-  FilterInput,
-  FilterSelect,
-  Pager,
-} from '@/components/dashboard/filters';
 import { PromptsTable } from '@/components/dashboard/prompts-table';
-import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
-import { Flash, Page, StatCard, StatGrid, TableEmpty } from '@/components/dashboard/ui';
+import { singleParam } from '@/components/dashboard/support';
+import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -31,6 +16,11 @@ export const dynamic = 'force-dynamic';
 
 const DELETE_FORM = 'prompt.delete';
 const UNDELETE_FORM = 'prompt.undelete';
+const BULK_DELETE_FORM = 'prompt.bulk-delete';
+
+// One-line justification: the client table owns filtering and pagination, so the
+// page loads a generous window instead of paginating server-side.
+const LIST_LIMIT = 500;
 
 export async function deletePrompt(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -62,6 +52,27 @@ export async function undeletePrompt(_prev: ActionState, formData: FormData): Pr
   redirect(`/dashboard/prompts?undeleted=${encodeURIComponent(id)}`);
 }
 
+export async function bulkDeletePrompt(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_DELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const ids = formData.getAll('id').filter((value): value is string => typeof value === 'string');
+  try {
+    for (const id of ids) {
+      guard.services.prompts.softDelete(id, { adminBypass: true });
+    }
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/prompts');
+  return { error: null };
+}
+
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -70,82 +81,62 @@ function readField(form: FormData, name: string): string {
 export default async function PromptsPage({
   searchParams,
 }: {
-  searchParams: Promise<SearchParams>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const filters = readPromptsFilters(params);
-  const roundTripQuery = promptsQuery(params);
   const justDeleted = singleParam(params['deleted']);
   const justUndeleted = singleParam(params['undeleted']);
-
-  const isFiltered =
-    filters.project !== '' || filters.session !== '' || filters.agent !== '' || filters.q !== '';
+  const includeDeleted = singleParam(params['include_deleted']) === '1';
 
   const { repos } = getServices();
   const csrf = {
     remove: await dashboardCsrfToken(DELETE_FORM),
     restore: await dashboardCsrfToken(UNDELETE_FORM),
+    bulkRemove: await dashboardCsrfToken(BULK_DELETE_FORM),
   };
 
-  const offset = filters.page * PAGE_SIZE;
   const projectRows = repos.projects.adminListAll();
   const projectById = new Map(projectRows.map((p) => [p.id, p]));
-  const resolvedProject = resolveProjectFilter(filters.project, projectRows);
 
-  const ftsQuery = sanitizeFtsQuery(filters.q);
-
-  let rows: Prompt[];
-  if (resolvedProject.unknown) {
-    rows = [];
-  } else if (ftsQuery) {
-    rows = repos.prompts.adminSearchFts(ftsQuery, PAGE_SIZE + 1, offset).filter((p) =>
-      matchesFilters(p, {
-        includeDeleted: filters.includeDeleted,
-        projectId: resolvedProject.projectId,
-        agent: filters.agent,
-        session: filters.session,
-      }),
-    );
-  } else {
-    rows = repos.prompts.adminList({
-      includeDeleted: filters.includeDeleted,
-      projectId: resolvedProject.projectId,
-      agent: filters.agent || undefined,
-      sessionIdPrefix: filters.session || undefined,
-      limit: PAGE_SIZE + 1,
-      offset,
-    });
-  }
-
-  const hasMore = rows.length > PAGE_SIZE;
-  const visible = rows.slice(0, PAGE_SIZE);
-
-  const totalCount: number | undefined = resolvedProject.unknown
-    ? 0
-    : ftsQuery
-      ? undefined
-      : repos.prompts.adminCount({
-          includeDeleted: filters.includeDeleted,
-          projectId: resolvedProject.projectId,
-          agent: filters.agent || undefined,
-          sessionIdPrefix: filters.session || undefined,
-        });
+  const rows: Prompt[] = repos.prompts.adminList({
+    includeDeleted,
+    limit: LIST_LIMIT,
+    offset: 0,
+  });
 
   const activeCount = repos.prompts.adminCount({ includeDeleted: false });
   const deletedCount = repos.prompts.adminCount({ includeDeleted: true }) - activeCount;
-
-  const matching = totalCount === undefined ? `${visible.length}+` : `${totalCount}`;
+  const total = repos.prompts.adminCount({ includeDeleted });
 
   return (
     <Page>
-      <header className="min-w-0">
-        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
-          Prompts
-        </h1>
-        <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
-          {`${matching} MATCHING · ${visible.length} ROWS · ${activeCount} LIVE · ${deletedCount} DELETED`}
-        </p>
-      </header>
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
+            Prompts
+          </h1>
+          <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
+            {`${total} MATCHING · ${rows.length} ROWS · ${activeCount} LIVE · ${deletedCount} DELETED`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          {includeDeleted ? (
+            <Link
+              href="/dashboard/prompts"
+              className="border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:border-primary"
+            >
+              Hide deleted
+            </Link>
+          ) : (
+            <Link
+              href="/dashboard/prompts?include_deleted=1"
+              className="border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:border-primary"
+            >
+              Show deleted
+            </Link>
+          )}
+        </div>
+      </section>
 
       {justDeleted ? (
         <div className="mt-6">
@@ -178,83 +169,32 @@ export default async function PromptsPage({
           tone={deletedCount > 0 ? 'amber' : 'dim'}
           sub={<span>HIDDEN UNLESS SHOWN</span>}
         />
-        <StatCard k="SHOWING" v={visible.length} sub={<span>PAGE {filters.page + 1}</span>} />
+        <StatCard k="IN WINDOW" v={rows.length} sub={<span>LOADED FOR THE LIST</span>} />
       </StatGrid>
 
-      <FilterForm action="/dashboard/prompts" className="mt-6">
-        <FilterField label="SCOPE" htmlFor="p-project">
-          <FilterSelect
-            id="p-project"
-            name="project"
-            value={filters.project}
-            options={[
-              { value: '', label: 'all scopes' },
-              ...projectRows.map((p) => ({ value: p.slug, label: p.slug })),
-            ]}
-          />
-        </FilterField>
-        <FilterField label="AGENT" htmlFor="p-agent">
-          <FilterInput
-            id="p-agent"
-            name="agent"
-            value={filters.agent}
-            placeholder="e.g. claude-code"
-          />
-        </FilterField>
-        <FilterField label="SESSION" htmlFor="p-session">
-          <FilterInput id="p-session" name="session" value={filters.session} placeholder="01H…" />
-        </FilterField>
-        <FilterField label="SEARCH" htmlFor="p-q" className="min-w-56 flex-1">
-          <FilterInput id="p-q" name="q" value={filters.q} placeholder="FTS5 keyword" />
-        </FilterField>
-        <FilterField label="DELETED" htmlFor="p-deleted">
-          <FilterSelect
-            id="p-deleted"
-            name="include_deleted"
-            value={filters.includeDeleted ? '1' : ''}
-            options={[
-              { value: '', label: 'hidden' },
-              { value: '1', label: 'shown' },
-            ]}
-          />
-        </FilterField>
-        <FilterActions clearHref="/dashboard/prompts" />
-      </FilterForm>
-
-      {visible.length === 0 ? (
-        <TableEmpty>
-          {isFiltered ? 'NO PROMPT MATCHES THIS FILTER' : 'NO PROMPT HAS BEEN CAPTURED YET'}
-        </TableEmpty>
-      ) : (
-        <PromptsTable
-          rows={visible.map((prompt) => ({
-            id: prompt.id,
-            title: prompt.title,
-            content: prompt.content,
-            project: prompt.projectId ? (projectById.get(prompt.projectId)?.slug ?? '—') : '—',
-            sessionId: prompt.sessionId ?? null,
-            agent: prompt.agent ?? '—',
-            tags: prompt.tags ?? [],
-            status: prompt.deletedAt
-              ? 'deleted'
-              : (prompt.replaces?.length ?? 0) > 0
-                ? 'refined'
-                : 'active',
-            createdAt: prompt.createdAt,
-            deleted: prompt.deletedAt != null,
-          }))}
-          actions={{ remove: deletePrompt, restore: undeletePrompt }}
-          csrf={csrf}
-        />
-      )}
-
-      <Pager
-        page={filters.page}
-        hasMore={hasMore}
-        total={totalCount}
-        totalLabel={`${visible.length} ROWS`}
-        path="/dashboard/prompts"
-        query={roundTripQuery}
+      <PromptsTable
+        rows={rows.map((prompt) => ({
+          id: prompt.id,
+          title: prompt.title,
+          content: prompt.content,
+          project: prompt.projectId ? (projectById.get(prompt.projectId)?.slug ?? '—') : '—',
+          sessionId: prompt.sessionId ?? null,
+          agent: prompt.agent ?? '—',
+          tags: prompt.tags ?? [],
+          status: prompt.deletedAt
+            ? 'deleted'
+            : (prompt.replaces?.length ?? 0) > 0
+              ? 'refined'
+              : 'active',
+          createdAt: prompt.createdAt,
+          deleted: prompt.deletedAt != null,
+        }))}
+        actions={{ remove: deletePrompt, restore: undeletePrompt, bulkRemove: bulkDeletePrompt }}
+        csrf={csrf}
+        quickFilter
+        selectable
+        searchable
+        pageSize={10}
       />
     </Page>
   );
