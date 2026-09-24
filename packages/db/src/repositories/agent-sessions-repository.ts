@@ -16,6 +16,7 @@ export type AdminSessionRow = Pick<
   | 'agent'
   | 'title'
   | 'description'
+  | 'summary'
   | 'startedAt'
   | 'endedAt'
   | 'status'
@@ -56,6 +57,7 @@ const listSelection = {
   agent: agentSessions.agent,
   title: agentSessions.title,
   description: agentSessions.description,
+  summary: agentSessions.summary,
   startedAt: agentSessions.startedAt,
   endedAt: agentSessions.endedAt,
   status: agentSessions.status,
