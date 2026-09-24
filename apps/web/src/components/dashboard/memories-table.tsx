@@ -5,6 +5,7 @@ import Link from 'next/link';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { ReviewPill, StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -185,7 +186,12 @@ export function MemoriesTable({
       }
       renderDetail={(row) => (
         <div className="flex flex-col gap-3 px-2 py-1 text-xs">
-          <p className="whitespace-pre-line leading-relaxed text-foreground">{row.content}</p>
+          <MarkdownPanel
+            eyebrow="Memory content"
+            title="Durable context"
+            markdown={row.content}
+            copyLabel="Copy markdown"
+          />
           <p className="font-mono text-[10px] text-muted-foreground">
             {row.type} · {row.confirms} confirms · {row.tags.length} tags
           </p>
