@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.28.12](https://github.com/susomejias/rembric/compare/server-v0.28.11...server-v0.28.12) (2026-09-24)
+
+
+### Features
+
+* **web:** add spectrumui data-table component for list views ([a24051e](https://github.com/susomejias/rembric/commit/a24051e8e87536b1f3c7ccb4908f43e079d2faa6))
+* **web:** attach dev seed memories to sessions across 14 days ([7213f42](https://github.com/susomejias/rembric/commit/7213f42215272d3779a5ef8e221950d54bbd4b7b))
+* **web:** bulk bar per page - tokens revoke only, projects rename on single selection ([7fedf85](https://github.com/susomejias/rembric/commit/7fedf858137e2276dfd3d540662b513834b89f7c))
+* **web:** bulk mark-as-abandoned and delete with dedicated server actions ([6a20fce](https://github.com/susomejias/rembric/commit/6a20fceb70fc0a6f4cc6fa6eee2202b964ca483d))
+* **web:** chrome-free oauth consent with standalone identity ([86f8efc](https://github.com/susomejias/rembric/commit/86f8efca3d95c7a5761a1c6556284f5e88a09141))
+* **web:** dynamic time-of-day greeting with icon on the overview ([83067ab](https://github.com/susomejias/rembric/commit/83067ab0be1787ad13aa8df3362ff75a93982335))
+* **web:** entities list with client search, kind pills and metadata disclosure ([dc72f34](https://github.com/susomejias/rembric/commit/dc72f347407922bd6db0bf22f5e6427ebb90f391))
+* **web:** fixed bulk bar, markdown copy and contextual row menu in data table ([3eac3af](https://github.com/susomejias/rembric/commit/3eac3af33332d6afff9d0ea9835ec4f05ad1b024))
+* **web:** full content markdown render in row disclosures ([8cff447](https://github.com/susomejias/rembric/commit/8cff447ef76a90f8367e19c32bb3ddf00562d0ed))
+* **web:** identity sweep over ui primitives, update, error and light passes ([259768a](https://github.com/susomejias/rembric/commit/259768ae31d54d68a69a9c0a1c960a4ca16d9abd))
+* **web:** judgments and consolidation detail pages light pass ([9b1aa97](https://github.com/susomejias/rembric/commit/9b1aa97a5fcbad692918a9d049547d0c07d0cf28))
+* **web:** judgments contextual menu, search and bulk orphan ([838f14b](https://github.com/susomejias/rembric/commit/838f14b2762596c38387e8d8b119feea89dab946))
+* **web:** login restyled to the new dashboard identity ([e75b300](https://github.com/susomejias/rembric/commit/e75b300b71cf1c429e5355947135764845991a5c))
+* **web:** memories and sessions detail pages light pass ([10055d9](https://github.com/susomejias/rembric/commit/10055d9cda6464362da4cd8c52781dde3ec3f546))
+* **web:** memories list on the full sessions data-table pattern ([2b1af6a](https://github.com/susomejias/rembric/commit/2b1af6a5b7595e485c628d67587fde1f90a31249))
+* **web:** navbar totals as lime chips, wider bar, clickable row titles and overview cleanup ([568c78e](https://github.com/susomejias/rembric/commit/568c78e6ea7942e0ce5ce2ddb4d02ae72baa547c))
+* **web:** overflow nav trigger as icon button ([052c879](https://github.com/susomejias/rembric/commit/052c879b1caff265710c0fe2ab4aae1a9ad4d775))
+* **web:** page help tooltips, relation chip tones and nav totals wiring ([7dd9353](https://github.com/susomejias/rembric/commit/7dd93534a31b21eb782a0814b72cff07fe313dde))
+* **web:** per-session memory sparklines in sessions list ([27f98bf](https://github.com/susomejias/rembric/commit/27f98bf4498f07ff71e430b3787e6eaad88ce7e1))
+* **web:** projects sheets and data-table, stale list assertions to new design ([96ffa85](https://github.com/susomejias/rembric/commit/96ffa855c68a66e606fe3bb328de01a0ea3d15ec))
+* **web:** prompts contextual menu, search, pills and bulk delete ([22c2695](https://github.com/susomejias/rembric/commit/22c2695007128411ef8af14a5cda549003071494))
+* **web:** prompts list with client search, status pills, bulk delete and contextual menu ([acd2efa](https://github.com/susomejias/rembric/commit/acd2efa4ce05fc1e724b5da0f58ab98fe9d9619e))
+* **web:** rebuild dashboard overview as ops console with real queries ([d73f67a](https://github.com/susomejias/rembric/commit/d73f67a96e1937189303798ef8c97eab29f32d87))
+* **web:** rebuild entities list with spectrumui data-table ([28e64bd](https://github.com/susomejias/rembric/commit/28e64bd34aed62cb90a4629a83f119f0725ebe69))
+* **web:** rebuild judgments list with spectrumui data-table ([e5e4e05](https://github.com/susomejias/rembric/commit/e5e4e05ff1b82fb15df47b5b6c5b868aadc3f026))
+* **web:** rebuild memories list with spectrumui data-table ([ac5349c](https://github.com/susomejias/rembric/commit/ac5349cf0dfe3ccec89646bcd152f5a457cb4322))
+* **web:** rebuild prompts list with spectrumui data-table ([ba6ebe2](https://github.com/susomejias/rembric/commit/ba6ebe2957bc7d5b259aa3fd4909093ccff05f72))
+* **web:** rebuild tokens list with spectrumui data-table ([3660ec3](https://github.com/susomejias/rembric/commit/3660ec3a3323572608e44ec9db7d56fc8c808138))
+* **web:** redesign dashboard identity to monochrome zinc + lime with Geist fonts ([d5ce3fb](https://github.com/susomejias/rembric/commit/d5ce3fbb067e36e7d831972f0a7828a03e8d8189))
+* **web:** render session summary markdown in row detail disclosure ([c3e022d](https://github.com/susomejias/rembric/commit/c3e022d7c987a76c78d5a6e60ca6f54e3ca4b002))
+* **web:** replace dashboard sidebar with floating command bar shell ([5815ccd](https://github.com/susomejias/rembric/commit/5815ccdafb45149fea7f69f671a77fcdc9977f38))
+* **web:** self-describing markdown clipboard payload for bulk copy ([6216901](https://github.com/susomejias/rembric/commit/62169014754334ad84afe0bee9d409afed126f50))
+* **web:** sessions data-table view, undo pill, vitest @ alias and activity polish ([6e5ae5a](https://github.com/susomejias/rembric/commit/6e5ae5a89b14ea4b81a35f5998315b63eabdd155))
+* **web:** spectrum status pills, session duration column and contextual actions menu ([1aea3b3](https://github.com/susomejias/rembric/commit/1aea3b35b1877df0738c3051fd678fbfcd35c8a6))
+* **web:** token creation moved to a sheet with identity banner ([684f0e4](https://github.com/susomejias/rembric/commit/684f0e4b5f1a98631775328c38e0129154281f1b))
+* **web:** tokens list with contextual menu, search and bulk revoke ([d425069](https://github.com/susomejias/rembric/commit/d425069d6064a59a82aa9481258b350002856e95))
+
+
+### Bug Fixes
+
+* **web:** calm greeting copy without exclamation marks ([c5717f6](https://github.com/susomejias/rembric/commit/c5717f62b3f7cac9b0e654669cde6445cb6cc777))
+* **web:** center tokens widget value row and settings/activity light pass ([fcf7591](https://github.com/susomejias/rembric/commit/fcf75911a37f198ae84d01d6f846ee6482c5f63e))
+* **web:** entities rebuild button outline and kind pill identity ([2e41a31](https://github.com/susomejias/rembric/commit/2e41a31f4358393efe660e14952eeb84da0ab06c))
+* **web:** entities stat cards removed and new project button normalized ([e4e025c](https://github.com/susomejias/rembric/commit/e4e025c86defff7bd43b175c765a46b00963a1f3))
+* **web:** greeting icon in standard color with exclamation copy ([a4ea755](https://github.com/susomejias/rembric/commit/a4ea7552625385db6f8dae387be493e89e23e04c))
+* **web:** memory activity card without featured gradient ([0707295](https://github.com/susomejias/rembric/commit/070729513154ee08117e9f73e8013ef74884a5a1))
+* **web:** navbar totals chips, wider default bar and totals test ([bb32ad4](https://github.com/susomejias/rembric/commit/bb32ad42485e344ad461899645488313362527aa))
+* **web:** normalize page headers to the identity across list views ([a54b951](https://github.com/susomejias/rembric/commit/a54b95129ea5a2cd1a5976ad90992e05cdd20bc4))
+* **web:** opening exclamation mark in greetings ([8db7892](https://github.com/susomejias/rembric/commit/8db7892a9ca7ab186bfc75e170fb1d97c0d28e57))
+* **web:** overview sessions widget sizing and overflow indicator ([f0fc587](https://github.com/susomejias/rembric/commit/f0fc58772d900a9cf8aa6f4562251dd10d373cf4))
+* **web:** plain Overview page title instead of the greeting ([13417f8](https://github.com/susomejias/rembric/commit/13417f88c8fd1fbdf5389af489d5953a0dd53100))
+* **web:** serializable ticker formatting and drizzle dedupe after dependency cleanup ([c500efa](https://github.com/susomejias/rembric/commit/c500efa74b38836107ef553d17cd2761c4c95dbb))
+* **web:** sessions subtitle below the title like the other pages ([548af71](https://github.com/susomejias/rembric/commit/548af71b1c91490db2323379a57c85b12a582939))
+
+
+### Refactor
+
+* **web:** drop legacy server filter forms from the redesigned lists ([2d83cb8](https://github.com/susomejias/rembric/commit/2d83cb8d50dec5fd2a662dcfd8c7c1b5c32229e3))
+* **web:** shared MetaGrid primitives and identity markdown-panel ([356902d](https://github.com/susomejias/rembric/commit/356902deb79e2dc81aeeaed4be324104fe9ce855))
+
 ## [0.28.11](https://github.com/susomejias/rembric/compare/server-v0.28.10...server-v0.28.11) (2026-09-23)
 
 
