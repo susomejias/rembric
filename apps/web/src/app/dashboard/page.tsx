@@ -303,7 +303,7 @@ export default function DashboardOverviewPage() {
         </WidgetCard>
 
         <WidgetCard label="ACTIVE TOKENS" link={{ href: '/dashboard/tokens', label: 'tokens →' }}>
-          <div className="flex items-baseline gap-2 px-5 pt-1">
+          <div className="flex items-center gap-2 px-5 pt-1">
             <NumberTicker
               value={activeTokens.length}
               className="text-4xl font-semibold text-foreground"
