@@ -7,6 +7,8 @@ import { seedProject } from '../default-project';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
 
+import type { Services } from '@/lib/services';
+
 installViewMocks('/dashboard/judgments');
 
 const PAGE_SIZE = 50;
@@ -58,9 +60,9 @@ beforeEach(() => {
 
 afterEach(() => t.cleanup());
 
-async function renderJudgments(params: Record<string, string> = {}): Promise<string> {
+async function renderJudgments(): Promise<string> {
   const page = (await import('../../app/dashboard/judgments/page')).default;
-  return renderToHtml(await page({ searchParams: Promise.resolve(params) }));
+  return renderToHtml(await page());
 }
 
 async function renderJudgmentDetail(id: string): Promise<string> {
@@ -86,11 +88,27 @@ describe('judgment evidence fallback', () => {
 });
 
 describe('judgments list verdict pill and routing', () => {
-  it('renders the pending verdict pill and links through the /dashboard/judgments route', async () => {
+  it('renders the pending verdict pill and the row actions menu trigger', async () => {
     const html = await renderJudgments();
     expect(html).toContain('</span>pending</span>');
-    expect(html).toContain('href="/dashboard/judgments/REL-MALFORMED"');
+    expect(html).toContain('Actions for judgment widget RS');
     expect(html).not.toContain('/dashboard/relations');
+  });
+
+  it('keeps the row menu content client-only, so detail links and orphan controls stay out of the SSR document', async () => {
+    const html = await renderJudgments();
+    expect(html).toContain('Actions for judgment widget RS');
+    expect(html).not.toContain('href="/dashboard/judgments/REL-MALFORMED"');
+    expect(html).not.toContain('View details');
+    expect(html).not.toContain('Mark orphaned');
+  });
+
+  it('exposes the search box, the relation quick filter and the selection checkboxes', async () => {
+    const html = await renderJudgments();
+    expect(html).toContain('Filter by relation');
+    expect(html).toContain('Search judgments…');
+    expect(html).toContain('Select all rows on this page');
+    expect(html).toContain('Select widget RS → widget RT"');
   });
 
   it('renders a judged verdict pill for a closed relation', async () => {
@@ -129,5 +147,20 @@ describe('judgments list verdict pill and routing', () => {
     expect(html).toContain(`${PAGE_SIZE} ROWS`);
     expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
     expect(html).not.toContain(`${SEEDED} ROWS`);
+  });
+});
+
+describe('judgment bulk orphan action', () => {
+  it('consults the server guard before touching any relation', async () => {
+    const { bulkOrphanJudgments } = await import('../../app/dashboard/judgments/page');
+    const formData = new FormData();
+    formData.set('csrf', 'test-csrf-token');
+    formData.set('judgmentId', 'J-MALFORMED');
+
+    const result = await bulkOrphanJudgments({ error: null }, formData);
+
+    expect(result).toEqual({ error: null });
+    const services = servicesRef.current as Services;
+    expect(services.repos.relations.findByJudgmentId('J-MALFORMED')?.status).toBe('pending');
   });
 });

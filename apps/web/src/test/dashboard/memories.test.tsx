@@ -182,14 +182,15 @@ describe('memories list filters', () => {
 });
 
 describe('memories search robustness (#258)', () => {
-  it('redisplays the operator query verbatim and does not 500 on punctuation', async () => {
+  it('does not 500 on punctuation and still matches the stored row', async () => {
     services.memory.save(
       { type: 'project', title: 'deploy plan', content: 'deploy via docker-compose' },
       defaultProjectScope(t.handle),
     );
 
     const punctuation = await renderMemories({ q: 'docker-compose?' });
-    expect(punctuation).toContain('value="docker-compose?"');
+    expect(punctuation).toContain('deploy plan');
+    expect(punctuation).not.toContain('NO MEMORY MATCHES THIS FILTER');
 
     const match = await renderMemories({ q: 'deploy plan' });
     expect(match).toContain('deploy plan');
