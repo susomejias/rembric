@@ -1,6 +1,7 @@
 import { DomainError } from '@rembric/core';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -16,20 +17,18 @@ import {
   DataTh,
   DataTr,
   Flash,
-  Kv,
-  KvGrid,
   Page,
   Pill,
   SectionBar,
   StatusPill,
   TableEmpty,
-  Tag,
   Time,
   ViewHead,
 } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +86,27 @@ function readField(form: FormData, name: string): string {
   return (typeof value === 'string' ? value : '').trim();
 }
 
+function MetaGrid({ children }: { children: ReactNode }) {
+  return (
+    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3">
+      {children}
+    </dl>
+  );
+}
+
+function MetaRow({ k, v, mono = false }: { k: string; v: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <dt className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+        {k}
+      </dt>
+      <dd className={cn('min-w-0 break-words text-sm text-foreground', mono && 'font-mono')}>
+        {v}
+      </dd>
+    </div>
+  );
+}
+
 export default async function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { repos } = getServices();
@@ -140,25 +160,25 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         </Flash>
       ) : null}
 
-      <KvGrid>
-        <Kv k="Status" v={<StatusPill status={row.status} />} />
-        <Kv k="Agent" v={row.agent} />
-        <Kv k="Project" v={row.projectSlug ?? '—'} />
-        <Kv
+      <MetaGrid>
+        <MetaRow k="Status" v={<StatusPill status={row.status} />} />
+        <MetaRow k="Agent" v={row.agent} />
+        <MetaRow k="Project" v={row.projectSlug ?? '—'} />
+        <MetaRow
           k="Token"
           v={row.tokenName ? `${row.tokenName}${row.tokenRevokedAt ? ' (revoked)' : ''}` : '—'}
           mono
         />
-        <Kv k="Started" v={<Time value={row.startedAt} />} mono />
-        <Kv k="Ended" v={<Time value={row.endedAt} />} mono />
-        <Kv
+        <MetaRow k="Started" v={<Time value={row.startedAt} />} mono />
+        <MetaRow k="Ended" v={<Time value={row.endedAt} />} mono />
+        <MetaRow
           k={row.endedAt ? 'Duration' : 'Running for'}
           v={durationBetween(row.startedAt, row.endedAt, nowMs)}
           mono
         />
-        <Kv k="Memories" v={memories.length} />
-        <Kv k="Prompts" v={prompts.length} />
-      </KvGrid>
+        <MetaRow k="Memories" v={memories.length} />
+        <MetaRow k="Prompts" v={prompts.length} />
+      </MetaGrid>
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
         {row.deletedAt ? (
@@ -206,7 +226,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
       {summary && !row.summaryFinal ? (
         <>
           <SectionBar name="Summary" more={<Pill tone="dim">RAW</Pill>} />
-          <pre className="mb-5 overflow-x-auto border border-border bg-muted p-3 font-mono text-xs leading-5">
+          <pre className="mb-5 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-muted-foreground">
             {summary}
           </pre>
         </>
@@ -279,7 +299,14 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
                     {(prompt.tags ?? []).length === 0 ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
-                      (prompt.tags ?? []).map((tag) => <Tag key={tag}>{tag}</Tag>)
+                      (prompt.tags ?? []).map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex w-fit items-center rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground"
+                        >
+                          {tag}
+                        </span>
+                      ))
                     )}
                   </div>
                 </DataTd>

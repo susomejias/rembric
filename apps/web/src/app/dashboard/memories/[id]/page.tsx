@@ -7,6 +7,7 @@ import {
 import { projectScope } from '@rembric/db';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -15,7 +16,6 @@ import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId, singleParam, truncate } from '@/components/dashboard/support';
 import {
   BackLink,
-  Chip,
   DataBody,
   DataHead,
   DataTable,
@@ -23,8 +23,6 @@ import {
   DataTh,
   DataTr,
   Flash,
-  Kv,
-  KvGrid,
   Page,
   Pill,
   ReviewPill,
@@ -38,6 +36,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,6 +89,45 @@ async function confirmMemory(_prev: ActionState, formData: FormData): Promise<Ac
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
+}
+
+type MetaTone = 'fg' | 'lime' | 'amber';
+
+const META_TONE: Record<MetaTone, string> = {
+  fg: 'text-foreground',
+  lime: 'text-primary',
+  amber: 'text-warn',
+};
+
+function MetaGrid({ children }: { children: ReactNode }) {
+  return (
+    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3">
+      {children}
+    </dl>
+  );
+}
+
+function MetaRow({
+  k,
+  v,
+  tone = 'fg',
+  mono = false,
+}: {
+  k: string;
+  v: ReactNode;
+  tone?: MetaTone;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <dt className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+        {k}
+      </dt>
+      <dd className={cn('min-w-0 break-words text-sm', META_TONE[tone], mono && 'font-mono')}>
+        {v}
+      </dd>
+    </div>
+  );
 }
 
 export default async function MemoryDetailPage({
@@ -194,18 +232,18 @@ export default async function MemoryDetailPage({
         </Flash>
       ) : null}
 
-      <KvGrid>
-        <Kv k="Status" v={<StatusPill status={row.status} />} />
-        <Kv k="Project" v={projectLabel} />
-        <Kv k="Type" v={row.type} />
-        <Kv k="Confirms" v={confirmCount} />
-        <Kv k="Created" v={<Time value={row.createdAt} />} mono />
-        <Kv k="Last seen" v={<Time value={row.lastSeenAt} />} mono />
-        <Kv k="Scope" v={row.scope} mono />
-        <Kv k="Topic key" v={row.topicKey ?? '—'} mono />
-        <Kv k="Source" v={row.source?.agent ?? '—'} mono />
+      <MetaGrid>
+        <MetaRow k="Status" v={<StatusPill status={row.status} />} />
+        <MetaRow k="Project" v={projectLabel} />
+        <MetaRow k="Type" v={row.type} />
+        <MetaRow k="Confirms" v={confirmCount} />
+        <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
+        <MetaRow k="Last seen" v={<Time value={row.lastSeenAt} />} mono />
+        <MetaRow k="Scope" v={row.scope} mono />
+        <MetaRow k="Topic key" v={row.topicKey ?? '—'} mono />
+        <MetaRow k="Source" v={row.source?.agent ?? '—'} mono />
         {successor ? (
-          <Kv
+          <MetaRow
             k="Superseded by"
             v={
               <Link
@@ -220,15 +258,15 @@ export default async function MemoryDetailPage({
         ) : null}
         {reviewState !== null && reviewAfter !== null ? (
           <>
-            <Kv
+            <MetaRow
               k="Review"
               v={reviewState === 'needs_review' ? <ReviewPill /> : 'fresh'}
               tone={reviewState === 'needs_review' ? 'amber' : 'lime'}
             />
-            <Kv k="Review after" v={<Time value={reviewAfter} />} mono />
+            <MetaRow k="Review after" v={<Time value={reviewAfter} />} mono />
           </>
         ) : null}
-      </KvGrid>
+      </MetaGrid>
 
       <MarkdownPanel eyebrow="Memory content" title="Durable context" markdown={markdown} />
 
@@ -237,7 +275,14 @@ export default async function MemoryDetailPage({
         {row.tags.length === 0 ? (
           <span className="text-muted-foreground">—</span>
         ) : (
-          row.tags.map((tag) => <Chip key={tag}>{tag}</Chip>)
+          row.tags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex w-fit items-center rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))
         )}
       </div>
 
