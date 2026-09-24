@@ -242,10 +242,6 @@ function CommandBar({
   return (
     <TooltipProvider delayDuration={100}>
       <div className="min-h-screen bg-background">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-x-0 top-0 z-0 h-80 bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]"
-        />
         <div className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center px-4 pt-4">
           <header className="pointer-events-auto flex h-13 w-full max-w-5xl items-center gap-1.5 rounded-2xl border border-border bg-card/90 px-2.5 shadow-lg shadow-black/20 backdrop-blur">
             <Link
