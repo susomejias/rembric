@@ -8,6 +8,7 @@ import {
 import type { Repositories } from '@rembric/db';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -21,8 +22,7 @@ import {
   DataTd,
   DataTh,
   DataTr,
-  Kv,
-  KvGrid,
+  LABEL,
   Page,
   Pill,
   SectionBar,
@@ -33,6 +33,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,6 +107,25 @@ function readField(form: FormData, name: string): string {
   return (typeof value === 'string' ? value : '').trim();
 }
 
+function MetaGrid({ children }: { children: ReactNode }) {
+  return (
+    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-4">
+      {children}
+    </dl>
+  );
+}
+
+function MetaRow({ k, v, mono = false }: { k: string; v: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <dt className={cn('text-muted-foreground', LABEL)}>{k}</dt>
+      <dd className={cn('min-w-0 break-words text-sm text-foreground', mono && 'font-mono')}>
+        {v}
+      </dd>
+    </div>
+  );
+}
+
 function scopeLabel(repos: Repositories, scope: string): string {
   if (!scope.startsWith('project:')) return scope;
   return repos.projects.adminFindById(scope.slice('project:'.length))?.slug ?? scope;
@@ -150,15 +170,15 @@ export default async function ConsolidationRunPage({
         <BackLink href="/dashboard/consolidation" label="BACK TO CONSOLIDATION" />
       </div>
 
-      <KvGrid>
-        <Kv k="Started" v={<Time value={run.startedAt} />} mono />
-        <Kv k="Finished" v={<Time value={run.finishedAt} />} mono />
-        <Kv k="Scope" v={scopeLabel(repos, run.scope)} />
-        <Kv k="Ops" v={ops.length} />
-      </KvGrid>
+      <MetaGrid>
+        <MetaRow k="Started" v={<Time value={run.startedAt} />} mono />
+        <MetaRow k="Finished" v={<Time value={run.finishedAt} />} mono />
+        <MetaRow k="Scope" v={scopeLabel(repos, run.scope)} />
+        <MetaRow k="Ops" v={ops.length} />
+      </MetaGrid>
 
       <SectionBar name="Summary" />
-      <pre className="mb-6 overflow-x-auto border border-border bg-muted p-3 font-mono text-xs leading-5">
+      <pre className="mb-6 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-muted-foreground">
         {formatRunSummary(run.summary)}
       </pre>
 
@@ -255,7 +275,7 @@ export default async function ConsolidationRunPage({
             description="All affected memories will return to their pre-run status."
             confirmLabel="UNDO ENTIRE RUN"
           >
-            <Button type="button" variant="outline" size="sm">
+            <Button type="button" variant="destructive" size="sm">
               UNDO ENTIRE RUN
             </Button>
           </ConfirmSubmit>
