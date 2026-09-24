@@ -54,7 +54,7 @@ export default function SettingsPage() {
       </StatGrid>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -62,7 +62,7 @@ export default function SettingsPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">Local-first by construction</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               one process
             </span>
           </div>
@@ -71,7 +71,7 @@ export default function SettingsPage() {
             embedder runs in-process; the database is the only durable store.
           </p>
         </div>
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -79,7 +79,7 @@ export default function SettingsPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">Configured at the server boundary</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               env
             </span>
           </div>

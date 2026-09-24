@@ -119,7 +119,7 @@ export default function ActivityPage() {
       </StatGrid>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -127,7 +127,7 @@ export default function ActivityPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">Meaningful changes only</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               no event table
             </span>
           </div>
@@ -136,7 +136,7 @@ export default function ActivityPage() {
             and consolidation runs — not from a stream Rembric would have to retain and prune.
           </p>
         </div>
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -144,7 +144,7 @@ export default function ActivityPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">The audit trail is the data</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               SQLite
             </span>
           </div>
