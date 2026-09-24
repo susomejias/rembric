@@ -144,7 +144,7 @@ describe('judgments list verdict pill and routing', () => {
       .run();
 
     const html = await renderJudgments();
-    expect(html).toContain(`${PAGE_SIZE} ROWS`);
+    expect(html).toContain('1–10 of 50');
     expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
     expect(html).not.toContain(`${SEEDED} ROWS`);
   });

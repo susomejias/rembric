@@ -1,40 +1,25 @@
 import { DomainError, SLUG_REGEX, type ProjectView } from '@rembric/core';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
-import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
-import { CsrfField } from '@/components/dashboard/csrf-field';
+import type { ActionState } from '@/components/dashboard/action-form';
+import { CreateProjectSheet } from '@/components/dashboard/projects-sheets';
+import { ProjectsTable, type ProjectRowData } from '@/components/dashboard/projects-table';
 import { singleParam } from '@/components/dashboard/support';
-import {
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  Flash,
-  LABEL,
-  Page,
-  Pill,
-  SectionBar,
-  TableEmpty,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Flash, Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-const CREATE_FORM = 'project.create';
 const ARCHIVE_FORM = 'project.archive';
-const UNARCHIVE_FORM = 'project.unarchive';
+const BULK_ARCHIVE_FORM = 'project.bulk-archive';
+const CREATE_FORM = 'project.create';
 const RENAME_FORM = 'project.rename';
+const UNARCHIVE_FORM = 'project.unarchive';
 
 async function createProject(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -101,9 +86,40 @@ async function renameProject(_prev: ActionState, formData: FormData): Promise<Ac
   redirect('/dashboard/projects');
 }
 
+async function bulkArchiveProjects(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_ARCHIVE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const ids = formData.getAll('id').filter((value): value is string => typeof value === 'string');
+  try {
+    for (const id of ids) {
+      guard.services.projects.archive(id);
+    }
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/projects');
+  return { error: null };
+}
+
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
+}
+
+function toRowData(project: ProjectView): ProjectRowData {
+  return {
+    id: project.id,
+    label: project.label,
+    displayName: project.displayName ?? null,
+    slug: project.slug,
+    isDefault: project.isDefault,
+    archived: project.archivedAt !== null,
+    legacy: !SLUG_REGEX.test(project.slug),
+    createdAt: project.createdAt,
+  };
 }
 
 export default async function ProjectsPage({
@@ -119,163 +135,61 @@ export default async function ProjectsPage({
   const active = projects.list();
   const archived = projects.listArchived();
 
-  const renderRow = (project: ProjectView) => {
-    const isLegacy = !SLUG_REGEX.test(project.slug);
-    return (
-      <DataTr key={project.id}>
-        <DataTd>
-          <span className="flex flex-wrap items-center gap-2">
-            {project.label}
-            {project.isDefault ? <Pill tone="dim">default</Pill> : null}
-          </span>
-        </DataTd>
-        <DataTd className="font-mono text-xs text-muted-foreground">
-          <span className="flex flex-wrap items-center gap-2">
-            {project.slug}
-            {isLegacy ? <Pill tone="amber">legacy</Pill> : null}
-          </span>
-        </DataTd>
-        <DataTd className="font-mono text-xs text-muted-foreground">
-          <Time value={project.createdAt} />
-        </DataTd>
-        <DataTd>
-          <div className="flex flex-wrap items-center gap-2">
-            <ActionForm action={renameProject} className="flex flex-wrap items-center gap-2">
-              <CsrfField form={RENAME_FORM} />
-              <input type="hidden" name="id" value={project.id} />
-              <Input
-                name="displayName"
-                defaultValue={project.displayName ?? ''}
-                placeholder="display name"
-                className="w-[280px]"
-              />
-              <Button type="submit" variant="outline" size="sm">
-                RENAME
-              </Button>
-            </ActionForm>
-            {project.archivedAt ? (
-              <ActionForm action={unarchiveProject}>
-                <CsrfField form={UNARCHIVE_FORM} />
-                <input type="hidden" name="id" value={project.id} />
-                <Button type="submit" variant="outline" size="sm">
-                  UNARCHIVE
-                </Button>
-              </ActionForm>
-            ) : project.isDefault ? null : (
-              <ActionForm action={archiveProject}>
-                <CsrfField form={ARCHIVE_FORM} />
-                <input type="hidden" name="id" value={project.id} />
-                <ConfirmSubmit
-                  tone="warn"
-                  title={`Archive project "${project.label}"?`}
-                  description="New writes will be rejected; existing memories stay queryable. You can unarchive later."
-                  confirmLabel="ARCHIVE PROJECT"
-                >
-                  <Button type="button" variant="outline" size="sm">
-                    ARCHIVE
-                  </Button>
-                </ConfirmSubmit>
-              </ActionForm>
-            )}
-          </div>
-        </DataTd>
-      </DataTr>
-    );
+  const csrf = {
+    create: await dashboardCsrfToken(CREATE_FORM),
+    rename: await dashboardCsrfToken(RENAME_FORM),
+    archive: await dashboardCsrfToken(ARCHIVE_FORM),
+    unarchive: await dashboardCsrfToken(UNARCHIVE_FORM),
+    bulkArchive: await dashboardCsrfToken(BULK_ARCHIVE_FORM),
   };
 
-  return (
-    <Page>
-      <ViewHead
-        num="06"
-        title="Rembric Projects."
-        hl="Rembric"
-        meta={[
-          { k: 'ACTIVE', v: active.length },
-          { k: 'ARCHIVED', v: archived.length },
-        ]}
-      />
+  const rows = [...active, ...archived].map(toRowData);
 
-      <p className="mt-4 text-xs text-muted-foreground">
+  return (
+    <Page className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Projects</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {`${rows.length} projects · ${active.length} active`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <CreateProjectSheet action={createProject} csrf={csrf.create} />
+        </div>
+      </section>
+
+      <p className="text-xs text-muted-foreground">
         A project is identified by its slug (the value passed via{' '}
         <code className="font-mono">/mcp/&lt;slug&gt;</code> or{' '}
         <code className="font-mono">{'project.use({slug})'}</code>).
       </p>
 
       {justCreated ? (
-        <div className="mt-5">
-          <Flash tone="lime" label="CREATED">
-            Created project <code className="font-mono">{justCreated}</code>.
-          </Flash>
-        </div>
+        <Flash tone="lime" label="CREATED">
+          Created project <code className="font-mono">{justCreated}</code>.
+        </Flash>
       ) : null}
       {errorMessage ? (
-        <div className="mt-5">
-          <Flash tone="danger" label="ERROR">
-            {errorMessage}
-          </Flash>
-        </div>
+        <Flash tone="danger" label="ERROR">
+          {errorMessage}
+        </Flash>
       ) : null}
 
-      <ActionForm action={createProject} className="mt-5 flex flex-wrap items-end gap-3">
-        <CsrfField form={CREATE_FORM} />
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="project-slug" className={`${LABEL} text-muted-foreground`}>
-            Slug
-          </Label>
-          <Input
-            id="project-slug"
-            name="slug"
-            required
-            placeholder="my-project"
-            pattern="[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?"
-            className="w-[220px]"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="project-display-name" className={`${LABEL} text-muted-foreground`}>
-            Display name
-          </Label>
-          <Input
-            id="project-display-name"
-            name="displayName"
-            placeholder="display name (optional)"
-            className="w-[320px]"
-          />
-        </div>
-        <Button type="submit">Create project</Button>
-      </ActionForm>
-
-      <div className="mt-8">
-        <SectionBar name={`Active (${active.length})`} />
-        {active.length === 0 ? (
-          <TableEmpty>No active projects.</TableEmpty>
-        ) : (
-          <DataTable>
-            <DataHead>
-              <DataTh>name</DataTh>
-              <DataTh>slug</DataTh>
-              <DataTh>created</DataTh>
-              <DataTh>actions</DataTh>
-            </DataHead>
-            <DataBody>{active.map(renderRow)}</DataBody>
-          </DataTable>
-        )}
-      </div>
-
-      {archived.length > 0 ? (
-        <div className="mt-8">
-          <SectionBar name={`Archived (${archived.length})`} />
-          <DataTable>
-            <DataHead>
-              <DataTh>name</DataTh>
-              <DataTh>slug</DataTh>
-              <DataTh>created</DataTh>
-              <DataTh>actions</DataTh>
-            </DataHead>
-            <DataBody>{archived.map(renderRow)}</DataBody>
-          </DataTable>
-        </div>
-      ) : null}
+      <ProjectsTable
+        rows={rows}
+        actions={{
+          rename: renameProject,
+          archive: archiveProject,
+          unarchive: unarchiveProject,
+        }}
+        csrf={csrf}
+        bulkArchiveAction={bulkArchiveProjects}
+        searchable
+        selectable
+        quickFilter
+        pageSize={10}
+      />
     </Page>
   );
 }
