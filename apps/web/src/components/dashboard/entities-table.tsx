@@ -13,7 +13,17 @@ export interface EntityRowData {
   readonly linkCount: number;
 }
 
-export function EntitiesTable({ rows }: { rows: readonly EntityRowData[] }) {
+export function EntitiesTable({
+  rows,
+  quickFilter = false,
+  searchable = false,
+  pageSize,
+}: {
+  rows: readonly EntityRowData[];
+  quickFilter?: boolean;
+  searchable?: boolean;
+  pageSize?: number;
+}) {
   const columns: DataTableColumn<EntityRowData>[] = [
     {
       id: 'entity',
@@ -53,8 +63,29 @@ export function EntitiesTable({ rows }: { rows: readonly EntityRowData[] }) {
       rowId={(row) => row.id}
       rowLabel={(row) => `${row.kind} entity — ${row.value}`}
       caption="Entities with kind, project and reference count"
+      searchable={searchable}
+      searchPlaceholder="Search entities…"
+      searchText={(row) => `${row.value} ${row.kind} ${row.project}`}
       variant="panel"
       density="default"
+      emptyState={
+        <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+          NO ENTITY MATCHES THIS FILTER
+        </div>
+      }
+      quickFilter={
+        quickFilter ? { columnId: 'kind', label: 'Filter by kind', allLabel: 'All' } : undefined
+      }
+      renderDetail={(row) => (
+        <div className="flex flex-col gap-2 px-2 py-1 text-xs">
+          <p className="font-mono text-[11px] text-foreground break-all">{row.value}</p>
+          <p className="font-mono text-[10px] text-muted-foreground">
+            {`kind: ${row.kind} · project: ${row.project} · ${row.linkCount} ${
+              row.linkCount === 1 ? 'memory' : 'memories'
+            } · id: ${row.id}`}
+          </p>
+        </div>
+      )}
       rowActions={(row) => (
         <Link
           href={`/dashboard/memories?q=${encodeURIComponent(row.value)}`}
@@ -63,6 +94,7 @@ export function EntitiesTable({ rows }: { rows: readonly EntityRowData[] }) {
           View memories →
         </Link>
       )}
+      pageSize={pageSize}
     />
   );
 }

@@ -129,4 +129,40 @@ describe('dashboard entities view', () => {
     const html = await renderEntities();
     expect(html).toMatch(/REBUILD ENTITY INDEX[\s\S]{0,40}\(1 PENDING\)/);
   });
+
+  it('renders the kind quick-filter pills, the search box and one client page of ten', async () => {
+    const m = memory.save(
+      { type: 'project', title: 'Many', content: 'many' },
+      defaultProjectScope(t.handle),
+    );
+    const refs = Array.from({ length: 12 }, (_, i) => ({
+      kind: 'path' as const,
+      value: `path-${String(i).padStart(2, '0')}.ts`,
+    }));
+    repos.entities.linkMemory(m.id, defaultProject(t.handle).id, refs, new Date());
+
+    const html = await renderEntities();
+    expect(html).toContain('Filter by kind');
+    expect(html).toContain('Search entities…');
+    expect(html).toContain('1–10 of 12');
+    expect(html).toContain('path-00.ts');
+    expect(html).not.toContain('path-10.ts');
+  });
+
+  it('keeps the non-destructive row affordance and the metadata disclosure', async () => {
+    const m = memory.save(
+      { type: 'project', title: 'A', content: 'apps/a.ts' },
+      defaultProjectScope(t.handle),
+    );
+    repos.entities.linkMemory(
+      m.id,
+      defaultProject(t.handle).id,
+      [{ kind: 'path', value: 'apps/a.ts' }],
+      new Date(),
+    );
+
+    const html = await renderEntities();
+    expect(html).toContain('View memories →');
+    expect(html).toContain('Show path entity — apps/a.ts"');
+  });
 });

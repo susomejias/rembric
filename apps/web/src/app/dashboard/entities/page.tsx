@@ -2,7 +2,7 @@ import type { EntityBackfillWorker } from '@rembric/core';
 import { ENTITY_KINDS, type EntityKind } from '@rembric/db';
 import { redirect } from 'next/navigation';
 
-import { entitiesQuery, readEntitiesFilters, type SearchParams } from './filters';
+import { readEntitiesFilters, type SearchParams } from './filters';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -13,10 +13,9 @@ import {
   FilterField,
   FilterForm,
   FilterSelect,
-  Pager,
 } from '@/components/dashboard/filters';
-import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
-import { Flash, Page, StatCard, StatGrid, TableEmpty } from '@/components/dashboard/ui';
+import { shortId, singleParam } from '@/components/dashboard/support';
+import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -26,6 +25,12 @@ export const dynamic = 'force-dynamic';
 const REBUILD_FORM = 'entities.rebuild';
 
 const REBUILD_MAX_BATCHES = 200;
+
+// One-line justification: the client table owns filtering and pagination, so the
+// page loads a generous window instead of paginating server-side.
+const LIST_LIMIT = 500;
+
+const TABLE_PAGE_SIZE = 10;
 
 export function runEntityRebuild(worker: EntityBackfillWorker): number {
   worker.resetIndex();
@@ -59,7 +64,6 @@ export default async function EntitiesPage({
 }) {
   const params = await searchParams;
   const filters = readEntitiesFilters(params);
-  const roundTripQuery = entitiesQuery(params);
   const rebuilt = singleParam(params['rebuilt']);
 
   const { repos } = getServices();
@@ -67,25 +71,37 @@ export default async function EntitiesPage({
   const kind = filters.kind === '' ? undefined : (filters.kind as EntityKind);
   const rowFilters = { kind, singleReferenceOnly: filters.singleReferenceOnly };
 
-  const offset = filters.page * PAGE_SIZE;
-  const rows = repos.entities.adminListEntities(rowFilters, PAGE_SIZE, offset);
+  const rows = repos.entities.adminListEntities(rowFilters, LIST_LIMIT, 0);
   const total = repos.entities.adminCountEntities(rowFilters);
   const backlog = repos.entities.adminBacklogCount();
   const projectById = new Map(repos.projects.adminListAll().map((p) => [p.id, p.slug]));
   const counts = repos.entities.adminCountsByKind();
   const corpusTotal = counts.reduce((sum, c) => sum + c.count, 0);
 
-  const hasMore = offset + rows.length < total;
-
   return (
     <Page>
-      <header className="min-w-0">
-        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
-          Entities
-        </h1>
-        <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
-          {`${rows.length} ROWS · ${total} MATCHING · ${corpusTotal} INDEXED`}
-        </p>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
+            Entities
+          </h1>
+          <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
+            {`${rows.length} ROWS · ${total} MATCHING · ${corpusTotal} INDEXED`}
+          </p>
+        </div>
+        <ActionForm action={rebuildEntities} className="shrink-0">
+          <CsrfField form={REBUILD_FORM} />
+          <ConfirmSubmit
+            tone="warn"
+            title="Truncate and re-scan the entity index from every memory, archived included?"
+            description="Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
+            confirmLabel="REBUILD ENTITY INDEX"
+          >
+            <Button type="button" variant="outline" size="sm">
+              REBUILD ENTITY INDEX{backlog > 0 ? ` (${backlog} PENDING)` : ''}
+            </Button>
+          </ConfirmSubmit>
+        </ActionForm>
       </header>
 
       {rebuilt !== '' ? (
@@ -110,22 +126,6 @@ export default async function EntitiesPage({
         ))}
       </StatGrid>
 
-      <div className="mt-6">
-        <ActionForm action={rebuildEntities}>
-          <CsrfField form={REBUILD_FORM} />
-          <ConfirmSubmit
-            tone="warn"
-            title="Truncate and re-scan the entity index from every memory, archived included?"
-            description="Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
-            confirmLabel="REBUILD ENTITY INDEX"
-          >
-            <Button type="button" variant="outline" size="sm">
-              REBUILD ENTITY INDEX{backlog > 0 ? ` (${backlog} PENDING)` : ''}
-            </Button>
-          </ConfirmSubmit>
-        </ActionForm>
-      </div>
-
       <FilterForm action="/dashboard/entities" className="mt-6">
         <FilterField label="KIND" htmlFor="e-kind">
           <FilterSelect id="e-kind" name="kind" value={filters.kind} options={KIND_OPTIONS} />
@@ -144,29 +144,19 @@ export default async function EntitiesPage({
         <FilterActions clearHref="/dashboard/entities" />
       </FilterForm>
 
-      {rows.length === 0 ? (
-        <TableEmpty>No entities match this filter.</TableEmpty>
-      ) : (
-        <EntitiesTable
-          rows={rows.map((entity) => ({
-            id: entity.id,
-            kind: entity.kind,
-            value: entity.value,
-            project: entity.projectId
-              ? (projectById.get(entity.projectId) ?? shortId(entity.projectId))
-              : '—',
-            linkCount: entity.linkCount,
-          }))}
-        />
-      )}
-
-      <Pager
-        page={filters.page}
-        hasMore={hasMore}
-        total={total}
-        totalLabel={`${rows.length} ROWS`}
-        path="/dashboard/entities"
-        query={roundTripQuery}
+      <EntitiesTable
+        rows={rows.map((entity) => ({
+          id: entity.id,
+          kind: entity.kind,
+          value: entity.value,
+          project: entity.projectId
+            ? (projectById.get(entity.projectId) ?? shortId(entity.projectId))
+            : '—',
+          linkCount: entity.linkCount,
+        }))}
+        quickFilter
+        searchable
+        pageSize={TABLE_PAGE_SIZE}
       />
     </Page>
   );
