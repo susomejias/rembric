@@ -1,5 +1,5 @@
 import type { EntityBackfillWorker } from '@rembric/core';
-import { ENTITY_KINDS, type EntityKind } from '@rembric/db';
+import type { EntityKind } from '@rembric/db';
 import { redirect } from 'next/navigation';
 
 import { readEntitiesFilters, type SearchParams } from './filters';
@@ -9,7 +9,7 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { EntitiesTable } from '@/components/dashboard/entities-table';
 import { shortId, singleParam } from '@/components/dashboard/support';
-import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
+import { Flash, Page } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -102,20 +102,6 @@ export default async function EntitiesPage({
           </Flash>
         </div>
       ) : null}
-
-      <StatGrid variant="cards" className="mt-6">
-        <StatCard compact k="ALL KINDS" v={corpusTotal} tone="lime" href="/dashboard/entities" />
-        {ENTITY_KINDS.map((entityKind) => (
-          <StatCard
-            compact
-            key={entityKind}
-            k={entityKind.toUpperCase()}
-            v={counts.find((c) => c.kind === entityKind)?.count ?? 0}
-            tone="fg"
-            href={`/dashboard/entities?kind=${entityKind}`}
-          />
-        ))}
-      </StatGrid>
 
       <div className="mt-4">
         <EntitiesTable
