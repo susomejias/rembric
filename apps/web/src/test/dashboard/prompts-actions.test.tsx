@@ -11,6 +11,7 @@ vi.mock('@/components/dashboard/ui', () => ({}));
 vi.mock('@/components/ui/button', () => ({}));
 vi.mock('@/lib/actions/guard', async () => await import('../../lib/actions/guard'));
 vi.mock('@/lib/services', async () => await import('../../lib/services'));
+vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 import {
   deriveSessionKey,
@@ -29,6 +30,7 @@ vi.mock('next/headers', () => ({ cookies: () => requestCookies.current }));
 
 const DELETE_FORM = 'prompt.delete';
 const UNDELETE_FORM = 'prompt.undelete';
+const BULK_DELETE_FORM = 'prompt.bulk-delete';
 const ADMIN_TOKEN = 'web-prompts-actions-admin-token-enough-entropy';
 
 interface Fixture {
@@ -72,7 +74,9 @@ function createFixture(): Fixture {
     cleanup: () => {
       try {
         handle.close();
-      } catch {}
+      } catch {
+        // Best-effort: the handle may already be closed by the fixture teardown.
+      }
       rmSync(dataDir, { recursive: true, force: true });
     },
   };
@@ -119,15 +123,28 @@ type ActionFn = (
   formData: FormData,
 ) => Promise<{ error: string | null }>;
 
-async function actions(): Promise<{ deletePrompt: ActionFn; undeletePrompt: ActionFn }> {
+async function actions(): Promise<{
+  deletePrompt: ActionFn;
+  undeletePrompt: ActionFn;
+  bulkDeletePrompt: ActionFn;
+}> {
   const mod = (await import('../../app/dashboard/prompts/page')) as {
     deletePrompt?: ActionFn;
     undeletePrompt?: ActionFn;
+    bulkDeletePrompt?: ActionFn;
   };
-  if (mod.deletePrompt === undefined || mod.undeletePrompt === undefined) {
-    throw new Error('prompts page does not export the delete/undelete actions');
+  if (
+    mod.deletePrompt === undefined ||
+    mod.undeletePrompt === undefined ||
+    mod.bulkDeletePrompt === undefined
+  ) {
+    throw new Error('prompts page does not export the delete/undelete/bulk-delete actions');
   }
-  return { deletePrompt: mod.deletePrompt, undeletePrompt: mod.undeletePrompt };
+  return {
+    deletePrompt: mod.deletePrompt,
+    undeletePrompt: mod.undeletePrompt,
+    bulkDeletePrompt: mod.bulkDeletePrompt,
+  };
 }
 
 function deletedAt(id: string): Date | null {
@@ -265,5 +282,49 @@ describe('prompt.delete and prompt.undelete state transitions', () => {
 
     const undel = await undeletePrompt(EMPTY_STATE, submission(UNDELETE_FORM, 'P-missing'));
     expect(undel.error).toContain('P-missing');
+  });
+});
+
+describe('prompt.bulk-delete authorization and effect', () => {
+  function bulkSubmission(ids: readonly string[], csrf = csrfFor(BULK_DELETE_FORM)): FormData {
+    const data = form({ csrf });
+    for (const id of ids) data.append('id', id);
+    return data;
+  }
+
+  it('refuses a submission carrying no CSRF token, deleting nothing', async () => {
+    const id = savePrompt('P-bulk-nocsrf');
+    const { bulkDeletePrompt } = await actions();
+
+    const result = await bulkDeletePrompt(EMPTY_STATE, bulkSubmission([id], ''));
+
+    expect(result.error).toContain('could not be verified');
+    expect(deletedAt(id)).toBeNull();
+  });
+
+  it('refuses a session minted from a non-admin token, deleting nothing', async () => {
+    const id = savePrompt('P-bulk-limited');
+    requestCookies.current = cookieSource(fixture.limited.cookie);
+    const { bulkDeletePrompt } = await actions();
+
+    const result = await bulkDeletePrompt(
+      EMPTY_STATE,
+      bulkSubmission([id], csrfFor(BULK_DELETE_FORM, fixture.limited.session)),
+    );
+
+    expect(result.error).toContain('admin token');
+    expect(deletedAt(id)).toBeNull();
+  });
+
+  it('soft-deletes every submitted id and reports no error', async () => {
+    const first = savePrompt('P-bulk-a');
+    const second = savePrompt('P-bulk-b');
+    const { bulkDeletePrompt } = await actions();
+
+    const result = await bulkDeletePrompt(EMPTY_STATE, bulkSubmission([first, second]));
+
+    expect(result.error).toBeNull();
+    expect(deletedAt(first)).not.toBeNull();
+    expect(deletedAt(second)).not.toBeNull();
   });
 });
