@@ -1,5 +1,6 @@
 import { DomainError, isProjectSetScope, pinnedProjectId, type TokenScope } from '@rembric/core';
 import type { Token } from '@rembric/db';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
@@ -29,6 +30,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 const CREATE_FORM = 'token.create';
 const REVOKE_FORM = 'token.revoke';
+const BULK_REVOKE_FORM = 'token.bulk-revoke';
 const TOKEN_PAGE_SIZE = 10;
 
 async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -110,6 +112,26 @@ async function revokeToken(_prev: ActionState, formData: FormData): Promise<Acti
   redirect('/dashboard/tokens');
 }
 
+async function bulkRevokeTokens(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_REVOKE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const names = formData
+    .getAll('name')
+    .filter((value): value is string => typeof value === 'string');
+  try {
+    for (const name of names) {
+      guard.services.tokens.revoke(name);
+    }
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/tokens');
+  return { error: null };
+}
+
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -126,7 +148,10 @@ export default async function TokensPage({
 
   const { repos, projects, tokens: tokensService } = getServices();
   const nowMs = Date.now();
-  const csrf = { revoke: await dashboardCsrfToken(REVOKE_FORM) };
+  const csrf = {
+    revoke: await dashboardCsrfToken(REVOKE_FORM),
+    bulkRevoke: await dashboardCsrfToken(BULK_REVOKE_FORM),
+  };
 
   const tokens = tokensService.list();
 
@@ -220,8 +245,10 @@ export default async function TokensPage({
             stateTone: state.tone,
             revoked: token.revokedAt !== null,
           }))}
-          actions={{ revoke: revokeToken }}
+          actions={{ revoke: revokeToken, bulkRevoke: bulkRevokeTokens }}
           csrf={csrf}
+          selectable
+          searchable
           pageSize={TOKEN_PAGE_SIZE}
         />
       </div>
