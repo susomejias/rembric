@@ -2,7 +2,6 @@
 
 import { MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -18,6 +17,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
+const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
+const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 export interface SessionRowData {
   readonly id: string;
@@ -48,6 +50,8 @@ export interface SessionCsrfTokens {
   readonly abandon: string | null;
   readonly remove: string | null;
   readonly restore: string | null;
+  readonly bulkAbandon: string | null;
+  readonly bulkRemove: string | null;
 }
 
 export function SessionsTable({
@@ -57,6 +61,8 @@ export function SessionsTable({
   sparklines,
   actions,
   csrf,
+  bulkAbandon,
+  bulkRemove,
   quickFilter = false,
   selectable = false,
   searchable = false,
@@ -68,13 +74,13 @@ export function SessionsTable({
   sparklines?: SessionSparklines;
   actions: SessionServerActions;
   csrf: SessionCsrfTokens;
+  bulkAbandon: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
+  bulkRemove: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   quickFilter?: boolean;
   selectable?: boolean;
   searchable?: boolean;
   pageSize?: number;
 }) {
-  const router = useRouter();
-
   const columns: DataTableColumn<SessionRowData>[] = [
     {
       id: 'session',
@@ -156,15 +162,6 @@ export function SessionsTable({
     },
   ];
 
-  const deleteIds = (ids: string[]) => {
-    for (const id of ids) {
-      const formData = new FormData();
-      formData.set('id', id);
-      void actions.remove({ error: null }, formData);
-    }
-    router.refresh();
-  };
-
   return (
     <TooltipProvider delayDuration={100}>
       <DataTable
@@ -191,24 +188,55 @@ export function SessionsTable({
         selectable={selectable}
         bulkActions={
           selectable
-            ? (context) => (
-                <ConfirmSubmit
-                  tone="danger"
-                  title={`Soft-delete ${context.ids.length} selected sessions?`}
-                  description="Their memories stay queryable but the sessions are hidden from the list. You can restore them from the deleted view."
-                  confirmLabel="DELETE SELECTED"
-                >
-                  <Button type="button" variant="destructive" size="sm">
-                    Delete selected
-                  </Button>
-                </ConfirmSubmit>
-              )
-            : undefined
-        }
-        onDelete={
-          selectable
-            ? (ids) => {
-                deleteIds(ids);
+            ? (context) => {
+                const activeRows = context.rows.filter((row) => row.status === 'active');
+                const skipped = context.rows.length - activeRows.length;
+                return (
+                  <>
+                    <ActionForm action={bulkAbandon} className="flex">
+                      <input type="hidden" name="csrf" value={csrf.bulkAbandon ?? ''} />
+                      {activeRows.map((row) => (
+                        <input key={row.id} type="hidden" name="id" value={row.id} />
+                      ))}
+                      <ConfirmSubmit
+                        tone="warn"
+                        title={`Mark ${activeRows.length} selected ${
+                          activeRows.length === 1 ? 'session' : 'sessions'
+                        } as abandoned?`}
+                        description={`${activeRows.length} active ${
+                          activeRows.length === 1 ? 'session' : 'sessions'
+                        } will be marked abandoned. ${skipped} non-active ${
+                          skipped === 1 ? 'session' : 'sessions'
+                        } will be skipped. Their memories stay queryable and the rows stay visible.`}
+                        confirmLabel="ABANDON SELECTED"
+                      >
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="border-warn/40 bg-warn/10 text-warn hover:bg-warn/20 hover:text-warn"
+                        >
+                          Mark as abandoned
+                        </Button>
+                      </ConfirmSubmit>
+                    </ActionForm>
+                    <ActionForm action={bulkRemove} className="flex">
+                      <input type="hidden" name="csrf" value={csrf.bulkRemove ?? ''} />
+                      {context.ids.map((id) => (
+                        <input key={id} type="hidden" name="id" value={id} />
+                      ))}
+                      <ConfirmSubmit
+                        tone="danger"
+                        title={`Soft-delete ${context.ids.length} selected sessions?`}
+                        description="Their memories stay queryable but the sessions are hidden from the list. You can restore them from the deleted view."
+                        confirmLabel="DELETE SELECTED"
+                      >
+                        <Button type="button" variant="destructive" size="sm">
+                          Delete selected
+                        </Button>
+                      </ConfirmSubmit>
+                    </ActionForm>
+                  </>
+                );
               }
             : undefined
         }
@@ -274,15 +302,10 @@ function SessionRowMenu({
       <DropdownMenuContent align="end" className="w-44 border-border bg-popover">
         {row.deleted ? (
           <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}>
-            <ActionForm action={actions.restore} className="flex w-full">
+            <ActionForm action={actions.restore} className={MENU_ITEM_ROOT}>
               <input type="hidden" name="csrf" value={csrf.restore ?? ''} />
               <input type="hidden" name="id" value={row.id} />
-              <Button
-                type="submit"
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start font-normal"
-              >
+              <Button type="submit" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                 Undelete session
               </Button>
             </ActionForm>
@@ -292,7 +315,7 @@ function SessionRowMenu({
             <DropdownMenuItem asChild>
               <Link
                 href={`/dashboard/sessions/${row.id}`}
-                className="h-8 w-full cursor-pointer items-center px-2"
+                className={cn(MENU_ITEM_ROOT, 'cursor-pointer')}
               >
                 View details
               </Link>
@@ -303,7 +326,7 @@ function SessionRowMenu({
                 onSelect={(event) => event.preventDefault()}
                 className="text-warn focus:text-warn"
               >
-                <ActionForm action={actions.abandon} className="flex w-full">
+                <ActionForm action={actions.abandon} className={MENU_ITEM_ROOT}>
                   <input type="hidden" name="csrf" value={csrf.abandon ?? ''} />
                   <input type="hidden" name="id" value={row.id} />
                   <ConfirmSubmit
@@ -312,12 +335,7 @@ function SessionRowMenu({
                     description="Its memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
                     confirmLabel="ABANDON SESSION"
                   >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-full justify-start px-2 font-normal"
-                    >
+                    <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                       Abandon session
                     </Button>
                   </ConfirmSubmit>
@@ -330,7 +348,7 @@ function SessionRowMenu({
               onSelect={(event) => event.preventDefault()}
               className="text-destructive focus:text-destructive"
             >
-              <ActionForm action={actions.remove} className="flex w-full">
+              <ActionForm action={actions.remove} className={MENU_ITEM_ROOT}>
                 <input type="hidden" name="csrf" value={csrf.remove ?? ''} />
                 <input type="hidden" name="id" value={row.id} />
                 <ConfirmSubmit
@@ -339,12 +357,7 @@ function SessionRowMenu({
                   description="Its memories stay queryable but the session is hidden from the list. You can restore it from the deleted view."
                   confirmLabel="DELETE SESSION"
                 >
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start font-normal"
-                  >
+                  <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                     Delete session
                   </Button>
                 </ConfirmSubmit>

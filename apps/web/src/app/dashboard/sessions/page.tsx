@@ -1,4 +1,5 @@
 import { DomainError } from '@rembric/core';
+import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -14,6 +15,8 @@ import { dashboardCsrfToken } from '@/lib/session';
 export const dynamic = 'force-dynamic';
 
 const ABANDON_FORM = 'session.abandon';
+const BULK_ABANDON_FORM = 'session.bulk-abandon';
+const BULK_DELETE_FORM = 'session.bulk-delete';
 const DELETE_FORM = 'session.delete';
 const UNDELETE_FORM = 'session.undelete';
 
@@ -76,6 +79,42 @@ function readField(form: FormData, name: string): string {
   return (typeof value === 'string' ? value : '').trim();
 }
 
+async function bulkAbandonSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_ABANDON_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const ids = formData.getAll('id').filter((v): v is string => typeof v === 'string');
+  try {
+    for (const id of ids) {
+      guard.services.agentSessions.markAbandoned(id, { adminBypass: true });
+    }
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/sessions');
+  return { error: null };
+}
+
+async function bulkDeleteSession(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_DELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const ids = formData.getAll('id').filter((v): v is string => typeof v === 'string');
+  try {
+    for (const id of ids) {
+      guard.services.agentSessions.softDelete(id, { adminBypass: true });
+    }
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/sessions');
+  return { error: null };
+}
+
 export default async function SessionsPage({
   searchParams,
 }: {
@@ -93,6 +132,8 @@ export default async function SessionsPage({
     abandon: await dashboardCsrfToken(ABANDON_FORM),
     remove: await dashboardCsrfToken(DELETE_FORM),
     restore: await dashboardCsrfToken(UNDELETE_FORM),
+    bulkAbandon: await dashboardCsrfToken(BULK_ABANDON_FORM),
+    bulkRemove: await dashboardCsrfToken(BULK_DELETE_FORM),
   };
 
   const rows = repos.agentSessions.adminList({
@@ -194,6 +235,8 @@ export default async function SessionsPage({
         sparklines={sparklines}
         actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
         csrf={csrf}
+        bulkAbandon={bulkAbandonSession}
+        bulkRemove={bulkDeleteSession}
         quickFilter
         selectable
         searchable
@@ -227,6 +270,8 @@ export default async function SessionsPage({
             sparklines={sparklines}
             actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
             csrf={csrf}
+            bulkAbandon={bulkAbandonSession}
+            bulkRemove={bulkDeleteSession}
             pageSize={10}
           />
         </>
