@@ -2,8 +2,22 @@
 
 import Link from 'next/link';
 
-import { Chip } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
+import { cn } from '@/lib/utils';
+
+function KindPill({ kind }: { kind: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
+        'border-border bg-input/60 text-muted-foreground',
+      )}
+    >
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-muted-foreground" />
+      {kind}
+    </span>
+  );
+}
 
 export interface EntityRowData {
   readonly id: string;
@@ -44,7 +58,7 @@ export function EntitiesTable({
       header: 'Kind',
       sortable: true,
       value: (row) => row.kind,
-      cell: (row) => <Chip>{row.kind}</Chip>,
+      cell: (row) => <KindPill kind={row.kind} />,
     },
     {
       id: 'project',
