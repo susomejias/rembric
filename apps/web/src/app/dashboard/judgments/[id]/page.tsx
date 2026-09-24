@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -8,8 +9,7 @@ import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId } from '@/components/dashboard/support';
 import {
   BackLink,
-  Kv,
-  KvGrid,
+  LABEL,
   Page,
   Pill,
   SectionBar,
@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,25 @@ async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<A
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
+}
+
+function MetaGrid({ children }: { children: ReactNode }) {
+  return (
+    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {children}
+    </dl>
+  );
+}
+
+function MetaRow({ k, v, mono = false }: { k: string; v: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <dt className={cn('text-muted-foreground', LABEL)}>{k}</dt>
+      <dd className={cn('min-w-0 break-words text-sm text-foreground', mono && 'font-mono')}>
+        {v}
+      </dd>
+    </div>
+  );
 }
 
 function evidencePretty(value: unknown): string | null {
@@ -70,20 +90,20 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
         <BackLink href="/dashboard/judgments" label="BACK TO JUDGMENTS" />
       </div>
 
-      <KvGrid>
-        <Kv k="Status" v={<StatusPill status={row.status} />} />
-        <Kv
+      <MetaGrid>
+        <MetaRow k="Status" v={<StatusPill status={row.status} />} />
+        <MetaRow
           k="Verdict"
           v={<Pill tone={row.relation === null ? 'dim' : 'lime'}>{row.relation ?? 'pending'}</Pill>}
         />
-        <Kv k="Confidence" v={row.confidence !== null ? row.confidence.toFixed(2) : '—'} />
-        <Kv
+        <MetaRow k="Confidence" v={row.confidence !== null ? row.confidence.toFixed(2) : '—'} />
+        <MetaRow
           k="Marked by"
           v={`${row.markedByKind ?? '—'}${row.markedByActor ? ` · ${row.markedByActor}` : ''}`}
         />
-        <Kv k="Created" v={<Time value={row.createdAt} />} mono />
-        <Kv k="Judged" v={<Time value={row.judgedAt} />} mono />
-      </KvGrid>
+        <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
+        <MetaRow k="Judged" v={<Time value={row.judgedAt} />} mono />
+      </MetaGrid>
 
       <MarkdownPanel
         eyebrow="Source"
@@ -120,7 +140,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
 
       <SectionBar name="Evidence" />
       {evidence !== null ? (
-        <pre className="mb-6 overflow-x-auto border border-border bg-muted p-3 font-mono text-xs leading-5">
+        <pre className="mb-6 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-muted-foreground">
           {evidence}
         </pre>
       ) : (
@@ -141,7 +161,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
             description="It will be removed from the pending queue and won't be re-judged automatically."
             confirmLabel="MARK ORPHANED"
           >
-            <Button type="button" variant="outline" size="sm">
+            <Button type="button" variant="destructive" size="sm">
               MARK ORPHANED
             </Button>
           </ConfirmSubmit>
