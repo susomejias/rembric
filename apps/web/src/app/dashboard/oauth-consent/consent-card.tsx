@@ -15,43 +15,78 @@ export interface ConsentCardProps {
   grantedScope: string;
 }
 
+const SCOPE_COPY: Record<string, string> = {
+  read: 'Read memories, sessions, projects and judgments.',
+  mcp: 'Read and write through the MCP tools.',
+};
+
+const META_LABEL = 'font-mono text-[10px] tracking-[.16em] text-muted-foreground uppercase';
+
 export function ConsentCard({ blob, clientName, redirectHost, grantedScope }: ConsentCardProps) {
   const access = resolveGrantedScope(grantedScope) === 'read:*' ? 'Read-only' : 'Read & write';
+  const scopes = grantedScope.split(/\s+/).filter((scope) => scope.length > 0);
 
   return (
     <ConsentShell hl="Authorize" rest="Application.">
-      <Lead>
-        <b className="text-foreground">{clientName}</b> wants to connect to your Rembric memory and
-        will redirect to <code className="font-mono">{redirectHost}</code>.
-      </Lead>
-
-      <div className="flex flex-col gap-1 rounded-xl border bg-muted/40 px-3 py-2.5">
-        <span className="font-mono text-[0.66rem] tracking-[0.12em] text-muted-foreground uppercase">
-          Granted access
-        </span>
-        <span className="text-sm">
-          <span className="text-primary">{access}</span> · scope{' '}
-          <code className="font-mono">{grantedScope}</code>
+      <div className="flex flex-col gap-1">
+        <span className={META_LABEL}>Client</span>
+        <span className="font-display text-lg leading-snug font-semibold tracking-tight break-words text-foreground">
+          {clientName}
         </span>
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <Lead>
+        This application wants to connect to your Rembric memory and will redirect to{' '}
+        <code className="font-mono text-foreground">{redirectHost}</code>.
+      </Lead>
+
+      <section className="flex flex-col gap-2.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className={META_LABEL}>Requested access</h2>
+          <span className={`${META_LABEL} text-primary`}>{access}</span>
+        </div>
+        <ul className="flex flex-col gap-2">
+          {scopes.map((scope, index) => {
+            const description = SCOPE_COPY[scope.toLowerCase()];
+            return (
+              <li key={`${scope}:${index}`} className="flex items-start gap-2.5">
+                <span
+                  aria-hidden="true"
+                  className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary"
+                />
+                <span className="flex flex-col gap-0.5">
+                  <code className="font-mono text-xs text-foreground">{scope}</code>
+                  {description ? (
+                    <span className="text-xs leading-relaxed text-muted-foreground">
+                      {description}
+                    </span>
+                  ) : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
         Project scope, if any, is bound by the connector path{' '}
-        <code className="font-mono">/mcp/&lt;slug&gt;</code>.
+        <code className="font-mono text-foreground">/mcp/&lt;slug&gt;</code>.
       </p>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <form action="/dashboard/oauth/consent" method="post">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <form action="/dashboard/oauth/consent" method="post" className="sm:flex-1">
           <CsrfField form={CONSENT_FORM} />
           <input type="hidden" name="areq" value={blob} />
           <input type="hidden" name="decision" value="approve" />
-          <Button type="submit">AUTHORIZE →</Button>
+          <Button type="submit" className="h-11 w-full rounded-[10px]">
+            AUTHORIZE →
+          </Button>
         </form>
-        <form action="/dashboard/oauth/consent" method="post">
+        <form action="/dashboard/oauth/consent" method="post" className="sm:flex-1">
           <CsrfField form={CONSENT_FORM} />
           <input type="hidden" name="areq" value={blob} />
           <input type="hidden" name="decision" value="deny" />
-          <Button type="submit" variant="outline">
+          <Button type="submit" variant="outline" className="h-11 w-full rounded-[10px]">
             DENY
           </Button>
         </form>
@@ -70,39 +105,43 @@ export function ConsentShell({
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
-      <div className="flex items-center gap-3">
+    <main className="relative isolate flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 py-12">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]"
+      />
+      <div className="flex items-center gap-2.5">
         <img
           src="/dashboard/assets/logo-transparent.png"
           alt=""
           aria-hidden="true"
-          className="size-8"
+          className="size-6 shrink-0"
         />
-        <span className="font-mono text-xs tracking-[0.18em] text-muted-foreground uppercase">
-          Rembric · Authorize
-        </span>
+        <span className={`${META_LABEL} tracking-[.18em]`}>Rembric · Authorize</span>
       </div>
-      <h1 className="text-2xl font-semibold tracking-tight">
-        <span className="text-primary">{hl}</span> {rest}
-      </h1>
-      <Card>
-        <CardContent className="flex flex-col gap-3">{children}</CardContent>
-      </Card>
-    </div>
+      <div className="flex w-full max-w-md flex-col gap-4">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+          <span className="text-primary">{hl}</span> {rest}
+        </h1>
+        <Card className="rounded-2xl border border-border bg-card shadow-lg shadow-black/20 ring-0">
+          <CardContent className="flex flex-col gap-4">{children}</CardContent>
+        </Card>
+      </div>
+    </main>
   );
 }
 
 export function ErrorNotice({ message }: { message: string }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      <Badge variant="destructive" className="font-mono">
+    <div className="flex items-start gap-2.5">
+      <Badge variant="destructive" className="mt-0.5 shrink-0 font-mono tracking-[.14em]">
         ERROR
       </Badge>
-      <span>{message}</span>
+      <span className="text-sm leading-relaxed text-foreground">{message}</span>
     </div>
   );
 }
 
 export function Lead({ children }: { children: ReactNode }) {
-  return <p className="text-sm text-muted-foreground">{children}</p>;
+  return <p className="text-sm leading-relaxed text-muted-foreground">{children}</p>;
 }
