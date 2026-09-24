@@ -14,6 +14,7 @@ import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { MemoriesTable } from '@/components/dashboard/memories-table';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { shortId, singleParam } from '@/components/dashboard/support';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -196,7 +197,10 @@ export default async function MemoriesPage({
     <Page>
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Memories</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Memories</h1>
+            <PageHelp text="What your agents chose to remember — searchable, reviewable, archived by decay." />
+          </div>
           <p className="mt-2 text-sm text-muted-foreground">{summary}</p>
         </div>
       </section>

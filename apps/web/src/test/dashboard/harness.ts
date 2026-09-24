@@ -78,26 +78,20 @@ export function installViewMocks(pathname = '/dashboard'): void {
     async () => await import('../../components/dashboard/support'),
   );
   vi.mock('@/components/dashboard/ui', async () => await import('../../components/dashboard/ui'));
-  vi.mock('@/components/dashboard/command-bar', async () => {
-    const { badgeTooltip } = await import('../../lib/nav');
-    type Breakdown = { total: number; byProject: { label: string; count: number }[] };
+  vi.mock('@/components/dashboard/command-bar', () => {
     return {
       CommandFrame: ({
         children,
-        counters = {},
+        totals = {},
       }: {
         children?: unknown;
-        counters?: Record<string, Breakdown>;
+        totals?: Record<string, number>;
       }) =>
         createElement(
           'div',
           { 'data-shell': 'true' },
-          (['pendingJudgments', 'needsReview'] as const).map((key) =>
-            createElement('span', {
-              key,
-              'data-badge': key,
-              title: counters[key] ? badgeTooltip(key, counters[key]) : undefined,
-            }),
+          Object.entries(totals).map(([key, value]) =>
+            createElement('span', { key, 'data-total': key }, String(value)),
           ),
           children as never,
         ),

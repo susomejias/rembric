@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { PromptsTable } from '@/components/dashboard/prompts-table';
 import { singleParam } from '@/components/dashboard/support';
 import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
@@ -112,7 +113,10 @@ export default async function PromptsPage({
     <Page>
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Prompts</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Prompts</h1>
+            <PageHelp text="Prompts captured from agent sessions, with lifecycle states." />
+          </div>
           <p className="mt-2 text-sm text-muted-foreground">
             {`${total} MATCHING · ${rows.length} rows · ${activeCount} live · ${deletedCount} deleted`}
           </p>
