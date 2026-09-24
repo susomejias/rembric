@@ -16,8 +16,11 @@ import {
 
 installViewMocks('/dashboard/memories');
 
-const PAGE_SIZE = 50;
-const SEEDED = PAGE_SIZE + 2;
+// The page loads one bounded window (LIST_LIMIT) while the header reports the
+// true filtered total, so the fixture overflows the window on purpose.
+const LIST_LIMIT = 500;
+const OVERFLOW = LIST_LIMIT + 2;
+const SEEDED = 52;
 
 function widget(id: string, overrides: Partial<NewMemory> = {}): NewMemory {
   const content = `widget number ${id}`;
@@ -66,54 +69,114 @@ async function renderMemoryDetail(id: string): Promise<string> {
   );
 }
 
-describe('memories list totals and page slice', () => {
+describe('memories list header and bounded window', () => {
   beforeEach(() => {
     t.handle.db
       .insert(memory)
-      .values(Array.from({ length: SEEDED }, (_, i) => widget(`G${i}`)))
+      .values(Array.from({ length: OVERFLOW }, (_, i) => widget(`G${i}`)))
       .run();
   });
 
-  it(`shows the true total (${SEEDED}), not the page slice, and caps the pager at PAGE_SIZE`, async () => {
+  it(`reports the true total (${OVERFLOW}) while loading a single ${LIST_LIMIT}-row window`, async () => {
     const html = await renderMemories();
-    expect(html).toContain('TOTAL MEMORIES');
-    expect(after(html, 'TOTAL MEMORIES', 300)).toContain(String(SEEDED));
-    expect(html).toContain('PAGE 1 OF 2');
-    expect(html).toContain(`${PAGE_SIZE} ROWS`);
-    expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
-    expect(html).not.toContain(`${SEEDED} ROWS`);
+    expect(html).toContain(`${OVERFLOW} total · ${OVERFLOW} active · ${OVERFLOW} need review`);
+    // The client pager counts the bounded window, never the true total.
+    expect(html).toContain(`1–10 of ${LIST_LIMIT}`);
+    expect(html).not.toContain(`1–10 of ${OVERFLOW}`);
+    expect(html).toContain('Pagination');
   });
 
   it('renders the needs-review count and the review pill for ancient rows', async () => {
     const html = await renderMemories();
-    expect(html).toContain('NEEDS REVIEW');
+    expect(html).toContain(`${OVERFLOW} need review`);
     expect(html).toContain('>needs review<');
   });
+});
 
-  it('renders a lower-bound pager (no exact total) for needs_review combined with a query', async () => {
-    const html = await renderMemories({ review: 'needs_review', q: 'widget' });
-    expect(html).toContain(`${PAGE_SIZE} ROWS`);
-    expect(html).not.toMatch(/PAGE 1 OF/);
+describe('memories list (client data-table)', () => {
+  it('renders the toolbar, selection checkboxes, row labels, pills and menu trigger', async () => {
+    t.handle.db
+      .insert(memory)
+      .values([
+        widget('A1', { title: 'alpha memory', content: 'alpha memory' }),
+        widget('A2', {
+          title: 'beta memory',
+          content: 'beta memory',
+          status: 'archived',
+          createdAt: new Date(),
+          lastSeenAt: new Date(),
+        }),
+      ])
+      .run();
+
+    const active = await renderMemories();
+    expect(active).toContain('Filter by status');
+    expect(active).toContain('Search memories…');
+    expect(active).toContain('Select all rows on this page');
+    expect(active).toContain('Select project memory — alpha memory"');
+    expect(active).toContain('Actions for memory alpha memory');
+    expect(active).toContain('>active<');
+    // The default status filter still hides non-active rows.
+    expect(active).not.toContain('beta memory');
+
+    const archived = await renderMemories({ status: 'archived' });
+    expect(archived).toContain('Select project memory — beta memory"');
+    expect(archived).toContain('>archived<');
   });
+});
 
+describe('memories list filters', () => {
   it('an FTS query honours the default active status filter, not the raw match count', async () => {
     t.handle.db
       .insert(memory)
       .values([
-        widget('WSUP', { status: 'superseded', content: 'superseded-widget-marker' }),
-        widget('WARC', { status: 'archived', content: 'archived-widget-marker' }),
+        widget('WACT', { title: 'active-widget-marker', content: 'active-widget-marker' }),
+        widget('WSUP', {
+          title: 'superseded-widget-marker',
+          content: 'superseded-widget-marker',
+          status: 'superseded',
+        }),
+        widget('WARC', {
+          title: 'archived-widget-marker',
+          content: 'archived-widget-marker',
+          status: 'archived',
+        }),
       ])
       .run();
 
     const html = await renderMemories({ q: 'widget' });
-    expect(html).toContain('widget number G0');
+    expect(html).toContain('active-widget-marker');
     expect(html).not.toContain('superseded-widget-marker');
     expect(html).not.toContain('archived-widget-marker');
   });
 
+  it('needs_review combined with a query keeps only rows past their review TTL', async () => {
+    t.handle.db
+      .insert(memory)
+      .values([
+        widget('ANCIENT', { title: 'ancient-widget-marker', content: 'ancient-widget-marker' }),
+        widget('FRESH', {
+          title: 'fresh-widget-marker',
+          content: 'fresh-widget-marker',
+          createdAt: new Date(),
+          lastSeenAt: new Date(),
+        }),
+      ])
+      .run();
+
+    const html = await renderMemories({ review: 'needs_review', q: 'widget' });
+    expect(html).toContain('ancient-widget-marker');
+    expect(html).not.toContain('fresh-widget-marker');
+  });
+
   it('an unresolvable project slug yields an empty list, not every scope', async () => {
+    t.handle.db
+      .insert(memory)
+      .values([widget('KEEP'), widget('DROP')])
+      .run();
+
     const html = await renderMemories({ project: 'no-such-slug' });
-    expect(html).toContain('No memories match this filter.');
+    expect(html).toContain('NO MEMORY MATCHES THIS FILTER');
     expect(html).not.toContain('widget number');
   });
 });

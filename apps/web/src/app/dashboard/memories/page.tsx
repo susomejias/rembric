@@ -1,35 +1,47 @@
 import {
   deriveReviewState,
+  DomainError,
   REFUTED_PRIORITY_MS,
   REVIEW_TTL_MS,
   sanitizeFtsQuery,
   type ReviewState,
 } from '@rembric/core';
-import { MEMORY_TYPES, type Memory, type MemoryStatus, type MemoryType } from '@rembric/db';
-import Link from 'next/link';
-
 import {
-  DEFAULT_STATUS,
-  memoriesQuery,
-  readMemoriesFilters,
-  resolveProjectFilter,
-  type SearchParams,
-} from './filters';
+  MEMORY_TYPES,
+  projectScope,
+  type Memory,
+  type MemoryStatus,
+  type MemoryType,
+} from '@rembric/db';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 
+import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './filters';
+
+import type { ActionState } from '@/components/dashboard/action-form';
 import {
   FilterActions,
   FilterField,
   FilterForm,
   FilterInput,
   FilterSelect,
-  Pager,
 } from '@/components/dashboard/filters';
 import { MemoriesTable } from '@/components/dashboard/memories-table';
-import { PAGE_SIZE, shortId } from '@/components/dashboard/support';
-import { Page, StatCard, StatGrid, TableEmpty } from '@/components/dashboard/ui';
+import { shortId, singleParam } from '@/components/dashboard/support';
+import { Flash, Page } from '@/components/dashboard/ui';
+import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { dashboardCsrfToken } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
+
+const ARCHIVE_FORM = 'memory.archive';
+const BULK_ARCHIVE_FORM = 'memory.bulk-archive';
+const CONFIRM_FORM = 'memory.confirm';
+
+// One-line justification: the client table owns filtering and pagination, so the
+// page loads a single bounded window instead of paginating server-side.
+const LIST_LIMIT = 500;
 
 const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
   (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
@@ -41,6 +53,74 @@ const STATUS_OPTIONS = [
   { value: 'archived', label: 'archived' },
 ];
 
+const NO_PROJECT_MESSAGE =
+  'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.';
+
+async function archiveMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, ARCHIVE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  const row = guard.services.memory.unsafeGetById(id);
+  if (!row) redirect('/dashboard/memories');
+  if (!row.projectId) return { error: NO_PROJECT_MESSAGE };
+
+  try {
+    guard.services.memory.archive(id, projectScope(row.projectId));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/memories?archived=${encodeURIComponent(id)}`);
+}
+
+async function confirmMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, CONFIRM_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  const row = guard.services.memory.unsafeGetById(id);
+  if (!row) redirect('/dashboard/memories');
+  if (!row.projectId) return { error: NO_PROJECT_MESSAGE };
+
+  try {
+    guard.services.memory.confirm(id, projectScope(row.projectId), {
+      source: { agent: 'dashboard-operator' },
+    });
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/dashboard/memories?confirmed=${encodeURIComponent(id)}`);
+}
+
+function readField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return (typeof value === 'string' ? value : '').trim();
+}
+
+async function bulkArchiveMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, BULK_ARCHIVE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const ids = formData.getAll('id').filter((v): v is string => typeof v === 'string');
+  try {
+    for (const id of ids) {
+      const row = guard.services.memory.unsafeGetById(id);
+      if (!row?.projectId || row.status !== 'active') continue;
+      guard.services.memory.archive(id, projectScope(row.projectId));
+    }
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/memories');
+  return { error: null };
+}
+
 export default async function MemoriesPage({
   searchParams,
 }: {
@@ -48,23 +128,22 @@ export default async function MemoriesPage({
 }) {
   const params = await searchParams;
   const filters = readMemoriesFilters(params);
-  const roundTripQuery = memoriesQuery(params);
+  const justArchived = singleParam(params['archived']);
+  const justConfirmed = singleParam(params['confirmed']);
 
   const { repos } = getServices();
   const nowMs = Date.now();
 
+  const csrf = {
+    archive: await dashboardCsrfToken(ARCHIVE_FORM),
+    confirm: await dashboardCsrfToken(CONFIRM_FORM),
+    bulkArchive: await dashboardCsrfToken(BULK_ARCHIVE_FORM),
+  };
+
   const wantsNeedsReview = filters.review === 'needs_review';
-  const offset = filters.page * PAGE_SIZE;
   const status = filters.status as MemoryStatus;
   const type = filters.type === '' ? undefined : (filters.type as MemoryType);
   const ftsQuery = sanitizeFtsQuery(filters.q);
-
-  const isFiltered =
-    filters.project !== '' ||
-    filters.type !== '' ||
-    filters.review !== '' ||
-    filters.q !== '' ||
-    filters.status !== DEFAULT_STATUS;
 
   const projectRows = repos.projects.adminListAll();
   const projectSlugById = new Map(projectRows.map((p) => [p.id, p.slug]));
@@ -78,15 +157,15 @@ export default async function MemoriesPage({
       status,
       type,
       projectId: resolvedProject.projectId,
-      limit: PAGE_SIZE + 1,
-      offset,
+      limit: LIST_LIMIT,
+      offset: 0,
     });
   } else if (wantsNeedsReview) {
     rows = repos.memory.adminFindNeedsReview({
       projectId: resolvedProject.projectId,
       nowMs,
-      limit: PAGE_SIZE + 1,
-      offset,
+      limit: LIST_LIMIT,
+      offset: 0,
       ttlByType: TTL_BY_TYPE,
       refutedPriorityMs: REFUTED_PRIORITY_MS,
     });
@@ -95,98 +174,61 @@ export default async function MemoriesPage({
       status,
       type,
       projectId: resolvedProject.projectId,
-      limit: PAGE_SIZE + 1,
-      offset,
+      limit: LIST_LIMIT,
+      offset: 0,
     });
   }
 
   const reviewById = new Map<string, ReviewState | null>();
-  if (rows.length > 0) {
-    const reviewTimestamps = repos.memory.reviewTimestampsByIds(rows.map((m) => m.id));
-    const at = new Date(nowMs);
-    for (const m of rows) {
-      reviewById.set(
-        m.id,
-        deriveReviewState(
-          {
-            type: m.type,
-            createdAt: m.createdAt,
-            status: m.status,
-            lastConfirmedAt: reviewTimestamps.get(m.id)?.affirmedAt ?? null,
-            lastRefutedAt: reviewTimestamps.get(m.id)?.refutedAt ?? null,
-          },
-          at,
-        ).reviewState,
-      );
-    }
+  const reviewTimestamps = repos.memory.reviewTimestampsByIds(rows.map((m) => m.id));
+  const reviewAt = new Date(nowMs);
+  for (const m of rows) {
+    reviewById.set(
+      m.id,
+      deriveReviewState(
+        {
+          type: m.type,
+          createdAt: m.createdAt,
+          status: m.status,
+          lastConfirmedAt: reviewTimestamps.get(m.id)?.affirmedAt ?? null,
+          lastRefutedAt: reviewTimestamps.get(m.id)?.refutedAt ?? null,
+        },
+        reviewAt,
+      ).reviewState,
+    );
   }
   if (wantsNeedsReview && ftsQuery) {
     rows = rows.filter((m) => reviewById.get(m.id) === 'needs_review');
   }
 
-  const hasMore = rows.length > PAGE_SIZE;
-  const visible = rows.slice(0, PAGE_SIZE);
-
-  let totalCount: number | undefined;
-  if (resolvedProject.unknown) {
-    totalCount = 0;
-  } else if (ftsQuery && wantsNeedsReview) {
-    totalCount = undefined;
-  } else if (offset === 0 && !hasMore) {
-    totalCount = visible.length;
-  } else if (ftsQuery) {
-    totalCount = repos.memory.adminCountFts(ftsQuery, {
-      status,
-      type,
-      projectId: resolvedProject.projectId,
-    });
-  } else if (wantsNeedsReview) {
-    totalCount = repos.memory.adminCountNeedsReview({
-      projectId: resolvedProject.projectId,
-      nowMs,
-      ttlByType: TTL_BY_TYPE,
-    });
-  } else {
-    totalCount = repos.memory.adminCount({ status, type, projectId: resolvedProject.projectId });
-  }
+  const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
 
   const statusCounts = repos.memory.countRowsByStatus();
   const totalMemories = statusCounts.reduce((acc, row) => acc + row.count, 0);
   const activeMemories = statusCounts.find((row) => row.status === 'active')?.count ?? 0;
   const totalNeedsReview = repos.memory.adminCountNeedsReview({ nowMs, ttlByType: TTL_BY_TYPE });
+  const summary = `${totalMemories.toLocaleString('en-US')} total · ${activeMemories.toLocaleString(
+    'en-US',
+  )} active · ${totalNeedsReview.toLocaleString('en-US')} need review`;
 
   return (
     <Page>
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Memories</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {totalMemories.toLocaleString('en-US')} total · {activeMemories.toLocaleString('en-US')}{' '}
-            active · {totalNeedsReview.toLocaleString('en-US')} need review
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{summary}</p>
         </div>
       </section>
 
-      <StatGrid className="mt-6 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
-        <StatCard
-          k="TOTAL MEMORIES"
-          v={totalMemories.toLocaleString('en-US')}
-          tone="lime"
-          sub={<span>ALL TIME</span>}
-        />
-        <StatCard
-          k="ACTIVE MEMORIES"
-          v={activeMemories.toLocaleString('en-US')}
-          sub={<span>RECALLABLE</span>}
-        />
-        <StatCard k="SHOWING" v={visible.length} sub={<span>PAGE {filters.page + 1}</span>} />
-        <StatCard
-          k="NEEDS REVIEW"
-          v={totalNeedsReview}
-          tone={totalNeedsReview > 0 ? 'amber' : 'dim'}
-          sub={<span>PAST THEIR TTL</span>}
-        />
-      </StatGrid>
+      {justArchived ? (
+        <Flash tone="lime" label="ARCHIVED">
+          Memory <code className="font-mono">{shortId(justArchived)}</code> archived.
+        </Flash>
+      ) : justConfirmed ? (
+        <Flash tone="lime" label="CONFIRMED">
+          Memory <code className="font-mono">{shortId(justConfirmed)}</code> re-affirmed.
+        </Flash>
+      ) : null}
 
       <FilterForm action="/dashboard/memories" className="mt-6">
         <FilterField label="SCOPE" htmlFor="f-project">
@@ -236,48 +278,32 @@ export default async function MemoriesPage({
         <FilterActions clearHref="/dashboard/memories" />
       </FilterForm>
 
-      {visible.length === 0 ? (
-        <TableEmpty>
-          {isFiltered ? (
-            <>
-              No memories match this filter.{' '}
-              <Link href="/dashboard/memories" className="text-primary hover:underline">
-                Clear the filters
-              </Link>
-              .
-            </>
-          ) : (
-            <>
-              Nothing has been saved in this scope — save your first with the{' '}
-              <code className="font-mono">memory.save</code> MCP tool.
-            </>
-          )}
-        </TableEmpty>
-      ) : (
+      <div className="mt-6">
         <MemoriesTable
-          rows={visible.map((memory) => ({
+          rows={rows.map((memory) => ({
             id: memory.id,
             title: memory.title,
+            content: memory.content,
             type: memory.type,
             project: memory.projectId
               ? (projectSlugById.get(memory.projectId) ?? shortId(memory.projectId))
               : '—',
+            tags: memory.tags,
             status: memory.status,
             createdAt: memory.createdAt,
             lastSeenAt: memory.lastSeenAt,
             needsReview: (reviewById.get(memory.id) ?? null) === 'needs_review',
+            confirms: confirmCounts.get(memory.id) ?? 0,
           }))}
+          actions={{ archive: archiveMemory, confirm: confirmMemory }}
+          csrf={csrf}
+          bulkArchive={bulkArchiveMemory}
+          quickFilter
+          selectable
+          searchable
+          pageSize={10}
         />
-      )}
-
-      <Pager
-        page={filters.page}
-        hasMore={hasMore}
-        total={totalCount}
-        totalLabel={`${visible.length} ROWS`}
-        path="/dashboard/memories"
-        query={roundTripQuery}
-      />
+      </div>
     </Page>
   );
 }
