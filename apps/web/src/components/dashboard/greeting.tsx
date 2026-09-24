@@ -9,10 +9,10 @@ type GreetingSpec = {
 };
 
 function greetingFor(hour: number): GreetingSpec {
-  if (hour < 6) return { label: 'Burning the midnight oil!', Icon: MoonStar };
-  if (hour < 12) return { label: 'Good morning!', Icon: Sunrise };
-  if (hour < 19) return { label: 'Good afternoon!', Icon: Sun };
-  return { label: 'Good evening!', Icon: MoonStar };
+  if (hour < 6) return { label: '¡Burning the midnight oil!', Icon: MoonStar };
+  if (hour < 12) return { label: '¡Good morning!', Icon: Sunrise };
+  if (hour < 19) return { label: '¡Good afternoon!', Icon: Sun };
+  return { label: '¡Good evening!', Icon: MoonStar };
 }
 
 export function Greeting() {
