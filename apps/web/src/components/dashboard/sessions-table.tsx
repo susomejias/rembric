@@ -258,15 +258,21 @@ export function SessionsTable({
                   No summary was captured for this session.
                 </p>
               ) : (
-                <div className="whitespace-pre-line">
-                  <MarkdownPanel
-                    eyebrow={hasSummary ? 'Summary' : 'Description'}
-                    title={hasSummary ? 'Session summary' : 'Session description'}
-                    markdown={body}
-                    copyLabel="Copy markdown"
-                  />
-                </div>
+                <MarkdownPanel
+                  eyebrow={hasSummary ? 'Summary' : 'Description'}
+                  title={hasSummary ? 'Session summary' : 'Session description'}
+                  markdown={body}
+                  copyLabel="Copy markdown"
+                />
               )}
+              {hasSummary && row.description !== null ? (
+                <MarkdownPanel
+                  eyebrow="Description"
+                  title="Session description"
+                  markdown={row.description}
+                  copyLabel="Copy markdown"
+                />
+              ) : null}
               <p className="font-mono text-[10px] text-muted-foreground">
                 token: {row.token} · {row.memories} memories · {row.prompts} prompts
               </p>
