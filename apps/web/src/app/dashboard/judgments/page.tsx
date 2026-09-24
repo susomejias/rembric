@@ -1,9 +1,9 @@
 import { revalidatePath } from 'next/cache';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { JudgmentsTable } from '@/components/dashboard/judgments-table';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { PAGE_SIZE } from '@/components/dashboard/support';
 import { Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -69,7 +69,10 @@ export default async function JudgmentsPage() {
   return (
     <Page>
       <header className="min-w-0">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Judgments</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Judgments</h1>
+          <PageHelp text="Conflicts and overlaps between memories awaiting your verdict." />
+        </div>
         <p className="mt-2 text-sm text-muted-foreground">
           {`${rows.length} rows · ${pending} pending · ${judged} judged · ${orphaned} orphaned`}
         </p>
@@ -99,38 +102,6 @@ export default async function JudgmentsPage() {
           pageSize={TABLE_PAGE_SIZE}
         />
       </div>
-
-      <aside className="mt-8 border border-border bg-card p-5 md:p-6">
-        <p className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-          HOW DECISIONS WORK
-        </p>
-        <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
-          Only durable context wins
-        </h2>
-        <p className="mt-4 text-xs leading-5 text-muted-foreground">
-          Nothing is silently promoted. A verdict keeps its source, target, confidence, reason, and
-          evidence.
-        </p>
-        <div className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">
-          <div className="flex items-center justify-between">
-            <span>Closure</span>
-            <span className="text-primary">memory.judge</span>
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <span>Re-surfacing</span>
-            <span>memory.context.pendingJudgments</span>
-          </div>
-        </div>
-        <p className="mt-6 border-t border-border pt-4 text-[11px] text-muted-foreground">
-          Aging pendings are orphaned by the deterministic sweep, not by a cron job.
-        </p>
-        <Link
-          href="/dashboard/consolidation"
-          className="mt-4 inline-block text-[11px] text-primary hover:underline"
-        >
-          Inspect the journal →
-        </Link>
-      </aside>
     </Page>
   );
 }

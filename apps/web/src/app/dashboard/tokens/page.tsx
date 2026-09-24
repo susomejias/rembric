@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { singleParam } from '@/components/dashboard/support';
 import { TokensTable } from '@/components/dashboard/tokens-table';
 import { LABEL, Page, SectionBar } from '@/components/dashboard/ui';
@@ -188,7 +189,10 @@ export default async function TokensPage({
   return (
     <Page>
       <header className="min-w-0">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Tokens</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Tokens</h1>
+          <PageHelp text="Bearer credentials agents use to reach this memory." />
+        </div>
         <p className="mt-2 text-sm text-muted-foreground">
           {`${rows.length} tokens · ${activeCount} active`}
         </p>

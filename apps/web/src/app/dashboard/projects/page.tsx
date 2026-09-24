@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { CreateProjectSheet } from '@/components/dashboard/projects-sheets';
 import { ProjectsTable, type ProjectRowData } from '@/components/dashboard/projects-table';
 import { singleParam } from '@/components/dashboard/support';
@@ -149,7 +150,10 @@ export default async function ProjectsPage({
     <Page className="flex flex-col gap-4">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Projects</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Projects</h1>
+            <PageHelp text="Scopes that group memory per project — agents address them by slug." />
+          </div>
           <p className="mt-2 text-sm text-muted-foreground">
             {`${rows.length} projects · ${active.length} active`}
           </p>
@@ -158,12 +162,6 @@ export default async function ProjectsPage({
           <CreateProjectSheet action={createProject} csrf={csrf.create} />
         </div>
       </section>
-
-      <p className="text-xs text-muted-foreground">
-        A project is identified by its slug (the value passed via{' '}
-        <code className="font-mono">/mcp/&lt;slug&gt;</code> or{' '}
-        <code className="font-mono">{'project.use({slug})'}</code>).
-      </p>
 
       {justCreated ? (
         <Flash tone="lime" label="CREATED">
