@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.28.14](https://github.com/susomejias/rembric/compare/server-v0.28.13...server-v0.28.14) (2026-09-24)
+
+
+### Features
+
+* **web:** restore one-click update page and update-available modal ([78f8b6b](https://github.com/susomejias/rembric/commit/78f8b6b353860be12d9b528964a09f1d753a8db1)), closes [#400](https://github.com/susomejias/rembric/issues/400)
+* **web:** wire self-update orchestrator with start action and JSON probes ([1032601](https://github.com/susomejias/rembric/commit/1032601ef44608e947e93e7f364aa3b316e7377e)), closes [#400](https://github.com/susomejias/rembric/issues/400)
+
+
+### Refactor
+
+* **web:** drop update preview seam and consolidate the update page ([9872d79](https://github.com/susomejias/rembric/commit/9872d7975d888f07587d57bec92e463a6fcd6fc6)), closes [#400](https://github.com/susomejias/rembric/issues/400)
+
 ## [0.28.13](https://github.com/susomejias/rembric/compare/server-v0.28.12...server-v0.28.13) (2026-09-24)
 
 
