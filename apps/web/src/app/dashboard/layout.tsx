@@ -31,7 +31,7 @@ function navTotals(): Record<string, number> {
 
   return {
     memories: repos.memory.countRowsByStatus().reduce((acc, row) => acc + row.count, 0),
-    sessions: 12500, // TEMP: hardcode para validar el formato compacto en la navbar
+    sessions: repos.agentSessions.adminCount({ deleted: false }),
     judgments: (['pending', 'judged', 'orphaned'] as const).reduce(
       (acc, status) => acc + repos.relations.adminCountByStatus(status),
       0,
