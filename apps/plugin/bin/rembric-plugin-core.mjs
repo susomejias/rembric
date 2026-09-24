@@ -101,7 +101,13 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
-      diag(`POST ${path} ${err?.message ?? 'error'}`);
+      if (err?.name === 'TimeoutError') {
+        diag(
+          `POST ${path} timeout after ${timeoutMs}ms — request abandoned, nothing sent twice; server too slow or unreachable`,
+        );
+      } else {
+        diag(`POST ${path} ${err?.message ?? 'error'}`);
+      }
       return null;
     }
   }
