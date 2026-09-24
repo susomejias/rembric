@@ -100,7 +100,6 @@ export default function DashboardOverviewPage() {
         <WidgetCard
           order="order-2 lg:order-1"
           label="MEMORY ACTIVITY"
-          featured
           labelExtra={
             <span className="flex items-center gap-3">
               <span className="flex items-center gap-1.5">
