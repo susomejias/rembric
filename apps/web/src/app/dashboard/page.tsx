@@ -77,7 +77,7 @@ export default function DashboardOverviewPage() {
     ...activeSessionRows.map((session) => ({
       key: `session-${session.id}`,
       at: session.startedAt.getTime(),
-      text: `session · ${session.agent}${session.summary ? ` · ${truncate(session.summary, 48)}` : ''}`,
+      text: `session · ${session.agent} · ${truncate(session.title ?? session.projectSlug ?? '—', 48)}`,
       href: `/dashboard/sessions/${session.id}`,
       live: session.status === 'active',
     })),
