@@ -2,83 +2,88 @@
 version: alpha
 name: Rembric
 description: >-
-  Brutalist editorial design system for the Rembric self-hosted MCP memory
-  dashboard. Dark + lime, monospace-forward, a React surface on Tailwind v4 +
-  shadcn/ui with a `--radius` token scale. Visual identity locked by spec;
-  changing any token requires an OpenSpec change.
+  Dark monochrome zinc design system with the Rembric lime as the single accent
+  for the self-hosted MCP memory dashboard. A Next.js App Router + React 19
+  surface on Tailwind v4 + shadcn/Radix, with a `--radius` token scale. The
+  canonical identity doc is `.agents/skills/rembric-dashboard-ui/SKILL.md`; the
+  formal OpenSpec spec change is pending.
 
 colors:
   primary: '#c6f24e'
-  on-primary: '#0a0a0a'
-  neutral: '#0a0a0a'
-  surface: '#141414'
-  surface-hover: '#15170d'
-  on-surface: '#f2f2f2'
-  on-surface-dim: '#9a9a9a'
-  on-surface-faint: '#2a2a2a'
+  on-primary: '#09090b'
+  background: '#09090b'
+  card: '#101012'
+  raised: '#18181b'
+  accent: '#1c1c1f'
+  border: '#1f1f23'
+  input: '#27272a'
+  ring: '#3f3f46'
+  foreground: '#fafafa'
+  foreground-secondary: '#a1a1aa'
+  foreground-muted: '#71717a'
   warn: '#ff8c00'
-  danger: '#ff3344'
+  destructive: 'oklch(0.704 0.191 22.216)'
 
 typography:
   display:
-    fontFamily: Space Grotesk
+    fontFamily: Geist
     fontSize: 3rem
     fontWeight: 700
     lineHeight: 0.95
     letterSpacing: -0.025em
   display-lg:
-    fontFamily: Space Grotesk
+    fontFamily: Geist
     fontSize: 5rem
     fontWeight: 700
     lineHeight: 0.9
     letterSpacing: -0.035em
   h1:
-    fontFamily: Space Grotesk
+    fontFamily: Geist
     fontSize: 2.4rem
     fontWeight: 700
     lineHeight: 1
     letterSpacing: -0.02em
   h2:
-    fontFamily: JetBrains Mono
+    fontFamily: Geist Mono
     fontSize: 0.78rem
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: 0.14em
   h3:
-    fontFamily: JetBrains Mono
+    fontFamily: Geist Mono
     fontSize: 0.72rem
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: 0.12em
   body-md:
-    fontFamily: Inter
+    fontFamily: Geist
     fontSize: 0.92rem
     fontWeight: 400
     lineHeight: 1.55
   body-sm:
-    fontFamily: Inter
+    fontFamily: Geist
     fontSize: 0.82rem
     fontWeight: 400
     lineHeight: 1.5
   label-md:
-    fontFamily: JetBrains Mono
+    fontFamily: Geist Mono
     fontSize: 0.72rem
     fontWeight: 500
     lineHeight: 1
     letterSpacing: 0.12em
   label-sm:
-    fontFamily: JetBrains Mono
+    fontFamily: Geist Mono
     fontSize: 0.66rem
     fontWeight: 500
     lineHeight: 1
     letterSpacing: 0.14em
   mono-md:
-    fontFamily: JetBrains Mono
+    fontFamily: Geist Mono
     fontSize: 0.78rem
     fontWeight: 400
     lineHeight: 1.4
   mono-sm:
-    fontFamily: JetBrains Mono
+    fontFamily: Geist Mono
     fontSize: 0.7rem
     fontWeight: 400
     lineHeight: 1.4
@@ -94,29 +99,31 @@ spacing:
   3xl: 64px
 
 rounded:
-  none: 0px
+  button: 10px
+  input: 12px
+  card: 16px
 
 components:
   button-primary:
     backgroundColor: '{colors.primary}'
     textColor: '{colors.on-primary}'
     typography: '{typography.label-md}'
-    rounded: '{rounded.none}'
+    rounded: '{rounded.button}'
     padding: '16px'
     height: '44px'
   button-primary-hover:
-    backgroundColor: '{colors.neutral}'
-    textColor: '{colors.primary}'
+    backgroundColor: '{colors.primary}'
+    textColor: '{colors.on-primary}'
   button-secondary:
-    backgroundColor: 'transparent'
-    textColor: '{colors.on-surface}'
-    rounded: '{rounded.none}'
+    backgroundColor: '{colors.raised}'
+    textColor: '{colors.foreground}'
+    rounded: '{rounded.button}'
     padding: '16px'
     height: '44px'
   button-warn:
     backgroundColor: 'transparent'
     textColor: '{colors.warn}'
-    rounded: '{rounded.none}'
+    rounded: '{rounded.button}'
     padding: '16px'
     height: '44px'
   button-warn-hover:
@@ -124,539 +131,564 @@ components:
     textColor: '{colors.on-primary}'
   button-danger:
     backgroundColor: 'transparent'
-    textColor: '{colors.danger}'
-    rounded: '{rounded.none}'
+    textColor: '{colors.destructive}'
+    rounded: '{rounded.button}'
     padding: '16px'
     height: '44px'
   button-danger-hover:
-    backgroundColor: '{colors.danger}'
+    backgroundColor: '{colors.destructive}'
     textColor: '{colors.on-primary}'
   button-sm:
     typography: '{typography.label-sm}'
     padding: '10px'
     height: '28px'
   input:
-    backgroundColor: '{colors.surface}'
-    textColor: '{colors.on-surface}'
-    typography: '{typography.mono-md}'
-    rounded: '{rounded.none}'
+    backgroundColor: '{colors.input}'
+    textColor: '{colors.foreground}'
+    typography: '{typography.body-sm}'
+    rounded: '{rounded.input}'
     padding: '12px'
     height: '44px'
-  pill:
-    backgroundColor: 'transparent'
-    textColor: '{colors.on-surface}'
+  status-pill:
+    backgroundColor: '{colors.raised}'
+    textColor: '{colors.foreground}'
     typography: '{typography.label-sm}'
-    rounded: '{rounded.none}'
+    rounded: '9999px'
     padding: '8px'
   stat-card:
-    backgroundColor: '{colors.surface}'
-    textColor: '{colors.on-surface}'
-    rounded: '{rounded.none}'
+    backgroundColor: '{colors.card}'
+    textColor: '{colors.foreground}'
+    rounded: '{rounded.card}'
     padding: '24px'
   card:
-    backgroundColor: '{colors.surface}'
-    textColor: '{colors.on-surface}'
-    rounded: '{rounded.none}'
+    backgroundColor: '{colors.card}'
+    textColor: '{colors.foreground}'
+    rounded: '{rounded.card}'
   modal:
-    backgroundColor: '{colors.surface}'
-    textColor: '{colors.on-surface}'
-    rounded: '{rounded.none}'
+    backgroundColor: '{colors.raised}'
+    textColor: '{colors.foreground}'
+    rounded: '{rounded.card}'
     padding: '0px'
   row-hover:
-    backgroundColor: '{colors.surface-hover}'
+    backgroundColor: '{colors.accent}'
   caption:
-    textColor: '{colors.on-surface-dim}'
+    textColor: '{colors.foreground-muted}'
     typography: '{typography.label-sm}'
   divider:
-    backgroundColor: '{colors.on-surface-faint}'
+    backgroundColor: '{colors.border}'
     height: '1px'
 ---
 
 # Rembric — Dashboard Design System
 
-Single source of truth for the visual identity and UI patterns served at
-`/dashboard/*`. The YAML frontmatter above carries the machine-readable
-design tokens; the prose below tells you **why** those values exist and
-how to apply them.
+Single source of truth for the **current** visual identity and UI patterns
+served at `/dashboard/*`. The YAML frontmatter above carries the
+machine-readable design tokens; the prose below tells you **why** those values
+exist and how to apply them.
 
-If you are building or extending a dashboard page, read the whole file
-before touching CSS or HTML. The recipes at the bottom show the canonical
-patterns — match them rather than inventing new ones.
+The canonical, always-current identity doc is
+`.agents/skills/rembric-dashboard-ui/SKILL.md` (v1.1). This file is the
+repo-root overview that defers to it and to the live implementations. The
+identity was **redesigned (2026-09, branch `feat/dashboard-identity-redesign`)**;
+the previous identity is preserved as history at the end of this file.
+
+If you are building or extending a dashboard page, read the whole file before
+touching code. The recipes at the bottom show the canonical patterns — match
+them rather than inventing new ones.
 
 ## Overview
 
-Rembric's identity is **brutalist editorial**. The product is a
-single-tenant, self-hosted memory + sessions + dashboard for AI coding
-agents; it should feel operational, terse, and unambiguous — like an
-oscilloscope, not a SaaS landing page.
+Rembric's identity is **dark monochrome zinc with a single lime accent**. The
+product is a single-tenant, self-hosted memory + sessions + dashboard for AI
+coding agents; it should feel operational, terse, and unambiguous — a control
+room, not a SaaS landing page.
 
 Visual choices:
 
-- **Dark canvas, lime accent.** A near-black neutral (`#0a0a0a`) with a
-  single vibrant lime accent (`#c6f24e`) used sparingly — as a
-  highlighter/cinta, never wallpaper. Two semantic tones live alongside:
-  warn (`#ff8c00`) for reversible-but-cautious actions, danger
-  (`#ff3344`) for irreversible ones.
-- **Editorial monospace.** All labels, IDs, table headers, and status
-  pills use JetBrains Mono in uppercase with generous letter-spacing.
-  Body text uses Inter; hero titles use Space Grotesk. Each font is
-  self-hosted as woff2 — no CDN at runtime.
-- **Radius from the token scale.** Corner shape comes from the `--radius`
-  scale (`--radius`, `--radius-sm`, `--radius-md`, `--radius-lg`,
-  `--radius-xl`); depth is conveyed primarily by tonal layers and 1-px lines.
+- **Dark canvas, one accent.** Near-black zinc surfaces (`#09090b`) carried by
+  a layered surface ladder (`#101012` cards, `#18181b` raised/popover/muted) and
+  1-px `#1f1f23` borders. Lime (`#c6f24e`) is the **only** accent — it marks
+  primary actions, active state, and the chart's save series, never wallpaper.
+  Amber (`#ff8c00`) and destructive stay for warn / danger tones.
+- **Geist, self-hosted.** Geist drives UI and display output; Geist Mono owns
+  labels, meta, counters and tabular data. Both are self-hosted woff2 — no CDN
+  at runtime, no second display face.
+- **Depth without heavy chrome.** Soft shadows only (`shadow-lg shadow-black/20`
+  – `shadow-black/40`) plus **radial lime glows**; hierarchy comes from the
+  surface ladder and 1-px lines, not from hard borders.
+- **Rounded, restrained geometry.** `--radius: 1rem`; cards `rounded-2xl` (16),
+  inputs `rounded-xl` (12), buttons `rounded-lg` (10), status pills
+  `rounded-full`. Shape is a token decision, never a hard-coded zero.
+- **Floating shell, no sidebar.** A floating centered command bar replaces the
+  old fixed rail; login and OAuth consent render chrome-free.
 - **One product, one operator.** No theming, no light mode, no per-user
-  preferences. The system looks the same for every operator.
+  preferences. The surface looks the same for every operator.
 
-Emotional response: precise, sober, in-control. The interface should
-read as a control room — fast to scan, hard to misread.
+Emotional response: precise, sober, in-control. The interface should read as a
+control room — fast to scan, hard to misread.
 
 ## Colors
 
-The palette is rooted in two near-black neutrals and a single
-electric-lime accent. Two alert tones complete the vocabulary.
+The palette is a zinc surface ladder plus a single lime accent, two alert tones,
+and a zinc chart ladder that uses lime as `chart-1`.
 
-- **Primary (#c6f24e — Lime)**: the only "happy" colour. Reserved for
-  primary actions, lime-block highlights on hero titles, active nav
-  items, and active-state pills. Never used for ambient surfaces.
-- **On-primary (#0a0a0a)**: text colour on lime surfaces; identical to
-  the neutral so primary buttons read as "stamped ink".
-- **Neutral (#0a0a0a — Near-black)**: the canvas. All pages, the
-  sidebar, and the mobile bar share this background.
-- **Surface (#141414 — Coal)**: cards, inputs, dialogs, filter bars —
-  any contained surface that needs to lift from the canvas without using
-  a shadow.
-- **Surface-hover (#15170d — Coal w/ lime tint)**: row-hover background
-  in tables. Faint enough to read as a hint, lime enough to feel
-  on-brand.
-- **On-surface (#f2f2f2 — Bone)**: primary text.
-- **On-surface-dim (#9a9a9a — Ash)**: labels, captions, secondary copy.
-- **On-surface-faint (#2a2a2a — Iron)**: borders, dividers, faint
-  separators.
-- **Warn (#ff8c00 — Ember)**: reversible-but-cautious actions (Archive
-  memory, Archive project, Mark relation orphaned, Undo single op).
-  Also used on the "superseded" pill.
-- **Danger (#ff3344 — Signal)**: irreversible / impactful actions
-  (Delete session, Revoke token, Undo entire run). Also used on the
-  "orphaned" and "revoked" pills.
+- **Primary (#c6f24e — Lime)**: the only "happy" colour. Reserved for primary
+  actions, active nav items, active-state pills, and the chart's save series.
+- **On-primary (#09090b)**: text colour on lime surfaces, so primary buttons
+  read as lime fill + near-black ink.
+- **Background (#09090b)**: the canvas — every page and the floating command
+  bar share it.
+- **Card (#101012)**: the base contained surface for cards, panels, and stat
+  tiles.
+- **Raised (#18181b)**: raised / popover / secondary / muted surfaces that lift
+  above a card (dropdowns, sheets, secondary buttons, empty pills).
+- **Accent (#1c1c1f)**: hover and subtle-selected background (row-hover, active
+  menu items).
+- **Border (#1f1f23)**: 1-px borders on cards, tables, and chrome.
+- **Input (#27272a)**: form-field background; **Ring (#3f3f46)**: focus rings.
+- **Foreground (#fafafa)**: primary text. **Foreground-secondary (#a1a1aa)**:
+  secondary copy. **Foreground-muted (#71717a)**: labels, captions, meta.
+- **Warn (#ff8c00 — Amber)**: reversible-but-cautious actions (abandon, archive,
+  supersede) and the chart's consolidation-ops series.
+- **Destructive**: irreversible / impactful actions (delete session, revoke
+  token). Kept as the shadcn `--destructive` token.
+- **Charts (`--chart-1`…`--chart-5`)**: `#c6f24e` → `#a1a1aa` → `#52525b` →
+  `#3f3f46` → `#27272a`; the zinc ladder with lime reserved for the primary
+  series.
+
+### The chrome-only rule
+
+On **light** surfaces lime is **chrome only** — fills, borders, dots, and bars.
+**Never lime text on a light background.** On the dark dashboard lime text is
+legitimate (active nav item, active-state pill, positive metric), but it stays
+rationed: one lime decision per screen.
 
 ### Implementation
 
-Tokens are mirrored as CSS custom properties in
-`src/dashboard/styles/core/tokens.css`. Use the variables, never raw hex:
+Tokens are defined as CSS custom properties in
+`apps/web/src/app/globals.css` and mapped into Tailwind v4 via `@theme inline`,
+so utilities such as `bg-background`, `bg-card`, `bg-popover`,
+`text-foreground`, `text-muted-foreground`, `border-border`, `bg-primary`,
+`text-warn`, and `text-destructive` resolve to the tokens. Use the utilities and
+variables, never raw hex.
 
-| Token              | CSS variable          |
-| ------------------ | --------------------- |
-| `primary`          | `var(--lime)`         |
-| `on-primary`       | `var(--lime-ink)`     |
-| `neutral`          | `var(--bg)`           |
-| `surface`          | `var(--bg-elev)`      |
-| `surface-hover`    | `var(--bg-row-hover)` |
-| `on-surface`       | `var(--fg)`           |
-| `on-surface-dim`   | `var(--fg-dim)`       |
-| `on-surface-faint` | `var(--fg-faint)`     |
-| `warn`             | `var(--warn)`         |
-| `danger`           | `var(--danger)`       |
+| Token                  | CSS variable                | Tailwind utility              |
+| ---------------------- | --------------------------- | ----------------------------- |
+| `primary`              | `var(--primary)`            | `bg-primary` / `text-primary` |
+| `on-primary`           | `var(--primary-foreground)` | `text-primary-foreground`     |
+| `background`           | `var(--background)`         | `bg-background`               |
+| `card`                 | `var(--card)`               | `bg-card`                     |
+| `raised`               | `var(--popover)`            | `bg-popover` / `bg-secondary` |
+| `accent`               | `var(--accent)`             | `bg-accent`                   |
+| `border`               | `var(--border)`             | `border-border`               |
+| `input`                | `var(--input)`              | `bg-input`                    |
+| `ring`                 | `var(--ring)`               | `ring-ring`                   |
+| `foreground`           | `var(--foreground)`         | `text-foreground`             |
+| `foreground-secondary` | (zinc step)                 | `text-zinc-400`               |
+| `foreground-muted`     | `var(--muted-foreground)`   | `text-muted-foreground`       |
+| `warn`                 | `var(--warn)`               | `text-warn`                   |
+| `destructive`          | `var(--destructive)`        | `text-destructive`            |
 
 ## Typography
 
-Three faces, each with a deliberate role:
+Two families, each with a deliberate role:
 
-- **Space Grotesk** drives hero titles and stat values. Its geometric
-  construction and tight letter-spacing make `REMBRIC OVERVIEW.` read
-  as a section stamp rather than a marketing headline. Weight 700,
-  uppercase, letter-spacing tight (-0.025em).
-- **Inter** carries body text and paragraph copy at 14–16 px. It
-  disappears into the page — that's the point.
-- **JetBrains Mono** is the workhorse: labels, table headers, status
-  pills, IDs, code snippets, sidebar items. Always uppercase, always
-  with letter-spacing in the 0.1–0.14em range. The monospace cadence
-  is what makes the dashboard read as an operator console.
+- **Geist** drives UI and display output — titles, body copy, stat values. It is
+  wired to `--font-sans` and `--font-display`, giving the product a single clean
+  voice instead of a three-face stack.
+- **Geist Mono** owns labels, counters, meta, and tabular data — table numbers,
+  durations, IDs, code snippets, section labels. Its tabular cadence is what
+  makes the dashboard read as an operator console.
 
-### Page title pattern
+Both are vendored as woff2 under `apps/web/src/app/fonts/` and loaded in
+`apps/web/src/app/layout.tsx` with `next/font/local`. Use the CSS variables,
+never the family name directly:
 
-Every view title is `Rembric <PageName>.` with the word `Rembric`
-rendered inside a lime block (the `hl-lime` atom). Periods are part of
-the title:
+| Stack   | CSS variable                                  |
+| ------- | --------------------------------------------- |
+| UI      | `var(--font-geist)` → `var(--font-sans)`      |
+| Display | `var(--font-geist)` → `var(--font-display)`   |
+| Mono    | `var(--font-geist-mono)` → `var(--font-mono)` |
 
-```
-REMBRIC OVERVIEW.        ←  /dashboard
-REMBRIC MEMORIES.        ←  /dashboard/memories
-REMBRIC SESSION 01KR…    ←  /dashboard/sessions/:id
-```
-
-### Implementation
-
-All faces are vendored as woff2 under `/dashboard/assets/fonts/` by
-`scripts/fetch-fonts.mjs`. `@font-face` declarations live in
-`tokens.css`. Use the CSS variables, never the family name directly:
-
-| Stack   | CSS variable                                             |
-| ------- | -------------------------------------------------------- |
-| Display | `var(--f-display)` (Space Grotesk + system fallback)     |
-| Body    | `var(--f-sans)` (Inter + system fallback)                |
-| Mono    | `var(--f-mono)` (JetBrains Mono + ui-monospace fallback) |
+No CDN fonts and no second display face.
 
 ## Layout
 
-The layout follows a **fluid CSS Flexbox + CSS Grid** model. There is
-no max-width container on `.main` — the dashboard fills the available
-viewport.
-
-A strict **8-px scale** governs spacing. Use the CSS custom properties,
-never raw pixels:
-
-| Token  | CSS                 | Use                           |
-| ------ | ------------------- | ----------------------------- |
-| `xs`   | `var(--s-1)` `4px`  | inner gaps in compact rows    |
-| `sm`   | `var(--s-2)` `8px`  | between siblings, button gaps |
-| `md`   | `var(--s-3)` `12px` | small block padding           |
-| `base` | `var(--s-4)` `16px` | default block padding         |
-| `lg`   | `var(--s-5)` `24px` | section padding, card body    |
-| `xl`   | `var(--s-6)` `32px` | main vertical rhythm          |
-| `2xl`  | `var(--s-7)` `48px` | `.main` horizontal padding    |
-| `3xl`  | `var(--s-8)` `64px` | `.main` bottom padding        |
+The dashboard is laid out by a **floating command bar over a fluid content
+column**. There is **no sidebar rail** — the old fixed 196 px rail is gone.
 
 ### Shell
 
-The app frame is fixed at the side, the content fluid at the centre:
+`apps/web/src/components/dashboard/command-bar.tsx` renders `CommandFrame`:
+a floating, centered header (`rounded-2xl border bg-card/90 backdrop-blur`) with
+the primary nav, a "More" dropdown for secondary entries, badge counters, and a
+mobile `Sheet` drawer. `apps/web/src/app/dashboard/layout.tsx` wraps every
+authenticated route in it. Nav data lives in `apps/web/src/lib/nav.ts`
+(`NAV` / `NAV_GROUPS`); add entries there and both the desktop bar and the mobile
+sheet pick them up.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ <aside class="sb">     │ <main class="main">                │
-│   brand                │   <header class="view-head">       │
-│   nav (MAIN + ADMIN)   │   [optional <a class="view-back">] │
-│   foot (logout)        │   …                                │
-└─────────────────────────────────────────────────────────────┘
-```
+### Chrome-free screens
 
-`.sb` is **196 px** wide. When the user collapses it (`.is-collapsed`
-on both `.app` and `.sb`), it shrinks to **56 px** and hides labels
-with a 140 ms `width` transition. The state persists in the
-`rbr-sb-collapsed` cookie so the SSR HTML is correct on first paint
-— no FOUC.
+`/dashboard/login` and `/dashboard/oauth-consent` render **without** the frame.
+They are listed in `CHROME_FREE_PATHS` in `apps/web/src/lib/nav.ts`, and
+`CommandFrame` short-circuits on `isChromeFreePath()` — a route renders
+standalone as soon as it is added to that list.
 
-### Responsive breakpoints
+### Spacing
 
-```
-≥1281 px   full desktop: sidebar 196 px, grids at max density
-≤1280 px   sidebar still desktop; .grid-7 → 4 cols; .grid-6 → 3 cols
-≤980 px    sidebar collapses into top drawer (transform translateY);
-           multi-col grids stack; tables stay scrollable inside .tbl-host;
-           filter bar stacks vertically with separators
-≤640 px    single-column everywhere; stat grids 2-wide; login pane
-           single; table min-width drops to 580 px
-```
+A strict **8-px scale** governs spacing:
 
-Minimum supported viewport: **320 px**. No horizontal page-level scroll
-at any width — only `.tbl-host` and inline `<pre>` blocks scroll
-horizontally. Touch targets at ≤980 px: **≥44 × 44 px**.
+| Token  | Value | Use                            |
+| ------ | ----- | ------------------------------ |
+| `xs`   | 4px   | inner gaps in compact rows     |
+| `sm`   | 8px   | between siblings, button gaps  |
+| `md`   | 12px  | small block padding            |
+| `base` | 16px  | default block padding          |
+| `lg`   | 24px  | section padding, card body     |
+| `xl`   | 32px  | main vertical rhythm           |
+| `2xl`  | 48px  | wide-screen horizontal padding |
+| `3xl`  | 64px  | page bottom padding            |
+
+### Responsive
+
+Below **768 px** the command bar collapses to a compact bar with a `Sheet`
+drawer, page content stacks to a single column, and tables stay scrollable
+inside their panel rather than pushing page width. Minimum supported viewport:
+**320 px** with no page-level horizontal scroll. Touch targets stay **≥44 × 44
+px** on touch layouts.
 
 ## Elevation & Depth
 
-Rembric is a **flat** design system — depth is conveyed by tokens and
-lines rather than by elevation. Visual hierarchy uses three mechanisms:
+Depth is conveyed by **tonal layers, soft shadows, and glows** rather than heavy
+borders:
 
-- **Tonal layers**: the canvas is `#0a0a0a`; cards and inputs sit on
-  `#141414`; hovered rows shift to `#15170d`. Each step is small (~5%
-  luminance) — enough to be felt, not seen.
-- **1-px borders** in `#2a2a2a` separate everything that needs
-  separation: card edges, table borders, view-head bottom border,
-  section bars, filter bar boundaries.
-- **Lime accents** (3-px left bars on `.sb-section`, lime borders on
-  the append-only banner, lime underlines on the `u-lime` atom) act as
-  navigational anchors and let the eye locate state changes quickly.
+- **Tonal layers**: canvas `#09090b`; cards `#101012`; raised surfaces
+  `#18181b`; hover accent `#1c1c1f`. Each step is small — felt, not seen.
+- **Soft shadows only**: `shadow-lg` with `shadow-black/20`–`shadow-black/40`.
+  There is no hard drop-shadow vocabulary and no stacked shadow decoration.
+- **Radial lime glows**: a faint radial gradient anchors key surfaces, e.g.
+  `bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]`.
+  This is the signature "lit from within" depth cue from the redesign mockups.
+- **1-px borders** in `#1f1f23` separate chrome and panels where a line is
+  clearer than a tonal step.
 
-Hovers add saturation, not size — borders shift to lime, text colour
-shifts to lime, but the element does not enlarge or float.
+Hovers shift tone (surface or lime), they do not enlarge or float the element.
 
 ## Shapes
 
-The shape language is driven by the `--radius` token scale (`--radius`,
-`--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`). Surfaces
-take their rounding from the shadcn/ui primitives that consume those
-tokens, so the exact radius is a token decision rather than a hard-coded
-zero.
+The shape language is driven by the `--radius` token scale (`--radius: 1rem`)
+and expressed in Tailwind utilities:
 
-Keep the scale restrained: the brutalist character comes from the
-typography, the palette and the 1-px lines, not from heavy rounding.
+| Role           | Radius | Utility        |
+| -------------- | ------ | -------------- |
+| Cards / panels | 16 px  | `rounded-2xl`  |
+| Inputs         | 12 px  | `rounded-xl`   |
+| Buttons        | 10 px  | `rounded-lg`   |
+| Status pills   | full   | `rounded-full` |
+
+Keep the scale restrained. Character comes from the monochrome palette, the lime
+accent, the typography, and 1-px lines — not from heavy rounding or mixed
+radii. Don't hard-code a corner radius; use the scale so shape stays consistent
+across primitives.
 
 ## Components
 
-Atoms live in `src/dashboard/styles/core/atoms.css`. Patterns live in
-`src/dashboard/styles/core/patterns.css`. Element-level defaults inside
-`.main` live in `src/dashboard/styles/core/content.css`.
+Server components compose the new identity directly. Shared primitives live in
+`apps/web/src/components/dashboard/` and `apps/web/src/components/ui/`.
 
 ### Buttons
 
-Four tone variants share the same base. **Tone semantics are
-load-bearing**:
+`Button` (shadcn) drives tone, and tone semantics are **load-bearing**:
 
-| Class            | Tone     | When to use                                                                                       |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `.btn.primary`   | Lime     | Confirm / save / sign-in / filter — the affirmative action                                        |
-| `.btn.secondary` | Outlined | Cancel, dismissive, navigation                                                                    |
-| `.btn.warn`      | Orange   | Reversible-but-cautious (Archive memory, Archive project, Mark relation orphaned, Undo single op) |
-| `.btn.danger`    | Red      | Irreversible (Delete session, Revoke token, Undo entire run)                                      |
+| Variant         | Tone       | When to use                                                                       |
+| --------------- | ---------- | --------------------------------------------------------------------------------- |
+| `default`       | Lime fill  | Confirm / save / sign-in / filter — the affirmative action                        |
+| `secondary`     | Raised     | Cancel, dismissive, navigation                                                    |
+| `outline`/ghost | Borderless | Secondary or low-emphasis controls                                                |
+| `destructive`   | Red        | Irreversible (delete session, revoke token, bulk remove)                          |
+| warn-toned      | Amber      | Reversible-but-cautious (abandon session, archive memory, mark relation orphaned) |
 
-`.btn.sm` shrinks padding + font for inline placements. Buttons inside
-a `<td>` or `.actions` container are automatically downsized by
-`content.css` — no need to add `.sm` by hand.
+Primary buttons are **lime fill + near-black text**. Every destructive button
+(warn/danger) MUST live inside a `<ConfirmSubmit>` inside its `<ActionForm>` so
+the confirmation dialog opens before submit.
 
-Every destructive button (warn/danger) MUST live inside a form marked
-`data-confirm` so the global confirmation dialog opens before submit.
+### StatusPill
 
-### Pills
+`StatusPill` (`apps/web/src/components/dashboard/ui.tsx`) is the shared,
+app-wide status pill: a `rounded-full` container with a dot plus a tinted
+background/border per tone (`TONE_PILL`), driven by the `STATUS_TONE` map
+(active/judged → lime, abandoned/superseded → amber, archived/ended/pending →
+dim, orphaned/deleted → danger). Use it for every status; never hand-roll a
+second badge.
 
-`.pill` is a small bordered chip with a coloured leading bullet. Use
-modifier classes for state: `active`, `superseded`, `archived`,
-`pending`, `judged`, `orphaned`, `default`, plus type pills
-(`t-user`, `t-feedback`, `t-project`, `t-reference`) and
-relation-kind pills (`k-supersedes`, `k-conflicts_with`, `k-related`,
-`k-compatible`, `k-scoped`, `k-not_conflict`, `k-pending`).
+### Spectrum data-table (list views)
 
-### Inputs
+Every list/table page goes through `DataTable` from
+`@/components/spectrumui/data-table` with `variant="panel"`. The shared engine
+provides:
 
-`.inp` and `.sel` are the large form fields. Inside `.main`, bare
-`<input type="text|password|search">` and `<select>` pick up the same
-brutalist treatment from `content.css`. Use the classes only outside
-`.main` (login page).
+- **quick-filter pills** with live counts,
+- **client search**,
+- **selectable rows** with a rising **bulk-action bar**,
+- a contextual **`⋯` row menu** (`rowActions`),
+- a **detail disclosure** (`renderDetail`),
+- and `pageSize` for client-side pagination.
 
-### Filters bar
+`apps/web/src/components/dashboard/sessions-table.tsx` is the **canonical
+implementation** to copy. Siblings in the same pattern: `judgments-table.tsx`,
+`prompts-table.tsx`, `memories-table.tsx`, `entities-table.tsx`,
+`tokens-table.tsx`.
 
-A single, compact, informative row. Pattern:
+### Forms & mutations
 
-```html
-<form class="filters" method="get">
-  <span class="group">
-    <span class="k">SCOPE</span>
-    <select name="project">
-      …
-    </select>
-  </span>
-  <span class="group search">
-    <span class="k">SEARCH</span>
-    <input type="search" name="q" placeholder="fts5 keyword" />
-  </span>
-  <span class="acts">
-    <button class="btn primary" type="submit">FILTER</button>
-    <a class="clear" href="/dashboard/X">CLEAR</a>
-  </span>
-</form>
-```
+Every mutation is a **server action through `ActionForm`**
+(`@/components/dashboard/action-form`). Put a `<CsrfField form={FORM_NAME} />`
+(`csrf-field.tsx`) in it and start the action with
+`guardAction(formData, FORM_NAME)` / `guardFailure(...)`
+(`@/lib/actions/guard`), which enforces session + admin + CSRF. The action
+returns `ActionState = { error: string | null }`.
 
-On ≤980 px the bar stacks vertically, each group gets a border-bottom
-separator (except the last, to avoid duplicating the border-top of
-`.acts`), and the actions row gets clear breathing room above.
+Inputs use the shadcn primitives bound to the tokens (`bg-input`,
+`border-border`, `rounded-xl`). There is no second styling system.
 
-### Tables
+### ConfirmSubmit
 
-Every dashboard table lives inside a `<div class="tbl-host">` so it
-scrolls horizontally inside its container instead of pushing the page
-width past the viewport. Inside `.main`, bare `<table>` picks up the
-brutalist look from `content.css`.
+`ConfirmSubmit` (`confirm-submit.tsx`) wires a Radix `AlertDialog` to the
+enclosing `ActionForm` via `useActionFormId`, so it only works **inside** an
+`<ActionForm>`, wrapping a `<Button type="button">` trigger. Pass
+`tone="danger"` for irreversible actions, `"warn"` for reversible ones.
 
-To make a row navigate to a detail page, add `data-href="/dashboard/…"`
-on the `<tr>`. The global `ROW_LINK` script intercepts clicks (skipping
-links / buttons / forms) and navigates. Cursor turns into a pointer
-automatically.
+### Time
 
-### Stat cards
+`<Time>` (`time.tsx`) emits `<time dateTime data-rembric-ts>` with a UTC
+fallback and re-renders in the viewer's timezone after mount. Never hand-write
+`toISOString` / `toLocaleString` in views.
 
-`statCard({ k, v, tone, sub, href })` renders a single brutalist stat
-tile (big number, label, optional sub text). Wrap rows of them in
-`.grid-7` or `.grid-6` for the responsive collapse to work.
+### Nav
 
-### View head + back link
+Nav entries live in the `NAV` array (`lib/nav.ts`): group, `num`, label, `href`,
+lucide `icon`, optional `badgeKey`. The command bar and its mobile sheet both
+read it. Chrome-free routes go in `CHROME_FREE_PATHS`.
 
-`viewHead({ num, title, hl, meta })` + (on detail pages) `backLink({
-href, label })` rendered immediately after. The back link sits at the
-top of the content area (NOT inside the view-head meta strip).
+### Charts
 
-### Pager
-
-`pager({ page, hasMore, pageHrefBuilder, totalLabel })` — never roll
-your own. Pagination uses **offset+limit with `LIMIT PAGE_SIZE + 1`**
-to detect `hasMore` without a separate COUNT query. `PAGE_SIZE` is **10**
-across all listings; exported from `components.ts`.
-
-### Modal
-
-The global `<dialog class="modal">` lives at the bottom of `<body>` in
-`shell()`. Any `<form data-confirm="message">` opens it before
-allowing submit. Tone via `data-confirm-tone` (`warn` / `danger`).
-
-### Component reference
-
-| Helper                                   | File            | Purpose                                                   |
-| ---------------------------------------- | --------------- | --------------------------------------------------------- |
-| `renderPage(c, sessions, body, opts)`    | `page-shell.ts` | canonical entry for authenticated pages                   |
-| `shell(body, opts)`                      | `templates.ts`  | lower-level layout — used only by login + by `renderPage` |
-| `viewHead(opts)`                         | `components.ts` | hero header with lime-block highlight                     |
-| `backLink(opts)`                         | `components.ts` | "← BACK TO …" sub-page link                               |
-| `statCard(opts)`                         | `components.ts` | brutalist stat tile                                       |
-| `pager(opts)`                            | `components.ts` | prev / next pager                                         |
-| `sectionBar(opts)`                       | `components.ts` | soft section divider                                      |
-| `flash(opts)`                            | `components.ts` | inline banner                                             |
-| `btn(opts)`                              | `components.ts` | branded button                                            |
-| `sparkline(data)`                        | `components.ts` | inline SVG sparkline                                      |
-| `urlWithPage(url, page)`                 | `components.ts` | preserve filters when paging                              |
-| `formatTs(d)`                            | `templates.ts`  | local-time `<time>` with UTC fallback                     |
-| `statusPill(s)` / `defaultProjectPill()` | `templates.ts`  | brand-aware pills                                         |
+`activity-chart.tsx` is the reference for lime/zinc bar visuals: lime for saves,
+amber for superseded/archived ops, rounded caps, hover tooltips on `bg-popover`
+with soft `shadow-black/40`.
 
 ## Do's and Don'ts
 
 **Do**
 
-- Use the CSS custom properties from `tokens.css` for every colour,
-  spacing, and typography reference. Never raw hex, never raw `px`.
-- Use `renderPage()` as the entry point for every authenticated route.
-- Wrap every `<table>` in `<div class="tbl-host">` so it scrolls
-  horizontally inside its container.
-- Mark every destructive form with `data-confirm`. Pick the right tone
+- Use the Tailwind utilities bound to the tokens in `globals.css` for every
+  colour, spacing, and type reference. Never raw hex.
+- Use `StatusPill` for status and the Spectrum `DataTable` for list views —
+  copy `sessions-table.tsx` rather than inventing a table.
+- Route every mutation through `ActionForm` + `CsrfField` + `guardAction`.
+- Wrap every destructive action in `ConfirmSubmit` and pick the right tone
   (`warn` vs `danger`) — that's a semantic decision, not aesthetic.
-- Add `data-href` to a `<tr>` to make the whole row navigable to its
-  detail page. Don't add a separate "OPEN ›" button.
-- Maintain WCAG AA contrast (4.5:1 for body text). The locked palette
-  satisfies this; don't add new colours that don't.
-- Keep touch targets ≥44 × 44 px at ≤980 px.
+- Add new nav entries to `NAV` (and chrome-free routes to `CHROME_FREE_PATHS`)
+  so the command bar and mobile sheet stay in sync.
+- Put the ⋯ menu's "View details" as a `next/link`; there is no `data-href` /
+  `ROW_LINK` script anymore.
+- Send timestamps through `<Time>`.
+- Maintain WCAG AA contrast (4.5:1 for body text). The palette satisfies this;
+  don't add colours that don't.
+- Keep touch targets ≥44 × 44 px on touch layouts.
 
 **Don't**
 
-- Don't introduce inline `<style>` blocks in templates. The single
-  inline style allowed is one-off content-driven values (a sparkline
-  data array, a width %). Anything reusable belongs in CSS.
-- Don't use `localStorage` for UI state. Cookies are the rule — they
-  render correctly on first paint without a flash.
-- Don't hard-code a corner radius. Use the `--radius` tokens so shape
-  stays consistent across primitives.
-- Don't layer on decorative `box-shadow`s. Depth comes from tonal layers
-  and borders; keep any shadow a shadcn primitive ships with.
-- Don't use a CDN at runtime — vendor fonts, HTMX, favicons. The
-  dashboard must work offline.
-- This dashboard is a React + Tailwind v4 surface. Don't add a second
-  client framework or a competing styling system on top of it.
-- Don't use the lime accent on more than one element per "decision
-  unit" — primary action, active nav item, or hero highlight. If two
-  lime elements compete for attention on the same screen, demote one.
-- Don't mix tone semantics. `Archive` is `warn`, `Delete` is `danger`.
-  Don't downgrade a delete to warn to "soften" it — the colour is the
-  warning.
+- Don't introduce new CSS files or inline `<style>` blocks — style with Tailwind
+  utilities bound to `globals.css`.
+- Don't add a second client framework or a competing styling system on top of
+  React + Tailwind v4.
+- Don't use lime text on a light surface, and don't spend more than one lime
+  element per decision unit.
+- Don't hard-code a corner radius; use the 16 / 12 / 10 scale.
+- Don't layer decorative `box-shadow`s. Depth comes from tonal layers, soft
+  shadows, and radial lime glows.
+- Don't add a CDN at runtime — fonts are self-hosted; the dashboard must work
+  offline.
+- Don't mix tone semantics. `Abandon` is warn, `Delete` is danger. Don't
+  downgrade a delete to warn to "soften" it — the colour is the warning.
+- Don't reach for the legacy primitives still exported from `ui.tsx` /
+  `filters.tsx` (see **Pending items**) when building or restyling a page.
 
 ---
 
-The following sections are **Rembric-specific extensions** to the
-canonical DESIGN.md spec. Per the spec, "Unknown section heading:
-Preserve; do not error", so consumers should preserve these as-is.
-
 ## Recipe: add a new dashboard page
 
-1. **CSS**: create `src/dashboard/styles/views/<view>.css` (can be
-   empty — the file's mere existence registers a view bundle).
-2. **Route handler** at `src/dashboard/<view>.ts`:
-
-   ```ts
-   import { backLink, PAGE_SIZE, pager, urlWithPage, viewHead } from './components.js';
-   import { renderPage } from './page-shell.js';
-   import { html, raw } from './templates.js';
-
-   export function createXRouter(deps): Hono {
-     const app = new Hono();
-     app.get('/', (c) => {
-       const session = getSession(c);
-       if (!session) return c.redirect('/dashboard/login');
-       const body = html`
-         ${viewHead({
-           num: 'NN',
-           title: 'Rembric X.',
-           hl: 'Rembric',
-           meta: [{ k: 'TOTAL', v: '0' }],
-         })}
-         <div class="tbl-host">
-           <table>
-             …
-           </table>
-         </div>
-         ${pager({ page, hasMore, pageHrefBuilder: (p) => urlWithPage(c.req.url, p) })}
-       `;
-       return c.html(renderPage(c, deps.sessions, body, { title: 'X', activeNav: 'x' }));
-     });
-     return app;
-   }
-   ```
-
-3. **Mount** in `src/server/dashboard-router.ts` with
-   `app.route('/x', createXRouter(...))`.
-4. **Nav**: add the entry to `NAV` in `components.ts`.
-5. **Tests**: cover the route in `src/test/dashboard-e2e.test.ts` if
-   it surfaces user-visible data.
+1. **Route**: create `apps/web/src/app/dashboard/<name>/page.tsx` as an async
+   server component with `export const dynamic = 'force-dynamic'`. `searchParams`
+   is a `Promise` in this Next.js version — `const params = await searchParams`
+   before reading. Data comes from `getServices()` (`@/lib/services`).
+2. **Compose** the page from the new identity: a Spectrum `DataTable` for lists,
+   `StatusPill` for status, `<Time>` for timestamps, `ActionForm` +
+   `ConfirmSubmit` for mutations.
+3. **Nav**: add the entry to the `NAV` array in `apps/web/src/lib/nav.ts`; the
+   command bar and mobile sheet read it. Add a chrome-free route to
+   `CHROME_FREE_PATHS` if it must render standalone.
+4. **Table**: if the page lists rows, create
+   `apps/web/src/components/dashboard/<view>-table.tsx` by copying
+   `sessions-table.tsx` and swapping the columns.
+5. **Tests**: add a co-located page test under
+   `apps/web/src/test/dashboard/<name>.test.tsx`.
 
 ## Recipe: a destructive action
 
-```ts
-html`
-  <form
-    action="/dashboard/tokens/${t.name}/revoke"
-    method="post"
-    class="inline"
-    data-confirm='Revoke token "${t.name}"? This is IRREVERSIBLE. Any agent using this token will lose access immediately.'
-    data-confirm-label="REVOKE TOKEN"
-    data-confirm-tone="danger"
+A server action with `guardAction`, a matching `<CsrfField>`, and a
+`<ConfirmSubmit>` wrapping the trigger inside the same `<ActionForm>`:
+
+```tsx
+<ActionForm action={revokeToken}>
+  <CsrfField form={FORM} />
+  <ConfirmSubmit
+    tone="danger"
+    title="Revoke token"
+    description="Revoke this token? This is IRREVERSIBLE. Any agent using it loses access immediately."
+    confirmLabel="Revoke token"
   >
-    ${csrfInput(session.session, deps.sessions, 'token.revoke')}
-    <button class="danger" type="submit">Revoke</button>
-  </form>
-`;
+    <Button type="button" variant="destructive">
+      Revoke
+    </Button>
+  </ConfirmSubmit>
+</ActionForm>
 ```
 
-Skip confirmation for: undelete, unarchive, rename, create (benign or
+Skip confirmation for undelete, unarchive, rename, and create (benign or
 trivially reversible).
 
 ## Recipe: row navigation
 
-```ts
-html`
-  <tr data-href="/dashboard/memories/${m.id}">
-    <td><a href="/dashboard/memories/${m.id}">${truncate(m.content, 100)}</a></td>
-    …
-  </tr>
-`;
+There is no `data-href` / `ROW_LINK` script anymore. Row navigation lives in the
+`⋯` menu as a `next/link`:
+
+```tsx
+rowActions={(row) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="icon" aria-label="Row actions">
+        <MoreHorizontal className="size-4" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      <DropdownMenuItem asChild>
+        <Link href={`/dashboard/sessions/${row.id}`}>View details</Link>
+      </DropdownMenuItem>
+      {/* destructive items: confirm via ConfirmSubmit inside the ActionForm */}
+    </DropdownMenuContent>
+  </DropdownMenu>
+)}
 ```
 
-Tables don't spend a column on row ids. The row's semantic cell (title,
-content, or timestamp) hosts the one real `<a>` — kept for keyboard
-users and right-clickers — while `data-href` lets the whole row be
-clickable for mouse users.
+Bulk selection exposes the same actions in the table's rising bulk-action bar.
 
-## JS enhancements (in `templates.ts`)
+## Client components
 
-All scripts inline in `<head>`. Tiny vanilla JS. Every interaction has
-a no-JS fallback.
+Interactivity is React client components, not inline scripts. The shared ones:
 
-| Script        | Purpose                                                      | Trigger                                                 |
-| ------------- | ------------------------------------------------------------ | ------------------------------------------------------- |
-| `TS_UPGRADER` | Localizes `<time data-rembric-ts>` via `Intl.DateTimeFormat` | `DOMContentLoaded` + `htmx:afterSwap`                   |
-| `MOB_TOGGLE`  | Opens / closes mobile drawer                                 | Click on `.mob-toggle` / `.sb-mob-close` / `Escape` key |
-| `SB_COLLAPSE` | Desktop sidebar collapse with width transition               | Submit on `form[action="/dashboard/_sidebar/toggle"]`   |
-| `ROW_LINK`    | Whole-row navigation in tables                               | Click on `<tr data-href>` (skips interactive children)  |
-| `CONFIRM`     | Native `<dialog>` confirmation for destructive forms         | Submit on `<form data-confirm>`                         |
+| Component                   | Purpose                                                    |
+| --------------------------- | ---------------------------------------------------------- |
+| `command-bar.tsx`           | Floating command bar, More dropdown, mobile `Sheet`        |
+| `time.tsx`                  | Locale-renders `<time data-rembric-ts>` after mount        |
+| `action-form.tsx`           | `ActionForm` + `useActionFormId` for server-action forms   |
+| `confirm-submit.tsx`        | Radix `AlertDialog` bound to the enclosing form            |
+| `activity-chart.tsx`        | Lime/amber bar chart with hover tooltips                   |
+| `spectrumui/data-table.tsx` | List-view engine: search, quick filters, selection, detail |
 
 ## Reference files
 
 ```
-src/dashboard/templates.ts            shell() + html`` + minifier + scripts
-src/dashboard/page-shell.ts           renderPage() — authenticated entry
-src/dashboard/components.ts           viewHead, statCard, pager, btn, …
-src/dashboard/assets.ts               static asset middleware
-src/dashboard/csrf.ts                 CSRF helpers
-src/dashboard/styles/
-  core/tokens.css                     CSS variables + @font-face
-  core/base.css                       reset + global element defaults
-  core/atoms.css                      .pill .btn .inp .flash .tag .bn …
-  core/layout.css                     .app .sb .mob-bar .view-head
-  core/patterns.css                   .stat .grid-7 .tbl .filters .pager …
-  core/content.css                    bare element defaults inside .main
-  views/*.css                         per-page extensions
-scripts/build-css.mjs                 lightningcss build pipeline
-scripts/fetch-fonts.mjs               woff2 vendor script
-openspec/specs/dashboard/spec.md      spec contract that locks the design
+apps/web/src/app/dashboard/layout.tsx              CommandFrame wrapper
+apps/web/src/app/dashboard/**/page.tsx             one async server component per route
+apps/web/src/components/dashboard/command-bar.tsx  floating command bar + shell
+apps/web/src/components/dashboard/sessions-table.tsx  canonical Spectrum data-table
+apps/web/src/components/dashboard/ui.tsx           StatusPill (live) + legacy primitives
+apps/web/src/components/spectrumui/data-table.tsx  shared list-view table engine
+apps/web/src/components/dashboard/action-form.tsx  ActionForm + useActionFormId
+apps/web/src/components/dashboard/csrf-field.tsx   CsrfField
+apps/web/src/components/dashboard/confirm-submit.tsx ConfirmSubmit
+apps/web/src/components/dashboard/time.tsx         Time
+apps/web/src/components/dashboard/activity-chart.tsx  lime/zinc bar chart
+apps/web/src/components/dashboard/support.ts       PAGE_SIZE, queryWithPage, …
+apps/web/src/lib/nav.ts                            NAV / NAV_GROUPS / CHROME_FREE_PATHS
+apps/web/src/app/globals.css                       Tailwind v4 theme + design tokens
+apps/web/src/app/layout.tsx                        Geist / Geist Mono localFont wiring
+apps/web/src/test/dashboard/*.test.tsx             per-page tests
+.agents/skills/rembric-dashboard-ui/SKILL.md       canonical identity doc (v1.1)
+odd/tasks/dashboard-identity-redesign.md           redesign task file (pending items)
 ```
+
+---
+
+## Superseded identity — brutalist editorial (2026-09 redesign)
+
+**Historical record. Superseded — do not use for new work.**
+
+The identity described in this section governed the Rembric dashboard until the
+**2026-09 redesign (branch `feat/dashboard-identity-redesign`)**. It is kept here
+so the record of why the surface once looked the way it did is not erased. Every
+token, font, and pattern below is **superseded** by the zinc/lime/Geist system
+documented above.
+
+The dashboard began as a **brutalist editorial** design system: a near-black
+canvas (`#0a0a0a`) with coal cards (`#141414`), a coal-with-lime-tint row hover
+(`#15170d`), and iron borders (`#2a2a2a`); hero titles in Space Grotesk, body
+copy in Inter, and labels in JetBrains Mono; a `--radius` scale that leaned to
+hard 0-radii; and a fixed **196 px sidebar rail** (`196 px`, collapsing to
+`56 px`). It was framed as "operational, terse, unambiguous — like an
+oscilloscope, not a SaaS landing page," with the `hl-lime` lime-block title
+(`REMBRIC <PAGE>.`) as its signature stamp.
+
+**Why it was replaced.** The fixed sidebar rail, the hard-edged zero-radius
+primitives, the three-face type stack, and the flat tonal palette read as
+heavier and less scannable than the current floating command bar over a layered
+zinc surface, and the old surface ladder was too compressed to carry depth
+without borders. The redesign (owner-approved, explored in
+OpenPencil) moved to a two-face Geist stack, a wider surface ladder with soft
+shadows and radial lime glows, a floating shell, and the Spectrum UI
+data-table listing model.
+
+Superseded artifacts, retained only as history:
+
+| Superseded token   | Old value | Status in the new identity        |
+| ------------------ | --------- | --------------------------------- |
+| `primary`          | `#c6f24e` | retained (still the only accent)  |
+| `on-primary`       | `#0a0a0a` | replaced by `#09090b`             |
+| `neutral`          | `#0a0a0a` | replaced by the background token  |
+| `surface`          | `#141414` | replaced by `#101012` (card)      |
+| `surface-hover`    | `#15170d` | replaced by `#1c1c1f` (accent)    |
+| `on-surface`       | `#f2f2f2` | replaced by `#fafafa`             |
+| `on-surface-dim`   | `#9a9a9a` | replaced by `#71717a` (muted)     |
+| `on-surface-faint` | `#2a2a2a` | replaced by `#1f1f23` (border)    |
+| `warn`             | `#ff8c00` | retained (amber)                  |
+| `danger`           | `#ff3344` | replaced by the destructive token |
+
+- **Type**: Space Grotesk (display), Inter (body), JetBrains Mono (labels) —
+  all replaced by Geist / Geist Mono.
+- **Shell & scripts**: the `.sb` sidebar, `renderPage()`, `shell()`, HTMX,
+  `data-href` / `ROW_LINK`, and the inline `TS_UPGRADER` / `MOB_TOGGLE` /
+  `SB_COLLAPSE` / `CONFIRM` scripts — the stack was Hono + HTMX + SSR helpers
+  under `src/dashboard/`, which no longer exists.
+- **Primitives**: `viewHead`, `statCard`, `pager`, the hard-bordered `Pill`,
+  `FilterForm` / `Pager`, and the `app-sidebar.tsx` rail — now **LEGACY**
+  (see below).
+
+## Pending items
+
+- **Legacy primitives not yet restyled.** The consolidation and maintenance
+  pages (plus several detail pages) still carry the pre-redesign primitives
+  exported as LEGACY from `apps/web/src/components/dashboard/ui.tsx`
+  (`ViewHead`, `SectionBar`, `StatCard`/`StatGrid`, `Kv`/`KvGrid`,
+  `Panel`/`PanelHead`, `DataTable`, `Pill`/`ReviewPill`/`Chip`/`Tag`, `Bar`,
+  `Notice`, `Flash`) and from `filters.tsx` (`FilterForm`/`Pager`). When those
+  pages are restyled, replace the legacy primitives with the new identity
+  (`StatusPill`, the Spectrum `DataTable`), not with another legacy primitive.
+- **Formal OpenSpec change pending.** The token unlock has not yet been
+  formalized. Until the `dashboard` OpenSpec spec is updated and merged, the
+  **live reference is the branch code** — `sessions-table.tsx`,
+  `command-bar.tsx`, `activity-chart.tsx`, `ui.tsx`, and `globals.css` — and the
+  canonical identity doc is `.agents/skills/rembric-dashboard-ui/SKILL.md`.
+  Tracked as task 9 in `odd/tasks/dashboard-identity-redesign.md`. Do not edit
+  `openspec/specs/dashboard/spec.md` or archived `design.md` files from UI work;
+  that is a separate task.
