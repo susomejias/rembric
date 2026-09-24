@@ -16,11 +16,11 @@ export function CopyCommand({ command }: { command: string }) {
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <code className="border border-border bg-muted px-2.5 py-1.5 font-mono text-xs text-foreground">
+      <code className="rounded-lg border border-border bg-muted px-2.5 py-1.5 font-mono text-xs text-foreground">
         {command}
       </code>
-      <Button type="button" variant="secondary" size="sm" onClick={copy}>
-        {copied ? 'COPIED' : 'COPY'}
+      <Button type="button" variant="outline" size="sm" onClick={copy}>
+        {copied ? 'Copied' : 'Copy'}
       </Button>
     </div>
   );

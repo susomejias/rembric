@@ -234,7 +234,7 @@ export default async function ConsolidationPage({
       </StatGrid>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -242,7 +242,7 @@ export default async function ConsolidationPage({
               </p>
               <h2 className="mt-2 text-base font-medium">Sweep behavior</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               deterministic
             </span>
           </div>
@@ -270,7 +270,7 @@ export default async function ConsolidationPage({
             </ActionForm>
           </div>
         </div>
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -278,7 +278,7 @@ export default async function ConsolidationPage({
               </p>
               <h2 className="mt-2 text-base font-medium">Undoable work</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               journaled
             </span>
           </div>
@@ -359,7 +359,7 @@ export default async function ConsolidationPage({
           {page > 0 ? (
             <Link
               href={`/dashboard/consolidation?page=${page - 1}`}
-              className="border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
+              className="rounded-xl border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
             >
               ‹ PREV
             </Link>
@@ -370,7 +370,7 @@ export default async function ConsolidationPage({
           {hasMore ? (
             <Link
               href={`/dashboard/consolidation?page=${page + 1}`}
-              className="border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
+              className="rounded-xl border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
             >
               NEXT ›
             </Link>

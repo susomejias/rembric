@@ -43,7 +43,7 @@ function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string 
   return (
     <span
       aria-hidden="true"
-      className={cn('inline-block size-[0.55em] shrink-0', TONE_DOT[tone], className)}
+      className={cn('inline-block size-[0.55em] shrink-0 rounded-full', TONE_DOT[tone], className)}
     />
   );
 }
@@ -69,14 +69,14 @@ export function ViewHead({
   const heading = (
     <h1
       className={cn(
-        'font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl',
+        'text-3xl font-semibold tracking-tight text-foreground',
         !titleVisible && 'sr-only',
       )}
     >
       {parts ? (
         <>
           {parts[0]}
-          <span className="bg-primary px-[.18em] pb-[.04em] text-primary-foreground">{hl}</span>
+          <span className="text-primary">{hl}</span>
           {parts[1]}
         </>
       ) : (
@@ -85,7 +85,7 @@ export function ViewHead({
     </h1>
   );
   if (!titleVisible) return heading;
-  return <header className="min-w-0 border-b border-border pb-4">{heading}</header>;
+  return <header className="min-w-0">{heading}</header>;
 }
 
 export function BackLink({ href, label }: { href: string; label: string }) {
@@ -113,11 +113,8 @@ export function SectionBar({
   more?: ReactNode;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-baseline gap-3 border-b border-border pb-3">
-      <span className={cn('flex items-center gap-2 font-semibold text-foreground', LABEL)}>
-        <Bullet />
-        {name}
-      </span>
+    <div className="mb-4 flex flex-wrap items-baseline gap-3">
+      <span className={cn('font-medium text-foreground', LABEL)}>{name}</span>
       {meta ? <span className={cn('text-muted-foreground', LABEL)}>{meta}</span> : null}
       {more ? <span className="ml-auto">{more}</span> : null}
     </div>
@@ -143,8 +140,8 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className, compact }: 
       </div>
       <div
         className={cn(
-          'font-display leading-none font-bold tracking-[-.025em]',
-          compact ? 'text-3xl' : 'text-4xl',
+          'leading-none font-semibold tracking-tight',
+          compact ? 'text-2xl' : 'text-3xl',
           TONE_TEXT[tone],
         )}
       >
@@ -156,9 +153,9 @@ export function StatCard({ k, v, tone = 'dim', sub, href, className, compact }: 
     </>
   );
   const box = cn(
-    'flex flex-col border border-border bg-card transition-colors',
+    'flex flex-col rounded-2xl border border-border bg-card transition-colors',
     compact ? 'min-h-[92px] gap-1.5 p-4' : 'min-h-[132px] gap-3 p-5',
-    href && 'hover:border-primary',
+    href && 'hover:border-primary/60',
     className,
   );
   return href ? (
@@ -182,10 +179,9 @@ export function StatGrid({
   return (
     <div
       className={cn(
-        variant === 'frame' &&
-          'grid grid-cols-2 gap-px border border-border bg-border [&>*]:border-0! md:grid-cols-3 xl:grid-cols-6',
+        variant === 'frame' && 'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6',
         variant === 'cards' &&
-          'grid [grid-template-columns:repeat(auto-fill,minmax(148px,1fr))] [&>*]:-ml-px! [&>*]:-mt-px!',
+          'grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(148px,1fr))]',
         className,
       )}
     >
@@ -290,7 +286,7 @@ export function PanelHead({
 
 export function DataTable({ children }: { children: ReactNode }) {
   return (
-    <div className="w-full overflow-x-auto border border-border bg-card">
+    <div className="w-full overflow-hidden overflow-x-auto rounded-2xl border border-border bg-card">
       <Table className="min-w-[720px]">{children}</Table>
     </div>
   );
@@ -337,7 +333,7 @@ export function TableEmpty({ children }: { children: ReactNode }) {
   return (
     <div
       className={cn(
-        'border border-dashed border-border px-5 py-14 text-center text-muted-foreground',
+        'rounded-2xl border border-dashed border-border px-5 py-14 text-center text-muted-foreground',
         LABEL,
       )}
     >
@@ -350,7 +346,7 @@ export function Pill({ children, tone = 'dim' }: { children: ReactNode; tone?: T
   return (
     <span
       className={cn(
-        'inline-flex w-fit items-center gap-2 border bg-transparent px-2 py-0.5 font-mono text-[10px] whitespace-nowrap uppercase tracking-[.12em]',
+        'inline-flex w-fit items-center gap-2 rounded-full border bg-transparent px-2.5 py-0.5 font-mono text-[10px] whitespace-nowrap uppercase tracking-[.12em]',
         TONE_BORDER[tone],
       )}
     >
@@ -456,7 +452,7 @@ export function Bar({
 }) {
   const clamped = Math.min(100, Math.max(0, percent));
   return (
-    <div className="mt-2 h-1.5 overflow-hidden bg-muted">
+    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
       <div
         className={cn(
           'h-full',
@@ -482,7 +478,7 @@ export function Notice({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-3 border bg-card px-4 py-3',
+        'flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3',
         tone === 'amber'
           ? 'border-warn/40'
           : tone === 'danger'
@@ -512,7 +508,7 @@ export function Flash({
   return (
     <div
       className={cn(
-        'mb-5 flex flex-wrap items-center gap-4 border bg-card px-5 py-4',
+        'mb-5 flex flex-wrap items-center gap-4 rounded-xl border bg-card px-5 py-4',
         TONE_BORDER[tone],
       )}
     >

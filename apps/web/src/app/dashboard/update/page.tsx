@@ -1,4 +1,6 @@
+import type { UpdateInfo } from '@rembric/core';
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 
 import { checkForUpdates, UPDATE_CHECK_FORM } from './actions';
 import { CopyCommand } from './copy-command';
@@ -8,16 +10,7 @@ import { ActionForm } from '@/components/dashboard/action-form';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { singleParam } from '@/components/dashboard/support';
-import {
-  Flash,
-  Page,
-  Pill,
-  SectionBar,
-  StatCard,
-  StatGrid,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { Flash, Page, Pill, SectionBar, StatCard, StatGrid, Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { REMBRIC_VERSION } from '@/lib/version';
 
@@ -42,12 +35,20 @@ export default async function UpdatePage({
 
   return (
     <Page>
-      <ViewHead
-        num="09"
-        title="Rembric Updates."
-        hl="Rembric"
-        meta={[{ k: 'RUNNING', v: `v${REMBRIC_VERSION}` }]}
-      />
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Updates</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Running Rembric v{REMBRIC_VERSION} · {statusLine(enabled, info)}
+          </p>
+        </div>
+        {enabled && info === null ? (
+          <ActionForm action={checkForUpdates} className="shrink-0">
+            <CsrfField form={UPDATE_CHECK_FORM} />
+            <Button type="submit">Check for updates</Button>
+          </ActionForm>
+        ) : null}
+      </header>
 
       {notice ? (
         <div className="mt-5">
@@ -57,77 +58,53 @@ export default async function UpdatePage({
         </div>
       ) : null}
 
-      <section className="mt-6 max-w-[900px] border border-border bg-card p-6 md:p-8">
-        <p className="font-mono text-[11px] uppercase tracking-[.16em] text-primary">
+      <section className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-6 md:p-8">
+        <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
           {!enabled
-            ? 'CHECK DISABLED'
+            ? 'Check disabled'
             : info
-              ? `UPDATE AVAILABLE · v${info.latestVersion}`
-              : 'UP TO DATE'}
+              ? `Update available · v${info.latestVersion}`
+              : 'Up to date'}
         </p>
         <p className="mt-4 max-w-3xl text-base leading-7 text-muted-foreground">
           {!enabled ? (
             <>
-              This deployment sets{' '}
-              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
-                REMBRIC_UPDATE_CHECK=off
-              </code>
-              , so Rembric never contacts GitHub and cannot know whether{' '}
-              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
-                v{REMBRIC_VERSION}
-              </code>{' '}
-              is the latest release. Remove the variable and restart to re-enable the check.
+              This deployment sets <VersionCode>REMBRIC_UPDATE_CHECK=off</VersionCode>, so Rembric
+              never contacts GitHub and cannot know whether{' '}
+              <VersionCode>v{REMBRIC_VERSION}</VersionCode> is the latest release. Remove the
+              variable and restart to re-enable the check.
             </>
           ) : info ? (
             <>
-              You are running{' '}
-              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
-                v{REMBRIC_VERSION}
-              </code>{' '}
-              and <b className="font-medium text-primary">v{info.latestVersion}</b> is published.
-              The upgrade runs on the host, not in this dashboard.
+              You are running <VersionCode>v{REMBRIC_VERSION}</VersionCode> and{' '}
+              <b className="font-medium text-primary">v{info.latestVersion}</b> is published. The
+              upgrade runs on the host, not in this dashboard.
             </>
           ) : (
             <>
-              You are running{' '}
-              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
-                v{REMBRIC_VERSION}
-              </code>{' '}
-              — no newer release is known. The check runs automatically at most once a day and can
-              be disabled with{' '}
-              <code className="border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
-                REMBRIC_UPDATE_CHECK=off
-              </code>
-              .
+              You are running <VersionCode>v{REMBRIC_VERSION}</VersionCode> — no newer release is
+              known. The check runs automatically at most once a day and can be disabled with{' '}
+              <VersionCode>REMBRIC_UPDATE_CHECK=off</VersionCode>.
             </>
           )}
         </p>
-        <p className="mt-7 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
-          LAST CHECKED{' '}
+        <p className="mt-7 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+          Last checked{' '}
           <span className="ml-2 font-sans text-sm tracking-normal normal-case">
             {lastChecked ? <Time value={lastChecked} /> : 'not checked yet in this process'}
           </span>
         </p>
       </section>
 
-      {enabled && info === null ? (
-        <ActionForm action={checkForUpdates} className="mt-5">
-          <CsrfField form={UPDATE_CHECK_FORM} />
-          <Button type="submit" variant="outline" size="sm">
-            CHECK NOW →
-          </Button>
-        </ActionForm>
-      ) : null}
-
       <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
         <StatCard
-          k="CURRENT VERSION"
+          k="Current version"
           v={`v${REMBRIC_VERSION}`}
           tone="lime"
-          sub={<span>AS REPORTED BY THIS BUILD</span>}
+          sub={<span>As reported by this build</span>}
         />
         <StatCard
-          k="RELEASE STATUS"
+          k="Release status"
           v={
             <Pill tone={!enabled ? 'dim' : info ? 'amber' : 'lime'}>
               {!enabled
@@ -137,12 +114,12 @@ export default async function UpdatePage({
                   : 'Up to date'}
             </Pill>
           }
-          sub={<span>CACHED RESULT OF THE DAILY CHECK</span>}
+          sub={<span>Cached result of the daily check</span>}
         />
         <StatCard
-          k="MANUAL CHECK"
+          k="Manual check"
           v={enabled ? 'On demand' : 'Unavailable'}
-          sub={<span>{enabled ? 'FORCES A RELEASE CHECK NOW' : 'THE CHECK IS TURNED OFF'}</span>}
+          sub={<span>{enabled ? 'Forces a release check now' : 'The check is turned off'}</span>}
         />
       </StatGrid>
 
@@ -162,7 +139,7 @@ export default async function UpdatePage({
               info.releaseUrl ? (
                 <Link
                   href={info.releaseUrl}
-                  className="border border-border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  className="rounded-xl border border-border px-3.5 py-2 text-sm text-foreground transition-colors hover:bg-accent"
                 >
                   Open on GitHub
                 </Link>
@@ -170,14 +147,14 @@ export default async function UpdatePage({
             }
           />
           {info.publishedAt ? (
-            <p className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
-              PUBLISHED <Time value={info.publishedAt} />
+            <p className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+              Published <Time value={info.publishedAt} />
             </p>
           ) : null}
 
-          <div className="mt-6 max-w-[900px] border border-border bg-card p-5 md:p-6">
-            <p className="font-mono text-[11px] uppercase tracking-[.16em] text-primary">
-              MANUAL UPDATE
+          <div className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-5 md:p-6">
+            <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+              Manual update
             </p>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
               Run this on the host, then this page will reload on the new version:
@@ -189,15 +166,28 @@ export default async function UpdatePage({
               href={UPDATE_DOCS_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-4 inline-block font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground transition-colors hover:text-primary"
+              className="mt-4 inline-block font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground transition-colors hover:text-primary"
             >
-              HOW TO ENABLE ONE-CLICK UPDATES ›
+              How to enable one-click updates ›
             </a>
           </div>
         </div>
       ) : null}
     </Page>
   );
+}
+
+function VersionCode({ children }: { children: ReactNode }) {
+  return (
+    <code className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-primary">
+      {children}
+    </code>
+  );
+}
+
+function statusLine(enabled: boolean, info: UpdateInfo | null): string {
+  if (!enabled) return 'update check disabled';
+  return info ? `v${info.latestVersion} is available` : 'up to date';
 }
 
 function noticeFrom(

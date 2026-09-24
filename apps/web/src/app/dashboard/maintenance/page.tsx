@@ -173,13 +173,13 @@ export default async function MaintenancePage({
       </StatGrid>
 
       {release ? (
-        <section className="mt-6 border border-primary/40 bg-primary/5 p-5 md:p-6">
+        <section className="mt-6 rounded-2xl border border-primary/40 bg-primary/5 p-5 md:p-6">
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
                 UPDATE AVAILABLE
               </p>
-              <h2 className="mt-2 font-display text-xl font-bold tracking-[-.02em]">
+              <h2 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
                 Rembric v{release.latestVersion} is published
               </h2>
               <p className="mt-2 max-w-xl text-xs leading-5 text-muted-foreground">
@@ -200,7 +200,7 @@ export default async function MaintenancePage({
             </p>
             <Link
               href="/dashboard/update"
-              className="bg-primary px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[.12em] text-primary-foreground transition-colors hover:bg-primary/90"
+              className="rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               Open the release
             </Link>
@@ -209,7 +209,7 @@ export default async function MaintenancePage({
       ) : null}
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -217,7 +217,7 @@ export default async function MaintenancePage({
               </p>
               <h2 className="mt-2 text-base font-medium">Safe purges</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               journaled
             </span>
           </div>
@@ -226,7 +226,7 @@ export default async function MaintenancePage({
             deleted prompts. Every purge is journaled and reversible.
           </p>
         </div>
-        <div className="border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -234,7 +234,7 @@ export default async function MaintenancePage({
               </p>
               <h2 className="mt-2 text-base font-medium">Disk recovery</h2>
             </div>
-            <span className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
+            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
               freelist
             </span>
           </div>
