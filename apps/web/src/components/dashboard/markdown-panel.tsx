@@ -31,11 +31,14 @@ export function MarkdownPanel({
   };
 
   return (
-    <section className="mb-5 border border-primary/40 bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 md:px-6">
+    <section className="mb-5 rounded-2xl border border-border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
         <div>
           <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
-            <span aria-hidden="true" className="inline-block size-[0.55em] shrink-0 bg-primary" />
+            <span
+              aria-hidden="true"
+              className="inline-block size-[0.55em] shrink-0 rounded-full bg-primary"
+            />
             {eyebrow}
           </p>
           <h2 className="mt-1 text-base font-medium">{title}</h2>
@@ -46,7 +49,7 @@ export function MarkdownPanel({
             type="button"
             onClick={copy}
             aria-label={copyLabel}
-            className={`flex items-center gap-2 border border-border px-3 py-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary ${LABEL}`}
+            className={`flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary ${LABEL}`}
           >
             {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
             {copied ? 'Copied' : copyLabel}
@@ -94,12 +97,12 @@ const MARKDOWN_COMPONENTS = {
     </a>
   ),
   code: ({ children }: { children?: ReactNode }) => (
-    <code className="border border-border bg-muted px-1.5 py-0.5 font-mono text-[.8em] text-foreground">
+    <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[.8em] text-foreground">
       {children}
     </code>
   ),
   pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="mb-3 overflow-x-auto border border-border bg-muted p-3 font-mono text-xs leading-5">
+    <pre className="mb-3 overflow-x-auto rounded-xl border border-border bg-muted p-3 font-mono text-xs leading-5">
       {children}
     </pre>
   ),
