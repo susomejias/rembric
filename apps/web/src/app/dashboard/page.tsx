@@ -1,5 +1,3 @@
-import { REVIEW_TTL_MS } from '@rembric/core';
-import type { MemoryType } from '@rembric/db';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
@@ -9,15 +7,10 @@ import { formatBytes, relativeTime, truncate } from '@/components/dashboard/supp
 import { NumberTicker } from '@/components/motion/number-ticker';
 import { getServices } from '@/lib/services';
 import { cn } from '@/lib/utils';
-import { REMBRIC_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
 
 const DAY_MS = 86_400_000;
-
-const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
-  (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
-);
 
 type FeedItem = {
   readonly key: string;
@@ -30,17 +23,6 @@ type FeedItem = {
 export default function DashboardOverviewPage() {
   const { agentSessions, db, repos } = getServices();
   const nowMs = Date.now();
-
-  const memoriesByStatus = repos.memory.countRowsByStatus();
-  const totalMemories = memoriesByStatus.reduce((acc, row) => acc + row.count, 0);
-
-  const needsReview = repos.memory
-    .adminCountNeedsReviewByProject({ nowMs, ttlByType: TTL_BY_TYPE })
-    .reduce((acc, row) => acc + row.count, 0);
-  const pendingJudgments = repos.relations
-    .adminPendingAdjudicableByProject()
-    .reduce((acc, row) => acc + row.count, 0);
-  const reviewTotal = needsReview + pendingJudgments;
 
   const allTokens = repos.tokens.listAll();
   const activeTokens = allTokens.filter(
@@ -110,27 +92,8 @@ export default function DashboardOverviewPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Good evening</h1>
-          <p className="mt-2 truncate text-sm text-muted-foreground">
-            {totalMemories.toLocaleString('en-US')} memories · v{REMBRIC_VERSION} · db {dbSize}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <Link
-            href="/dashboard/maintenance"
-            className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
-          >
-            Maintenance
-          </Link>
-          <Link
-            href="/dashboard/judgments"
-            className="rounded-[10px] bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            {reviewTotal > 0 ? `Review · ${reviewTotal}` : 'Review'}
-          </Link>
-        </div>
+      <section className="flex flex-col gap-4">
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Good evening</h1>
       </section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_460px]">
@@ -413,6 +376,7 @@ export default function DashboardOverviewPage() {
             <HealthRow label="MCP endpoint" value={mcpHost} tone="lime" />
             <HealthRow label="FTS index" value="memory_fts · contentless" />
             <HealthRow label="Node" value={process.versions.node} />
+            <HealthRow label="DB size" value={dbSize} />
           </div>
           <div className="px-5 pt-4">
             <Link

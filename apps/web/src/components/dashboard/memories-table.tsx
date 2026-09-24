@@ -72,7 +72,12 @@ export function MemoriesTable({
       value: (row) => row.title,
       cell: (row) => (
         <div className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium text-foreground">{row.title}</span>
+          <Link
+            href={`/dashboard/memories/${row.id}`}
+            className="truncate text-sm font-medium text-foreground transition-colors hover:text-primary"
+          >
+            {row.title}
+          </Link>
           <span className="truncate font-mono text-[11px] text-muted-foreground">
             {row.type} · {row.project}
           </span>

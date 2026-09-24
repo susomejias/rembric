@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
 import { SessionsTable } from '@/components/dashboard/sessions-table';
 import { singleParam } from '@/components/dashboard/support';
@@ -170,8 +171,9 @@ export default async function SessionsPage({
   return (
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
+        <div className="flex items-center gap-2">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Sessions</h1>
+          <PageHelp text="Agent runs captured with summaries, transcripts and per-session memory counts." />
           <p className="mt-2 text-sm text-muted-foreground">
             {total.toLocaleString('en-US')} sessions · {active} active now
           </p>
