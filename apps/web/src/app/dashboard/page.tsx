@@ -179,7 +179,7 @@ export default function DashboardOverviewPage() {
                         {session.agent}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                        {session.summary ?? session.projectSlug ?? '—'}
+                        {session.title ?? session.projectSlug ?? '—'}
                       </span>
                       <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                         {relativeTime(session.startedAt, nowMs)}

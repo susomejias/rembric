@@ -32,7 +32,7 @@ export type AdminSessionDetail = AdminSessionRow & Pick<AgentSession, 'summary' 
 
 export type AdminRecentSession = Pick<
   AgentSession,
-  'id' | 'agent' | 'startedAt' | 'endedAt' | 'status' | 'summary' | 'summaryFinal'
+  'id' | 'agent' | 'startedAt' | 'endedAt' | 'status' | 'title' | 'summary' | 'summaryFinal'
 > & {
   projectSlug: Project['slug'] | null;
   memCount: number;
@@ -340,6 +340,7 @@ export class AgentSessionsRepository {
         startedAt: agentSessions.startedAt,
         endedAt: agentSessions.endedAt,
         status: agentSessions.status,
+        title: agentSessions.title,
         summary: agentSessions.summary,
         summaryFinal: agentSessions.summaryFinal,
         projectSlug: projects.slug,
