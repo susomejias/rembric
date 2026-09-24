@@ -1,6 +1,6 @@
 'use client';
 
-import { LogOut, Menu } from 'lucide-react';
+import { LogOut, Menu, MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
@@ -49,14 +49,13 @@ function NavMoreMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        aria-label="More pages"
         className={cn(
-          'rounded-lg px-2.5 py-1.5 text-sm transition-colors',
-          moreActive
-            ? 'bg-accent font-medium text-foreground'
-            : 'text-muted-foreground hover:text-foreground',
+          'flex size-9 items-center justify-center rounded-lg transition-colors',
+          moreActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
       >
-        More
+        <MoreHorizontal aria-hidden="true" className="size-5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="border-border bg-popover">
         <DropdownMenuLabel className="font-mono text-[10px] tracking-[.14em] text-muted-foreground">
