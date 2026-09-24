@@ -1,5 +1,6 @@
 'use client';
 
+import { MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
@@ -7,6 +8,17 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { Pill, StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+
+const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
+const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 export interface JudgmentRowData {
   readonly id: string;
@@ -18,27 +30,36 @@ export interface JudgmentRowData {
   readonly relation: string | null;
   readonly status: string;
   readonly actor: string | null;
+  readonly kind: string | null;
   readonly createdAt: Date;
   readonly judgedAt: Date | null;
 }
 
 export interface JudgmentServerActions {
   orphan: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
+  bulkOrphan: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
 }
 
 export interface JudgmentCsrfTokens {
   readonly orphan: string | null;
+  readonly bulkOrphan: string | null;
 }
 
 export function JudgmentsTable({
   rows,
   actions,
   csrf,
+  quickFilter = false,
+  selectable = false,
+  searchable = false,
   pageSize = 10,
 }: {
   rows: readonly JudgmentRowData[];
   actions: JudgmentServerActions;
   csrf: JudgmentCsrfTokens;
+  quickFilter?: boolean;
+  selectable?: boolean;
+  searchable?: boolean;
   pageSize?: number;
 }) {
   const columns: DataTableColumn<JudgmentRowData>[] = [
@@ -112,6 +133,9 @@ export function JudgmentsTable({
       rowId={(row) => row.id}
       rowLabel={(row) => `${row.sourceTitle} → ${row.targetTitle}`}
       caption="Judgments, pending and recently judged"
+      searchable={searchable}
+      searchPlaceholder="Search judgments…"
+      searchText={(row) => `${row.sourceTitle} ${row.targetTitle} ${row.relation ?? 'pending'}`}
       variant="panel"
       density="default"
       emptyState={
@@ -119,14 +143,66 @@ export function JudgmentsTable({
           NO JUDGMENT MATCHES THIS FILTER
         </div>
       }
-      quickFilter={{ columnId: 'relation', label: 'Filter by relation', allLabel: 'All' }}
-      rowActions={(row) => <JudgmentRowActions row={row} actions={actions} csrf={csrf} />}
+      quickFilter={
+        quickFilter
+          ? { columnId: 'relation', label: 'Filter by relation', allLabel: 'All' }
+          : undefined
+      }
+      selectable={selectable}
+      bulkActions={
+        selectable
+          ? (context) => {
+              const pendingRows = context.rows.filter((row) => row.status === 'pending');
+              const skipped = context.rows.length - pendingRows.length;
+              return (
+                <ActionForm action={actions.bulkOrphan} className="flex">
+                  <input type="hidden" name="csrf" value={csrf.bulkOrphan ?? ''} />
+                  {pendingRows.map((row) => (
+                    <input key={row.id} type="hidden" name="judgmentId" value={row.judgmentId} />
+                  ))}
+                  <ConfirmSubmit
+                    tone="danger"
+                    title={`Mark ${pendingRows.length} selected ${
+                      pendingRows.length === 1 ? 'judgment' : 'judgments'
+                    } as orphaned?`}
+                    description={`${pendingRows.length} pending ${
+                      pendingRows.length === 1 ? 'judgment' : 'judgments'
+                    } will be removed from the queue and won't be re-judged automatically. ${skipped} non-pending ${
+                      skipped === 1 ? 'judgment' : 'judgments'
+                    } will be skipped.`}
+                    confirmLabel="MARK ORPHANED"
+                  >
+                    <Button type="button" variant="destructive" size="sm">
+                      Mark orphaned
+                    </Button>
+                  </ConfirmSubmit>
+                </ActionForm>
+              );
+            }
+          : undefined
+      }
+      renderDetail={(row) => (
+        <div className="flex flex-col gap-3 px-2 py-1 text-xs">
+          <p className="whitespace-pre-line leading-relaxed text-foreground">
+            <span className="font-medium">{row.sourceTitle}</span>
+            <span aria-hidden="true" className="px-1 text-muted-foreground">
+              →
+            </span>
+            <span className="font-medium">{row.targetTitle}</span>
+          </p>
+          <p className="font-mono text-[10px] text-muted-foreground">
+            relation: {row.relation ?? 'pending'} · actor: {row.actor ?? '—'} · kind:{' '}
+            {row.kind ?? '—'}
+          </p>
+        </div>
+      )}
+      rowActions={(row) => <JudgmentRowMenu row={row} actions={actions} csrf={csrf} />}
       pageSize={pageSize}
     />
   );
 }
 
-function JudgmentRowActions({
+function JudgmentRowMenu({
   row,
   actions,
   csrf,
@@ -136,29 +212,52 @@ function JudgmentRowActions({
   csrf: JudgmentCsrfTokens;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Link
-        href={`/dashboard/judgments/${row.id}`}
-        className="font-mono text-[11px] uppercase tracking-[.14em] hover:text-primary"
-      >
-        View →
-      </Link>
-      {row.status === 'pending' ? (
-        <ActionForm action={actions.orphan}>
-          <input type="hidden" name="csrf" value={csrf.orphan ?? ''} />
-          <input type="hidden" name="judgmentId" value={row.judgmentId} />
-          <ConfirmSubmit
-            tone="danger"
-            title="Mark this judgment as orphaned?"
-            description="It will be removed from the pending queue and won't be re-judged automatically."
-            confirmLabel="MARK ORPHANED"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`Actions for judgment ${row.sourceTitle}`}
+          className="size-7 text-muted-foreground hover:text-foreground"
+        >
+          <MoreHorizontal aria-hidden="true" className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44 border-border bg-popover">
+        <DropdownMenuItem asChild>
+          <Link
+            href={`/dashboard/judgments/${row.id}`}
+            className={cn(MENU_ITEM_ROOT, 'cursor-pointer')}
           >
-            <Button type="button" variant="outline" size="sm">
-              Mark orphaned
-            </Button>
-          </ConfirmSubmit>
-        </ActionForm>
-      ) : null}
-    </div>
+            View details
+          </Link>
+        </DropdownMenuItem>
+        {row.status === 'pending' ? (
+          <>
+            <DropdownMenuSeparator className="bg-border" />
+            <DropdownMenuItem
+              asChild
+              onSelect={(event) => event.preventDefault()}
+              className="text-destructive focus:text-destructive"
+            >
+              <ActionForm action={actions.orphan} className={MENU_ITEM_ROOT}>
+                <input type="hidden" name="csrf" value={csrf.orphan ?? ''} />
+                <input type="hidden" name="judgmentId" value={row.judgmentId} />
+                <ConfirmSubmit
+                  tone="danger"
+                  title="Mark this judgment as orphaned?"
+                  description="It will be removed from the pending queue and won't be re-judged automatically."
+                  confirmLabel="MARK ORPHANED"
+                >
+                  <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
+                    Mark orphaned
+                  </Button>
+                </ConfirmSubmit>
+              </ActionForm>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
