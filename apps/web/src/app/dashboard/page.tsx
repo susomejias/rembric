@@ -15,6 +15,8 @@ const DAY_MS = 86_400_000;
 type FeedItem = {
   readonly key: string;
   readonly at: number;
+  readonly kind: 'session' | 'judgment';
+  readonly meta: readonly string[];
   readonly text: string;
   readonly href: string;
   readonly live: boolean;
@@ -77,14 +79,18 @@ export default function DashboardOverviewPage() {
     ...activeSessionRows.map((session) => ({
       key: `session-${session.id}`,
       at: session.startedAt.getTime(),
-      text: `session · ${session.agent} · ${truncate(session.title ?? session.projectSlug ?? '—', 48)}`,
+      kind: 'session' as const,
+      meta: [session.agent, session.status],
+      text: session.title ?? session.projectSlug ?? '—',
       href: `/dashboard/sessions/${session.id}`,
       live: session.status === 'active',
     })),
     ...recentJudgments.map((relation) => ({
       key: `judgment-${relation.id}`,
       at: (relation.judgedAt ?? relation.createdAt).getTime(),
-      text: `judgment · ${relation.relation ?? 'pending'} · ${truncate(relation.sourceTitle, 40)}`,
+      kind: 'judgment' as const,
+      meta: [relation.relation ?? 'pending'],
+      text: truncate(relation.sourceTitle, 40),
       href: `/dashboard/judgments/${relation.id}`,
       live: false,
     })),
@@ -356,6 +362,17 @@ export default function DashboardOverviewPage() {
                           item.live ? 'animate-pulse bg-primary' : 'bg-chart-4',
                         )}
                       />
+                      <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary">
+                        {item.kind}
+                      </span>
+                      {item.meta.map((chip) => (
+                        <span
+                          key={chip}
+                          className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] uppercase text-muted-foreground"
+                        >
+                          {chip}
+                        </span>
+                      ))}
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                         {item.text}
                       </span>
