@@ -1,12 +1,15 @@
-import type { UpdateInfo } from '@rembric/core';
+import type { SelfUpdateCapability, UpdateInfo, UpdateStatus } from '@rembric/core';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { checkForUpdates, UPDATE_CHECK_FORM } from './actions';
+import { checkForUpdates, startUpdate, UPDATE_CHECK_FORM, UPDATE_START_FORM } from './actions';
 import { CopyCommand } from './copy-command';
+import { getSelfUpdate, isUpdateRunning, updatePreviewPhase } from './self-update-service';
+import { UpdateProgress } from './update-progress';
 import { getUpdates } from './update-service';
 
 import { ActionForm } from '@/components/dashboard/action-form';
+import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { singleParam } from '@/components/dashboard/support';
@@ -32,6 +35,15 @@ export default async function UpdatePage({
   const info = updates.peek();
   const lastChecked = updates.lastCheckedAt;
   const notice = noticeFrom(params);
+
+  const selfUpdate = getSelfUpdate();
+  const status = selfUpdate.status();
+
+  if (isUpdateRunning(status)) {
+    return <UpdateRun status={status} />;
+  }
+
+  const capability = info === null ? null : await selfUpdate.capability();
 
   return (
     <Page>
@@ -77,8 +89,10 @@ export default async function UpdatePage({
           ) : info ? (
             <>
               You are running <VersionCode>v{REMBRIC_VERSION}</VersionCode> and{' '}
-              <b className="font-medium text-primary">v{info.latestVersion}</b> is published. The
-              upgrade runs on the host, not in this dashboard.
+              <b className="font-medium text-primary">v{info.latestVersion}</b> is published.
+              {capability?.state === 'available'
+                ? ' This deployment can install it from here.'
+                : ' The upgrade runs on the host, not in this dashboard.'}
             </>
           ) : (
             <>
@@ -152,28 +166,125 @@ export default async function UpdatePage({
             </p>
           ) : null}
 
-          <div className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-5 md:p-6">
-            <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
-              Manual update
-            </p>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Run this on the host, then this page will reload on the new version:
-            </p>
-            <div className="mt-4">
-              <CopyCommand command={MANUAL_UPDATE_COMMAND} />
-            </div>
-            <a
-              href={UPDATE_DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 inline-block font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground transition-colors hover:text-primary"
-            >
-              How to enable one-click updates ›
-            </a>
-          </div>
+          {capability ? <UpdateActionBlock info={info} capability={capability} /> : null}
         </div>
       ) : null}
     </Page>
+  );
+}
+
+function UpdateRun({ status }: { status: UpdateStatus }) {
+  const previewPhase = updatePreviewPhase();
+
+  return (
+    <Page>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+            Updating Rembric
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Installing <b className="font-medium text-primary">v{status.targetVersion ?? '…'}</b> ·
+            usually takes under a minute
+          </p>
+        </div>
+      </header>
+
+      <section className="mt-6 max-w-[900px] rounded-2xl border border-primary/40 bg-card p-6 md:p-8">
+        <UpdateProgress
+          initialVersion={REMBRIC_VERSION}
+          preview={previewPhase === null ? null : { phase: previewPhase, pull: status.pull }}
+        />
+        <p className="mt-6 max-w-3xl text-sm leading-6 text-muted-foreground">
+          Keep this page open — it reloads by itself once the new version answers. If the new
+          container fails its health check, the upgrader rolls back to{' '}
+          <VersionCode>v{REMBRIC_VERSION}</VersionCode>.
+        </p>
+      </section>
+    </Page>
+  );
+}
+
+function UpdateActionBlock({
+  info,
+  capability,
+}: {
+  info: UpdateInfo;
+  capability: SelfUpdateCapability;
+}) {
+  if (capability.state === 'available') {
+    return (
+      <div className="mt-6 max-w-[900px] rounded-2xl border border-primary/40 bg-card p-5 md:p-6">
+        <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+          One-click update
+        </p>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Rembric backs up the database, then hands the swap to a short-lived upgrader container:
+          stop, replace, restart, verify. Your data and configuration are preserved.
+        </p>
+        <div className="mt-4">
+          <ActionForm action={startUpdate}>
+            <CsrfField form={UPDATE_START_FORM} />
+            <ConfirmSubmit
+              tone="danger"
+              title={`Install v${info.latestVersion}?`}
+              description={`Rembric will back up the database, stop, replace its container with v${info.latestVersion} and restart. Your data and configuration are preserved.`}
+              confirmLabel="UPDATE NOW"
+            >
+              <Button type="button">UPDATE TO v{info.latestVersion} →</Button>
+            </ConfirmSubmit>
+          </ActionForm>
+        </div>
+      </div>
+    );
+  }
+
+  if (capability.state === 'pinned') {
+    return (
+      <div className="mt-6 max-w-[900px] rounded-2xl border border-warn/40 bg-card p-5 md:p-6">
+        <p className="font-mono text-[11px] uppercase tracking-[.14em] text-warn">
+          One-click disabled · image tag pinned
+        </p>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+          This deployment pins the image to <VersionCode>:{capability.imageTag ?? ''}</VersionCode>{' '}
+          (the <VersionCode>REMBRIC_VERSION</VersionCode> variable in your{' '}
+          <VersionCode>.env</VersionCode>). Self-updating would be silently reverted by the next{' '}
+          <VersionCode>docker compose up</VersionCode>. Remove the pin and run{' '}
+          <VersionCode>docker compose up -d</VersionCode> once to enable one-click updates, or
+          update manually:
+        </p>
+        <div className="mt-4">
+          <CopyCommand command={MANUAL_UPDATE_COMMAND} />
+        </div>
+        <DocsLink />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-5 md:p-6">
+      <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">Manual update</p>
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+        Run this on the host, then reload this page:
+      </p>
+      <div className="mt-4">
+        <CopyCommand command={MANUAL_UPDATE_COMMAND} />
+      </div>
+      <DocsLink />
+    </div>
+  );
+}
+
+function DocsLink() {
+  return (
+    <a
+      href={UPDATE_DOCS_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-4 inline-block font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground transition-colors hover:text-primary"
+    >
+      How to enable one-click updates ›
+    </a>
   );
 }
 
@@ -206,6 +317,13 @@ function noticeFrom(
       tone: 'error',
       label: 'Check failed',
       body: 'The release check could not reach GitHub (offline or rate-limited) — expected on air-gapped hosts.',
+    };
+  }
+  if (checked === 'preview') {
+    return {
+      tone: 'success',
+      label: 'Preview mode',
+      body: 'Preview mode is on — this page renders the update offer from REMBRIC_UPDATE_PREVIEW_VERSION. Nothing was installed or started.',
     };
   }
   return null;
