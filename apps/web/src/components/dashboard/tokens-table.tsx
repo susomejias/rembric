@@ -118,6 +118,7 @@ export function TokensTable({
         quickFilter ? { columnId: 'state', label: 'Filter by state', allLabel: 'All' } : undefined
       }
       selectable={selectable}
+      clipboard={false}
       bulkActions={
         selectable
           ? (context) => {
