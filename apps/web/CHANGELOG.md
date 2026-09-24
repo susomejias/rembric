@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.28.13](https://github.com/susomejias/rembric/compare/server-v0.28.12...server-v0.28.13) (2026-09-24)
+
+
+### Features
+
+* **web:** live activity feed renders kind, agent and relation as chips ([7a80e22](https://github.com/susomejias/rembric/commit/7a80e22b189124abe63a07a0e5560a8c64eb2b99))
+
+
+### Bug Fixes
+
+* **web:** nav sessions badge uses real count instead of hardcoded value ([fd5c126](https://github.com/susomejias/rembric/commit/fd5c1264063baf084ad884066741af7290bc1221))
+* **web:** overview live activity feed shows session title instead of summary ([59cbddc](https://github.com/susomejias/rembric/commit/59cbddc2d59f60c0dcecfe88093e344cf3cfb8d3))
+* **web:** overview session rows show title instead of summary content ([752697d](https://github.com/susomejias/rembric/commit/752697d6c142599e8694fc735d78fb0bc2973139))
+* **web:** remove decorative radial gradient behind dashboard ([7335789](https://github.com/susomejias/rembric/commit/73357895e3c0b67dc0e82a87a7ab08ef8c97a143))
+
 ## [0.28.12](https://github.com/susomejias/rembric/compare/server-v0.28.11...server-v0.28.12) (2026-09-24)
 
 
