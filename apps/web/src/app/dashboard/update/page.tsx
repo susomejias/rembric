@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 import { checkForUpdates, startUpdate, UPDATE_CHECK_FORM, UPDATE_START_FORM } from './actions';
 import { CopyCommand } from './copy-command';
-import { getSelfUpdate, isUpdateRunning, updatePreviewPhase } from './self-update-service';
+import { getSelfUpdate, isUpdateRunning } from './self-update-service';
 import { UpdateProgress } from './update-progress';
 import { getUpdates } from './update-service';
 
@@ -13,7 +13,7 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { singleParam } from '@/components/dashboard/support';
-import { Flash, Page, Pill, SectionBar, StatCard, StatGrid, Time } from '@/components/dashboard/ui';
+import { Flash, Page, Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { REMBRIC_VERSION } from '@/lib/version';
 
@@ -54,12 +54,6 @@ export default async function UpdatePage({
             Running Rembric v{REMBRIC_VERSION} · {statusLine(enabled, info)}
           </p>
         </div>
-        {enabled && info === null ? (
-          <ActionForm action={checkForUpdates} className="shrink-0">
-            <CsrfField form={UPDATE_CHECK_FORM} />
-            <Button type="submit">Check for updates</Button>
-          </ActionForm>
-        ) : null}
       </header>
 
       {notice ? (
@@ -70,112 +64,97 @@ export default async function UpdatePage({
         </div>
       ) : null}
 
-      <section className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-6 md:p-8">
-        <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
-          {!enabled
-            ? 'Check disabled'
-            : info
-              ? `Update available · v${info.latestVersion}`
-              : 'Up to date'}
-        </p>
-        <p className="mt-4 max-w-3xl text-base leading-7 text-muted-foreground">
-          {!enabled ? (
-            <>
-              This deployment sets <VersionCode>REMBRIC_UPDATE_CHECK=off</VersionCode>, so Rembric
-              never contacts GitHub and cannot know whether{' '}
-              <VersionCode>v{REMBRIC_VERSION}</VersionCode> is the latest release. Remove the
-              variable and restart to re-enable the check.
-            </>
-          ) : info ? (
-            <>
-              You are running <VersionCode>v{REMBRIC_VERSION}</VersionCode> and{' '}
-              <b className="font-medium text-primary">v{info.latestVersion}</b> is published.
-              {capability?.state === 'available'
-                ? ' This deployment can install it from here.'
-                : ' The upgrade runs on the host, not in this dashboard.'}
-            </>
-          ) : (
-            <>
-              You are running <VersionCode>v{REMBRIC_VERSION}</VersionCode> — no newer release is
-              known. The check runs automatically at most once a day and can be disabled with{' '}
-              <VersionCode>REMBRIC_UPDATE_CHECK=off</VersionCode>.
-            </>
-          )}
-        </p>
-        <p className="mt-7 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-          Last checked{' '}
-          <span className="ml-2 font-sans text-sm tracking-normal normal-case">
-            {lastChecked ? <Time value={lastChecked} /> : 'not checked yet in this process'}
-          </span>
-        </p>
-      </section>
+      {!enabled ? (
+        <section className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-6 md:p-8">
+          <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+            Check disabled
+          </p>
+          <p className="mt-4 max-w-3xl text-base leading-7 text-muted-foreground">
+            This deployment sets <VersionCode>REMBRIC_UPDATE_CHECK=off</VersionCode>, so Rembric
+            never contacts GitHub and cannot know whether{' '}
+            <VersionCode>v{REMBRIC_VERSION}</VersionCode> is the latest release. Remove the variable
+            and restart to re-enable the check.
+          </p>
+          <LastChecked value={lastChecked} />
+        </section>
+      ) : info ? (
+        <section className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-6 md:p-8">
+          <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+            Update available · v{info.latestVersion}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <VersionCode>v{REMBRIC_VERSION}</VersionCode>
+            <span className="text-muted-foreground">→</span>
+            <VersionCode>v{info.latestVersion}</VersionCode>
+            {info.publishedAt ? (
+              <span className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+                Published <Time value={info.publishedAt} />
+              </span>
+            ) : null}
+          </div>
 
-      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
-        <StatCard
-          k="Current version"
-          v={`v${REMBRIC_VERSION}`}
-          tone="lime"
-          sub={<span>As reported by this build</span>}
-        />
-        <StatCard
-          k="Release status"
-          v={
-            <Pill tone={!enabled ? 'dim' : info ? 'amber' : 'lime'}>
-              {!enabled
-                ? 'Check disabled'
-                : info
-                  ? `v${info.latestVersion} available`
-                  : 'Up to date'}
-            </Pill>
-          }
-          sub={<span>Cached result of the daily check</span>}
-        />
-        <StatCard
-          k="Manual check"
-          v={enabled ? 'On demand' : 'Unavailable'}
-          sub={<span>{enabled ? 'Forces a release check now' : 'The check is turned off'}</span>}
-        />
-      </StatGrid>
-
-      {info ? (
-        <div className="mt-8">
-          <SectionBar name={`Release v${info.latestVersion}`} meta="RELEASE NOTES" />
-          <MarkdownPanel
-            eyebrow={`Release v${info.latestVersion}`}
-            title="Release notes"
-            markdown={
-              info.changelog.trim().length > 0
-                ? `# v${info.latestVersion}\n\n${info.changelog}`
-                : `# v${info.latestVersion}\n\nThis release carries no changelog body.`
-            }
-            copyLabel="Copy changelog"
-            action={
-              info.releaseUrl ? (
-                <Link
-                  href={info.releaseUrl}
-                  className="rounded-xl border border-border px-3.5 py-2 text-sm text-foreground transition-colors hover:bg-accent"
-                >
-                  Open on GitHub
-                </Link>
-              ) : null
-            }
-          />
-          {info.publishedAt ? (
-            <p className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-              Published <Time value={info.publishedAt} />
-            </p>
-          ) : null}
+          <div className="mt-6">
+            <MarkdownPanel
+              eyebrow={`Release v${info.latestVersion}`}
+              title="Release notes"
+              markdown={
+                info.changelog.trim().length > 0
+                  ? `# v${info.latestVersion}\n\n${info.changelog}`
+                  : `# v${info.latestVersion}\n\nThis release carries no changelog body.`
+              }
+              copyLabel="Copy changelog"
+              action={
+                info.releaseUrl ? (
+                  <Link
+                    href={info.releaseUrl}
+                    className="rounded-xl border border-border px-3.5 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+                  >
+                    Open on GitHub
+                  </Link>
+                ) : null
+              }
+            />
+          </div>
 
           {capability ? <UpdateActionBlock info={info} capability={capability} /> : null}
-        </div>
-      ) : null}
+
+          <LastChecked value={lastChecked} />
+        </section>
+      ) : (
+        <section className="mt-6 max-w-[900px] rounded-2xl border border-border bg-card p-6 md:p-8">
+          <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
+            Up to date
+          </p>
+          <p className="mt-4 max-w-3xl text-base leading-7 text-muted-foreground">
+            You are running <VersionCode>v{REMBRIC_VERSION}</VersionCode> — no newer release is
+            known. The check runs automatically at most once a day and can be disabled with{' '}
+            <VersionCode>REMBRIC_UPDATE_CHECK=off</VersionCode>.
+          </p>
+          <div className="mt-6">
+            <ActionForm action={checkForUpdates}>
+              <CsrfField form={UPDATE_CHECK_FORM} />
+              <Button type="submit">Check for updates</Button>
+            </ActionForm>
+          </div>
+          <LastChecked value={lastChecked} />
+        </section>
+      )}
     </Page>
   );
 }
 
-function UpdateRun({ status }: { status: UpdateStatus }) {
-  const previewPhase = updatePreviewPhase();
+function LastChecked({ value }: { value: Date | null }) {
+  return (
+    <p className="mt-6 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
+      Last checked{' '}
+      <span className="ml-2 font-sans text-sm tracking-normal normal-case">
+        {value ? <Time value={value} /> : 'not checked yet in this process'}
+      </span>
+    </p>
+  );
+}
 
+function UpdateRun({ status }: { status: UpdateStatus }) {
   return (
     <Page>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -191,10 +170,7 @@ function UpdateRun({ status }: { status: UpdateStatus }) {
       </header>
 
       <section className="mt-6 max-w-[900px] rounded-2xl border border-primary/40 bg-card p-6 md:p-8">
-        <UpdateProgress
-          initialVersion={REMBRIC_VERSION}
-          preview={previewPhase === null ? null : { phase: previewPhase, pull: status.pull }}
-        />
+        <UpdateProgress initialVersion={REMBRIC_VERSION} />
         <p className="mt-6 max-w-3xl text-sm leading-6 text-muted-foreground">
           Keep this page open — it reloads by itself once the new version answers. If the new
           container fails its health check, the upgrader rolls back to{' '}
@@ -317,13 +293,6 @@ function noticeFrom(
       tone: 'error',
       label: 'Check failed',
       body: 'The release check could not reach GitHub (offline or rate-limited) — expected on air-gapped hosts.',
-    };
-  }
-  if (checked === 'preview') {
-    return {
-      tone: 'success',
-      label: 'Preview mode',
-      body: 'Preview mode is on — this page renders the update offer from REMBRIC_UPDATE_PREVIEW_VERSION. Nothing was installed or started.',
     };
   }
   return null;

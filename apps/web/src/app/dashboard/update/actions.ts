@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { getSelfUpdate } from './self-update-service';
-import { getUpdates, updatePreviewVersion } from './update-service';
+import { getUpdates } from './update-service';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -28,8 +28,6 @@ export async function startUpdate(_prev: ActionState, formData: FormData): Promi
   'use server';
   const guard = await guardAction(formData, UPDATE_START_FORM);
   if (!guard.ok) return guardFailure(guard);
-
-  if (updatePreviewVersion() !== null) redirect('/dashboard/update?checked=preview');
 
   const info = getUpdates().peek();
   if (info === null) redirect('/dashboard/update?err=no_update');

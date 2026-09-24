@@ -48,26 +48,12 @@ interface ProgressPayload {
   targetVersion: string | null;
 }
 
-export interface UpdateProgressPreview {
-  phase: UpdatePhase;
-  pull: { done: number; total: number } | null;
-}
-
-export function UpdateProgress({
-  initialVersion,
-  preview,
-}: {
-  initialVersion: string;
-  preview: UpdateProgressPreview | null;
-}) {
-  const previewPhase = preview?.phase ?? null;
-  const [steps, setSteps] = useState<StepStates>(() => statesForPhase(previewPhase));
-  const [pull, setPull] = useState<{ done: number; total: number } | null>(preview?.pull ?? null);
+export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
+  const [steps, setSteps] = useState<StepStates>(() => ({ ...IDLE_STATES }));
+  const [pull, setPull] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (previewPhase !== null) return;
-
     let cancelled = false;
     let verifying = false;
     let sawDown = false;
@@ -167,7 +153,7 @@ export function UpdateProgress({
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [initialVersion, previewPhase]);
+  }, [initialVersion]);
 
   return (
     <div>
@@ -199,21 +185,6 @@ export function UpdateProgress({
       </div>
     </div>
   );
-}
-
-function statesForPhase(phase: UpdatePhase | null): StepStates {
-  switch (phase) {
-    case 'backup':
-      return { ...IDLE_STATES, backup: 'active' };
-    case 'pull':
-      return { ...IDLE_STATES, backup: 'done', pull: 'active' };
-    case 'launch':
-      return { ...IDLE_STATES, backup: 'done', pull: 'done', restart: 'active' };
-    case 'restarting':
-      return { ...IDLE_STATES, backup: 'done', pull: 'done', restart: 'active', verify: 'active' };
-    default:
-      return { ...IDLE_STATES };
-  }
 }
 
 function rollbackText(initialVersion: string): string {
