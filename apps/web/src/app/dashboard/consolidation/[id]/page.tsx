@@ -8,7 +8,6 @@ import {
 import type { Repositories } from '@rembric/db';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -22,7 +21,8 @@ import {
   DataTd,
   DataTh,
   DataTr,
-  LABEL,
+  MetaGrid,
+  MetaRow,
   Page,
   Pill,
   SectionBar,
@@ -33,7 +33,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,25 +106,6 @@ function readField(form: FormData, name: string): string {
   return (typeof value === 'string' ? value : '').trim();
 }
 
-function MetaGrid({ children }: { children: ReactNode }) {
-  return (
-    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-4">
-      {children}
-    </dl>
-  );
-}
-
-function MetaRow({ k, v, mono = false }: { k: string; v: ReactNode; mono?: boolean }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <dt className={cn('text-muted-foreground', LABEL)}>{k}</dt>
-      <dd className={cn('min-w-0 break-words text-sm text-foreground', mono && 'font-mono')}>
-        {v}
-      </dd>
-    </div>
-  );
-}
-
 function scopeLabel(repos: Repositories, scope: string): string {
   if (!scope.startsWith('project:')) return scope;
   return repos.projects.adminFindById(scope.slice('project:'.length))?.slug ?? scope;
@@ -144,7 +124,9 @@ function formatRunSummary(summary: string | null): string {
       const ops = parsed as { archives: number; orphaned: number };
       return `${ops.archives} archived · ${ops.orphaned} orphaned`;
     }
-  } catch {}
+  } catch {
+    // The stored summary is not valid run JSON: fall back to the raw text.
+  }
   return summary;
 }
 
@@ -170,7 +152,7 @@ export default async function ConsolidationRunPage({
         <BackLink href="/dashboard/consolidation" label="BACK TO CONSOLIDATION" />
       </div>
 
-      <MetaGrid>
+      <MetaGrid className="lg:grid-cols-4">
         <MetaRow k="Started" v={<Time value={run.startedAt} />} mono />
         <MetaRow k="Finished" v={<Time value={run.finishedAt} />} mono />
         <MetaRow k="Scope" v={scopeLabel(repos, run.scope)} />

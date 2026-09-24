@@ -7,7 +7,6 @@ import {
 import { projectScope } from '@rembric/db';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -23,6 +22,8 @@ import {
   DataTh,
   DataTr,
   Flash,
+  MetaGrid,
+  MetaRow,
   Page,
   Pill,
   ReviewPill,
@@ -36,7 +37,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,45 +89,6 @@ async function confirmMemory(_prev: ActionState, formData: FormData): Promise<Ac
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
-}
-
-type MetaTone = 'fg' | 'lime' | 'amber';
-
-const META_TONE: Record<MetaTone, string> = {
-  fg: 'text-foreground',
-  lime: 'text-primary',
-  amber: 'text-warn',
-};
-
-function MetaGrid({ children }: { children: ReactNode }) {
-  return (
-    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3">
-      {children}
-    </dl>
-  );
-}
-
-function MetaRow({
-  k,
-  v,
-  tone = 'fg',
-  mono = false,
-}: {
-  k: string;
-  v: ReactNode;
-  tone?: MetaTone;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <dt className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-        {k}
-      </dt>
-      <dd className={cn('min-w-0 break-words text-sm', META_TONE[tone], mono && 'font-mono')}>
-        {v}
-      </dd>
-    </div>
-  );
 }
 
 export default async function MemoryDetailPage({

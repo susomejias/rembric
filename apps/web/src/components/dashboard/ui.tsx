@@ -190,10 +190,23 @@ export function StatGrid({
   );
 }
 
-export function Kv({
+export function MetaGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <dl
+      className={cn(
+        'mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3',
+        className,
+      )}
+    >
+      {children}
+    </dl>
+  );
+}
+
+export function MetaRow({
   k,
   v,
-  tone = 'dim',
+  tone = 'fg',
   mono = false,
 }: {
   k: string;
@@ -202,84 +215,11 @@ export function Kv({
   mono?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-2 border-b border-r border-border px-5 py-4 md:min-h-[96px]">
-      <div className={cn('flex items-center gap-2 text-muted-foreground', LABEL)}>
-        <Bullet tone={tone} />
-        {k}
-      </div>
-      <div
-        className={cn(
-          'min-w-0 break-words',
-          mono
-            ? 'font-mono text-sm font-medium'
-            : cn('font-display text-xl font-bold tracking-[-.015em]', TONE_TEXT[tone]),
-        )}
-      >
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <dt className={cn('text-muted-foreground', LABEL)}>{k}</dt>
+      <dd className={cn('min-w-0 break-words text-sm', TONE_TEXT[tone], mono && 'font-mono')}>
         {v}
-      </div>
-    </div>
-  );
-}
-
-export function KvGrid({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div
-      className={cn(
-        'mb-5 grid border-t border-l border-border sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6',
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-export function Panel({
-  children,
-  className,
-  padded = false,
-}: {
-  children: ReactNode;
-  className?: string;
-  padded?: boolean;
-}) {
-  return (
-    <section className={cn('border border-border bg-card', padded && 'p-5 md:p-6', className)}>
-      {children}
-    </section>
-  );
-}
-
-export function PanelHead({
-  eyebrow,
-  title,
-  action,
-  className,
-}: {
-  eyebrow: ReactNode;
-  title: ReactNode;
-  action?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        'flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 md:px-6',
-        className,
-      )}
-    >
-      <div>
-        <p className={cn('flex items-center gap-2 text-muted-foreground', LABEL)}>
-          <Bullet />
-          {eyebrow}
-        </p>
-        <h2 className="mt-1 text-base font-medium">{title}</h2>
-      </div>
-      {typeof action === 'string' ? (
-        <span className={cn('text-muted-foreground', LABEL)}>{action}</span>
-      ) : (
-        action
-      )}
+      </dd>
     </div>
   );
 }
@@ -430,14 +370,6 @@ export function Chip({ children, tone = 'lime' }: { children: ReactNode; tone?: 
         TONE_BORDER[tone],
       )}
     >
-      {children}
-    </span>
-  );
-}
-
-export function Tag({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex w-fit items-center border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[.1em] text-muted-foreground">
       {children}
     </span>
   );

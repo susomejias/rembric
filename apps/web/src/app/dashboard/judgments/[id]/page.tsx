@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import type { ReactNode } from 'react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -9,7 +8,8 @@ import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId } from '@/components/dashboard/support';
 import {
   BackLink,
-  LABEL,
+  MetaGrid,
+  MetaRow,
   Page,
   Pill,
   SectionBar,
@@ -20,7 +20,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,25 +39,6 @@ async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<A
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
-}
-
-function MetaGrid({ children }: { children: ReactNode }) {
-  return (
-    <dl className="mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {children}
-    </dl>
-  );
-}
-
-function MetaRow({ k, v, mono = false }: { k: string; v: ReactNode; mono?: boolean }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <dt className={cn('text-muted-foreground', LABEL)}>{k}</dt>
-      <dd className={cn('min-w-0 break-words text-sm text-foreground', mono && 'font-mono')}>
-        {v}
-      </dd>
-    </div>
-  );
 }
 
 function evidencePretty(value: unknown): string | null {
@@ -90,7 +70,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
         <BackLink href="/dashboard/judgments" label="BACK TO JUDGMENTS" />
       </div>
 
-      <MetaGrid>
+      <MetaGrid className="xl:grid-cols-6">
         <MetaRow k="Status" v={<StatusPill status={row.status} />} />
         <MetaRow
           k="Verdict"
