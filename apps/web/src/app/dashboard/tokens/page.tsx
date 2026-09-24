@@ -188,9 +188,7 @@ export default async function TokensPage({
   return (
     <Page>
       <header className="min-w-0">
-        <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
-          Tokens
-        </h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Tokens</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {`${rows.length} tokens · ${activeCount} active`}
         </p>

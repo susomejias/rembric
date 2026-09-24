@@ -71,11 +71,9 @@ export default async function EntitiesPage({
     <Page>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="font-display text-2xl font-semibold tracking-[-.03em] uppercase md:text-3xl">
-            Entities
-          </h1>
-          <p className="mt-2 font-mono text-[11px] tracking-[.14em] text-muted-foreground uppercase">
-            {`${rows.length} ROWS · ${total} MATCHING · ${corpusTotal} INDEXED`}
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Entities</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {`${rows.length} in view · ${total} matching · ${corpusTotal} indexed`}
           </p>
         </div>
         <ActionForm action={rebuildEntities} className="shrink-0">
@@ -84,17 +82,21 @@ export default async function EntitiesPage({
             tone="warn"
             title="Truncate and re-scan the entity index from every memory, archived included?"
             description="Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
-            confirmLabel="REBUILD ENTITY INDEX"
+            confirmLabel="Rebuild entity index"
           >
-            <Button type="button" variant="outline" size="sm">
-              REBUILD ENTITY INDEX{backlog > 0 ? ` (${backlog} PENDING)` : ''}
+            <Button
+              type="button"
+              size="sm"
+              className="rounded-[10px] border-border text-sm text-foreground"
+            >
+              Rebuild entity index{backlog > 0 ? ` (${backlog} pending)` : ''}
             </Button>
           </ConfirmSubmit>
         </ActionForm>
       </header>
 
       {rebuilt !== '' ? (
-        <div className="mt-5">
+        <div className="mt-2">
           <Flash tone="lime" label="REBUILT">
             Entity index rebuilt ({rebuilt} memor{rebuilt === '1' ? 'y' : 'ies'} re-scanned).
           </Flash>
@@ -115,20 +117,22 @@ export default async function EntitiesPage({
         ))}
       </StatGrid>
 
-      <EntitiesTable
-        rows={rows.map((entity) => ({
-          id: entity.id,
-          kind: entity.kind,
-          value: entity.value,
-          project: entity.projectId
-            ? (projectById.get(entity.projectId) ?? shortId(entity.projectId))
-            : '—',
-          linkCount: entity.linkCount,
-        }))}
-        quickFilter
-        searchable
-        pageSize={TABLE_PAGE_SIZE}
-      />
+      <div className="mt-4">
+        <EntitiesTable
+          rows={rows.map((entity) => ({
+            id: entity.id,
+            kind: entity.kind,
+            value: entity.value,
+            project: entity.projectId
+              ? (projectById.get(entity.projectId) ?? shortId(entity.projectId))
+              : '—',
+            linkCount: entity.linkCount,
+          }))}
+          quickFilter
+          searchable
+          pageSize={TABLE_PAGE_SIZE}
+        />
+      </div>
     </Page>
   );
 }
