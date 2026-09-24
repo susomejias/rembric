@@ -100,6 +100,18 @@ describe('sessions list (client data-table)', () => {
     expect(html).toContain('Actions for session S1');
   });
 
+  it('links the session title to its detail page with the judgments title styling', async () => {
+    const html = await renderSessions();
+    const row = sessionRow(html, 'claude-code', 'S1');
+    expect(row).toContain(
+      '<a href="/dashboard/sessions/S1" class="truncate text-sm font-medium text-foreground transition-colors hover:text-primary">S1</a>',
+    );
+    // The agent · project subtitle stays plain text, outside the link.
+    expect(row).toContain(
+      '<span class="truncate font-mono text-[11px] text-muted-foreground">claude-code',
+    );
+  });
+
   it('renders the memory sparkline when the session has writes in the window', async () => {
     t.handle.db
       .insert(memory)

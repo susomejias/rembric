@@ -70,6 +70,15 @@ async function renderJudgmentDetail(id: string): Promise<string> {
   return renderToHtml(await page({ params: Promise.resolve({ id }) }));
 }
 
+function relationChipClass(html: string, label: string): string {
+  const re = new RegExp(
+    `<span class="([^"]*rounded-full border[^"]*)"[^>]*><span aria-hidden="true"[^>]*></span>${label}</span>`,
+  );
+  const match = re.exec(html);
+  if (!match) throw new Error(`no relation chip for ${label}`);
+  return match[1]!;
+}
+
 describe('judgment evidence fallback', () => {
   it('renders a malformed stored evidence value escaped instead of throwing', async () => {
     const html = await renderJudgmentDetail('REL-MALFORMED');
@@ -147,6 +156,52 @@ describe('judgments list verdict pill and routing', () => {
     expect(html).toContain('1–10 of 50');
     expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
     expect(html).not.toContain(`${SEEDED} ROWS`);
+  });
+});
+
+describe('relation chip tone schema', () => {
+  it('tones supersedes lime, conflicts_with amber and pending dim', async () => {
+    t.handle.db
+      .insert(memory)
+      .values([widget('RS2'), widget('RT2'), widget('RS3'), widget('RT3')])
+      .run();
+    t.handle.db
+      .insert(memoryRelations)
+      .values([
+        {
+          id: 'REL-LIME',
+          judgmentId: 'J-LIME',
+          sourceId: 'RS2',
+          targetId: 'RT2',
+          relation: 'supersedes',
+          status: 'judged',
+          createdAt: new Date(1_000),
+          judgedAt: new Date(2_000),
+        },
+        {
+          id: 'REL-AMBER',
+          judgmentId: 'J-AMBER',
+          sourceId: 'RS3',
+          targetId: 'RT3',
+          relation: 'conflicts_with',
+          status: 'judged',
+          createdAt: new Date(1_000),
+          judgedAt: new Date(2_000),
+        },
+      ])
+      .run();
+
+    const html = await renderJudgments();
+
+    expect(relationChipClass(html, 'supersedes')).toContain(
+      'border-primary/40 bg-primary/10 text-primary',
+    );
+    expect(relationChipClass(html, 'conflicts_with')).toContain(
+      'border-warn/40 bg-warn/10 text-warn',
+    );
+    expect(relationChipClass(html, 'pending')).toContain(
+      'border-border bg-input/60 text-muted-foreground',
+    );
   });
 });
 

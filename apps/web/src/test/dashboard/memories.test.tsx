@@ -69,6 +69,15 @@ async function renderMemoryDetail(id: string): Promise<string> {
   );
 }
 
+// Same SSR hook as the sessions table: the row checkbox aria-label carries the
+// type and the row title.
+function memoryRow(html: string, type: string, title: string): string {
+  const marker = `Select ${type} memory — ${title}"`;
+  const chunk = html.split('<tr').find((c) => c.includes(marker));
+  if (chunk === undefined) throw new Error(`no row for memory ${marker}`);
+  return chunk.split('</tr>')[0]!;
+}
+
 describe('memories list header and bounded window', () => {
   beforeEach(() => {
     t.handle.db
@@ -122,6 +131,23 @@ describe('memories list (client data-table)', () => {
     const archived = await renderMemories({ status: 'archived' });
     expect(archived).toContain('Select project memory — beta memory"');
     expect(archived).toContain('>archived<');
+  });
+
+  it('links the memory title to its detail page with the judgments title styling', async () => {
+    t.handle.db
+      .insert(memory)
+      .values([widget('L1', { title: 'linked memory', content: 'linked memory' })])
+      .run();
+
+    const html = await renderMemories();
+    const row = memoryRow(html, 'project', 'linked memory');
+    expect(row).toContain(
+      '<a href="/dashboard/memories/L1" class="truncate text-sm font-medium text-foreground transition-colors hover:text-primary">linked memory</a>',
+    );
+    // The type · project subtitle stays plain text, outside the link.
+    expect(row).toContain(
+      '<span class="truncate font-mono text-[11px] text-muted-foreground">project',
+    );
   });
 });
 
