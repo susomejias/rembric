@@ -3,24 +3,12 @@ import type { Token } from '@rembric/db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
-import { CsrfField } from '@/components/dashboard/csrf-field';
+import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { singleParam } from '@/components/dashboard/support';
+import { CopyPlaintextButton, CreateTokenSheet } from '@/components/dashboard/tokens-sheet';
 import { TokensTable } from '@/components/dashboard/tokens-table';
-import { LABEL, Page, SectionBar } from '@/components/dashboard/ui';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Page, SectionBar } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -150,6 +138,7 @@ export default async function TokensPage({
   const { repos, projects, tokens: tokensService } = getServices();
   const nowMs = Date.now();
   const csrf = {
+    create: await dashboardCsrfToken(CREATE_FORM),
     revoke: await dashboardCsrfToken(REVOKE_FORM),
     bulkRevoke: await dashboardCsrfToken(BULK_REVOKE_FORM),
   };
@@ -188,25 +177,33 @@ export default async function TokensPage({
 
   return (
     <Page>
-      <header className="min-w-0">
-        <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Tokens</h1>
-          <PageHelp text="Bearer credentials agents use to reach this memory." />
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Tokens</h1>
+            <PageHelp text="Bearer credentials agents use to reach this memory." />
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {`${rows.length} tokens · ${activeCount} active`}
+          </p>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {`${rows.length} tokens · ${activeCount} active`}
-        </p>
+        <div className="flex shrink-0 items-center gap-3">
+          <CreateTokenSheet action={createToken} csrf={csrf.create} projects={selectable} />
+        </div>
       </header>
 
       {justCreated ? (
-        <div className="mt-6 border border-primary/40 bg-card p-5">
+        <div className="mt-6 rounded-2xl border border-primary/40 bg-primary/10 p-5">
           <p className="text-sm">
             <strong className="font-semibold">New token created.</strong> This is the only time the
             plaintext is shown — copy it now:
           </p>
-          <pre className="mt-3 overflow-x-auto border border-border bg-background px-3 py-2 font-mono text-xs">
-            {justCreated}
-          </pre>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <code className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs">
+              {justCreated}
+            </code>
+            <CopyPlaintextButton value={justCreated} />
+          </div>
           {minted ? (
             <p className="mt-3 text-xs text-muted-foreground">
               Scope <code className="font-mono">{minted.scope}</code> —{' '}
@@ -253,72 +250,6 @@ export default async function TokensPage({
           searchable
           pageSize={TOKEN_PAGE_SIZE}
         />
-      </div>
-
-      <div className="mt-8">
-        <SectionBar name="Create a new token" />
-        <ActionForm action={createToken} className="flex max-w-[480px] flex-col gap-4">
-          <CsrfField form={CREATE_FORM} />
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="token-name" className={`${LABEL} text-muted-foreground`}>
-              Name
-            </Label>
-            <Input id="token-name" name="name" required placeholder="claude-laptop" />
-          </div>
-
-          <fieldset className="flex flex-col gap-2">
-            <legend className={`${LABEL} text-muted-foreground`}>Projects (optional)</legend>
-            <div className="flex flex-wrap gap-x-4 gap-y-2">
-              {selectable.map((project) => (
-                <div key={project.id} className="flex items-center gap-2">
-                  <Checkbox
-                    id={`token-project-${project.id}`}
-                    name="project"
-                    value={project.slug}
-                  />
-                  <Label
-                    htmlFor={`token-project-${project.id}`}
-                    className="font-mono text-xs font-normal"
-                  >
-                    {project.slug}
-                  </Label>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              None selected: ADMIN, every project + dashboard login. One: that project only. Two or
-              more: exactly those, and still not admin.
-            </p>
-          </fieldset>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="token-access" className={`${LABEL} text-muted-foreground`}>
-              Access
-            </Label>
-            <Select name="access" defaultValue="write">
-              <SelectTrigger id="token-access" className="w-full">
-                <SelectValue placeholder="select access" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="write">write (read and write)</SelectItem>
-                  <SelectItem value="read">read (read only)</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="token-expires" className={`${LABEL} text-muted-foreground`}>
-              Expires (optional, ISO 8601)
-            </Label>
-            <Input id="token-expires" name="expires" placeholder="2027-01-01T00:00:00Z" />
-          </div>
-
-          <div>
-            <Button type="submit">Create</Button>
-          </div>
-        </ActionForm>
       </div>
     </Page>
   );
