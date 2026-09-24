@@ -915,6 +915,26 @@ export class MemoryRepository {
       .orderBy(day)
       .all();
   }
+
+  /** Per-session daily write counts since `since`; empty input → `[]`, missing days absent. */
+  adminMemoryWritesBySessionPerDay(
+    sessionIds: readonly string[],
+    since: Date,
+  ): { sessionId: string; day: number; n: number }[] {
+    if (sessionIds.length === 0) return [];
+    const day = sql<number>`(created_at / 86400000)`;
+    const rows = this.db
+      .select({ sessionId: memory.sessionId, day, n: count() })
+      .from(memory)
+      // `IN (<non-null set>)` already excludes a NULL session_id.
+      .where(and(inArray(memory.sessionId, idJsonSet(sessionIds)), gte(memory.createdAt, since)))
+      .groupBy(memory.sessionId, day)
+      .orderBy(memory.sessionId, day)
+      .all();
+    return rows.flatMap((r) =>
+      r.sessionId ? [{ sessionId: r.sessionId, day: r.day, n: r.n }] : [],
+    );
+  }
 }
 
 const PURGE_PREDICATE = sql`m.status = 'archived'

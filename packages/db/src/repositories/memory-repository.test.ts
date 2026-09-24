@@ -3,11 +3,13 @@ import { REFUTED_PRIORITY_MS, REVIEW_TTL_MS } from '@rembric/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  agentSessions,
   confirmations,
   memory,
   MemoryRepository,
   projects,
   projectScope,
+  tokens,
   type NewMemory,
 } from '@rembric/db';
 
@@ -642,6 +644,82 @@ describe('MemoryRepository', () => {
         // All four still need review — only the ordering changed.
         expect(repo.countNeedsReview({ projectId: 'p0', nowMs: NOW, ttlByType })).toBe(4);
       });
+    });
+  });
+
+  describe('adminMemoryWritesBySessionPerDay', () => {
+    const DAY_MS = 86_400_000;
+
+    // Day 0 is the epoch (1970-01-01T00:00:00Z); the bucket is integer division
+    // of the epoch-ms timestamp by one day.
+    const atDay = (day: number, offsetMs = 0) => new Date(day * DAY_MS + offsetMs);
+
+    beforeEach(() => {
+      t.handle.db
+        .insert(tokens)
+        .values([{ id: 'tk1', name: 'test', hash: 'x', scope: '*', createdAt: new Date(500) }])
+        .run();
+      t.handle.db
+        .insert(agentSessions)
+        .values(
+          ['S1', 'S2', 'S3'].map((id) => ({
+            id,
+            tokenId: 'tk1',
+            agent: 'claude-code',
+            status: 'ended' as const,
+            startedAt: new Date(0),
+          })),
+        )
+        .run();
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '01A', content: 'a', sessionId: 'S1', createdAt: atDay(0, 1_000) }),
+          row({ id: '01B', content: 'b', sessionId: 'S1', createdAt: atDay(0, DAY_MS - 1) }),
+          row({ id: '01C', content: 'c', sessionId: 'S1', createdAt: atDay(3) }),
+          row({ id: '01D', content: 'd', sessionId: 'S2', createdAt: atDay(3) }),
+          row({ id: '01E', content: 'e', sessionId: 'S2', createdAt: atDay(5) }),
+          row({ id: '01F', content: 'f', sessionId: null, createdAt: atDay(3) }),
+        ])
+        .run();
+    });
+
+    it('groups per session per UTC day and omits days with no rows', () => {
+      expect(repo.adminMemoryWritesBySessionPerDay(['S1', 'S2'], atDay(0))).toEqual([
+        { sessionId: 'S1', day: 0, n: 2 },
+        { sessionId: 'S1', day: 3, n: 1 },
+        { sessionId: 'S2', day: 3, n: 1 },
+        { sessionId: 'S2', day: 5, n: 1 },
+      ]);
+    });
+
+    it('buckets on the UTC calendar day boundary, not a rolling window', () => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '01G', content: 'g', sessionId: 'S3', createdAt: new Date(3 * DAY_MS - 1) }),
+          row({ id: '01H', content: 'h', sessionId: 'S3', createdAt: new Date(3 * DAY_MS) }),
+        ])
+        .run();
+
+      expect(repo.adminMemoryWritesBySessionPerDay(['S3'], atDay(0))).toEqual([
+        { sessionId: 'S3', day: 2, n: 1 },
+        { sessionId: 'S3', day: 3, n: 1 },
+      ]);
+    });
+
+    it('drops rows before `since` and sessions outside the requested set', () => {
+      expect(repo.adminMemoryWritesBySessionPerDay(['S1', 'S2'], atDay(4))).toEqual([
+        { sessionId: 'S2', day: 5, n: 1 },
+      ]);
+      expect(repo.adminMemoryWritesBySessionPerDay(['S2'], atDay(0))).toEqual([
+        { sessionId: 'S2', day: 3, n: 1 },
+        { sessionId: 'S2', day: 5, n: 1 },
+      ]);
+    });
+
+    it('returns an empty list for an empty session set', () => {
+      expect(repo.adminMemoryWritesBySessionPerDay([], atDay(0))).toEqual([]);
     });
   });
 });
