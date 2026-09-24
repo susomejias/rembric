@@ -3,7 +3,8 @@ import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { TokensService } from '@rembric/core';
-import { createDb, createRepositories, projectScope, type DbHandle } from '@rembric/db';
+import { createDb, createRepositories, memory, projectScope, type DbHandle } from '@rembric/db';
+import { eq } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 const DEMO_SLUG = 'demo';
@@ -246,6 +247,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
     },
   ];
 
+  const sessionIds: string[] = [];
   for (const cfg of endedSessions) {
     const s = sessionsSvc.start({
       tokenId: adminTokenId,
@@ -260,6 +262,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
       title: cfg.title,
       final: true,
     });
+    sessionIds.push(s.id);
   }
 
   sessionsSvc.start({
@@ -378,6 +381,19 @@ export function runSeed(deps: SeedDeps): SeedResult {
     });
     memoryCount += 2;
   }
+
+  // Attach the demo memories to sessions and spread them over the last 14 days
+  // so the Sessions counters and sparklines have data.
+  const memoryRows = deps.handle.db.select({ id: memory.id }).from(memory).all();
+  memoryRows.forEach((row, index) => {
+    const sessionId = sessionIds[index % sessionIds.length];
+    const createdAt = new Date(Date.now() - (index % 14) * DAY - (index % 6) * 3_600_000);
+    deps.handle.db
+      .update(memory)
+      .set({ sessionId, createdAt, lastSeenAt: createdAt })
+      .where(eq(memory.id, row.id))
+      .run();
+  });
 
   const result: SeedResult = {
     skipped: false,
