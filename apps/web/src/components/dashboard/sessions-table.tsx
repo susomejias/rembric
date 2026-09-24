@@ -5,6 +5,7 @@ import Link from 'next/link';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ export interface SessionRowData {
   readonly id: string;
   readonly title: string;
   readonly description: string | null;
+  readonly summary: string | null;
   readonly agent: string;
   readonly project: string;
   readonly token: string;
@@ -240,18 +242,32 @@ export function SessionsTable({
               }
             : undefined
         }
-        renderDetail={(row) =>
-          row.deleted ? null : (
-            <div className="flex flex-col gap-2 px-2 py-1 text-xs">
-              <p className="whitespace-pre-line leading-relaxed text-muted-foreground">
-                {row.description ?? 'No description was captured for this session.'}
-              </p>
+        renderDetail={(row) => {
+          if (row.deleted) return null;
+          const hasSummary = row.summary !== null;
+          const body = row.summary ?? row.description;
+          return (
+            <div className="flex flex-col gap-3 px-2 py-1 text-xs">
+              {body === null ? (
+                <p className="whitespace-pre-line leading-relaxed text-muted-foreground">
+                  No summary was captured for this session.
+                </p>
+              ) : (
+                <div className="whitespace-pre-line">
+                  <MarkdownPanel
+                    eyebrow={hasSummary ? 'Summary' : 'Description'}
+                    title={hasSummary ? 'Session summary' : 'Session description'}
+                    markdown={body}
+                    copyLabel="Copy markdown"
+                  />
+                </div>
+              )}
               <p className="font-mono text-[10px] text-muted-foreground">
                 token: {row.token} · {row.memories} memories · {row.prompts} prompts
               </p>
             </div>
-          )
-        }
+          );
+        }}
         rowActions={(row) => <SessionRowMenu row={row} actions={actions} csrf={csrf} />}
         pageSize={pageSize}
       />
