@@ -171,9 +171,11 @@ export default async function SessionsPage({
   return (
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Sessions</h1>
-          <PageHelp text="Agent runs captured with summaries, transcripts and per-session memory counts." />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Sessions</h1>
+            <PageHelp text="Agent runs captured with summaries, transcripts and per-session memory counts." />
+          </div>
           <p className="mt-2 text-sm text-muted-foreground">
             {total.toLocaleString('en-US')} sessions · {active} active now
           </p>
