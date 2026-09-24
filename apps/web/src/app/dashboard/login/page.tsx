@@ -18,8 +18,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
   return (
     <main className="grid min-h-screen bg-background font-sans text-foreground min-[981px]:grid-cols-[1fr_480px]">
-      <section className="flex flex-col justify-between gap-3 border-b border-border px-4 pt-6 pb-4 min-[641px]:gap-4 min-[641px]:px-6 min-[641px]:py-8 min-[981px]:gap-8 min-[981px]:border-r min-[981px]:border-b-0 min-[981px]:p-12">
-        <div className="flex items-center gap-3">
+      <section className="relative flex flex-col justify-between gap-3 overflow-hidden border-b border-border px-4 pt-6 pb-4 min-[641px]:gap-4 min-[641px]:px-6 min-[641px]:py-8 min-[981px]:gap-8 min-[981px]:border-r min-[981px]:border-b-0 min-[981px]:p-12">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]"
+        />
+
+        <div className="relative flex items-center gap-3">
           <img
             src="/dashboard/assets/logo-transparent.png"
             alt=""
@@ -32,7 +37,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
 
-        <div>
+        <div className="relative">
           <h1 className="font-display text-[2.2rem] leading-[1.3] font-bold tracking-tight min-[641px]:text-[3.2rem] min-[981px]:text-[5rem] min-[981px]:leading-[1.35]">
             <span className="bg-primary px-[.25em] text-primary-foreground">REMBRIC</span>
             <br />
@@ -48,7 +53,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </p>
         </div>
 
-        <ul className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs tracking-widest text-muted-foreground uppercase max-[641px]:hidden">
+        <ul className="relative flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs tracking-widest text-muted-foreground uppercase max-[641px]:hidden">
           {LOGIN_CLIENTS.map((client) => (
             <li key={client} className="flex items-center gap-2">
               <span aria-hidden="true" className="size-1.5 bg-primary" />
@@ -59,7 +64,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       </section>
 
       <section className="flex flex-col justify-center px-4 pt-6 pb-8 min-[641px]:px-6 min-[641px]:py-8 min-[981px]:p-12">
-        <form method="post" action="/dashboard/login" className="grid w-full gap-3">
+        <form
+          method="post"
+          action="/dashboard/login"
+          className="grid w-full gap-4 rounded-2xl border border-border bg-card p-6 shadow-lg shadow-black/20 md:p-7"
+        >
           {next ? <input type="hidden" name="next" value={next} /> : null}
 
           {error ? (
@@ -89,7 +98,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
 
           <div className="flex gap-3">
-            <Button type="submit" className="min-h-11">
+            <Button type="submit" className="min-h-11 w-full">
               SIGN IN →
             </Button>
           </div>
