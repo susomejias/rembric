@@ -23,8 +23,6 @@ import { getUpdates } from './update-service';
 import { guardAction } from '@/lib/actions/guard';
 import type { Services } from '@/lib/services';
 
-const PREVIEW_VERSION_ENV = 'REMBRIC_UPDATE_PREVIEW_VERSION';
-
 function resetUpdatesSingleton(): void {
   delete (globalThis as Record<string, unknown>)['__rembricUpdates'];
 }
@@ -73,7 +71,6 @@ async function primeRelease(version: string): Promise<void> {
 }
 
 beforeEach(() => {
-  delete process.env[PREVIEW_VERSION_ENV];
   delete process.env['REMBRIC_UPDATE_CHECK_URL'];
   process.env['REMBRIC_UPDATE_CHECK'] = 'off';
   resetUpdatesSingleton();
@@ -82,7 +79,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env[PREVIEW_VERSION_ENV];
   delete process.env['REMBRIC_UPDATE_CHECK_URL'];
   delete process.env['REMBRIC_UPDATE_CHECK'];
   resetUpdatesSingleton();
@@ -115,16 +111,6 @@ describe('startUpdate', () => {
     const digest = await redirectTarget(() => startUpdate({ error: null }, new FormData()));
 
     expect(digest).toContain('/dashboard/login');
-    expect(startMock).not.toHaveBeenCalled();
-  });
-
-  it('never starts the upgrader while the preview seam is on', async () => {
-    process.env[PREVIEW_VERSION_ENV] = '9.9.9';
-    grant();
-
-    const digest = await redirectTarget(() => startUpdate({ error: null }, new FormData()));
-
-    expect(digest).toContain('/dashboard/update?checked=preview');
     expect(startMock).not.toHaveBeenCalled();
   });
 
