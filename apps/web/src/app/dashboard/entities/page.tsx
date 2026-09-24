@@ -8,6 +8,7 @@ import { ActionForm, type ActionState } from '@/components/dashboard/action-form
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { EntitiesTable } from '@/components/dashboard/entities-table';
+import { PageHelp } from '@/components/dashboard/page-help';
 import { shortId, singleParam } from '@/components/dashboard/support';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
@@ -71,7 +72,10 @@ export default async function EntitiesPage({
     <Page>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">Entities</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Entities</h1>
+            <PageHelp text="Paths, tickets and other identifiers extracted from memory content." />
+          </div>
           <p className="mt-2 text-sm text-muted-foreground">
             {`${rows.length} in view · ${total} matching · ${corpusTotal} indexed`}
           </p>
@@ -86,6 +90,7 @@ export default async function EntitiesPage({
           >
             <Button
               type="button"
+              variant="outline"
               size="sm"
               className="rounded-[10px] border-border text-sm text-foreground"
             >
