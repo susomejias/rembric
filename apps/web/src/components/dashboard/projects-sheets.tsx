@@ -41,7 +41,7 @@ export function CreateProjectSheet({ action, csrf }: { action: FormAction; csrf:
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button type="button" size="sm">
+        <Button type="button" size="sm" className="rounded-[10px]">
           New project
         </Button>
       </SheetTrigger>
