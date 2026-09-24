@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { ActivityChart } from '@/components/dashboard/activity-chart';
+import { Greeting } from '@/components/dashboard/greeting';
 import { RowTooltip } from '@/components/dashboard/row-tooltip';
 import { formatBytes, relativeTime, truncate } from '@/components/dashboard/support';
 import { NumberTicker } from '@/components/motion/number-ticker';
@@ -93,7 +94,7 @@ export default function DashboardOverviewPage() {
   return (
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Good evening</h1>
+        <Greeting />
       </section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_460px]">
