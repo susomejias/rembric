@@ -1,26 +1,19 @@
-import { REVIEW_TTL_MS } from '@rembric/core';
-import type { MemoryType } from '@rembric/db';
 import type { ReactNode } from 'react';
 
 import { getUpdates } from './update/update-service';
 
 import { CommandFrame } from '@/components/dashboard/command-bar';
-import { type BadgeBreakdown, type NavBadgeCounters } from '@/lib/nav';
 import { getServices } from '@/lib/services';
 import { REMBRIC_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
-
-const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
-  (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
-);
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const updates = getUpdates();
 
   return (
     <CommandFrame
-      counters={badgeCounters()}
+      totals={navTotals()}
       version={REMBRIC_VERSION}
       updater={{
         enabled: updates.enabled,
@@ -33,26 +26,18 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   );
 }
 
-function badgeCounters(): NavBadgeCounters {
+function navTotals(): Record<string, number> {
   const { repos } = getServices();
-  const projectSlugs = new Map(
-    repos.projects.adminListAll().map((project) => [project.id, project.slug]),
-  );
-
-  const toBreakdown = (
-    rows: ReadonlyArray<{ projectId: string | null; count: number }>,
-  ): BadgeBreakdown => ({
-    total: rows.reduce((acc, row) => acc + row.count, 0),
-    byProject: rows.map((row) => ({
-      label: row.projectId === null ? 'global' : (projectSlugs.get(row.projectId) ?? row.projectId),
-      count: row.count,
-    })),
-  });
 
   return {
-    pendingJudgments: toBreakdown(repos.relations.adminPendingAdjudicableByProject()),
-    needsReview: toBreakdown(
-      repos.memory.adminCountNeedsReviewByProject({ nowMs: Date.now(), ttlByType: TTL_BY_TYPE }),
+    memories: repos.memory.countRowsByStatus().reduce((acc, row) => acc + row.count, 0),
+    sessions: 12500, // TEMP: hardcode para validar el formato compacto en la navbar
+    judgments: (['pending', 'judged', 'orphaned'] as const).reduce(
+      (acc, status) => acc + repos.relations.adminCountByStatus(status),
+      0,
     ),
+    entities: repos.entities.adminCountsByKind().reduce((acc, row) => acc + row.count, 0),
+    projects: repos.projects.count(),
+    tokens: repos.tokens.count(),
   };
 }

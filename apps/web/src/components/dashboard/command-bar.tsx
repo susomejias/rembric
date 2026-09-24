@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { isChromeFreePath, NAV, navEntryForPath, type NavEntry } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
@@ -32,7 +33,6 @@ const PRIMARY_KEYS = new Set([
   'judgments',
   'entities',
   'projects',
-  'tokens',
 ]);
 
 function NavMoreMenu({
@@ -241,87 +241,89 @@ function CommandBar({
   const updaterState = updaterReadState(updater);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-x-0 top-0 z-0 h-80 bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]"
-      />
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center px-4 pt-4">
-        <header className="pointer-events-auto flex h-13 w-full max-w-5xl items-center gap-1.5 rounded-2xl border border-border bg-card/90 px-2.5 shadow-lg shadow-black/20 backdrop-blur">
-          <Link
-            href="/dashboard"
-            className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-2"
-            title="Rembric — go to the overview"
-          >
-            <img
-              src="/dashboard/assets/logo-transparent.png"
-              alt="Rembric"
-              className="size-6 shrink-0"
-            />
-          </Link>
+    <TooltipProvider delayDuration={100}>
+      <div className="min-h-screen bg-background">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-x-0 top-0 z-0 h-80 bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]"
+        />
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center px-4 pt-4">
+          <header className="pointer-events-auto flex h-13 w-full max-w-5xl items-center gap-1.5 rounded-2xl border border-border bg-card/90 px-2.5 shadow-lg shadow-black/20 backdrop-blur">
+            <Link
+              href="/dashboard"
+              className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-2"
+              title="Rembric — go to the overview"
+            >
+              <img
+                src="/dashboard/assets/logo-transparent.png"
+                alt="Rembric"
+                className="size-6 shrink-0"
+              />
+            </Link>
 
-          <nav aria-label="Primary" className="hidden min-w-0 items-center gap-0.5 md:flex">
-            {primary.map((entry) => {
-              const isActive = entry.key === activeKey;
-              const total = totals[entry.key];
-              return (
-                <Link
-                  key={entry.key}
-                  href={entry.href}
-                  prefetch
-                  aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors',
-                    isActive
-                      ? 'bg-accent font-medium text-foreground'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
+            <nav aria-label="Primary" className="hidden min-w-0 items-center gap-1 md:flex">
+              {primary.map((entry) => {
+                const isActive = entry.key === activeKey;
+                const total = totals[entry.key];
+                return (
+                  <Link
+                    key={entry.key}
+                    href={entry.href}
+                    prefetch
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors',
+                      isActive
+                        ? 'bg-accent font-medium text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {entry.label}
+                    {total !== undefined ? (
+                      <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
+                        {formatCompact(total)}
+                      </span>
+                    ) : null}
+                  </Link>
+                );
+              })}
+              <NavMoreMenu entries={more} activeKey={activeKey} version={version} />
+            </nav>
+
+            <div className="ml-auto flex items-center gap-1.5">
+              <UpdaterChip state={updaterState} version={version} />
+              <LogoutMenu version={version} />
+              <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+                <SheetTrigger
+                  aria-label="Open navigation"
+                  className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground md:hidden"
                 >
-                  {entry.label}
-                  {total !== undefined ? (
-                    <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
-                      {formatCompact(total)}
-                    </span>
-                  ) : null}
-                </Link>
-              );
-            })}
-            <NavMoreMenu entries={more} activeKey={activeKey} version={version} />
-          </nav>
-
-          <div className="ml-auto flex items-center gap-1.5">
-            <UpdaterChip state={updaterState} version={version} />
-            <LogoutMenu version={version} />
-            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetTrigger
-                aria-label="Open navigation"
-                className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground md:hidden"
-              >
-                <Menu aria-hidden="true" className="size-5" />
-              </SheetTrigger>
-              <SheetContent side="right" className="w-72 border-border bg-card p-0">
-                <SheetHeader className="border-b border-border px-4 py-4">
-                  <SheetTitle className="flex items-center gap-2 text-sm font-semibold">
-                    <img
-                      src="/dashboard/assets/logo-transparent.png"
-                      alt=""
-                      aria-hidden="true"
-                      className="size-5 shrink-0"
-                    />
-                    rembric
-                  </SheetTitle>
-                </SheetHeader>
-                <MobileNav
-                  entries={NAV}
-                  activeKey={activeKey}
-                  onNavigate={() => setMobileOpen(false)}
-                />
-              </SheetContent>
-            </Sheet>
-          </div>
-        </header>
+                  <Menu aria-hidden="true" className="size-5" />
+                </SheetTrigger>
+                <SheetContent side="right" className="w-72 border-border bg-card p-0">
+                  <SheetHeader className="border-b border-border px-4 py-4">
+                    <SheetTitle className="flex items-center gap-2 text-sm font-semibold">
+                      <img
+                        src="/dashboard/assets/logo-transparent.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="size-5 shrink-0"
+                      />
+                      rembric
+                    </SheetTitle>
+                  </SheetHeader>
+                  <MobileNav
+                    entries={NAV}
+                    activeKey={activeKey}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
+                </SheetContent>
+              </Sheet>
+            </div>
+          </header>
+        </div>
+        {children}
       </div>
-      {children}
-    </div>
+    </TooltipProvider>
   );
 }

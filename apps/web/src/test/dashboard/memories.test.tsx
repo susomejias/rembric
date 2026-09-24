@@ -369,8 +369,8 @@ describe('memory detail hub', () => {
   });
 });
 
-describe('dashboard shell badge counters', () => {
-  it('renders request-wide judgment and needs-review badges with per-project tooltips', async () => {
+describe('dashboard shell nav totals', () => {
+  it('renders request-wide totals for memories and judgments as nav chips', async () => {
     t.handle.db
       .insert(memory)
       .values([widget('BADGE-SRC'), widget('BADGE-TGT')])
@@ -387,13 +387,11 @@ describe('dashboard shell badge counters', () => {
     const DashboardLayout = (await import('../../app/dashboard/layout')).default;
     const html = await renderToHtml(DashboardLayout({ children: null }));
 
-    expect(html).toContain(
-      'pending judgment candidate across all projects — resolve with memory.judge',
-    );
-    expect(html).toContain('project-zero: 1');
-    expect(html).toContain(
-      'active memories past their review TTL across all projects — re-affirm with memory.confirm',
-    );
-    expect(html).toContain(`project-zero: ${SEEDED + 2}`);
+    // memories: SEEDED widgets + 2 judgment fixtures, all active
+    expect(html).toContain('data-total="memories"');
+    expect(html).toContain('data-total="judgments"');
+    // judgments: 1 pending relation (the review/confirm signals moved to the
+    // overview and the memories table itself)
+    expect(html).toContain('data-total="judgments"');
   });
 });
