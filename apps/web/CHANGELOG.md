@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.16](https://github.com/susomejias/rembric/compare/server-v0.28.15...server-v0.28.16) (2026-09-27)
+
+
+### Bug Fixes
+
+* **web:** render update modal changelog as markdown and keep progress realtime ([aa4bec7](https://github.com/susomejias/rembric/commit/aa4bec78f409eee31c1198df529b357a43a4e5fc))
+
 ## [0.28.15](https://github.com/susomejias/rembric/compare/server-v0.28.14...server-v0.28.15) (2026-09-27)
 
 
