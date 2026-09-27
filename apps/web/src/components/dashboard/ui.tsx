@@ -51,7 +51,7 @@ function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string 
 export const LABEL = 'font-mono text-[11px] uppercase tracking-[.14em]';
 
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('w-full min-w-0 px-5 md:px-8', className)}>{children}</div>;
+  return <div className={cn('w-full min-w-0', className)}>{children}</div>;
 }
 
 export function ViewHead({
