@@ -69,6 +69,24 @@ export function startProcess(): void {
   startSessionReaper(services);
   startEmbeddingDrain(services);
   startEntityBackfill(services);
+  void warmEmbedder(services);
+}
+
+async function warmEmbedder(services: Services): Promise<void> {
+  try {
+    const warmed = await services.warmEmbedder();
+    if (warmed) {
+      console.error(
+        '[process] embedder warmed (pipeline + first inferences ran off the turn path)',
+      );
+    } else {
+      console.error(
+        '[process] embedder warmup skipped (no local model cache; the first save loads it)',
+      );
+    }
+  } catch (err) {
+    console.error('[process] embedder warmup failed', message(err));
+  }
 }
 
 function bootstrapAdminToken(services: Services): void {

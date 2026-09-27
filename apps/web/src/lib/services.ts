@@ -12,6 +12,7 @@ import {
   RelationsService,
   TokensService,
   UsageCounters,
+  embedderModelIsBaked,
   embeddingQueryInput,
   ensureVectorModel,
   loadEmbedder,
@@ -40,6 +41,7 @@ export interface Services {
   authLockout: AuthLockout;
   sessionAbandonAfterMs: number;
   embeddingWorker: () => Promise<EmbeddingWorker>;
+  warmEmbedder: () => Promise<boolean>;
   hasEmbeddingBacklog: () => boolean;
   entityBackfillWorker: EntityBackfillWorker;
   oauth: OAuthService | null;
@@ -88,6 +90,18 @@ function buildServices(): Services {
       (embedder) => new EmbeddingWorker({ repos, embedder }),
     ));
 
+  // The ONNX pipeline blocks the event loop ~300ms when it loads and again on its
+  // second inference; warmed at boot so that cost never lands on a turn-START
+  // recall-hints request racing the first save (issue #388).
+  const warmEmbedder = (): Promise<boolean> => {
+    if (!embedderModelIsBaked()) return Promise.resolve(false);
+    return getEmbedder().then(async (embedder) => {
+      await embedder.embed('rembric embedder warmup');
+      await embedder.embed('rembric embedder warmup pass 2');
+      return true;
+    });
+  };
+
   const entityBackfillWorker = new EntityBackfillWorker({ repos, tx: db.db });
 
   const runner = new ConsolidationRunner({
@@ -131,6 +145,7 @@ function buildServices(): Services {
       max: 30 * 86_400_000,
     }),
     embeddingWorker,
+    warmEmbedder,
     hasEmbeddingBacklog: () => repos.vectors.findMissingEmbeddings(1).length > 0,
     entityBackfillWorker,
     oauth: buildOAuthService(repos),
