@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.28.15](https://github.com/susomejias/rembric/compare/server-v0.28.14...server-v0.28.15) (2026-09-27)
+
+
+### Features
+
+* **web:** server-side pagination and filters for judgments and entities tables ([a044e51](https://github.com/susomejias/rembric/commit/a044e51458547182211e15b0f844fe59112997d8))
+* **web:** server-side pagination and status filter for the sessions table ([985ddac](https://github.com/susomejias/rembric/commit/985ddac09c8e742b741f5da52b5caf37588d6772))
+* **web:** server-side pagination for the memories table ([832366f](https://github.com/susomejias/rembric/commit/832366fe669a618f7a9f9476391b65e9b84abd8d))
+* **web:** server-side pagination for the prompts table ([fb656c1](https://github.com/susomejias/rembric/commit/fb656c17df2fd7f218c851329cf086fa845ec280))
+
+
+### Bug Fixes
+
+* **web:** activity signal chip reports the rendered count ([4e6338f](https://github.com/susomejias/rembric/commit/4e6338fc0ac666f66e3c33e2c53dabf1caca9071))
+* **web:** drop redundant horizontal padding from dashboard Page wrapper ([97494e8](https://github.com/susomejias/rembric/commit/97494e8f23b2d540b44c2d456329c75cfafb6f4a))
+* **web:** nav badge counts active memories; repair tokens.count() ([f71e3b1](https://github.com/susomejias/rembric/commit/f71e3b17c6ef62aa91d8e12d1b9e2119989aafb2))
+* **web:** warm the embedding model at boot, off the turn path ([84223bc](https://github.com/susomejias/rembric/commit/84223bc76ba1a1fc8cf219b30ae6595a4750ef16)), closes [#388](https://github.com/susomejias/rembric/issues/388)
+
+
+### Documentation
+
+* **specs:** archive dashboard-nav-badge-lifecycle-totals ([643f314](https://github.com/susomejias/rembric/commit/643f314a87b31e6c0bf8c9b6e7aa0b3b1ff6a427))
+
 ## [0.28.14](https://github.com/susomejias/rembric/compare/server-v0.28.13...server-v0.28.14) (2026-09-24)
 
 
