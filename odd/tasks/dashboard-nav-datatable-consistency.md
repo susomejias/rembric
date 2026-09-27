@@ -57,8 +57,17 @@ directly on `main` (owner decision: minor adjustments).
   The mismatch is resolved on the table side (server pagination), same as
   judgments. Spec update pending via OpenSpec.
 
-### 5. Round 2 conversions (pending)
-- memories/page.tsx: `?page=N` over existing server filters (status/type/project/review/q); badge unchanged per owner decision.
-- sessions/page.tsx: `?page=N` over adminList({deleted:false}); include_deleted window reviewed too.
-- prompts/page.tsx: `?page=N` over adminList({includeDeleted}).
-- activity/page.tsx: chip text vs rendered slice (minor).
+### 5. Round 2 conversions — DONE
+- memories: `832366fe` — `?page=N` over the existing server filters (status/type/project/review/q);
+  status chips server-rendered with full-corpus counts; combined q + needs-review now loads
+  every FTS match, filters by derived review state, and the pager total matches the yielded
+  rows (the in-memory post-filter over a 50-row FTS window would have produced ghost pages).
+- sessions: `985ddac0` — `?page=N` + real `status` param; status chips server-rendered with
+  full counts; include_deleted window loads one page at the same offset with its own count;
+  header uses the unfiltered total. NOTE: `apps/web/src/app/dashboard/sessions/filters.ts`
+  found dead (imported by nothing) — cleanup candidate, untouched.
+- prompts: `fb656c17` — `?page=N` over `adminList`; client status quickFilter removed (no
+  repo status-count method exists, so no faithful full-corpus chip row was invented); the
+  server-side Show deleted toggle stays.
+- activity: `4e6338fc` — chip reports the rendered count ("X OF Y SIGNALS").
+- Verified per unit: `pnpm --filter @rembric/web test` 58 files / 1087 passed, typecheck + lint clean.
