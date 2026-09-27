@@ -27,6 +27,11 @@ export function embeddingQueryInput(query: string): string {
 /** Model cache baked by the Dockerfile; present → fully offline. */
 const IMAGE_MODEL_CACHE = '/app/models';
 
+/** True when the model files exist locally, so loading it cannot hit the network. */
+export function embedderModelIsBaked(): boolean {
+  return existsSync(process.env['REMBRIC_MODEL_CACHE'] ?? IMAGE_MODEL_CACHE);
+}
+
 export interface Embedder {
   /** Compute a normalized 768-dim embedding. */
   embed(text: string): Promise<Float32Array>;

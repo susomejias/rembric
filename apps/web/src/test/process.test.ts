@@ -19,7 +19,9 @@ const MARKER = '.rembric-state.json';
 function resetProcessGlobals(): void {
   try {
     globalForTest.__rembricDb?.close?.();
-  } catch {}
+  } catch {
+    // a torn fixture DB must not mask the assertion that follows
+  }
   delete globalForTest.__rembricServices;
   delete globalForTest.__rembricDb;
   delete globalForTest.__rembricProcessStarted;
@@ -119,5 +121,24 @@ describe('startProcess data-loss guard', () => {
     const marker = readMarker();
     expect(marker.version).toBe(1);
     expect(marker.counts['projects']).toBe(1);
+  });
+
+  it('skips the embedder warmup without a local model cache (never loads the model at boot)', async () => {
+    const errors = captureErrors();
+    process.env['REMBRIC_MODEL_CACHE'] = join(dataDir, 'no-model-dir');
+
+    try {
+      startProcess();
+      await vi.waitFor(() => {
+        expect(errors.lines.join('\n')).toContain('embedder warmup skipped');
+      });
+    } finally {
+      errors.restore();
+      delete process.env['REMBRIC_MODEL_CACHE'];
+    }
+
+    expect(errors.lines.join('\n')).toContain(
+      'embedder warmup skipped (no local model cache; the first save loads it)',
+    );
   });
 });
