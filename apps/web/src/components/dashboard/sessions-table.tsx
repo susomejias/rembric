@@ -65,7 +65,6 @@ export function SessionsTable({
   csrf,
   bulkAbandon,
   bulkRemove,
-  quickFilter = false,
   selectable = false,
   searchable = false,
   pageSize,
@@ -78,7 +77,6 @@ export function SessionsTable({
   csrf: SessionCsrfTokens;
   bulkAbandon: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   bulkRemove: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
-  quickFilter?: boolean;
   selectable?: boolean;
   searchable?: boolean;
   pageSize?: number;
@@ -186,11 +184,6 @@ export function SessionsTable({
           <div className="px-5 py-10 text-center text-sm text-muted-foreground">
             NO SESSION MATCHES THIS FILTER
           </div>
-        }
-        quickFilter={
-          quickFilter
-            ? { columnId: 'status', label: 'Filter by status', allLabel: 'All' }
-            : undefined
         }
         selectable={selectable}
         bulkActions={
