@@ -2,7 +2,7 @@
 
 The audit of the 2026-09-27 badge/datatable consistency work (`odd/tasks/dashboard-nav-datatable-consistency.md`) found the dashboard spec mandating a needs-review badge on the Memories nav entry while the shipped UI reports a corpus counter. Two prior conventions collided:
 
-- `a5596f9` (2026-09-14) had made the old sidebar badges *adjudicable/backlog* counters (judgments = pending adjudicable pairs, memories = needs-review count).
+- `a5596f9` (2026-09-14) had made the old sidebar badges _adjudicable/backlog_ counters (judgments = pending adjudicable pairs, memories = needs-review count).
 - The command-bar redesign dropped that logic; `navTotals()` recomputed raw corpus totals.
 
 ## Decisions

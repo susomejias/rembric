@@ -235,7 +235,7 @@ export default async function MemoriesPage({
       ).reviewState,
     );
   }
- const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
+  const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
 
   const statusCounts = repos.memory.countRowsByStatus();
   const countByStatus = new Map(statusCounts.map((row) => [row.status, row.count]));

@@ -7,6 +7,7 @@ directly on `main` (owner decision: minor adjustments).
 ## Tasks
 
 ### 1. Mobile padding on non-overview pages — DONE (commit 97494e8f)
+
 - `CommandFrame`'s `<main>` already carries `px-4 sm:px-6`; `<Page>` added a
   redundant `px-5 md:px-8`, so every page but the overview (which doesn't use
   `<Page>`) rendered 36px side padding on mobile.
@@ -14,6 +15,7 @@ directly on `main` (owner decision: minor adjustments).
 - Commit: (pending)
 
 ### 2. Judgments: badge shows 7.5k, table loads only 50 rows
+
 - Badge = pending(62) + judged(6975) + orphaned(452) historical total; page
   loads `pending(PAGE_SIZE) + judged(PAGE_SIZE)` sliced to 50.
 - Owner decision (asked 2026-09-27): keep the total badge, add pagination so
@@ -25,12 +27,14 @@ directly on `main` (owner decision: minor adjustments).
 - Commit: (pending)
 
 ### 3. Entities: badge 2k, table "500 in view · 2001 matching"
+
 - `adminListEntities(rowFilters, LIST_LIMIT=500, 0)` — hard window, no paging.
 - Plan: URL-driven `?page=N` server pagination through the full matching set
   via the existing `kind` filter param; shared server-pager component.
 - Commit: (pending)
 
 ## Conventions for both conversions
+
 - Shared pager: `apps/web/src/components/dashboard/pager.tsx` (one
   implementation; renders Prev/Next + "Page X of Y · N rows" as Links preserving
   other searchParams). Written by the parent (committed with task 2).
@@ -44,6 +48,7 @@ directly on `main` (owner decision: minor adjustments).
   and row actions inside the loaded window.
 
 ### 4. SYSTEMATIC AUDIT (owner: "revisa todas las secciones, parece sistemático") — DONE
+
 - Audit (gentle-ai-explore muk6g0mb-1-le8u) mapped every nav section. Ranked:
   judgments > memories > sessions > entities > prompts > activity (minor);
   projects + consolidation consistent (consolidation is the reference pattern).
@@ -58,6 +63,7 @@ directly on `main` (owner decision: minor adjustments).
   judgments. Spec update pending via OpenSpec.
 
 ### 5. Round 2 conversions — DONE
+
 - memories: `832366fe` — `?page=N` over the existing server filters (status/type/project/review/q);
   status chips server-rendered with full-corpus counts; combined q + needs-review now loads
   every FTS match, filters by derived review state, and the pager total matches the yielded

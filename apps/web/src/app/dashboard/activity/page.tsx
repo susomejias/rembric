@@ -156,7 +156,10 @@ export default function ActivityPage() {
       </div>
 
       <div className="mt-8">
-        <SectionBar name="Signal log" meta={`${Math.min(signals.length, 40)} OF ${signals.length} SIGNALS`} />
+        <SectionBar
+          name="Signal log"
+          meta={`${Math.min(signals.length, 40)} OF ${signals.length} SIGNALS`}
+        />
       </div>
       {signals.length === 0 ? (
         <TableEmpty>

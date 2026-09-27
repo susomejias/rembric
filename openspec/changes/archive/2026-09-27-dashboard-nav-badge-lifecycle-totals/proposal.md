@@ -1,6 +1,6 @@
 ## Why
 
-The dashboard spec still mandates a *needs-review* badge on the Memories nav entry (`openspec/specs/dashboard/spec.md:1314-1328`), but the shipped dashboard no longer behaves that way, and the owner has decided it should not:
+The dashboard spec still mandates a _needs-review_ badge on the Memories nav entry (`openspec/specs/dashboard/spec.md:1314-1328`), but the shipped dashboard no longer behaves that way, and the owner has decided it should not:
 
 - The command-bar navigation (which replaced the sidebar shell) computes nav totals in `apps/web/src/app/dashboard/layout.tsx::navTotals()` as corpus counters. After the 2026-09-27 consistency fix (`f71e3b17`), the Memories badge reports `active` memories only — the owner's convention: **nav badges are totals excluding rows retired from the lifecycle** ("los contadores nuevos dijimos que iban a ser de totales, excluyendo eliminadas, archivadas etc").
 - The owner explicitly decided the spec text mandating the needs-review badge must be violated in this case ("la spec se debe violar en este caso") and then asked to adjust the spec so it stops misleading ("ajustamos la spec si te parece para que no engañe").
