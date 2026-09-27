@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, isNull } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { projects, type Project } from '../schema/projects.js';
@@ -16,7 +16,8 @@ export class TokensRepository {
   constructor(private readonly db: Db) {}
 
   count(): number {
-    return this.db.select({ id: tokens.id }).from(tokens).limit(1).all().length;
+    const row = this.db.select({ value: count() }).from(tokens).get();
+    return row?.value ?? 0;
   }
 
   insert(values: NewToken): Token | undefined {
