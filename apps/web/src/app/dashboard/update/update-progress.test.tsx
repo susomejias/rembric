@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { UpdateProgress } from './update-progress';
+import { STATUS_MAX_MISSES, statusFailureMode, UpdateProgress } from './update-progress';
 
 const VERSION = '0.28.12';
 
@@ -32,5 +32,13 @@ describe('UpdateProgress', () => {
     });
     expect(html).not.toContain('data-pull-progress');
     expect(html).not.toContain('Update failed');
+  });
+
+  it('tolerates transient status-probe failures before switching to version probing', () => {
+    for (let misses = 1; misses < STATUS_MAX_MISSES; misses += 1) {
+      expect(statusFailureMode(misses)).toBe('retry');
+    }
+    expect(statusFailureMode(STATUS_MAX_MISSES)).toBe('verify');
+    expect(statusFailureMode(STATUS_MAX_MISSES + 10)).toBe('verify');
   });
 });

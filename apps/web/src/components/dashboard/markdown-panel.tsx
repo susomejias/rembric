@@ -63,7 +63,7 @@ export function MarkdownPanel({
   );
 }
 
-const MARKDOWN_COMPONENTS = {
+export const MARKDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
     <h3 className="mb-3 text-lg font-medium tracking-[-.03em] text-foreground">{children}</h3>
   ),

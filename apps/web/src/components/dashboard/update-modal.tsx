@@ -2,10 +2,13 @@
 
 import type { UpdateInfo } from '@rembric/core';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 import { ActionForm, type FormAction } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import { MARKDOWN_COMPONENTS } from '@/components/dashboard/markdown-panel';
 import { Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +40,7 @@ export function UpdateModal({
 }) {
   const version = info.latestVersion;
   const [open, setOpen] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (dismissedVersion() !== version) setOpen(true);
@@ -51,11 +55,16 @@ export function UpdateModal({
     setOpen(false);
   };
 
+  const startAndFollow = (): void => {
+    setOpen(false);
+    router.push('/dashboard/update');
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-lg gap-4 rounded-2xl border border-border bg-card p-5 sm:max-w-lg md:p-6"
+        className="max-h-[85vh] max-w-lg gap-4 overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:max-w-lg md:p-6"
       >
         <DialogHeader className="gap-3">
           <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
@@ -101,12 +110,16 @@ export function UpdateModal({
               </a>
             ) : null}
           </div>
-          <pre className="mt-2 max-h-56 overflow-auto rounded-xl border border-border bg-muted/40 p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
-            {info.changelog.trim().length > 0 ? info.changelog : '(no changelog provided)'}
-          </pre>
+          <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground [&_a]:break-all">
+            {info.changelog.trim().length > 0 ? (
+              <ReactMarkdown components={MARKDOWN_COMPONENTS}>{info.changelog}</ReactMarkdown>
+            ) : (
+              <p>(no changelog provided)</p>
+            )}
+          </div>
         </div>
 
-        <ActionForm action={startUpdate}>
+        <ActionForm action={startUpdate} onSubmit={startAndFollow}>
           <input type="hidden" name="csrf" value={csrfToken} />
           <ConfirmSubmit
             tone="danger"

@@ -40,6 +40,12 @@ const STATUS_INTERVAL_MS = 1500;
 const VERSION_INTERVAL_MS = 2000;
 const PROBE_TIMEOUT_MS = 4000;
 const SAME_VERSION_MISSES = 2;
+/** Consecutive failed status probes tolerated before assuming the container is down for the swap. */
+export const STATUS_MAX_MISSES = 3;
+
+export function statusFailureMode(misses: number): 'retry' | 'verify' {
+  return misses >= STATUS_MAX_MISSES ? 'verify' : 'retry';
+}
 
 interface ProgressPayload {
   phase: UpdatePhase;
@@ -58,6 +64,7 @@ export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
     let verifying = false;
     let sawDown = false;
     let sameVersionSeen = 0;
+    let statusMisses = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const schedule = (fn: () => void, delayMs: number): void => {
@@ -111,6 +118,7 @@ export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
             schedule(statusTick, STATUS_INTERVAL_MS);
             return;
           }
+          statusMisses = 0;
           if (status.phase === 'failed') {
             setSteps({ ...IDLE_STATES });
             setError(status.error ?? 'The update failed before it could hand off.');
@@ -141,9 +149,14 @@ export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
         })
         .catch(() => {
           if (cancelled) return;
-          verifying = true;
-          setSteps({ backup: 'done', pull: 'done', restart: 'active', verify: 'active' });
-          verifyTick();
+          statusMisses += 1;
+          if (statusFailureMode(statusMisses) === 'verify') {
+            verifying = true;
+            setSteps({ backup: 'done', pull: 'done', restart: 'active', verify: 'active' });
+            verifyTick();
+            return;
+          }
+          schedule(statusTick, STATUS_INTERVAL_MS);
         });
     };
 
@@ -172,7 +185,11 @@ export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
           >
             <span
               aria-hidden="true"
-              className={cn('size-2.5 shrink-0 rounded-full border', DOT[steps[step.key]])}
+              className={cn(
+                'size-2.5 shrink-0 rounded-full border',
+                DOT[steps[step.key]],
+                steps[step.key] === 'active' && 'animate-pulse',
+              )}
             />
             <span className={cn(LABEL, TEXT[steps[step.key]])}>{step.label}</span>
             {step.key === 'pull' && pull !== null ? (

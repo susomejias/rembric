@@ -20,17 +20,19 @@ export function ActionForm({
   action,
   children,
   className,
+  onSubmit,
 }: {
   action: FormAction;
   children: ReactNode;
   className?: string;
+  onSubmit?: React.DOMAttributes<HTMLFormElement>['onSubmit'];
 }) {
   const [state, formAction] = useActionState(action, { error: null });
   const formId = useId();
 
   return (
     <FormIdContext.Provider value={formId}>
-      <form id={formId} action={formAction} className={className}>
+      <form id={formId} action={formAction} onSubmit={onSubmit} className={className}>
         {state.error === null ? null : (
           <div className="mb-4">
             <Flash tone="danger" label="ERROR">
