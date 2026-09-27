@@ -8,4 +8,4 @@
 
 - [x] 2.1 Write `specs/dashboard/spec.md` as a MODIFIED block replacing the whole needs-review badge requirement, with updated scenarios (active total, omitted at zero, excludes retired rows).
 - [x] 2.2 Validate the change with `openspec validate --strict`.
-- [ ] 2.3 Archive the change once the owner approves, merging the delta into `openspec/specs/dashboard/spec.md:1314-1328`.
+- [x] 2.3 Archive the change once the owner approves, merging the delta into `openspec/specs/dashboard/spec.md:1314-1328`.
