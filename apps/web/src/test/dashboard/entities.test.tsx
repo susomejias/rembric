@@ -142,7 +142,8 @@ describe('dashboard entities view', () => {
     repos.entities.linkMemory(m.id, defaultProject(t.handle).id, refs, new Date());
 
     const html = await renderEntities();
-    expect(html).toContain('Filter by kind');
+    expect(html).toContain('aria-label="Entity kind"');
+    expect(html).not.toContain('Filter by kind');
     expect(html).toContain('Search entities…');
     expect(html).toContain('1–10 of 12');
     expect(html).toContain('path-00.ts');

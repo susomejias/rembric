@@ -102,7 +102,6 @@ export function JudgmentsTable({
   rows,
   actions,
   csrf,
-  quickFilter = false,
   selectable = false,
   searchable = false,
   pageSize = 10,
@@ -110,7 +109,6 @@ export function JudgmentsTable({
   rows: readonly JudgmentRowData[];
   actions: JudgmentServerActions;
   csrf: JudgmentCsrfTokens;
-  quickFilter?: boolean;
   selectable?: boolean;
   searchable?: boolean;
   pageSize?: number;
@@ -193,11 +191,6 @@ export function JudgmentsTable({
         <div className="px-5 py-10 text-center text-sm text-muted-foreground">
           NO JUDGMENT MATCHES THIS FILTER
         </div>
-      }
-      quickFilter={
-        quickFilter
-          ? { columnId: 'relation', label: 'Filter by relation', allLabel: 'All' }
-          : undefined
       }
       selectable={selectable}
       bulkActions={
