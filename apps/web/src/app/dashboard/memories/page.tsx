@@ -6,8 +6,15 @@ import {
   sanitizeFtsQuery,
   type ReviewState,
 } from '@rembric/core';
-import { projectScope, type Memory, type MemoryStatus, type MemoryType } from '@rembric/db';
+import {
+  projectScope,
+  type Memory,
+  type MemoryStatus,
+  type MemoryType,
+  MEMORY_STATUSES,
+} from '@rembric/db';
 import { revalidatePath } from 'next/cache';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './filters';
@@ -15,11 +22,13 @@ import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './
 import type { ActionState } from '@/components/dashboard/action-form';
 import { MemoriesTable } from '@/components/dashboard/memories-table';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { shortId, singleParam } from '@/components/dashboard/support';
+import { ServerPager } from '@/components/dashboard/pager';
+import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,13 +36,19 @@ const ARCHIVE_FORM = 'memory.archive';
 const BULK_ARCHIVE_FORM = 'memory.bulk-archive';
 const CONFIRM_FORM = 'memory.confirm';
 
-// One-line justification: the client table owns filtering and pagination, so the
-// page loads a single bounded window instead of paginating server-side.
-const LIST_LIMIT = 500;
-
 const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
   (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
 );
+
+function statusHref(params: SearchParams, status: string): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key === 'status' || key === 'page' || value === undefined) continue;
+    for (const item of Array.isArray(value) ? value : [value]) search.append(key, item);
+  }
+  search.set('status', status);
+  return `/dashboard/memories?${search.toString()}`;
+}
 
 const NO_PROJECT_MESSAGE =
   'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.';
@@ -131,34 +146,75 @@ export default async function MemoriesPage({
   const projectSlugById = new Map(projectRows.map((p) => [p.id, p.slug]));
   const resolvedProject = resolveProjectFilter(filters.project, projectRows);
 
+  const rowOpts = {
+    status,
+    type,
+    projectId: resolvedProject.projectId,
+  };
+
+  let total: number;
+  if (resolvedProject.unknown) {
+    total = 0;
+  } else if (ftsQuery && wantsNeedsReview) {
+    total = 0;
+  } else if (ftsQuery) {
+    total = repos.memory.adminCountFts(ftsQuery, rowOpts);
+  } else if (wantsNeedsReview) {
+    total = repos.memory.adminCountNeedsReview({
+      projectId: resolvedProject.projectId,
+      nowMs,
+      ttlByType: TTL_BY_TYPE,
+    });
+  } else {
+    total = repos.memory.adminCount(rowOpts);
+  }
+
+  let pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  let page = Math.min(Math.max(1, filters.page), pages);
+  let offset = (page - 1) * PAGE_SIZE;
+
   let rows: Memory[];
   if (resolvedProject.unknown) {
     rows = [];
-  } else if (ftsQuery) {
-    rows = repos.memory.adminSearchFts(ftsQuery, {
-      status,
-      type,
-      projectId: resolvedProject.projectId,
-      limit: LIST_LIMIT,
+  } else if (ftsQuery && wantsNeedsReview) {
+    const matches = repos.memory.adminSearchFts(ftsQuery, {
+      ...rowOpts,
+      limit: repos.memory.adminCountFts(ftsQuery, rowOpts),
       offset: 0,
     });
+    const matchTimestamps = repos.memory.reviewTimestampsByIds(matches.map((m) => m.id));
+    const reviewNow = new Date(nowMs);
+    const needsReview = matches.filter(
+      (m) =>
+        deriveReviewState(
+          {
+            type: m.type,
+            createdAt: m.createdAt,
+            status: m.status,
+            lastConfirmedAt: matchTimestamps.get(m.id)?.affirmedAt ?? null,
+            lastRefutedAt: matchTimestamps.get(m.id)?.refutedAt ?? null,
+          },
+          reviewNow,
+        ).reviewState === 'needs_review',
+    );
+    total = needsReview.length;
+    pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    page = Math.min(Math.max(1, filters.page), pages);
+    offset = (page - 1) * PAGE_SIZE;
+    rows = needsReview.slice(offset, offset + PAGE_SIZE);
+  } else if (ftsQuery) {
+    rows = repos.memory.adminSearchFts(ftsQuery, { ...rowOpts, limit: PAGE_SIZE, offset });
   } else if (wantsNeedsReview) {
     rows = repos.memory.adminFindNeedsReview({
       projectId: resolvedProject.projectId,
       nowMs,
-      limit: LIST_LIMIT,
-      offset: 0,
+      limit: PAGE_SIZE,
+      offset,
       ttlByType: TTL_BY_TYPE,
       refutedPriorityMs: REFUTED_PRIORITY_MS,
     });
   } else {
-    rows = repos.memory.adminList({
-      status,
-      type,
-      projectId: resolvedProject.projectId,
-      limit: LIST_LIMIT,
-      offset: 0,
-    });
+    rows = repos.memory.adminList({ ...rowOpts, limit: PAGE_SIZE, offset });
   }
 
   const reviewById = new Map<string, ReviewState | null>();
@@ -179,13 +235,10 @@ export default async function MemoriesPage({
       ).reviewState,
     );
   }
-  if (wantsNeedsReview && ftsQuery) {
-    rows = rows.filter((m) => reviewById.get(m.id) === 'needs_review');
-  }
-
-  const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
+ const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
 
   const statusCounts = repos.memory.countRowsByStatus();
+  const countByStatus = new Map(statusCounts.map((row) => [row.status, row.count]));
   const totalMemories = statusCounts.reduce((acc, row) => acc + row.count, 0);
   const activeMemories = statusCounts.find((row) => row.status === 'active')?.count ?? 0;
   const totalNeedsReview = repos.memory.adminCountNeedsReview({ nowMs, ttlByType: TTL_BY_TYPE });
@@ -215,6 +268,31 @@ export default async function MemoriesPage({
         </Flash>
       ) : null}
 
+      <nav aria-label="Memory status" className="mt-4 flex flex-wrap items-center gap-2">
+        {MEMORY_STATUSES.map((statusValue) => {
+          const active = statusValue === filters.status;
+          return (
+            <Link
+              key={statusValue}
+              href={statusHref(params, statusValue)}
+              prefetch
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs capitalize transition-colors',
+                active
+                  ? 'border-border bg-accent font-medium text-foreground'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {statusValue}
+              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
+                {countByStatus.get(statusValue) ?? 0}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+
       <div className="mt-6">
         <MemoriesTable
           rows={rows.map((memory) => ({
@@ -235,11 +313,11 @@ export default async function MemoriesPage({
           actions={{ archive: archiveMemory, confirm: confirmMemory }}
           csrf={csrf}
           bulkArchive={bulkArchiveMemory}
-          quickFilter
           selectable
           searchable
           pageSize={10}
         />
+        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
     </Page>
   );

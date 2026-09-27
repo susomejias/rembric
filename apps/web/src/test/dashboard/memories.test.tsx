@@ -16,10 +16,10 @@ import {
 
 installViewMocks('/dashboard/memories');
 
-// The page loads one bounded window (LIST_LIMIT) while the header reports the
-// true filtered total, so the fixture overflows the window on purpose.
-const LIST_LIMIT = 500;
-const OVERFLOW = LIST_LIMIT + 2;
+// The page loads one server page (PAGE_SIZE) while the header reports the true
+// filtered total, so the fixture overflows the window on purpose.
+const PAGE_SIZE = 50;
+const OVERFLOW = PAGE_SIZE * 10 + 2;
 const SEEDED = 52;
 
 function widget(id: string, overrides: Partial<NewMemory> = {}): NewMemory {
@@ -86,12 +86,12 @@ describe('memories list header and bounded window', () => {
       .run();
   });
 
-  it(`reports the true total (${OVERFLOW}) while loading a single ${LIST_LIMIT}-row window`, async () => {
+  it(`reports the true total (${OVERFLOW}) while loading one ${PAGE_SIZE}-row server page`, async () => {
     const html = await renderMemories();
     expect(html).toContain(`${OVERFLOW} total · ${OVERFLOW} active · ${OVERFLOW} need review`);
-    // The client pager counts the bounded window, never the true total.
-    expect(html).toContain(`1–10 of ${LIST_LIMIT}`);
+    expect(html).toContain('1–10 of 50');
     expect(html).not.toContain(`1–10 of ${OVERFLOW}`);
+    expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->11');
     expect(html).toContain('Pagination');
   });
 
@@ -119,7 +119,8 @@ describe('memories list (client data-table)', () => {
       .run();
 
     const active = await renderMemories();
-    expect(active).toContain('Filter by status');
+    expect(active).toContain('aria-label="Memory status"');
+    expect(active).not.toContain('Filter by status');
     expect(active).toContain('Search memories…');
     expect(active).toContain('Select all rows on this page');
     expect(active).toContain('Select project memory — alpha memory"');
