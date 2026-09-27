@@ -1,17 +1,20 @@
 import { DomainError } from '@rembric/core';
+import { AGENT_SESSION_STATUSES, type AgentSessionStatus } from '@rembric/db';
 import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
+import { ServerPager } from '@/components/dashboard/pager';
 import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
 import { SessionsTable } from '@/components/dashboard/sessions-table';
-import { singleParam } from '@/components/dashboard/support';
+import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
 import { Flash } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +24,27 @@ const BULK_DELETE_FORM = 'session.bulk-delete';
 const DELETE_FORM = 'session.delete';
 const UNDELETE_FORM = 'session.undelete';
 
-// One-line justification: the client table owns filtering and pagination, so the
-// page loads a generous window instead of paginating server-side.
-const LIST_LIMIT = 500;
-
 const DAY_MS = 86_400_000;
+
+const STATUS_LABELS: Record<AgentSessionStatus, string> = {
+  active: 'Active',
+  ended: 'Ended',
+  abandoned: 'Abandoned',
+};
+
+function resolveStatus(raw: string): AgentSessionStatus | undefined {
+  return (AGENT_SESSION_STATUSES as readonly string[]).includes(raw)
+    ? (raw as AgentSessionStatus)
+    : undefined;
+}
+
+function statusHref(includeDeleted: boolean, status: AgentSessionStatus | undefined): string {
+  const search = new URLSearchParams();
+  if (includeDeleted) search.set('include_deleted', '1');
+  if (status !== undefined) search.set('status', status);
+  const query = search.toString();
+  return query ? `/dashboard/sessions?${query}` : '/dashboard/sessions';
+}
 
 // Sparkline slots = days including today, so the oldest bar is `today - 13`.
 const SPARKLINE_SLOTS = 14;
@@ -126,6 +145,7 @@ export default async function SessionsPage({
   const justRestored = singleParam(params['restored']);
   const justAbandoned = singleParam(params['abandoned']);
   const includeDeleted = singleParam(params['include_deleted']) === '1';
+  const status = resolveStatus(singleParam(params['status']));
 
   const { repos } = getServices();
   const nowMs = Date.now();
@@ -137,20 +157,33 @@ export default async function SessionsPage({
     bulkRemove: await dashboardCsrfToken(BULK_DELETE_FORM),
   };
 
+  const statusCounts = repos.agentSessions.adminCountByStatus();
+  const statusCount = (value: AgentSessionStatus) =>
+    statusCounts.find((row) => row.status === value)?.count ?? 0;
+  const active = statusCount('active');
+  const allTotal = repos.agentSessions.adminCount({ deleted: false });
+  const total =
+    status === undefined ? allTotal : repos.agentSessions.adminCount({ deleted: false, status });
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(Math.max(1, Number.parseInt(singleParam(params['page']), 10) || 1), pages);
+  const offset = (page - 1) * PAGE_SIZE;
+
   const rows = repos.agentSessions.adminList({
     deleted: false,
     activeFirst: true,
-    limit: LIST_LIMIT,
-    offset: 0,
+    status,
+    limit: PAGE_SIZE,
+    offset,
   });
   const deletedRows = includeDeleted
     ? repos.agentSessions.adminList({
         deleted: true,
         activeFirst: false,
-        limit: LIST_LIMIT,
-        offset: 0,
+        limit: PAGE_SIZE,
+        offset,
       })
     : [];
+  const deletedTotal = includeDeleted ? repos.agentSessions.adminCount({ deleted: true }) : 0;
 
   const sessionIds = [...rows, ...deletedRows].map((r) => r.id);
 
@@ -164,10 +197,6 @@ export default async function SessionsPage({
     nowMs,
   );
 
-  const statusCounts = repos.agentSessions.adminCountByStatus();
-  const active = statusCounts.find((row) => row.status === 'active')?.count ?? 0;
-  const total = repos.agentSessions.adminCount({ deleted: false });
-
   return (
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -177,25 +206,16 @@ export default async function SessionsPage({
             <PageHelp text="Agent runs captured with summaries, transcripts and per-session memory counts." />
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
-            {total.toLocaleString('en-US')} sessions · {active} active now
+            {allTotal.toLocaleString('en-US')} sessions · {active} active now
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {includeDeleted ? (
-            <Link
-              href="/dashboard/sessions"
-              className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
-            >
-              Hide deleted
-            </Link>
-          ) : (
-            <Link
-              href="/dashboard/sessions?include_deleted=1"
-              className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
-            >
-              Show deleted
-            </Link>
-          )}
+          <Link
+            href={statusHref(!includeDeleted, status)}
+            className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
+          >
+            {includeDeleted ? 'Hide deleted' : 'Show deleted'}
+          </Link>
         </div>
       </section>
 
@@ -217,6 +237,43 @@ export default async function SessionsPage({
           .
         </Flash>
       ) : null}
+
+      <nav aria-label="Filter by status" className="flex flex-wrap items-center gap-2">
+        <Link
+          href={statusHref(includeDeleted, undefined)}
+          prefetch
+          aria-current={status === undefined ? 'page' : undefined}
+          className={cn(
+            'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] transition-colors',
+            status === undefined
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border text-muted-foreground hover:text-foreground',
+          )}
+        >
+          All
+          <span className="tabular-nums">{allTotal}</span>
+        </Link>
+        {AGENT_SESSION_STATUSES.map((value) => {
+          const isActive = status === value;
+          return (
+            <Link
+              key={value}
+              href={statusHref(includeDeleted, value)}
+              prefetch
+              aria-current={isActive ? 'page' : undefined}
+              className={cn(
+                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] transition-colors',
+                isActive
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {STATUS_LABELS[value]}
+              <span className="tabular-nums">{statusCount(value)}</span>
+            </Link>
+          );
+        })}
+      </nav>
 
       <SessionsTable
         rows={rows.map((session) => ({
@@ -242,16 +299,18 @@ export default async function SessionsPage({
         csrf={csrf}
         bulkAbandon={bulkAbandonSession}
         bulkRemove={bulkDeleteSession}
-        quickFilter
         selectable
         searchable
         pageSize={10}
       />
 
+      <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
+
       {includeDeleted && deletedRows.length > 0 ? (
         <>
           <h2 className="mt-4 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-            Deleted
+            Deleted · {deletedRows.length.toLocaleString('en-US')} of{' '}
+            {deletedTotal.toLocaleString('en-US')}
           </h2>
           <SessionsTable
             rows={deletedRows.map((session) => ({

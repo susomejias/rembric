@@ -10,10 +10,12 @@ export interface MemoriesFilters {
   type: string;
   review: string;
   q: string;
+  page: number;
 }
 
 export function readMemoriesFilters(searchParams: SearchParams): MemoriesFilters {
   const project = singleParam(searchParams['project']);
+  const rawPage = Number.parseInt(singleParam(searchParams['page']), 10);
   return {
     project: project === RETIRED_PROJECT_FILTER ? '' : project,
     status:
@@ -21,6 +23,7 @@ export function readMemoriesFilters(searchParams: SearchParams): MemoriesFilters
     type: singleParam(searchParams['type']),
     review: singleParam(searchParams['review']),
     q: singleParam(searchParams['q']),
+    page: Number.isNaN(rawPage) || rawPage < 1 ? 1 : rawPage,
   };
 }
 

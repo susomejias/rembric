@@ -29,12 +29,10 @@ export interface EntityRowData {
 
 export function EntitiesTable({
   rows,
-  quickFilter = false,
   searchable = false,
   pageSize,
 }: {
   rows: readonly EntityRowData[];
-  quickFilter?: boolean;
   searchable?: boolean;
   pageSize?: number;
 }) {
@@ -86,9 +84,6 @@ export function EntitiesTable({
         <div className="px-5 py-10 text-center text-sm text-muted-foreground">
           NO ENTITY MATCHES THIS FILTER
         </div>
-      }
-      quickFilter={
-        quickFilter ? { columnId: 'kind', label: 'Filter by kind', allLabel: 'All' } : undefined
       }
       renderDetail={(row) => (
         <div className="flex flex-col gap-2 px-2 py-1 text-xs">

@@ -51,7 +51,6 @@ export function MemoriesTable({
   actions,
   csrf,
   bulkArchive,
-  quickFilter = false,
   selectable = false,
   searchable = false,
   pageSize,
@@ -60,7 +59,6 @@ export function MemoriesTable({
   actions: MemoryServerActions;
   csrf: MemoryCsrfTokens;
   bulkArchive: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
-  quickFilter?: boolean;
   selectable?: boolean;
   searchable?: boolean;
   pageSize?: number;
@@ -143,9 +141,6 @@ export function MemoriesTable({
         <div className="px-5 py-10 text-center text-sm text-muted-foreground">
           NO MEMORY MATCHES THIS FILTER
         </div>
-      }
-      quickFilter={
-        quickFilter ? { columnId: 'status', label: 'Filter by status', allLabel: 'All' } : undefined
       }
       selectable={selectable}
       bulkActions={

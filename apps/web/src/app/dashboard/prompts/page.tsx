@@ -6,8 +6,9 @@ import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
+import { ServerPager } from '@/components/dashboard/pager';
 import { PromptsTable } from '@/components/dashboard/prompts-table';
-import { singleParam } from '@/components/dashboard/support';
+import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
 import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -18,10 +19,6 @@ export const dynamic = 'force-dynamic';
 const DELETE_FORM = 'prompt.delete';
 const UNDELETE_FORM = 'prompt.undelete';
 const BULK_DELETE_FORM = 'prompt.bulk-delete';
-
-// One-line justification: the client table owns filtering and pagination, so the
-// page loads a generous window instead of paginating server-side.
-const LIST_LIMIT = 500;
 
 export async function deletePrompt(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -99,15 +96,16 @@ export default async function PromptsPage({
   const projectRows = repos.projects.adminListAll();
   const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
-  const rows: Prompt[] = repos.prompts.adminList({
-    includeDeleted,
-    limit: LIST_LIMIT,
-    offset: 0,
-  });
-
   const activeCount = repos.prompts.adminCount({ includeDeleted: false });
   const deletedCount = repos.prompts.adminCount({ includeDeleted: true }) - activeCount;
   const total = repos.prompts.adminCount({ includeDeleted });
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(Math.max(1, Number.parseInt(singleParam(params['page']), 10) || 1), pages);
+  const rows: Prompt[] = repos.prompts.adminList({
+    includeDeleted,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  });
 
   return (
     <Page>
@@ -193,11 +191,11 @@ export default async function PromptsPage({
         }))}
         actions={{ remove: deletePrompt, restore: undeletePrompt, bulkRemove: bulkDeletePrompt }}
         csrf={csrf}
-        quickFilter
         selectable
         searchable
         pageSize={10}
       />
+      <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
     </Page>
   );
 }

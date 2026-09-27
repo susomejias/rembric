@@ -1,5 +1,6 @@
 import type { EntityBackfillWorker } from '@rembric/core';
 import type { EntityKind } from '@rembric/db';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { readEntitiesFilters, type SearchParams } from './filters';
@@ -9,11 +10,13 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { EntitiesTable } from '@/components/dashboard/entities-table';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { shortId, singleParam } from '@/components/dashboard/support';
+import { ServerPager } from '@/components/dashboard/pager';
+import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +24,18 @@ const REBUILD_FORM = 'entities.rebuild';
 
 const REBUILD_MAX_BATCHES = 200;
 
-// One-line justification: the client table owns filtering and pagination, so the
-// page loads a generous window instead of paginating server-side.
-const LIST_LIMIT = 500;
-
 const TABLE_PAGE_SIZE = 10;
+
+function chipHref(params: SearchParams, kind: string): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key === 'kind' || key === 'page' || value === undefined) continue;
+    for (const item of Array.isArray(value) ? value : [value]) search.append(key, item);
+  }
+  if (kind !== '') search.set('kind', kind);
+  const query = search.toString();
+  return query ? `?${query}` : '?';
+}
 
 export function runEntityRebuild(worker: EntityBackfillWorker): number {
   worker.resetIndex();
@@ -61,8 +71,10 @@ export default async function EntitiesPage({
   const kind = filters.kind === '' ? undefined : (filters.kind as EntityKind);
   const rowFilters = { kind };
 
-  const rows = repos.entities.adminListEntities(rowFilters, LIST_LIMIT, 0);
   const total = repos.entities.adminCountEntities(rowFilters);
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(Math.max(1, filters.page), pages);
+  const rows = repos.entities.adminListEntities(rowFilters, PAGE_SIZE, (page - 1) * PAGE_SIZE);
   const backlog = repos.entities.adminBacklogCount();
   const projectById = new Map(repos.projects.adminListAll().map((p) => [p.id, p.slug]));
   const counts = repos.entities.adminCountsByKind();
@@ -108,6 +120,47 @@ export default async function EntitiesPage({
         </div>
       ) : null}
 
+      <nav aria-label="Entity kind" className="mt-4 flex flex-wrap items-center gap-2">
+        <Link
+          href={chipHref(params, '')}
+          prefetch
+          aria-current={kind === undefined ? 'page' : undefined}
+          className={cn(
+            'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition-colors',
+            kind === undefined
+              ? 'border-border bg-accent font-medium text-foreground'
+              : 'border-border text-muted-foreground hover:text-foreground',
+          )}
+        >
+          All
+          <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
+            {corpusTotal}
+          </span>
+        </Link>
+        {counts.map((entry) => {
+          const active = entry.kind === kind;
+          return (
+            <Link
+              key={entry.kind}
+              href={chipHref(params, entry.kind)}
+              prefetch
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs capitalize transition-colors',
+                active
+                  ? 'border-border bg-accent font-medium text-foreground'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {entry.kind}
+              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
+                {entry.count}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+
       <div className="mt-4">
         <EntitiesTable
           rows={rows.map((entity) => ({
@@ -119,10 +172,10 @@ export default async function EntitiesPage({
               : '—',
             linkCount: entity.linkCount,
           }))}
-          quickFilter
           searchable
           pageSize={TABLE_PAGE_SIZE}
         />
+        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
     </Page>
   );

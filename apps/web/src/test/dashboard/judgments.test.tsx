@@ -112,9 +112,11 @@ describe('judgments list verdict pill and routing', () => {
     expect(html).not.toContain('Mark orphaned');
   });
 
-  it('exposes the search box, the relation quick filter and the selection checkboxes', async () => {
+  it('exposes the search box, the server-rendered status tabs and the selection checkboxes', async () => {
     const html = await renderJudgments();
-    expect(html).toContain('Filter by relation');
+    expect(html).toContain('aria-label="Judgment status"');
+    expect(html).toContain('Orphaned');
+    expect(html).not.toContain('Filter by relation');
     expect(html).toContain('Search judgments…');
     expect(html).toContain('Select all rows on this page');
     expect(html).toContain('Select widget RS → widget RT"');

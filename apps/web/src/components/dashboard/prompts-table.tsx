@@ -50,7 +50,6 @@ export function PromptsTable({
   rows,
   actions,
   csrf,
-  quickFilter = false,
   selectable = false,
   searchable = false,
   pageSize,
@@ -58,7 +57,6 @@ export function PromptsTable({
   rows: readonly PromptRowData[];
   actions: PromptServerActions;
   csrf: PromptCsrfTokens;
-  quickFilter?: boolean;
   selectable?: boolean;
   searchable?: boolean;
   pageSize?: number;
@@ -125,9 +123,6 @@ export function PromptsTable({
         <div className="px-5 py-10 text-center text-sm text-muted-foreground">
           NO PROMPT MATCHES THIS FILTER
         </div>
-      }
-      quickFilter={
-        quickFilter ? { columnId: 'status', label: 'Filter by status', allLabel: 'All' } : undefined
       }
       selectable={selectable}
       bulkActions={

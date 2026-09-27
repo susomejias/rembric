@@ -78,22 +78,23 @@ async function renderPrompts(params: Record<string, string> = {}): Promise<strin
 }
 
 describe('prompts list (client data-table)', () => {
-  it('renders the bounded window with the true non-deleted total', async () => {
+  it('loads one server page (50 rows) with the true non-deleted total', async () => {
     const html = await renderPrompts();
     expect(html).toContain(`${NON_DELETED_TOTAL} MATCHING`);
-    expect(html).toContain('55 rows');
+    expect(html).toContain('50 rows');
+    expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->2');
     expect(html).toContain('VISIBLE TO AGENTS');
     expect(html).toContain('SOFT-deleted');
   });
 
   it('caps the client-rendered rows at the table page size', async () => {
     const html = await renderPrompts();
-    expect(html).toContain(`1–${CLIENT_PAGE_SIZE} of ${NON_DELETED_TOTAL}`);
+    expect(html).toContain(`1–${CLIENT_PAGE_SIZE} of 50`);
   });
 
-  it('exposes the status quick filter, the search box and the row checkboxes', async () => {
+  it('exposes the search box and the row checkboxes without window-local chips', async () => {
     const html = await renderPrompts();
-    expect(html).toContain('Filter by status');
+    expect(html).not.toContain('Filter by status');
     expect(html).toContain('Search prompts…');
     expect(html).toContain('Select all rows on this page');
     expect(html).toContain('Select prompt prompt G0"');
