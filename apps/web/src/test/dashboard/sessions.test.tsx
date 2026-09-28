@@ -148,7 +148,7 @@ describe('sessions list (client data-table)', () => {
     expect(html).not.toContain('1–10 of 12');
   });
 
-  it('the show-deleted toggle keeps working through the URL', async () => {
+  it('the Deleted pill switches the view through the URL', async () => {
     t.handle.db
       .update(agentSessions)
       .set({ deletedAt: new Date(9_000) })
@@ -156,8 +156,9 @@ describe('sessions list (client data-table)', () => {
 
     const withoutDeleted = await renderSessions();
     const withDeleted = await renderSessions({ include_deleted: '1' });
-    expect(withDeleted).toContain('Hide deleted');
-    expect(withoutDeleted).not.toContain('Hide deleted');
+    // The deleted view renders the rows in the one table, pill active.
+    expect(withDeleted).toContain('aria-pressed="true"');
+    expect(withoutDeleted).not.toContain('Show deleted');
     expect(withDeleted).toContain('Deleted');
   });
 

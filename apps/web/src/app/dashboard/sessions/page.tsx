@@ -38,14 +38,6 @@ function resolveStatus(raw: string): AgentSessionStatus | undefined {
     : undefined;
 }
 
-function statusHref(includeDeleted: boolean, status: AgentSessionStatus | undefined): string {
-  const search = new URLSearchParams();
-  if (includeDeleted) search.set('include_deleted', '1');
-  if (status !== undefined) search.set('status', status);
-  const query = search.toString();
-  return query ? `/dashboard/sessions?${query}` : '/dashboard/sessions';
-}
-
 // Sparkline slots = days including today, so the oldest bar is `today - 13`.
 const SPARKLINE_SLOTS = 14;
 
@@ -162,34 +154,24 @@ export default async function SessionsPage({
   const statusCount = (value: AgentSessionStatus) =>
     statusCounts.find((row) => row.status === value)?.count ?? 0;
   const allTotal = repos.agentSessions.adminCount({ deleted: false });
-  const total = repos.agentSessions.adminCount({
-    deleted: false,
-    status,
-    ...(q ? { q } : {}),
-  });
+  const deletedTotal = repos.agentSessions.adminCount({ deleted: true });
+  const total = includeDeleted
+    ? repos.agentSessions.adminCount({ deleted: true, ...(q ? { q } : {}) })
+    : repos.agentSessions.adminCount({ deleted: false, status, ...(q ? { q } : {}) });
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(Math.max(1, Number.parseInt(singleParam(params['page']), 10) || 1), pages);
   const offset = (page - 1) * PAGE_SIZE;
 
   const rows = repos.agentSessions.adminList({
-    deleted: false,
-    activeFirst: true,
-    status,
+    deleted: includeDeleted,
+    activeFirst: !includeDeleted,
+    ...(includeDeleted ? {} : { status }),
     ...(q ? { q } : {}),
     limit: PAGE_SIZE,
     offset,
   });
-  const deletedRows = includeDeleted
-    ? repos.agentSessions.adminList({
-        deleted: true,
-        activeFirst: false,
-        limit: PAGE_SIZE,
-        offset,
-      })
-    : [];
-  const deletedTotal = includeDeleted ? repos.agentSessions.adminCount({ deleted: true }) : 0;
 
-  const sessionIds = [...rows, ...deletedRows].map((r) => r.id);
+  const sessionIds = rows.map((r) => r.id);
 
   const memoryCounts = repos.memory.adminCountBySession(sessionIds);
   const promptCounts = repos.prompts.adminCountBySession(sessionIds);
@@ -209,14 +191,6 @@ export default async function SessionsPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Sessions</h1>
             <PageHelp text="Agent runs captured with summaries, transcripts and per-session memory counts." />
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <Link
-            href={statusHref(!includeDeleted, status)}
-            className="rounded-[10px] border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
-          >
-            {includeDeleted ? 'Hide deleted' : 'Show deleted'}
-          </Link>
         </div>
       </section>
 
@@ -254,7 +228,7 @@ export default async function SessionsPage({
           status: session.status,
           memories: memoryCounts[session.id] ?? 0,
           prompts: promptCounts[session.id] ?? 0,
-          deleted: false,
+          deleted: includeDeleted,
         }))}
         memoryCounts={memoryCounts}
         promptCounts={promptCounts}
@@ -269,11 +243,17 @@ export default async function SessionsPage({
         }
         quickFilter={{
           paramKey: 'status',
-          active: status ?? null,
-          options: AGENT_SESSION_STATUSES.map((value) => ({ value, label: STATUS_LABELS[value] })),
-          counts: Object.fromEntries(
-            AGENT_SESSION_STATUSES.map((value) => [value, statusCount(value)]),
-          ),
+          active: includeDeleted ? 'deleted' : (status ?? null),
+          options: [
+            ...AGENT_SESSION_STATUSES.map((value) => ({ value, label: STATUS_LABELS[value] })),
+            { value: 'deleted', label: 'Deleted', params: { include_deleted: '1' } },
+          ],
+          counts: {
+            ...Object.fromEntries(
+              AGENT_SESSION_STATUSES.map((value) => [value, statusCount(value)]),
+            ),
+            deleted: deletedTotal,
+          },
           totalCount: allTotal,
           allLabel: 'All',
           label: 'Filter by status',
@@ -281,41 +261,6 @@ export default async function SessionsPage({
       />
 
       <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
-
-      {includeDeleted && deletedRows.length > 0 ? (
-        <>
-          <h2 className="mt-4 font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground">
-            Deleted · {deletedRows.length.toLocaleString('en-US')} of{' '}
-            {deletedTotal.toLocaleString('en-US')}
-          </h2>
-          <SessionsTable
-            rows={deletedRows.map((session) => ({
-              id: session.id,
-              title: sessionTitle(session),
-              description: session.description ?? null,
-              summary: session.summary ?? null,
-              agent: session.agent,
-              project: session.projectSlug ?? '—',
-              token: session.tokenName ?? '—',
-              startedAt: session.startedAt,
-              endedAt: session.endedAt,
-              durationMs:
-                (session.endedAt ?? new Date(nowMs)).getTime() - session.startedAt.getTime(),
-              status: session.status,
-              memories: memoryCounts[session.id] ?? 0,
-              prompts: promptCounts[session.id] ?? 0,
-              deleted: true,
-            }))}
-            memoryCounts={memoryCounts}
-            promptCounts={promptCounts}
-            sparklines={sparklines}
-            actions={{ abandon: abandonSession, remove: deleteSession, restore: undeleteSession }}
-            csrf={csrf}
-            bulkAbandon={bulkAbandonSession}
-            bulkRemove={bulkDeleteSession}
-          />
-        </>
-      ) : null}
     </div>
   );
 }

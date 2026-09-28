@@ -8,6 +8,11 @@ import type {
   DataTableQuickFilterOption,
 } from '@/components/spectrumui/data-table';
 
+interface TableQuickFilterOptionSpec extends DataTableQuickFilterOption {
+  /** When set, selecting this option writes these params instead of `paramKey`. */
+  params?: Record<string, string>;
+}
+
 /**
  * Serializable quick-filter description a server page passes down to its table.
  * The pills render inside the DataTable; value and counts are computed on the
@@ -17,7 +22,7 @@ export interface TableQuickFilterSpec {
   paramKey: string;
   /** Active value from the URL; null selects the All pill. */
   active: string | null;
-  options: readonly DataTableQuickFilterOption[];
+  options: readonly TableQuickFilterOptionSpec[];
   counts: Record<string, number>;
   totalCount: number;
   allLabel?: string;
@@ -34,12 +39,22 @@ export function useServerQuickFilter(
 
   return React.useMemo(() => {
     if (!spec) return null;
+    const optionParams = spec.options.map((option) => option.params ?? null);
     const onValueChange = (value: string | null) => {
       const params = new URLSearchParams(searchParams.toString());
       params.delete('page');
-      const next = value ?? spec.defaultValue ?? null;
-      if (next === null || next === '') params.delete(spec.paramKey);
-      else params.set(spec.paramKey, next);
+      params.delete(spec.paramKey);
+      for (const extra of optionParams) {
+        if (extra) for (const key of Object.keys(extra)) params.delete(key);
+      }
+      const selected =
+        value === null ? null : (spec.options.find((o) => o.value === value) ?? null);
+      if (selected?.params) {
+        for (const [key, v] of Object.entries(selected.params)) params.set(key, v);
+      } else {
+        const next = value ?? spec.defaultValue ?? null;
+        if (next !== null && next !== '') params.set(spec.paramKey, next);
+      }
       const queryString = params.toString();
       router.replace(queryString ? `?${queryString}` : '?', { scroll: false });
     };
