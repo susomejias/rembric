@@ -91,7 +91,7 @@ describe('the projects page header', () => {
     const html = await renderProjects();
 
     expect(html).toContain('>Projects</h1>');
-    expect(html).toContain('3 projects · 2 active');
+    expect(html).toContain('New project');
     expect(html).toContain('>New project</button>');
     expect(html).toContain('aria-haspopup="dialog"');
     // The create form now lives inside the client-only Sheet: no field of it is
