@@ -67,9 +67,24 @@ describe('seed-volumetric argument surface', () => {
       sessions: 0,
       relations: 0,
       prompts: 0,
+      tokens: 0,
+      projects: 0,
       seed: 1,
       skew: false,
     });
+  });
+
+  it('parses the extra dashboard-row counts independently', () => {
+    expect(parseArgs(['--db', '/tmp/c', '--tokens', '12', '--projects', '34'])).toMatchObject({
+      tokens: 12,
+      projects: 34,
+    });
+    expect(parseArgs(['--db', '/tmp/c', '--tokens', '0', '--projects', '0'])).toMatchObject({
+      tokens: 0,
+      projects: 0,
+    });
+    expect(() => parseArgs(['--db', '/tmp/c', '--tokens', '-1'])).toThrow(UsageError);
+    expect(() => parseArgs(['--db', '/tmp/c', '--projects', 'many'])).toThrow(UsageError);
   });
 
   it('parses both axes and the seed independently', () => {
@@ -202,6 +217,8 @@ function buildInto(
       sessions: SHARED_SESSIONS,
       relations: SHARED_RELATIONS,
       prompts: SHARED_PROMPTS,
+      tokens: 0,
+      projects: 0,
       seed: 1,
       skew: false,
       ...overrides,
@@ -427,6 +444,49 @@ describe('seed-volumetric generates the shape it declares', () => {
   it('populates every derived table consistently with its source', () => {
     expect(derivedStateProblems(handle)).toEqual([]);
   });
+
+  it('leaves the client-paged tokens and projects lists at their scope-slot baseline', () => {
+    expect(result.tokens).toBe(1);
+    expect(scalar(handle, 'SELECT COUNT(*) v FROM tokens')).toBe(1);
+    expect(scalar(handle, "SELECT COUNT(*) v FROM projects WHERE slug LIKE 'vol-%'")).toBe(
+      VOLUMETRIC_SHAPE.projectCount,
+    );
+  });
+});
+
+const EXTRA_TOKENS = 7;
+const EXTRA_PROJECTS = 9;
+
+describe('seed-volumetric --tokens/--projects populate the client-paged lists', () => {
+  const dir = tempDir();
+  const { handle, result } = buildInto(dir, {
+    memories: 60,
+    sessions: 0,
+    relations: 0,
+    prompts: 0,
+    tokens: EXTRA_TOKENS,
+    projects: EXTRA_PROJECTS,
+  });
+  afterAll(() => handle.close());
+
+  it('mints one harness token plus the requested extras', () => {
+    expect(result.tokens).toBe(1 + EXTRA_TOKENS);
+    expect(scalar(handle, 'SELECT COUNT(*) v FROM tokens')).toBe(1 + EXTRA_TOKENS);
+    expect(
+      scalar(handle, "SELECT COUNT(*) v FROM tokens WHERE name LIKE 'volumetric-token-%'"),
+    ).toBe(EXTRA_TOKENS);
+  });
+
+  it('creates the requested extra projects beyond the scope slots', () => {
+    expect(result.projects).toBe(VOLUMETRIC_SHAPE.projectCount + EXTRA_PROJECTS);
+    expect(scalar(handle, "SELECT COUNT(*) v FROM projects WHERE slug LIKE 'vol-extra-%'")).toBe(
+      EXTRA_PROJECTS,
+    );
+  });
+
+  it('populates every derived table consistently with its source', () => {
+    expect(derivedStateProblems(handle)).toEqual([]);
+  });
 });
 
 const SKEWED_MEMORIES = 600;
@@ -533,6 +593,8 @@ describe('seed-volumetric derived-state assertion can actually fail', () => {
           sessions: 0,
           relations: 0,
           prompts: 0,
+          tokens: 0,
+          projects: 0,
           seed: 1,
           skew: false,
         },

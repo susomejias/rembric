@@ -34,6 +34,10 @@ export interface VolumetricArgs {
   sessions: number;
   relations: number;
   prompts: number;
+  /** Extra dashboard-only tokens beyond the single harness token, for the client-paged tokens list. */
+  tokens: number;
+  /** Extra dashboard-only projects beyond the scope slots, for the client-paged projects list. */
+  projects: number;
   seed: number;
   skew: boolean;
 }
@@ -43,6 +47,8 @@ export const DEFAULT_ARGS = {
   sessions: 0,
   relations: 0,
   prompts: 0,
+  tokens: 0,
+  projects: 0,
   seed: 1,
   skew: false,
 } as const;
@@ -68,6 +74,8 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
   let sessions: number = DEFAULT_ARGS.sessions;
   let relations: number = DEFAULT_ARGS.relations;
   let prompts: number = DEFAULT_ARGS.prompts;
+  let tokens: number = DEFAULT_ARGS.tokens;
+  let projects: number = DEFAULT_ARGS.projects;
   let seed: number = DEFAULT_ARGS.seed;
   let skew: boolean = DEFAULT_ARGS.skew;
 
@@ -89,6 +97,12 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
       case '--prompts':
         prompts = requireCount(flag, requireValue(flag, argv[(i += 1)]));
         break;
+      case '--tokens':
+        tokens = requireCount(flag, requireValue(flag, argv[(i += 1)]));
+        break;
+      case '--projects':
+        projects = requireCount(flag, requireValue(flag, argv[(i += 1)]));
+        break;
       case '--seed':
         seed = requireCount(flag, requireValue(flag, argv[(i += 1)]));
         break;
@@ -97,7 +111,7 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
         break;
       default:
         throw new UsageError(
-          `unknown flag ${JSON.stringify(flag)}. Accepted: --db <dir> --memories N --sessions M --relations R --prompts P --seed S --skew. ` +
+          `unknown flag ${JSON.stringify(flag)}. Accepted: --db <dir> --memories N --sessions M --relations R --prompts P --tokens T --projects J --seed S --skew. ` +
             'This harness never deletes, so there is no --reset and no --force: remove the corpus directory yourself.',
         );
     }
@@ -110,6 +124,8 @@ export function parseArgs(argv: readonly string[]): VolumetricArgs {
     sessions,
     relations,
     prompts,
+    tokens,
+    projects,
     seed,
     skew,
   };
@@ -460,6 +476,7 @@ export interface BuildResult {
   orphanedRelations: number;
   prompts: number;
   deletedPrompts: number;
+  tokens: number;
   projects: number;
   seed: number;
 }
@@ -500,6 +517,13 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
   const token = tokensSvc.create({ name: 'volumetric-harness', scope: '*' });
   const scopes: Scope[] = projects.map((p) => projectScope(p.id));
 
+  for (let i = 0; i < args.projects; i += 1) {
+    projectsSvc.create({ slug: `vol-extra-${i}`, displayName: `Volumetric extra ${i}` });
+  }
+  for (let i = 0; i < args.tokens; i += 1) {
+    tokensSvc.create({ name: `volumetric-token-${i}`, scope: i % 2 === 0 ? '*' : 'read:*' });
+  }
+
   const result: BuildResult = {
     memories: 0,
     memoriesByScopeSlot: Array.from({ length: VOLUMETRIC_SHAPE.scopeCount }, () => 0),
@@ -512,7 +536,8 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     orphanedRelations: 0,
     prompts: 0,
     deletedPrompts: 0,
-    projects: projects.length,
+    tokens: 1 + args.tokens,
+    projects: projects.length + args.projects,
     seed: args.seed,
   };
 
@@ -689,12 +714,15 @@ export function buildCorpus(deps: BuildDeps): BuildResult {
     `  relations:     ${result.relations} (${result.pendingRelations} pending, ${result.orphanedRelations} orphaned)`,
   );
   log(`  prompts:       ${result.prompts} (${result.deletedPrompts} soft-deleted)`);
-  log(`  projects:      ${result.projects} (one per scope slot)`);
+  log(`  tokens:        ${result.tokens} (1 harness + ${args.tokens} extra)`);
+  log(
+    `  projects:      ${result.projects} (${projects.length} scope slots + ${args.projects} extra)`,
+  );
   for (const [slot, n] of result.memoriesByScopeSlot.entries()) {
     log(`    slot ${slot} (${projects[slot]!.slug}): ${n}`);
   }
   log(
-    `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --relations ${args.relations} --prompts ${args.prompts} --seed ${args.seed}${args.skew ? ' --skew' : ''}`,
+    `[corpus] rebuild this corpus with: --db <dir> --memories ${args.memories} --sessions ${args.sessions} --relations ${args.relations} --prompts ${args.prompts} --tokens ${args.tokens} --projects ${args.projects} --seed ${args.seed}${args.skew ? ' --skew' : ''}`,
   );
   log(`[corpus] CAVEAT: ${SYNTHETIC_VECTOR_CAVEAT}`);
   return result;
