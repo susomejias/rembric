@@ -118,7 +118,7 @@ describe('memories list (client data-table)', () => {
       .run();
 
     const active = await renderMemories();
-    expect(active).toContain('aria-label="Filter by status"');
+    expect(active).toContain('aria-label="Filter by status or review"');
     expect(active).toContain('All');
     expect(active).toContain('Search memories…');
     expect(active).toContain('Select all rows on this page');
@@ -206,6 +206,31 @@ describe('memories list filters', () => {
     const html = await renderMemories({ review: 'needs_review', q: 'widget' });
     expect(html).toContain('ancient-widget-marker');
     expect(html).not.toContain('fresh-widget-marker');
+  });
+
+  it('offers a Needs review pill that filters past-TTL rows off the status axis', async () => {
+    t.handle.db
+      .insert(memory)
+      .values([
+        widget('OLD', { title: 'old-marker', content: 'old-marker' }),
+        widget('NEW', {
+          title: 'new-marker',
+          content: 'new-marker',
+          createdAt: new Date(),
+          lastSeenAt: new Date(),
+        }),
+      ])
+      .run();
+
+    const all = await renderMemories();
+    expect(all).toContain('Needs review');
+    expect(all).toContain('old-marker');
+
+    const review = await renderMemories({ review: 'needs_review' });
+    expect(review).toContain('old-marker');
+    expect(review).not.toContain('new-marker');
+    // The review pill is the selected one, so no status pill is pressed as active.
+    expect(review).toContain('aria-pressed="true"');
   });
 
   it('an unresolvable project slug yields an empty list, not every scope', async () => {

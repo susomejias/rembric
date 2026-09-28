@@ -227,6 +227,7 @@ export default async function MemoriesPage({
 
   const statusCounts = repos.memory.countRowsByStatus();
   const countByStatus = new Map(statusCounts.map((row) => [row.status, row.count]));
+  const needsReviewTotal = repos.memory.adminCountNeedsReview({ nowMs, ttlByType: TTL_BY_TYPE });
 
   return (
     <Page>
@@ -280,20 +281,31 @@ export default async function MemoriesPage({
           }
           quickFilter={{
             paramKey: 'status',
-            active: filters.status === 'all' ? null : filters.status,
-            options: MEMORY_STATUSES.map((value) => ({
-              value,
-              label: value.charAt(0).toUpperCase() + value.slice(1),
-            })),
-            counts: Object.fromEntries(
-              MEMORY_STATUSES.map((value) => [value, countByStatus.get(value) ?? 0]),
-            ),
+            active:
+              filters.review === 'needs_review'
+                ? 'needs_review'
+                : filters.status === 'all'
+                  ? null
+                  : filters.status,
+            options: [
+              ...MEMORY_STATUSES.map((value) => ({
+                value,
+                label: value.charAt(0).toUpperCase() + value.slice(1),
+              })),
+              { value: 'needs_review', label: 'Needs review', params: { review: 'needs_review' } },
+            ],
+            counts: {
+              ...Object.fromEntries(
+                MEMORY_STATUSES.map((value) => [value, countByStatus.get(value) ?? 0]),
+              ),
+              needs_review: needsReviewTotal,
+            },
             totalCount: MEMORY_STATUSES.reduce(
               (sum, value) => sum + (countByStatus.get(value) ?? 0),
               0,
             ),
             allLabel: 'All',
-            label: 'Filter by status',
+            label: 'Filter by status or review',
             defaultValue: 'all',
           }}
         />
