@@ -19,11 +19,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <main className="grid min-h-screen bg-background font-sans text-foreground min-[981px]:grid-cols-[1fr_480px]">
       <section className="relative flex flex-col justify-between gap-3 overflow-hidden border-b border-border px-4 pt-6 pb-4 min-[641px]:gap-4 min-[641px]:px-6 min-[641px]:py-8 min-[981px]:gap-8 min-[981px]:border-r min-[981px]:border-b-0 min-[981px]:p-12">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(640px_260px_at_50%_-60px,rgba(198,242,78,0.09),transparent_70%)]"
-        />
-
         <div className="relative flex items-center gap-3">
           <img
             src="/dashboard/assets/logo-transparent.png"
