@@ -141,38 +141,42 @@ export default async function PromptsPage({
         </div>
       ) : null}
 
-      <PromptsTable
-        rows={rows.map((prompt) => ({
-          id: prompt.id,
-          title: prompt.title,
-          content: prompt.content,
-          project: prompt.projectId ? (projectById.get(prompt.projectId)?.slug ?? '—') : '—',
-          sessionId: prompt.sessionId ?? null,
-          agent: prompt.agent ?? '—',
-          tags: prompt.tags ?? [],
-          status: prompt.deletedAt
-            ? 'deleted'
-            : (prompt.replaces?.length ?? 0) > 0
-              ? 'refined'
-              : 'active',
-          createdAt: prompt.createdAt,
-          deleted: prompt.deletedAt != null,
-        }))}
-        actions={{ remove: deletePrompt, restore: undeletePrompt, bulkRemove: bulkDeletePrompt }}
-        csrf={csrf}
-        selectable
-        toolbar={<TableSearch value={q} placeholder="Search prompts…" ariaLabel="Search prompts" />}
-        quickFilter={{
-          paramKey: 'include_deleted',
-          active: includeDeleted ? '1' : null,
-          options: [{ value: '1', label: 'Soft-deleted' }],
-          counts: { '1': deletedCount },
-          totalCount: activeCount,
-          allLabel: 'Live',
-          label: 'Filter by lifecycle',
-        }}
-      />
-      <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
+      <div className="mt-6">
+        <PromptsTable
+          rows={rows.map((prompt) => ({
+            id: prompt.id,
+            title: prompt.title,
+            content: prompt.content,
+            project: prompt.projectId ? (projectById.get(prompt.projectId)?.slug ?? '—') : '—',
+            sessionId: prompt.sessionId ?? null,
+            agent: prompt.agent ?? '—',
+            tags: prompt.tags ?? [],
+            status: prompt.deletedAt
+              ? 'deleted'
+              : (prompt.replaces?.length ?? 0) > 0
+                ? 'refined'
+                : 'active',
+            createdAt: prompt.createdAt,
+            deleted: prompt.deletedAt != null,
+          }))}
+          actions={{ remove: deletePrompt, restore: undeletePrompt, bulkRemove: bulkDeletePrompt }}
+          csrf={csrf}
+          selectable
+          toolbar={
+            <TableSearch value={q} placeholder="Search prompts…" ariaLabel="Search prompts" />
+          }
+          quickFilter={{
+            paramKey: 'include_deleted',
+            active: includeDeleted ? '1' : null,
+            options: [{ value: '1', label: 'Deleted' }],
+            counts: { '1': deletedCount },
+            totalCount: activeCount,
+            allLabel: 'All',
+            label: 'Filter by lifecycle',
+          }}
+        />
+        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
+      </div>
     </Page>
   );
 }

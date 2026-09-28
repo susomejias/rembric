@@ -85,8 +85,8 @@ describe('prompts list (client data-table)', () => {
   it('offers the lifecycle pills (live vs soft-deleted) with counts', async () => {
     const html = await renderPrompts();
     expect(html).toContain('aria-label="Filter by lifecycle"');
-    expect(html).toContain('Soft-deleted');
-    expect(html).toContain('>Live<');
+    expect(html).toContain('Deleted');
+    expect(html).toContain('All');
   });
 
   it('exposes the search box and the row checkboxes without window-local chips', async () => {
@@ -120,8 +120,8 @@ describe('prompts list (client data-table)', () => {
 
   it('the lifecycle pills start on Live and offer the deleted view', async () => {
     const html = await renderPrompts();
-    expect(html).toContain('>Live<');
-    expect(html).toContain('Soft-deleted');
+    expect(html).toContain('All');
+    expect(html).toContain('Deleted');
     expect(html).toContain('aria-pressed="true"');
   });
 });
