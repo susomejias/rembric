@@ -105,9 +105,6 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
     row.description ? `${row.description}\n` : '',
     summary && row.summaryFinal ? `## Summary\n\n${summary}` : '',
     `## Run\n\nAgent \`${row.agent}\` · started ${row.startedAt.toISOString()} · status ${row.status}.`,
-    memories.length > 0
-      ? `## Memories written\n\n${memories.map((m) => `- **${m.title}** — ${m.type}`).join('\n')}`
-      : '',
     prompts.length > 0
       ? `## Prompts captured\n\n${prompts.map((p) => `- ${p.content.slice(0, 120)}`).join('\n')}`
       : '',
