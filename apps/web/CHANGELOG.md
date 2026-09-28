@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.28.17](https://github.com/susomejias/rembric/compare/server-v0.28.16...server-v0.28.17) (2026-09-28)
+
+
+### Features
+
+* **web:** a Needs review pill on memories ([84373a7](https://github.com/susomejias/rembric/commit/84373a7c8fbe61aeb656c888429a9b49a835a7b6))
+* **web:** account avatar generated from the login token, not initialled ([ed4222b](https://github.com/susomejias/rembric/commit/ed4222b4edfd073eb75b2cc75a4d26d98acd83f6))
+* **web:** deleted view as one more pill on sessions, like prompts ([c992b95](https://github.com/susomejias/rembric/commit/c992b95981c52bc2675c93459607a8f5920f93a9))
+* **web:** memories lands on the whole corpus, like every other list ([2b54617](https://github.com/susomejias/rembric/commit/2b54617ccca632aecfdc02a185aebd9707c2d162))
+* **web:** memories nav badge counts the whole corpus ([65e5eac](https://github.com/susomejias/rembric/commit/65e5eac2b186bf2eed9c78d572d361b107469cf5))
+* **web:** one pager, corpus-wide search and server-owned filter pills across dashboard lists ([bb94a17](https://github.com/susomejias/rembric/commit/bb94a171019a38d7074527b7c97aff2c66dcfe88))
+* **web:** projects and tokens lists onto the shared pills+search pattern ([c819215](https://github.com/susomejias/rembric/commit/c8192157c9e5c3695d9e625402344a6b4280a25f))
+* **web:** prompts list to design parity — lifecycle pills, ServerPager only, FTS search ([71734a1](https://github.com/susomejias/rembric/commit/71734a1af5ce34a048b5ddf0f9c1ccfcf6997765))
+* **web:** volumetric seeder covers tokens and projects ([363a43f](https://github.com/susomejias/rembric/commit/363a43f1be88ae03dad3f55b240942e34cf7a418))
+
+
+### Bug Fixes
+
+* **web:** drop the memories-written section from the session log markdown ([2ba8ee1](https://github.com/susomejias/rembric/commit/2ba8ee1836ec5ab71fe6325b7410b7c083995dd3))
+* **web:** prompts card spacing and pill naming (All + Deleted) ([facfe18](https://github.com/susomejias/rembric/commit/facfe18771ad4e0ec0c86c93dfaa34f2821b0520))
+* **web:** remove the lime gradient wash from the login panel ([3326d9c](https://github.com/susomejias/rembric/commit/3326d9caa185f782cb6bb9028ee0f954af4be553))
+* **web:** the All pill on memories actually shows every status ([dc27521](https://github.com/susomejias/rembric/commit/dc27521fa4cf30953fb87d168c2fa701fc2cb870))
+
+
+### Refactor
+
+* **web:** the DataTable owns pagination, driven by the server ([1bb4740](https://github.com/susomejias/rembric/commit/1bb47407beb98fc878032e8a70e7ba51dc53179a))
+
 ## [0.28.16](https://github.com/susomejias/rembric/compare/server-v0.28.15...server-v0.28.16) (2026-09-27)
 
 
