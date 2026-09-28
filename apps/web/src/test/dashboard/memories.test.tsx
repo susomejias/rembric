@@ -125,8 +125,12 @@ describe('memories list (client data-table)', () => {
     expect(active).toContain('Select project memory — alpha memory"');
     expect(active).toContain('Actions for memory alpha memory');
     expect(active).toContain('>active<');
-    // The default status filter still hides non-active rows.
-    expect(active).not.toContain('beta memory');
+    // All is the landing state, so the archived row shows up by default.
+    expect(active).toContain('Select project memory — beta memory"');
+
+    const activeOnly = await renderMemories({ status: 'active' });
+    expect(activeOnly).toContain('Select project memory — alpha memory"');
+    expect(activeOnly).not.toContain('Select project memory — beta memory"');
 
     const archived = await renderMemories({ status: 'archived' });
     expect(archived).toContain('Select project memory — beta memory"');
@@ -156,7 +160,7 @@ describe('memories list (client data-table)', () => {
 });
 
 describe('memories list filters', () => {
-  it('an FTS query honours the default active status filter, not the raw match count', async () => {
+  it('an FTS query spans every status by default and narrows with an explicit status', async () => {
     t.handle.db
       .insert(memory)
       .values([
@@ -174,10 +178,15 @@ describe('memories list filters', () => {
       ])
       .run();
 
-    const html = await renderMemories({ q: 'widget' });
-    expect(html).toContain('active-widget-marker');
-    expect(html).not.toContain('superseded-widget-marker');
-    expect(html).not.toContain('archived-widget-marker');
+    const all = await renderMemories({ q: 'widget' });
+    expect(all).toContain('active-widget-marker');
+    expect(all).toContain('superseded-widget-marker');
+    expect(all).toContain('archived-widget-marker');
+
+    const activeOnly = await renderMemories({ q: 'widget', status: 'active' });
+    expect(activeOnly).toContain('active-widget-marker');
+    expect(activeOnly).not.toContain('superseded-widget-marker');
+    expect(activeOnly).not.toContain('archived-widget-marker');
   });
 
   it('needs_review combined with a query keeps only rows past their review TTL', async () => {

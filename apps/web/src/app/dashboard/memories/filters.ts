@@ -2,7 +2,7 @@ import { RETIRED_PROJECT_FILTER, singleParam } from '@/components/dashboard/supp
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
-export const DEFAULT_STATUS = 'active' as const;
+export const DEFAULT_STATUS = 'all' as const;
 
 export interface MemoriesFilters {
   project: string;
