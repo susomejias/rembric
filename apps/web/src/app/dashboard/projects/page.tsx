@@ -7,6 +7,7 @@ import { PageHelp } from '@/components/dashboard/page-help';
 import { CreateProjectSheet } from '@/components/dashboard/projects-sheets';
 import { ProjectsTable, type ProjectRowData } from '@/components/dashboard/projects-table';
 import { singleParam } from '@/components/dashboard/support';
+import { TableSearch } from '@/components/dashboard/table-search';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -145,6 +146,24 @@ export default async function ProjectsPage({
   };
 
   const rows = [...active, ...archived].map(toRowData);
+  const q = singleParam(params['q']).trim();
+  const needle = q.toLowerCase();
+  const lifecycleParam = ['active', 'archived'].includes(singleParam(params['lifecycle']))
+    ? singleParam(params['lifecycle'])
+    : null;
+  const activeCount = rows.filter((row) => !row.archived).length;
+  const visibleRows = rows
+    .filter((row) =>
+      lifecycleParam === 'active'
+        ? !row.archived
+        : lifecycleParam === 'archived'
+          ? row.archived
+          : true,
+    )
+    .filter((row) => {
+      if (!needle) return true;
+      return `${row.label} ${row.slug} ${row.displayName ?? ''}`.toLowerCase().includes(needle);
+    });
 
   return (
     <Page className="flex flex-col gap-4">
@@ -154,9 +173,6 @@ export default async function ProjectsPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Projects</h1>
             <PageHelp text="Scopes that group memory per project — agents address them by slug." />
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {`${rows.length} projects · ${active.length} active`}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <CreateProjectSheet action={createProject} csrf={csrf.create} />
@@ -175,7 +191,7 @@ export default async function ProjectsPage({
       ) : null}
 
       <ProjectsTable
-        rows={rows}
+        rows={visibleRows}
         actions={{
           rename: renameProject,
           archive: archiveProject,
@@ -183,9 +199,22 @@ export default async function ProjectsPage({
         }}
         csrf={csrf}
         bulkArchiveAction={bulkArchiveProjects}
-        searchable
         selectable
-        quickFilter
+        toolbar={
+          <TableSearch value={q} placeholder="Search projects…" ariaLabel="Search projects" />
+        }
+        quickFilter={{
+          paramKey: 'lifecycle',
+          active: lifecycleParam,
+          options: [
+            { value: 'active', label: 'Active' },
+            { value: 'archived', label: 'Archived' },
+          ],
+          counts: { active: activeCount, archived: rows.length - activeCount },
+          totalCount: rows.length,
+          allLabel: 'All',
+          label: 'Filter by state',
+        }}
         pageSize={10}
       />
     </Page>

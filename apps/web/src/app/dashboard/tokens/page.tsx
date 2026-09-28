@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation';
 import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { singleParam } from '@/components/dashboard/support';
+import { TableSearch } from '@/components/dashboard/table-search';
 import { CopyPlaintextButton, CreateTokenSheet } from '@/components/dashboard/tokens-sheet';
 import { TokensTable } from '@/components/dashboard/tokens-table';
 import { Page, SectionBar } from '@/components/dashboard/ui';
@@ -20,7 +21,6 @@ type SearchParams = Record<string, string | string[] | undefined>;
 const CREATE_FORM = 'token.create';
 const REVOKE_FORM = 'token.revoke';
 const BULK_REVOKE_FORM = 'token.bulk-revoke';
-const TOKEN_PAGE_SIZE = 10;
 
 async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
@@ -167,7 +167,26 @@ export default async function TokensPage({
     };
   });
 
-  const activeCount = rows.filter((row) => row.state.label === 'active').length;
+  const q = singleParam(params['q']).trim();
+  const needle = q.toLowerCase();
+  const stateParam = singleParam(params['state']);
+  const stateCounts: Record<string, number> = {};
+  for (const row of rows) {
+    stateCounts[row.state.label] = (stateCounts[row.state.label] ?? 0) + 1;
+  }
+  const stateOptions = Object.keys(stateCounts).map((label) => ({
+    value: label,
+    label: label.charAt(0).toUpperCase() + label.slice(1),
+  }));
+  const visibleRows = rows
+    .filter((row) =>
+      stateParam && stateCounts[stateParam] !== undefined ? row.state.label === stateParam : true,
+    )
+    .filter((row) => {
+      if (!needle) return true;
+      const haystack = `${row.token.name} ${row.scope} ${row.members.join(' ')} ${row.slug ?? ''}`;
+      return haystack.toLowerCase().includes(needle);
+    });
 
   const selectable = projectRows.filter((p) => p.archivedAt === null);
 
@@ -183,9 +202,6 @@ export default async function TokensPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Tokens</h1>
             <PageHelp text="Bearer credentials agents use to reach this memory." />
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {`${rows.length} tokens · ${activeCount} active`}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <CreateTokenSheet action={createToken} csrf={csrf.create} projects={selectable} />
@@ -233,7 +249,7 @@ export default async function TokensPage({
       <div className="mt-8">
         <SectionBar name="Existing" meta={`${rows.length} ROWS`} />
         <TokensTable
-          rows={rows.map(({ token, scope, members, slug, state }) => ({
+          rows={visibleRows.map(({ token, scope, members, slug, state }) => ({
             id: token.id,
             name: token.name,
             scope,
@@ -247,8 +263,16 @@ export default async function TokensPage({
           actions={{ revoke: revokeToken, bulkRevoke: bulkRevokeTokens }}
           csrf={csrf}
           selectable
-          searchable
-          pageSize={TOKEN_PAGE_SIZE}
+          toolbar={<TableSearch value={q} placeholder="Search tokens…" ariaLabel="Search tokens" />}
+          quickFilter={{
+            paramKey: 'state',
+            active: stateParam || null,
+            options: stateOptions,
+            counts: stateCounts,
+            totalCount: rows.length,
+            allLabel: 'All',
+            label: 'Filter by state',
+          }}
         />
       </div>
     </Page>

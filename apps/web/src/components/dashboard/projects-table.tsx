@@ -7,6 +7,10 @@ import * as React from 'react';
 import { ActionForm, type FormAction } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { RenameProjectSheet } from '@/components/dashboard/projects-sheets';
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { Pill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -66,20 +70,21 @@ export function ProjectsTable({
   actions,
   csrf,
   bulkArchiveAction,
-  quickFilter = false,
   selectable = false,
-  searchable = false,
+  toolbar,
+  quickFilter,
   pageSize,
 }: {
   rows: readonly ProjectRowData[];
   actions: ProjectServerActions;
   csrf: ProjectCsrfTokens;
   bulkArchiveAction: FormAction;
-  quickFilter?: boolean;
   selectable?: boolean;
-  searchable?: boolean;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
   pageSize?: number;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   // The target survives closing so the panel is still painted while it slides
   // out; `renameOpen` alone decides whether the sheet is on screen.
   const [renameTarget, setRenameTarget] = React.useState<ProjectRowData | null>(null);
@@ -124,9 +129,6 @@ export function ProjectsTable({
         rowId={(row) => row.id}
         rowLabel={(row) => `project ${row.label}`}
         caption="Projects with their slug, creation date and lifecycle actions"
-        searchable={searchable}
-        searchPlaceholder="Search projects…"
-        searchText={(row) => `${row.label} ${row.slug} ${row.displayName ?? ''}`}
         variant="panel"
         density="default"
         emptyState={
@@ -134,16 +136,8 @@ export function ProjectsTable({
             NO PROJECT MATCHES THIS FILTER
           </div>
         }
-        quickFilter={
-          quickFilter
-            ? {
-                columnId: 'state',
-                label: 'Filter by state',
-                allLabel: 'All',
-                getValue: (row) => (row.archived ? 'archived' : 'active'),
-              }
-            : undefined
-        }
+        quickFilterControl={quickFilterControl ?? undefined}
+        toolbar={toolbar}
         selectable={selectable}
         clipboard={false}
         bulkActions={

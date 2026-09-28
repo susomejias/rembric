@@ -4,6 +4,10 @@ import { MoreHorizontal } from 'lucide-react';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { Pill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -43,19 +47,20 @@ export function TokensTable({
   rows,
   actions,
   csrf,
-  quickFilter = true,
   selectable = false,
-  searchable = false,
+  toolbar,
+  quickFilter,
   pageSize = 10,
 }: {
   rows: readonly TokenRowData[];
   actions: TokenServerActions;
   csrf: TokenCsrfTokens;
-  quickFilter?: boolean;
   selectable?: boolean;
-  searchable?: boolean;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
   pageSize?: number;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   const columns: DataTableColumn<TokenRowData>[] = [
     {
       id: 'token',
@@ -108,15 +113,11 @@ export function TokensTable({
       caption="Access tokens with scope, expiry and revocation state"
       variant="panel"
       density="default"
-      searchable={searchable}
-      searchPlaceholder="Search tokens…"
-      searchText={(row) => `${row.name} ${row.scope} ${row.project}`}
       emptyState={
         <div className="px-5 py-10 text-center text-sm text-muted-foreground">No tokens yet.</div>
       }
-      quickFilter={
-        quickFilter ? { columnId: 'state', label: 'Filter by state', allLabel: 'All' } : undefined
-      }
+      quickFilterControl={quickFilterControl ?? undefined}
+      toolbar={toolbar}
       selectable={selectable}
       clipboard={false}
       bulkActions={
