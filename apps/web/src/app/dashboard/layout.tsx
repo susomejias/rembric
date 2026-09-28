@@ -40,7 +40,7 @@ function navTotals(): Record<string, number> {
   const { repos } = getServices();
 
   return {
-    memories: repos.memory.countRowsByStatus().find((row) => row.status === 'active')?.count ?? 0,
+    memories: repos.memory.countRowsByStatus().reduce((acc, row) => acc + row.count, 0),
     sessions: repos.agentSessions.adminCount({ deleted: false }),
     judgments: (['pending', 'judged', 'orphaned'] as const).reduce(
       (acc, status) => acc + repos.relations.adminCountByStatus(status),
