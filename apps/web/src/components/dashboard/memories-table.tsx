@@ -6,6 +6,10 @@ import Link from 'next/link';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { ReviewPill, StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -52,17 +56,18 @@ export function MemoriesTable({
   csrf,
   bulkArchive,
   selectable = false,
-  searchable = false,
-  pageSize,
+  toolbar,
+  quickFilter,
 }: {
   rows: readonly MemoryRowData[];
   actions: MemoryServerActions;
   csrf: MemoryCsrfTokens;
   bulkArchive: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   selectable?: boolean;
-  searchable?: boolean;
-  pageSize?: number;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   const columns: DataTableColumn<MemoryRowData>[] = [
     {
       id: 'memory',
@@ -132,9 +137,6 @@ export function MemoriesTable({
       rowId={(row) => row.id}
       rowLabel={(row) => `${row.type} memory — ${row.title}`}
       caption="Memories with status, creation, last-seen dates and affirmation counts"
-      searchable={searchable}
-      searchPlaceholder="Search memories…"
-      searchText={(row) => `${row.title} ${row.content} ${row.tags.join(' ')} ${row.project}`}
       variant="panel"
       density="default"
       emptyState={
@@ -193,7 +195,8 @@ export function MemoriesTable({
         </div>
       )}
       rowActions={(row) => <MemoryRowMenu row={row} actions={actions} csrf={csrf} />}
-      pageSize={pageSize}
+      toolbar={toolbar}
+      quickFilterControl={quickFilterControl ?? undefined}
     />
   );
 }

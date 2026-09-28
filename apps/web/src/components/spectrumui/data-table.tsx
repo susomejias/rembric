@@ -162,16 +162,24 @@ export interface DataTableQuickFilterOption {
   label?: React.ReactNode;
 }
 
-export interface DataTableQuickFilter<T> {
-  /** Column whose value the pills match against. */
-  columnId: string;
+/**
+ * Server-owned quick filter. The pills live in the table toolbar, but the value,
+ * the counts and the actual filtering belong to the caller (usually a URL param
+ * the server resolves) — so pills stay correct on server-paged views where the
+ * client only ever sees one page of rows.
+ */
+export interface DataTableQuickFilterControl {
   /** Accessible name for the pill group, e.g. "Filter by status". */
   label?: string;
-  /** Read the matchable value off a row when the column's own value is not a plain string. */
-  getValue?: (row: T) => string;
-  /** Defaults to the distinct values of the column, in data order. */
-  options?: DataTableQuickFilterOption[];
   allLabel?: string;
+  /** Active value; null selects the All pill. */
+  value: string | null;
+  options: readonly DataTableQuickFilterOption[];
+  /** Count behind each option value. */
+  counts: Record<string, number>;
+  /** Count behind the All pill. */
+  totalCount: number;
+  onValueChange: (value: string | null) => void;
 }
 
 export interface DataTableSelectionContext<T> {
@@ -210,8 +218,8 @@ export interface DataTableProps<T> {
   /** Override the haystack a query runs against. */
   searchText?: (row: T) => string;
 
-  /** One-tap value pills at the end of the toolbar, with live counts. */
-  quickFilter?: DataTableQuickFilter<T>;
+  /** Value pills at the end of the toolbar; the server owns value and counts. */
+  quickFilterControl?: DataTableQuickFilterControl;
 
   defaultSort?: DataTableSort | null;
   sort?: DataTableSort | null;
@@ -705,7 +713,7 @@ export function DataTable<T>({
   searchable = false,
   searchPlaceholder = 'Search',
   searchText,
-  quickFilter,
+  quickFilterControl,
   defaultSort = null,
   sort: sortProp,
   onSortChange,
@@ -738,7 +746,6 @@ export function DataTable<T>({
   const scale = DENSITY[density];
 
   const [query, setQuery] = React.useState('');
-  const [quickValue, setQuickValue] = React.useState<string | null>(null);
   /** Index into the visible page. The ring, not focus, follows it. */
   const [cursor, setCursor] = React.useState(0);
   const [gridFocused, setGridFocused] = React.useState(false);
@@ -788,53 +795,15 @@ export function DataTable<T>({
     });
   }, [rows, query, columns, searchText]);
 
-  const readQuickValue = React.useCallback(
-    (row: T) => {
-      if (!quickFilter) return '';
-      if (quickFilter.getValue) return quickFilter.getValue(row);
-      const column = columns.find((candidate) => candidate.id === quickFilter.columnId);
-      return printValue(readValue(column, row));
-    },
-    [quickFilter, columns],
-  );
-
-  const quickOptions = React.useMemo<DataTableQuickFilterOption[]>(() => {
-    if (!quickFilter) return [];
-    if (quickFilter.options) return quickFilter.options;
-    const seen: string[] = [];
-    for (const row of rows) {
-      const value = readQuickValue(row);
-      if (value && !seen.includes(value)) seen.push(value);
-    }
-    return seen.map((value) => ({ value }));
-  }, [quickFilter, rows, readQuickValue]);
-
-  // Live counts come from the searched set, so the pills always add up to the
-  // rows a click would actually show.
-  const quickCounts = React.useMemo(() => {
-    if (!quickFilter) return {};
-    const counts: Record<string, number> = {};
-    for (const row of filtered) {
-      const value = readQuickValue(row);
-      counts[value] = (counts[value] ?? 0) + 1;
-    }
-    return counts;
-  }, [quickFilter, filtered, readQuickValue]);
-
-  const narrowed = React.useMemo(() => {
-    if (!quickFilter || quickValue === null) return filtered;
-    return filtered.filter((row) => readQuickValue(row) === quickValue);
-  }, [filtered, quickFilter, quickValue, readQuickValue]);
-
   const sorted = React.useMemo(() => {
-    if (!sort) return narrowed;
+    if (!sort) return filtered;
     const column = columns.find((candidate) => candidate.id === sort.columnId);
-    if (!column) return narrowed;
+    if (!column) return filtered;
     const direction = sort.direction === 'asc' ? 1 : -1;
 
     // Sort is stable, so equal rows keep their source order. Blanks stay at the
     // bottom in both directions; a column of empties is not a result.
-    return [...narrowed].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const left = readValue(column, a);
       const right = readValue(column, b);
       const leftEmpty = isEmpty(left);
@@ -842,7 +811,7 @@ export function DataTable<T>({
       if (leftEmpty || rightEmpty) return leftEmpty === rightEmpty ? 0 : leftEmpty ? 1 : -1;
       return compare(left, right) * direction;
     });
-  }, [narrowed, sort, columns]);
+  }, [filtered, sort, columns]);
 
   const pageCount = pageSize ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
   // Clamped on the way out as well as in an effect, so a shrinking result set
@@ -858,11 +827,6 @@ export function DataTable<T>({
   // `safePage` already clamps whatever `page` holds.
   const changeQuery = (next: string) => {
     setQuery(next);
-    setPage(0);
-  };
-
-  const changeQuickValue = (next: string | null) => {
-    setQuickValue(next);
     setPage(0);
   };
 
@@ -1093,7 +1057,7 @@ export function DataTable<T>({
 
   // Measuring is what makes a reorder animate; keeping it off every other
   // render is what keeps hovering a row cheap.
-  const layoutToken = `${sort?.columnId ?? ''}:${sort?.direction ?? ''}:${safePage}:${query}:${quickValue ?? ''}`;
+  const layoutToken = `${sort?.columnId ?? ''}:${sort?.direction ?? ''}:${safePage}:${query}:${quickFilterControl?.value ?? ''}`;
 
   const gridId = React.useId();
   const rowDomId = (index: number) => `${gridId}-row-${index}`;
@@ -1191,7 +1155,7 @@ export function DataTable<T>({
   return (
     <div className={cn('w-full', className)}>
       <div className={cn('flex flex-col overflow-hidden', surface.frame)}>
-        {(searchable || title || toolbar || quickFilter) && (
+        {(searchable || title || toolbar || quickFilterControl) && (
           <div
             className={cn(
               'flex flex-wrap items-center gap-x-4 gap-y-2 py-3',
@@ -1208,31 +1172,33 @@ export function DataTable<T>({
             {/* Controls live at the end of the toolbar: filter pills first,
                 then search, then whatever actions the caller parks here. */}
             <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-              {quickFilter && quickOptions.length > 0 && (
+              {quickFilterControl && quickFilterControl.options.length > 0 && (
                 <LayoutGroup id={`${gridId}-filters`}>
                   <div
                     role="group"
-                    aria-label={quickFilter.label ?? 'Filter rows'}
+                    aria-label={quickFilterControl.label ?? 'Filter rows'}
                     className="flex flex-wrap items-center gap-1"
                   >
                     <FilterPill
-                      active={quickValue === null}
-                      onClick={() => changeQuickValue(null)}
-                      label={quickFilter.allLabel ?? 'All'}
-                      count={filtered.length}
+                      active={quickFilterControl.value === null}
+                      onClick={() => quickFilterControl.onValueChange(null)}
+                      label={quickFilterControl.allLabel ?? 'All'}
+                      count={quickFilterControl.totalCount}
                       layoutId={`${gridId}-pill`}
                       motionOn={motionOn}
                     />
-                    {quickOptions.map((option) => (
+                    {quickFilterControl.options.map((option) => (
                       <FilterPill
                         key={option.value}
-                        active={quickValue === option.value}
+                        active={quickFilterControl.value === option.value}
                         onClick={() =>
-                          changeQuickValue(quickValue === option.value ? null : option.value)
+                          quickFilterControl.onValueChange(
+                            quickFilterControl.value === option.value ? null : option.value,
+                          )
                         }
                         label={option.label ?? option.value}
                         plain={option.label === undefined}
-                        count={quickCounts[option.value] ?? 0}
+                        count={quickFilterControl.counts[option.value] ?? 0}
                         layoutId={`${gridId}-pill`}
                         motionOn={motionOn}
                       />
@@ -1792,11 +1758,11 @@ export function DataTable<T>({
                       <td colSpan={columnCount} className="px-6 py-16">
                         {emptyState ?? (
                           <EmptyHint
-                            filtered={Boolean(query || quickValue !== null)}
+                            filtered={Boolean(query || quickFilterControl?.value)}
                             motionOn={motionOn}
                             onClear={() => {
                               changeQuery('');
-                              changeQuickValue(null);
+                              quickFilterControl?.onValueChange(null);
                             }}
                           />
                         )}

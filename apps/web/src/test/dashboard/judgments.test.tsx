@@ -112,11 +112,10 @@ describe('judgments list verdict pill and routing', () => {
     expect(html).not.toContain('Mark orphaned');
   });
 
-  it('exposes the search box, the server-rendered status tabs and the selection checkboxes', async () => {
+  it('exposes the search box, the status pills and the selection checkboxes', async () => {
     const html = await renderJudgments();
-    expect(html).toContain('aria-label="Judgment status"');
+    expect(html).toContain('aria-label="Filter by status"');
     expect(html).toContain('Orphaned');
-    expect(html).not.toContain('Filter by relation');
     expect(html).toContain('Search judgments…');
     expect(html).toContain('Select all rows on this page');
     expect(html).toContain('Select widget RS → widget RT"');
@@ -155,8 +154,8 @@ describe('judgments list verdict pill and routing', () => {
       .run();
 
     const html = await renderJudgments();
-    expect(html).toContain('1–10 of 50');
-    expect(html).not.toContain(`${PAGE_SIZE + 1} ROWS`);
+    expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->2');
+    expect(html).not.toContain('1–10 of 50');
     expect(html).not.toContain(`${SEEDED} ROWS`);
   });
 });

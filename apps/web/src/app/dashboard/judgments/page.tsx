@@ -1,5 +1,4 @@
 import { revalidatePath } from 'next/cache';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
@@ -7,17 +6,16 @@ import { JudgmentsTable } from '@/components/dashboard/judgments-table';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { ServerPager } from '@/components/dashboard/pager';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
+import { TableSearch } from '@/components/dashboard/table-search';
 import { Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
 const ORPHAN_FORM = 'judgment.orphan';
 const BULK_ORPHAN_FORM = 'judgment.bulk-orphan';
-const TABLE_PAGE_SIZE = 10;
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -33,17 +31,6 @@ type StatusTab = (typeof STATUS_TABS)[number]['value'];
 function resolveStatusTab(raw: string): StatusTab {
   const tab = STATUS_TABS.find((candidate) => candidate.value === raw);
   return tab ? tab.value : 'all';
-}
-
-function statusHref(params: SearchParams, value: StatusTab): string {
-  const search = new URLSearchParams();
-  for (const [key, raw] of Object.entries(params)) {
-    if (key === 'page' || key === 'status' || raw === undefined) continue;
-    for (const item of Array.isArray(raw) ? raw : [raw]) search.append(key, item);
-  }
-  if (value !== 'all') search.set('status', value);
-  const query = search.toString();
-  return query ? `/dashboard/judgments?${query}` : '/dashboard/judgments';
 }
 
 async function orphanJudgment(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -87,6 +74,7 @@ export default async function JudgmentsPage({
 } = {}) {
   const params = (await searchParams) ?? {};
   const status = resolveStatusTab(singleParam(params['status']));
+  const q = singleParam(params['q']).trim();
 
   const { repos } = getServices();
   const csrf = {
@@ -94,7 +82,10 @@ export default async function JudgmentsPage({
     bulkOrphan: await dashboardCsrfToken(BULK_ORPHAN_FORM),
   };
 
-  const filters = status === 'all' ? {} : { status };
+  const filters = {
+    ...(status === 'all' ? {} : { status }),
+    ...(q ? { q } : {}),
+  };
   const total = repos.relations.adminCountWithFilters(filters);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(Math.max(1, Number.parseInt(singleParam(params['page']), 10) || 1), pages);
@@ -117,33 +108,7 @@ export default async function JudgmentsPage({
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">Judgments</h1>
           <PageHelp text="Conflicts and overlaps between memories awaiting your verdict." />
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {`${total} matching · ${pending} pending · ${judged} judged · ${orphaned} orphaned`}
-        </p>
       </header>
-
-      <nav aria-label="Judgment status" className="mt-4 flex flex-wrap items-center gap-2">
-        {STATUS_TABS.map((tab) => {
-          const active = tab.value === status;
-          return (
-            <Link
-              key={tab.value}
-              href={statusHref(params, tab.value)}
-              prefetch
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] transition-colors',
-                active
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tab.label}
-              <span className="tabular-nums">{counts[tab.value]}</span>
-            </Link>
-          );
-        })}
-      </nav>
 
       <div className="mt-6">
         <JudgmentsTable
@@ -164,8 +129,22 @@ export default async function JudgmentsPage({
           actions={{ orphan: orphanJudgment, bulkOrphan: bulkOrphanJudgments }}
           csrf={csrf}
           selectable
-          searchable
-          pageSize={TABLE_PAGE_SIZE}
+          toolbar={
+            <TableSearch value={q} placeholder="Search judgments…" ariaLabel="Search judgments" />
+          }
+          quickFilter={{
+            paramKey: 'status',
+            active: status === 'all' ? null : status,
+            options: [
+              { value: 'pending', label: 'Pending' },
+              { value: 'judged', label: 'Judged' },
+              { value: 'orphaned', label: 'Orphaned' },
+            ],
+            counts: { pending: counts.pending, judged: counts.judged, orphaned: counts.orphaned },
+            totalCount: counts.all,
+            allLabel: 'All',
+            label: 'Filter by status',
+          }}
         />
         <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>

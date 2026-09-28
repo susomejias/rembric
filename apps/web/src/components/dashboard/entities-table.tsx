@@ -2,6 +2,10 @@
 
 import Link from 'next/link';
 
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { cn } from '@/lib/utils';
 
@@ -29,13 +33,14 @@ export interface EntityRowData {
 
 export function EntitiesTable({
   rows,
-  searchable = false,
-  pageSize,
+  toolbar,
+  quickFilter,
 }: {
   rows: readonly EntityRowData[];
-  searchable?: boolean;
-  pageSize?: number;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   const columns: DataTableColumn<EntityRowData>[] = [
     {
       id: 'entity',
@@ -75,8 +80,6 @@ export function EntitiesTable({
       rowId={(row) => row.id}
       rowLabel={(row) => `${row.kind} entity — ${row.value}`}
       caption="Entities with kind, project and reference count"
-      searchable={searchable}
-      searchPlaceholder="Search entities…"
       searchText={(row) => `${row.value} ${row.kind} ${row.project}`}
       variant="panel"
       density="default"
@@ -103,7 +106,8 @@ export function EntitiesTable({
           View memories →
         </Link>
       )}
-      pageSize={pageSize}
+      toolbar={toolbar}
+      quickFilterControl={quickFilterControl ?? undefined}
     />
   );
 }

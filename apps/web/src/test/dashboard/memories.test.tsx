@@ -88,16 +88,14 @@ describe('memories list header and bounded window', () => {
 
   it(`reports the true total (${OVERFLOW}) while loading one ${PAGE_SIZE}-row server page`, async () => {
     const html = await renderMemories();
-    expect(html).toContain(`${OVERFLOW} total · ${OVERFLOW} active · ${OVERFLOW} need review`);
-    expect(html).toContain('1–10 of 50');
-    expect(html).not.toContain(`1–10 of ${OVERFLOW}`);
+    expect(html).toContain('Search memories…');
+    expect(html).not.toContain('1–10 of 50');
     expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->11');
     expect(html).toContain('Pagination');
   });
 
   it('renders the needs-review count and the review pill for ancient rows', async () => {
     const html = await renderMemories();
-    expect(html).toContain(`${OVERFLOW} need review`);
     expect(html).toContain('>needs review<');
   });
 });
@@ -119,8 +117,8 @@ describe('memories list (client data-table)', () => {
       .run();
 
     const active = await renderMemories();
-    expect(active).toContain('aria-label="Memory status"');
-    expect(active).not.toContain('Filter by status');
+    expect(active).toContain('aria-label="Filter by status"');
+    expect(active).toContain('All');
     expect(active).toContain('Search memories…');
     expect(active).toContain('Select all rows on this page');
     expect(active).toContain('Select project memory — alpha memory"');

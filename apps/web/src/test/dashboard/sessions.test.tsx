@@ -83,14 +83,12 @@ describe('sessions list (client data-table)', () => {
     expect(html).toContain('Select claude-code session — S4"');
     expect(html).toContain('Filter by status');
     expect(html).toContain('Search sessions…');
-    expect(html).toContain('1–4 of 4');
+    expect(html).not.toContain('1–4 of 4');
   });
 
-  it('reports the totals subtitle with the active count', async () => {
+  it('no longer renders the totals subtitle under the h1', async () => {
     const html = await renderSessions();
-    expect(html).toContain('4');
-    expect(html).toContain('sessions');
-    expect(html).toContain('active now');
+    expect(html).not.toContain('active now');
   });
 
   it('exposes selection checkboxes and the per-row actions menu', async () => {
@@ -135,7 +133,7 @@ describe('sessions list (client data-table)', () => {
     expect(html).toContain('w-[52px]');
   });
 
-  it('caps the client page at pageSize for 12 seeded rows', async () => {
+  it('renders the full server page for 12 seeded rows (no client re-slice)', async () => {
     const extra: NewAgentSession[] = Array.from({ length: 8 }, (_, i) => ({
       id: `X${i}`,
       tokenId: 'tk1',
@@ -146,7 +144,8 @@ describe('sessions list (client data-table)', () => {
     t.handle.db.insert(agentSessions).values(extra).run();
 
     const html = await renderSessions();
-    expect(html).toContain('1–10 of 12');
+    expect(html).toContain('Select test session — X7"');
+    expect(html).not.toContain('1–10 of 12');
   });
 
   it('the show-deleted toggle keeps working through the URL', async () => {

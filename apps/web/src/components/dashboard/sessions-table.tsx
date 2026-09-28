@@ -6,6 +6,10 @@ import Link from 'next/link';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -66,8 +70,8 @@ export function SessionsTable({
   bulkAbandon,
   bulkRemove,
   selectable = false,
-  searchable = false,
-  pageSize,
+  toolbar,
+  quickFilter,
 }: {
   rows: readonly SessionRowData[];
   memoryCounts: Record<string, number>;
@@ -78,9 +82,10 @@ export function SessionsTable({
   bulkAbandon: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   bulkRemove: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   selectable?: boolean;
-  searchable?: boolean;
-  pageSize?: number;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   const columns: DataTableColumn<SessionRowData>[] = [
     {
       id: 'session',
@@ -175,9 +180,6 @@ export function SessionsTable({
         rowId={(row) => row.id}
         rowLabel={(row) => `${row.agent} session — ${row.title}`}
         caption="Agent sessions with status, memory and prompt counts"
-        searchable={searchable}
-        searchPlaceholder="Search sessions…"
-        searchText={(row) => `${row.title} ${row.agent} ${row.project} ${row.token}`}
         variant="panel"
         density="default"
         emptyState={
@@ -273,7 +275,8 @@ export function SessionsTable({
           );
         }}
         rowActions={(row) => <SessionRowMenu row={row} actions={actions} csrf={csrf} />}
-        pageSize={pageSize}
+        toolbar={toolbar}
+        quickFilterControl={quickFilterControl ?? undefined}
       />
     </TooltipProvider>
   );

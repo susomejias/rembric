@@ -10,11 +10,11 @@ import { ServerPager } from '@/components/dashboard/pager';
 import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
 import { SessionsTable } from '@/components/dashboard/sessions-table';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
+import { TableSearch } from '@/components/dashboard/table-search';
 import { Flash } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -146,6 +146,7 @@ export default async function SessionsPage({
   const justAbandoned = singleParam(params['abandoned']);
   const includeDeleted = singleParam(params['include_deleted']) === '1';
   const status = resolveStatus(singleParam(params['status']));
+  const q = singleParam(params['q']).trim();
 
   const { repos } = getServices();
   const nowMs = Date.now();
@@ -160,10 +161,12 @@ export default async function SessionsPage({
   const statusCounts = repos.agentSessions.adminCountByStatus();
   const statusCount = (value: AgentSessionStatus) =>
     statusCounts.find((row) => row.status === value)?.count ?? 0;
-  const active = statusCount('active');
   const allTotal = repos.agentSessions.adminCount({ deleted: false });
-  const total =
-    status === undefined ? allTotal : repos.agentSessions.adminCount({ deleted: false, status });
+  const total = repos.agentSessions.adminCount({
+    deleted: false,
+    status,
+    ...(q ? { q } : {}),
+  });
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(Math.max(1, Number.parseInt(singleParam(params['page']), 10) || 1), pages);
   const offset = (page - 1) * PAGE_SIZE;
@@ -172,6 +175,7 @@ export default async function SessionsPage({
     deleted: false,
     activeFirst: true,
     status,
+    ...(q ? { q } : {}),
     limit: PAGE_SIZE,
     offset,
   });
@@ -205,9 +209,6 @@ export default async function SessionsPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Sessions</h1>
             <PageHelp text="Agent runs captured with summaries, transcripts and per-session memory counts." />
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {allTotal.toLocaleString('en-US')} sessions · {active} active now
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <Link
@@ -238,43 +239,6 @@ export default async function SessionsPage({
         </Flash>
       ) : null}
 
-      <nav aria-label="Filter by status" className="flex flex-wrap items-center gap-2">
-        <Link
-          href={statusHref(includeDeleted, undefined)}
-          prefetch
-          aria-current={status === undefined ? 'page' : undefined}
-          className={cn(
-            'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] transition-colors',
-            status === undefined
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border text-muted-foreground hover:text-foreground',
-          )}
-        >
-          All
-          <span className="tabular-nums">{allTotal}</span>
-        </Link>
-        {AGENT_SESSION_STATUSES.map((value) => {
-          const isActive = status === value;
-          return (
-            <Link
-              key={value}
-              href={statusHref(includeDeleted, value)}
-              prefetch
-              aria-current={isActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] transition-colors',
-                isActive
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {STATUS_LABELS[value]}
-              <span className="tabular-nums">{statusCount(value)}</span>
-            </Link>
-          );
-        })}
-      </nav>
-
       <SessionsTable
         rows={rows.map((session) => ({
           id: session.id,
@@ -300,8 +264,20 @@ export default async function SessionsPage({
         bulkAbandon={bulkAbandonSession}
         bulkRemove={bulkDeleteSession}
         selectable
-        searchable
-        pageSize={10}
+        toolbar={
+          <TableSearch value={q} placeholder="Search sessions…" ariaLabel="Search sessions" />
+        }
+        quickFilter={{
+          paramKey: 'status',
+          active: status ?? null,
+          options: AGENT_SESSION_STATUSES.map((value) => ({ value, label: STATUS_LABELS[value] })),
+          counts: Object.fromEntries(
+            AGENT_SESSION_STATUSES.map((value) => [value, statusCount(value)]),
+          ),
+          totalCount: allTotal,
+          allLabel: 'All',
+          label: 'Filter by status',
+        }}
       />
 
       <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
@@ -337,7 +313,6 @@ export default async function SessionsPage({
             csrf={csrf}
             bulkAbandon={bulkAbandonSession}
             bulkRemove={bulkDeleteSession}
-            pageSize={10}
           />
         </>
       ) : null}

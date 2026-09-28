@@ -5,6 +5,10 @@ import Link from 'next/link';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -103,16 +107,17 @@ export function JudgmentsTable({
   actions,
   csrf,
   selectable = false,
-  searchable = false,
-  pageSize = 10,
+  toolbar,
+  quickFilter,
 }: {
   rows: readonly JudgmentRowData[];
   actions: JudgmentServerActions;
   csrf: JudgmentCsrfTokens;
   selectable?: boolean;
-  searchable?: boolean;
-  pageSize?: number;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   const columns: DataTableColumn<JudgmentRowData>[] = [
     {
       id: 'judgment',
@@ -182,9 +187,6 @@ export function JudgmentsTable({
       rowId={(row) => row.id}
       rowLabel={(row) => `${row.sourceTitle} → ${row.targetTitle}`}
       caption="Judgments, pending and recently judged"
-      searchable={searchable}
-      searchPlaceholder="Search judgments…"
-      searchText={(row) => `${row.sourceTitle} ${row.targetTitle} ${row.relation ?? 'pending'}`}
       variant="panel"
       density="default"
       emptyState={
@@ -241,7 +243,8 @@ export function JudgmentsTable({
         </div>
       )}
       rowActions={(row) => <JudgmentRowMenu row={row} actions={actions} csrf={csrf} />}
-      pageSize={pageSize}
+      toolbar={toolbar}
+      quickFilterControl={quickFilterControl ?? undefined}
     />
   );
 }

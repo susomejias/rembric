@@ -14,7 +14,6 @@ import {
   MEMORY_STATUSES,
 } from '@rembric/db';
 import { revalidatePath } from 'next/cache';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './filters';
@@ -24,11 +23,11 @@ import { MemoriesTable } from '@/components/dashboard/memories-table';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { ServerPager } from '@/components/dashboard/pager';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
+import { TableSearch } from '@/components/dashboard/table-search';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,16 +38,6 @@ const CONFIRM_FORM = 'memory.confirm';
 const TTL_BY_TYPE = Object.entries(REVIEW_TTL_MS).filter(
   (entry): entry is [MemoryType, number] => typeof entry[1] === 'number',
 );
-
-function statusHref(params: SearchParams, status: string): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (key === 'status' || key === 'page' || value === undefined) continue;
-    for (const item of Array.isArray(value) ? value : [value]) search.append(key, item);
-  }
-  search.set('status', status);
-  return `/dashboard/memories?${search.toString()}`;
-}
 
 const NO_PROJECT_MESSAGE =
   'This memory predates the default project and has no project to act in. An older image wrote it; it cannot be archived or confirmed from the dashboard.';
@@ -239,12 +228,6 @@ export default async function MemoriesPage({
 
   const statusCounts = repos.memory.countRowsByStatus();
   const countByStatus = new Map(statusCounts.map((row) => [row.status, row.count]));
-  const totalMemories = statusCounts.reduce((acc, row) => acc + row.count, 0);
-  const activeMemories = statusCounts.find((row) => row.status === 'active')?.count ?? 0;
-  const totalNeedsReview = repos.memory.adminCountNeedsReview({ nowMs, ttlByType: TTL_BY_TYPE });
-  const summary = `${totalMemories.toLocaleString('en-US')} total · ${activeMemories.toLocaleString(
-    'en-US',
-  )} active · ${totalNeedsReview.toLocaleString('en-US')} need review`;
 
   return (
     <Page>
@@ -254,7 +237,6 @@ export default async function MemoriesPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Memories</h1>
             <PageHelp text="What your agents chose to remember — searchable, reviewable, archived by decay." />
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">{summary}</p>
         </div>
       </section>
 
@@ -267,31 +249,6 @@ export default async function MemoriesPage({
           Memory <code className="font-mono">{shortId(justConfirmed)}</code> re-affirmed.
         </Flash>
       ) : null}
-
-      <nav aria-label="Memory status" className="mt-4 flex flex-wrap items-center gap-2">
-        {MEMORY_STATUSES.map((statusValue) => {
-          const active = statusValue === filters.status;
-          return (
-            <Link
-              key={statusValue}
-              href={statusHref(params, statusValue)}
-              prefetch
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs capitalize transition-colors',
-                active
-                  ? 'border-border bg-accent font-medium text-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {statusValue}
-              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
-                {countByStatus.get(statusValue) ?? 0}
-              </span>
-            </Link>
-          );
-        })}
-      </nav>
 
       <div className="mt-6">
         <MemoriesTable
@@ -314,8 +271,31 @@ export default async function MemoriesPage({
           csrf={csrf}
           bulkArchive={bulkArchiveMemory}
           selectable
-          searchable
-          pageSize={10}
+          toolbar={
+            <TableSearch
+              value={filters.q.trim()}
+              placeholder="Search memories…"
+              ariaLabel="Search memories"
+            />
+          }
+          quickFilter={{
+            paramKey: 'status',
+            active: filters.status,
+            options: MEMORY_STATUSES.map((value) => ({
+              value,
+              label: value.charAt(0).toUpperCase() + value.slice(1),
+            })),
+            counts: Object.fromEntries(
+              MEMORY_STATUSES.map((value) => [value, countByStatus.get(value) ?? 0]),
+            ),
+            totalCount: MEMORY_STATUSES.reduce(
+              (sum, value) => sum + (countByStatus.get(value) ?? 0),
+              0,
+            ),
+            allLabel: 'All',
+            label: 'Filter by status',
+            defaultValue: 'active',
+          }}
         />
         <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>

@@ -1,6 +1,5 @@
 import type { EntityBackfillWorker } from '@rembric/core';
 import type { EntityKind } from '@rembric/db';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { readEntitiesFilters, type SearchParams } from './filters';
@@ -12,30 +11,17 @@ import { EntitiesTable } from '@/components/dashboard/entities-table';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { ServerPager } from '@/components/dashboard/pager';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
+import { TableSearch } from '@/components/dashboard/table-search';
 import { Flash, Page } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
 const REBUILD_FORM = 'entities.rebuild';
 
 const REBUILD_MAX_BATCHES = 200;
-
-const TABLE_PAGE_SIZE = 10;
-
-function chipHref(params: SearchParams, kind: string): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (key === 'kind' || key === 'page' || value === undefined) continue;
-    for (const item of Array.isArray(value) ? value : [value]) search.append(key, item);
-  }
-  if (kind !== '') search.set('kind', kind);
-  const query = search.toString();
-  return query ? `?${query}` : '?';
-}
 
 export function runEntityRebuild(worker: EntityBackfillWorker): number {
   worker.resetIndex();
@@ -69,7 +55,8 @@ export default async function EntitiesPage({
   const { repos } = getServices();
 
   const kind = filters.kind === '' ? undefined : (filters.kind as EntityKind);
-  const rowFilters = { kind };
+  const q = filters.q.trim();
+  const rowFilters = { kind, ...(q ? { q } : {}) };
 
   const total = repos.entities.adminCountEntities(rowFilters);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -88,9 +75,6 @@ export default async function EntitiesPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Entities</h1>
             <PageHelp text="Paths, tickets and other identifiers extracted from memory content." />
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {`${rows.length} in view · ${total} matching · ${corpusTotal} indexed`}
-          </p>
         </div>
         <ActionForm action={rebuildEntities} className="shrink-0">
           <CsrfField form={REBUILD_FORM} />
@@ -120,47 +104,6 @@ export default async function EntitiesPage({
         </div>
       ) : null}
 
-      <nav aria-label="Entity kind" className="mt-4 flex flex-wrap items-center gap-2">
-        <Link
-          href={chipHref(params, '')}
-          prefetch
-          aria-current={kind === undefined ? 'page' : undefined}
-          className={cn(
-            'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs transition-colors',
-            kind === undefined
-              ? 'border-border bg-accent font-medium text-foreground'
-              : 'border-border text-muted-foreground hover:text-foreground',
-          )}
-        >
-          All
-          <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
-            {corpusTotal}
-          </span>
-        </Link>
-        {counts.map((entry) => {
-          const active = entry.kind === kind;
-          return (
-            <Link
-              key={entry.kind}
-              href={chipHref(params, entry.kind)}
-              prefetch
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs capitalize transition-colors',
-                active
-                  ? 'border-border bg-accent font-medium text-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {entry.kind}
-              <span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-primary tabular-nums">
-                {entry.count}
-              </span>
-            </Link>
-          );
-        })}
-      </nav>
-
       <div className="mt-4">
         <EntitiesTable
           rows={rows.map((entity) => ({
@@ -172,8 +115,21 @@ export default async function EntitiesPage({
               : '—',
             linkCount: entity.linkCount,
           }))}
-          searchable
-          pageSize={TABLE_PAGE_SIZE}
+          toolbar={
+            <TableSearch value={q} placeholder="Search entities…" ariaLabel="Search entities" />
+          }
+          quickFilter={{
+            paramKey: 'kind',
+            active: kind ?? null,
+            options: counts.map((entry) => ({
+              value: entry.kind,
+              label: entry.kind.charAt(0).toUpperCase() + entry.kind.slice(1),
+            })),
+            counts: Object.fromEntries(counts.map((entry) => [entry.kind, entry.count])),
+            totalCount: corpusTotal,
+            allLabel: 'All',
+            label: 'Filter by kind',
+          }}
         />
         <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
