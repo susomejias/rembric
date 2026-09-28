@@ -31,7 +31,16 @@ Owner decisions (2026-09-28):
 
 ## Commits
 
-- (pending)
+- 97b92197 feat(db): corpus-wide q keyword filter (relations, entities, agent-sessions)
+- bb94a171 feat(web): one pager, corpus-wide search and server-owned filter pills
+- 71734a1a feat(web): prompts list to design parity (lifecycle pills, FTS, adminCountFts)
+- 2ba8ee18 fix(web): drop memories-written from session log (worker A)
+- 363a43f1 feat(web): volumetric seeder covers tokens and projects (seed worker)
+- c8192157 feat(web): projects and tokens onto the shared pills+search pattern
+- 65e5eac2 feat(web): memories nav badge counts the whole corpus (owner decision 2026-09-28)
+- 62e07724 test(web): projects header subtitle assertion removal
+
+Suite: web 1093 passed / 6 skipped, db 288 passed / 9 skipped, typecheck 7/7, lint clean.
 
 Parallel workers (file-disjoint): session-detail-memories-section, prompts-page-design-parity,
 db-lists-q-filter.
