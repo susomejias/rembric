@@ -12,6 +12,10 @@ import { vi } from 'vitest';
 
 export const servicesRef: { current: unknown } = { current: undefined };
 
+// Read at render time by the navigation mock: a hoisted vi.mock factory must not
+// close over installViewMocks' parameter, or a later real module import blows up.
+let currentPathname = '/dashboard';
+
 export function buildDashboardServices(handle: DbHandle): Record<string, unknown> {
   const repos = createRepositories(handle.db);
   return {
@@ -25,12 +29,13 @@ export function buildDashboardServices(handle: DbHandle): Record<string, unknown
 }
 
 export function installViewMocks(pathname = '/dashboard'): void {
+  currentPathname = pathname;
   vi.mock('next/link', () => ({
     default: ({ href, children, ...rest }: { href?: string; children?: unknown }) =>
       createElement('a', { href, ...rest }, children as never),
   }));
   vi.mock('next/navigation', () => ({
-    usePathname: () => pathname,
+    usePathname: () => currentPathname,
     useSearchParams: () => new URLSearchParams(),
     useRouter: () => ({
       refresh: vi.fn(),
@@ -47,8 +52,15 @@ export function installViewMocks(pathname = '/dashboard'): void {
       throw new Error(`NEXT_REDIRECT:${url}`);
     },
   }));
+  vi.mock('next/headers', () => ({
+    cookies: () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
+  }));
   vi.mock('@/lib/services', () => ({ getServices: () => servicesRef.current }));
-  vi.mock('@/lib/session', () => ({ dashboardCsrfToken: () => 'test-csrf-token' }));
+  vi.mock('@/lib/session', () => ({
+    dashboardCsrfToken: () => 'test-csrf-token',
+    // No dashboard session in tests: the shell falls back to its token label.
+    resolveDashboardSession: () => Promise.resolve(null),
+  }));
   vi.mock('@/lib/actions/guard', () => ({
     guardAction: () => ({ ok: false, error: 'not exercised' }),
     guardFailure: () => ({ error: null }),

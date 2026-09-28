@@ -1,5 +1,6 @@
 'use client';
 
+import { Facehash } from 'facehash';
 import { LogOut, Menu, MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -154,18 +155,36 @@ function UpdaterChip({
   );
 }
 
-function LogoutMenu({ version }: { version: string }) {
+const ACCOUNT_COLORS = [
+  'bg-zinc-200 dark:bg-zinc-800',
+  'bg-neutral-300 dark:bg-neutral-700',
+  'bg-zinc-300 dark:bg-zinc-700',
+  'bg-lime-200 dark:bg-lime-900',
+];
+
+function LogoutMenu({ account }: { account: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label="Account"
-        className="mr-1 flex size-7 items-center justify-center rounded-full bg-input text-xs font-semibold text-foreground"
+        aria-label={`Account — ${account}`}
+        title={account}
+        className="mr-1 flex size-7 items-center justify-center overflow-hidden rounded-full bg-input"
       >
-        S
+        {/* No initial: the identity is a token, not a person, so the mark is
+            generated from its name and stops being a letter. */}
+        <Facehash
+          name={account}
+          size={28}
+          showInitial={false}
+          enableBlink
+          intensity3d="subtle"
+          colorClasses={ACCOUNT_COLORS}
+          className="rounded-full"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="border-border bg-popover">
         <DropdownMenuLabel className="font-mono text-[10px] tracking-[.14em] text-muted-foreground">
-          v{version}
+          {account}
         </DropdownMenuLabel>
         <DropdownMenuSeparator className="bg-border" />
         <DropdownMenuItem asChild>
@@ -185,11 +204,13 @@ export function CommandFrame({
   children,
   totals = {},
   version,
+  account,
   updater,
 }: {
   children: ReactNode;
   totals?: Record<string, number>;
   version: string;
+  account: string;
   updater: UpdaterInput;
 }) {
   const pathname = usePathname();
@@ -197,7 +218,7 @@ export function CommandFrame({
   if (isChromeFreePath(pathname)) return <>{children}</>;
 
   return (
-    <CommandBar totals={totals} version={version} updater={updater}>
+    <CommandBar totals={totals} version={version} account={account} updater={updater}>
       <main className="mx-auto w-full max-w-6xl animate-in px-4 pt-28 pb-12 fade-in duration-300 motion-reduce:animate-none sm:px-6">
         {children}
       </main>
@@ -224,11 +245,13 @@ function CommandBar({
   children,
   totals,
   version,
+  account,
   updater,
 }: {
   children: ReactNode;
   totals: Record<string, number>;
   version: string;
+  account: string;
   updater: UpdaterInput;
 }) {
   const pathname = usePathname();
@@ -287,7 +310,7 @@ function CommandBar({
 
             <div className="ml-auto flex items-center gap-1.5">
               <UpdaterChip state={updaterState} version={version} />
-              <LogoutMenu version={version} />
+              <LogoutMenu account={account} />
               <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
                 <SheetTrigger
                   aria-label="Open navigation"

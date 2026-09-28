@@ -78,6 +78,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      facehash:
+        specifier: ^0.1.0
+        version: 0.1.0(@types/react@19.3.0)(next@16.3.5(@babel/core@7.29.7)(@types/node@22.19.19)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       lucide-react:
         specifier: ^1.47.0
         version: 1.47.0(react@19.3.0)
@@ -3630,6 +3633,19 @@ packages:
 
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
+
+  facehash@0.1.0:
+    resolution: {integrity: sha512-tv/QVZjLvEXHssqBaJECq+kRLFwwhd017PKk8ucT7aLingL2OZ5zEqKwPMHmT9+YQO92MVFWGZQP6vxV+P5vrQ==}
+    peerDependencies:
+      '@types/react': ''
+      next: '>=15'
+      react: '>=18 <20'
+      react-dom: '>=18 <20'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      next:
+        optional: true
 
   fast-check@3.23.2:
     resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
@@ -8468,6 +8484,14 @@ snapshots:
       - supports-color
 
   extend@3.0.2: {}
+
+  facehash@0.1.0(@types/react@19.3.0)(next@16.3.5(@babel/core@7.29.7)(@types/node@22.19.19)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+    dependencies:
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
+    optionalDependencies:
+      '@types/react': 19.3.0
+      next: 16.3.5(@babel/core@7.29.7)(@types/node@22.19.19)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
 
   fast-check@3.23.2:
     dependencies:

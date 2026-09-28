@@ -7,7 +7,7 @@ import { getUpdates } from './update/update-service';
 import { CommandFrame } from '@/components/dashboard/command-bar';
 import { UpdateModal } from '@/components/dashboard/update-modal';
 import { getServices } from '@/lib/services';
-import { dashboardCsrfToken } from '@/lib/session';
+import { dashboardCsrfToken, resolveDashboardSession } from '@/lib/session';
 import { REMBRIC_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
@@ -17,11 +17,13 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const info = updates.peek();
   const announceUpdate = info !== null && !isUpdateRunning(getSelfUpdate().status());
   const csrfToken = announceUpdate ? await dashboardCsrfToken(UPDATE_START_FORM) : null;
+  const session = await resolveDashboardSession();
 
   return (
     <CommandFrame
       totals={navTotals()}
       version={REMBRIC_VERSION}
+      account={accountName(session?.session.tokenId)}
       updater={{
         enabled: updates.enabled,
         latestVersion: info?.latestVersion ?? null,
@@ -34,6 +36,16 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       ) : null}
     </CommandFrame>
   );
+}
+
+/**
+ * There is no user account here — the dashboard is opened with a token, so the
+ * identity the avatar stands for is that token's name.
+ */
+function accountName(tokenId: string | undefined): string {
+  if (tokenId === undefined) return 'dashboard token';
+  const { repos } = getServices();
+  return repos.tokens.listAll().find((token) => token.id === tokenId)?.name ?? 'dashboard token';
 }
 
 function navTotals(): Record<string, number> {

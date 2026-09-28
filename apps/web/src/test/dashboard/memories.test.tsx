@@ -1,6 +1,6 @@
 import { deriveTitle, MemoryService, RelationsService } from '@rembric/core';
 import { createRepositories, memory, type NewMemory, type Repositories } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestDb, type TestDb } from '../db';
 import { defaultProjectScope, seedProject } from '../default-project';
@@ -14,6 +14,7 @@ import {
   servicesRef,
 } from './harness';
 
+import type { CommandFrame as CommandFrameComponent } from '@/components/dashboard/command-bar';
 import { PAGE_SIZE } from '@/components/dashboard/support';
 
 installViewMocks('/dashboard/memories');
@@ -431,5 +432,27 @@ describe('dashboard shell nav totals', () => {
     // judgments: 1 pending relation (the review/confirm signals moved to the
     // overview and the memories table itself)
     expect(html).toContain('data-total="judgments"');
+  });
+
+  it('renders the account trigger as a token identity instead of a letter', async () => {
+    // The harness stubs the command bar, so pull the real one in: this is about
+    // what the trigger actually renders.
+    const { CommandFrame } = await vi.importActual<{
+      CommandFrame: typeof CommandFrameComponent;
+    }>('@/components/dashboard/command-bar');
+
+    const html = await renderToHtml(
+      CommandFrame({
+        children: null,
+        version: '0.0.0',
+        account: 'pi-agent-token',
+        updater: { enabled: false, latestVersion: null, lastCheckedAt: null },
+      }),
+    );
+
+    // The trigger names the token the dashboard was opened with, and the old
+    // hard-coded initial is gone.
+    expect(html).toContain('aria-label="Account — pi-agent-token"');
+    expect(html).not.toContain('>S</button>');
   });
 });
