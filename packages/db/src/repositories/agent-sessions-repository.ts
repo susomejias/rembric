@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -50,6 +50,13 @@ export interface AdminSessionFilters {
   projectId?: string | null;
   agent?: string;
   status?: AgentSessionStatus;
+  /** Corpus-wide keyword over title/description/summary. */
+  q?: string;
+}
+
+/** `%q%` with `%` and `_` escaped for a `LIKE … ESCAPE '\'` predicate. */
+function likePattern(q: string): string {
+  return `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
 }
 
 const listSelection = {
@@ -281,6 +288,16 @@ export class AgentSessionsRepository {
     }
     if (opts.agent) conditions.push(eq(agentSessions.agent, opts.agent));
     if (opts.status) conditions.push(eq(agentSessions.status, opts.status));
+    if (opts.q) {
+      const pattern = likePattern(opts.q);
+      conditions.push(
+        or(
+          sql`${agentSessions.title} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${agentSessions.description} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${agentSessions.summary} LIKE ${pattern} ESCAPE '\\'`,
+        ) as SQL,
+      );
+    }
     return conditions;
   }
 

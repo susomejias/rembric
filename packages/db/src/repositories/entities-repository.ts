@@ -1,4 +1,4 @@
-import { and, eq, getTableColumns, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import type { Db } from '../client.js';
@@ -42,6 +42,11 @@ function entityScopeCondition(scope: SearchScope) {
 
 /** Entities per get-or-create lookup; SQLITE_MAX_EXPR_DEPTH is 1000. */
 const LOOKUP_CHUNK = 200;
+
+/** `%q%` with `%` and `_` escaped for a `LIKE … ESCAPE '\'` predicate. */
+function likePattern(q: string): string {
+  return `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+}
 
 export class EntitiesRepository {
   constructor(private readonly db: Db) {}
@@ -280,7 +285,7 @@ export class EntitiesRepository {
   }
 
   adminListEntities(
-    filters: { kind?: EntityKind; singleReferenceOnly?: boolean },
+    filters: { kind?: EntityKind; singleReferenceOnly?: boolean; q?: string },
     limit: number,
     offset: number,
   ): {
@@ -291,6 +296,9 @@ export class EntitiesRepository {
     linkCount: number;
   }[] {
     const conditions = filters.kind ? [eq(memoryEntities.kind, filters.kind)] : [];
+    if (filters.q) {
+      conditions.push(sql`${memoryEntities.value} LIKE ${likePattern(filters.q)} ESCAPE '\\'`);
+    }
     return this.db
       .select({
         id: memoryEntities.id,
@@ -312,14 +320,23 @@ export class EntitiesRepository {
       .all();
   }
 
-  adminCountEntities(filters: { kind?: EntityKind; singleReferenceOnly?: boolean }): number {
-    const kindFilter = filters.kind ? eq(memoryEntities.kind, filters.kind) : undefined;
+  adminCountEntities(filters: {
+    kind?: EntityKind;
+    singleReferenceOnly?: boolean;
+    q?: string;
+  }): number {
+    const conditions: SQL[] = [];
+    if (filters.kind) conditions.push(eq(memoryEntities.kind, filters.kind));
+    if (filters.q) {
+      conditions.push(sql`${memoryEntities.value} LIKE ${likePattern(filters.q)} ESCAPE '\\'`);
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
     // No HAVING: the join and GROUP BY cannot change the count.
     if (!filters.singleReferenceOnly) {
       const row = this.db
         .select({ n: sql<number>`count(*)` })
         .from(memoryEntities)
-        .where(kindFilter)
+        .where(where)
         .get();
       return row?.n ?? 0;
     }
@@ -328,7 +345,7 @@ export class EntitiesRepository {
       .select({ id: memoryEntities.id })
       .from(memoryEntities)
       .leftJoin(memoryEntityLinks, eq(memoryEntityLinks.entityId, memoryEntities.id))
-      .where(kindFilter)
+      .where(where)
       .groupBy(memoryEntities.id)
       .having(sql`count(${memoryEntityLinks.memoryId}) = 1`)
       .as('grouped');

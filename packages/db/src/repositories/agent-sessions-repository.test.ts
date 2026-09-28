@@ -139,6 +139,101 @@ describe('AgentSessionsRepository admin filters', () => {
       expect(repo.adminCount({ deleted: true })).toBe(1);
     });
   });
+
+  describe('q filter', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(agentSessions)
+        .values([
+          row({
+            id: 'Q1',
+            title: 'Deploy pipeline fixes',
+            status: 'ended',
+            startedAt: new Date(10_000),
+          }),
+          row({
+            id: 'Q2',
+            description: 'Investigate flaky tests',
+            status: 'ended',
+            startedAt: new Date(11_000),
+          }),
+          row({
+            id: 'Q3',
+            summary: 'Summarized deployment notes',
+            status: 'ended',
+            startedAt: new Date(12_000),
+          }),
+          row({
+            id: 'Q4',
+            title: 'Unrelated work',
+            status: 'ended',
+            startedAt: new Date(13_000),
+          }),
+        ])
+        .run();
+    });
+
+    it('control: without q the list and count are unchanged', () => {
+      expect(repo.adminCount({ deleted: false })).toBe(7);
+      expect(
+        repo.adminList({ deleted: false, activeFirst: false, limit: 100, offset: 0 }),
+      ).toHaveLength(7);
+    });
+
+    it('q matches title/description/summary, case-insensitively, and count matches the list', () => {
+      const rows = repo.adminList({
+        deleted: false,
+        q: 'DEPLOY',
+        activeFirst: false,
+        limit: 100,
+        offset: 0,
+      });
+      expect(rows.map((r) => r.id).sort()).toEqual(['Q1', 'Q3']);
+      expect(repo.adminCount({ deleted: false, q: 'DEPLOY' })).toBe(rows.length);
+
+      const described = repo.adminList({
+        deleted: false,
+        q: 'flaky',
+        activeFirst: false,
+        limit: 100,
+        offset: 0,
+      });
+      expect(described.map((r) => r.id)).toEqual(['Q2']);
+      expect(repo.adminCount({ deleted: false, q: 'flaky' })).toBe(described.length);
+    });
+
+    it('q excludes non-matching rows and count is zero', () => {
+      expect(
+        repo.adminList({
+          deleted: false,
+          q: 'no-such-keyword',
+          activeFirst: false,
+          limit: 100,
+          offset: 0,
+        }),
+      ).toEqual([]);
+      expect(repo.adminCount({ deleted: false, q: 'no-such-keyword' })).toBe(0);
+    });
+
+    it('q combines with the existing filters in both list and count', () => {
+      const rows = repo.adminList({
+        deleted: false,
+        q: 'Deploy',
+        agent: 'opencode',
+        activeFirst: false,
+        limit: 100,
+        offset: 0,
+      });
+      expect(rows).toEqual([]);
+      expect(repo.adminCount({ deleted: false, q: 'Deploy', agent: 'opencode' })).toBe(0);
+      expect(repo.adminCount({ deleted: false, q: 'Deploy', agent: 'claude-code' })).toBe(2);
+    });
+
+    it('escapes LIKE wildcards in q', () => {
+      expect(repo.adminCount({ deleted: false, q: '%' })).toBe(0);
+      expect(repo.adminCount({ deleted: false, q: '_' })).toBe(0);
+    });
+  });
 });
 
 describe('findSoleActiveForReuse (session_start reuse lookup — no staleness window)', () => {

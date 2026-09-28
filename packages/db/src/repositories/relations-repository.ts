@@ -10,6 +10,7 @@ import {
   lt,
   ne,
   or,
+  sql,
   type SQL,
 } from 'drizzle-orm';
 
@@ -38,6 +39,13 @@ export interface AdminRelationFilters {
   status?: RelationStatus;
   /** `'pending'` selects rows whose `relation` is still NULL. */
   kind?: RelationKind | 'pending';
+  /** Corpus-wide keyword over both endpoints' title and content. */
+  q?: string;
+}
+
+/** `%q%` with `%` and `_` escaped for a `LIKE … ESCAPE '\'` predicate. */
+function likePattern(q: string): string {
+  return `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
 }
 
 export type AdminRelationWithContent = Pick<
@@ -273,6 +281,17 @@ export class RelationsRepository {
     } else if (filters.kind) {
       conditions.push(eq(memoryRelations.relation, filters.kind));
     }
+    if (filters.q) {
+      const pattern = likePattern(filters.q);
+      conditions.push(
+        or(
+          sql`${sourceMemory.title} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${sourceMemory.content} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${targetMemory.title} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${targetMemory.content} LIKE ${pattern} ESCAPE '\\'`,
+        ) as SQL,
+      );
+    }
     return conditions;
   }
 
@@ -296,6 +315,16 @@ export class RelationsRepository {
 
   adminCountWithFilters(filters: AdminRelationFilters): number {
     const conditions = this.adminFilterConditions(filters);
+    if (filters.q) {
+      const row = this.db
+        .select({ value: count() })
+        .from(memoryRelations)
+        .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+        .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+        .where(and(...conditions))
+        .get();
+      return row?.value ?? 0;
+    }
     // No joins: both endpoints are NOT NULL FKs onto a PK, so neither can change a count.
     const query = this.db.select({ value: count() }).from(memoryRelations).$dynamic();
     const row = conditions.length > 0 ? query.where(and(...conditions)).get() : query.get();

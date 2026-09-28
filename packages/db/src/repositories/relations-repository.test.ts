@@ -145,6 +145,77 @@ describe('RelationsRepository', () => {
     it('respects limit and offset', () => {
       expect(repo.adminListWithContent({}, 2, 1).map((r) => r.id)).toEqual(['R3', 'R2']);
     });
+
+    describe('q filter', () => {
+      beforeEach(() => {
+        t.handle.db
+          .insert(memory)
+          .values([
+            mem('M3', 'alpha needle in source'),
+            mem('M4', 'clean target'),
+            mem('M5', 'gamma source'),
+            mem('M6', 'delta NEEDLE in target'),
+          ])
+          .run();
+        t.handle.db
+          .insert(memoryRelations)
+          .values([
+            rel({
+              id: 'R5',
+              judgmentId: 'J5',
+              sourceId: 'M3',
+              targetId: 'M4',
+              createdAt: new Date(5_000),
+            }),
+            rel({
+              id: 'R6',
+              judgmentId: 'J6',
+              sourceId: 'M5',
+              targetId: 'M6',
+              createdAt: new Date(6_000),
+            }),
+          ])
+          .run();
+      });
+
+      it('control: without q the list and count are unchanged', () => {
+        expect(repo.adminListWithContent({}, 10, 0).map((r) => r.id)).toEqual([
+          'R6',
+          'R5',
+          'R4',
+          'R3',
+          'R2',
+          'R1',
+        ]);
+        expect(repo.adminCountWithFilters({})).toBe(6);
+      });
+
+      it('q matches either endpoint and is case-insensitive', () => {
+        const rows = repo.adminListWithContent({ q: 'needle' }, 10, 0);
+        expect(rows.map((r) => r.id).sort()).toEqual(['R5', 'R6']);
+        expect(repo.adminCountWithFilters({ q: 'needle' })).toBe(rows.length);
+
+        const upper = repo.adminListWithContent({ q: 'NEEDLE' }, 10, 0);
+        expect(upper.map((r) => r.id).sort()).toEqual(['R5', 'R6']);
+        expect(repo.adminCountWithFilters({ q: 'NEEDLE' })).toBe(upper.length);
+      });
+
+      it('q excludes non-matching rows and count agrees', () => {
+        expect(repo.adminListWithContent({ q: 'no-such-keyword' }, 10, 0)).toEqual([]);
+        expect(repo.adminCountWithFilters({ q: 'no-such-keyword' })).toBe(0);
+      });
+
+      it('q combines with status in both list and count', () => {
+        const rows = repo.adminListWithContent({ q: 'needle', status: 'pending' }, 10, 0);
+        expect(rows.map((r) => r.id).sort()).toEqual(['R5', 'R6']);
+        expect(repo.adminCountWithFilters({ q: 'needle', status: 'pending' })).toBe(rows.length);
+      });
+
+      it('escapes LIKE wildcards in q', () => {
+        expect(repo.adminCountWithFilters({ q: '%' })).toBe(0);
+        expect(repo.adminCountWithFilters({ q: '_' })).toBe(0);
+      });
+    });
   });
 
   describe('adminGetWithContent', () => {

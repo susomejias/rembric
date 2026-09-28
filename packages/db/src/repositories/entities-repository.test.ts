@@ -399,6 +399,52 @@ describe('EntitiesRepository', () => {
     });
   });
 
+  describe('adminListEntities / adminCountEntities q filter', () => {
+    beforeEach(() => {
+      insertMemory('m1');
+      insertMemory('m2');
+      insertMemory('m3');
+      repo.linkMemory('m1', 'p0', [{ kind: 'path', value: 'apps/alpha.ts' }], new Date());
+      repo.linkMemory('m2', 'p0', [{ kind: 'path', value: 'apps/beta.ts' }], new Date());
+      repo.linkMemory('m3', 'p0', [{ kind: 'path', value: 'lib/gamma.ts' }], new Date());
+    });
+
+    it('control: without q every entity is listed once and counted', () => {
+      const rows = repo.adminListEntities({}, 10, 0);
+      expect(rows.map((r) => r.value).sort()).toEqual([
+        'apps/alpha.ts',
+        'apps/beta.ts',
+        'lib/gamma.ts',
+      ]);
+      expect(repo.adminCountEntities({})).toBe(3);
+    });
+
+    it('q filters by value, case-insensitively, and count matches the list', () => {
+      const rows = repo.adminListEntities({ q: 'ALPHA' }, 10, 0);
+      expect(rows.map((r) => r.value)).toEqual(['apps/alpha.ts']);
+      expect(repo.adminCountEntities({ q: 'ALPHA' })).toBe(rows.length);
+    });
+
+    it('q excludes non-matching rows and count is zero', () => {
+      expect(repo.adminListEntities({ q: 'no-such-value' }, 10, 0)).toEqual([]);
+      expect(repo.adminCountEntities({ q: 'no-such-value' })).toBe(0);
+    });
+
+    it('q applies on the singleReferenceOnly path in both list and count', () => {
+      const rows = repo.adminListEntities({ q: 'apps', singleReferenceOnly: true }, 10, 0);
+      expect(rows.map((r) => r.value).sort()).toEqual(['apps/alpha.ts', 'apps/beta.ts']);
+      expect(repo.adminCountEntities({ q: 'apps', singleReferenceOnly: true })).toBe(rows.length);
+      expect(repo.adminCountEntities({ q: 'alpha', singleReferenceOnly: true })).toBe(1);
+      expect(repo.adminCountEntities({ q: 'no-such-value', singleReferenceOnly: true })).toBe(0);
+    });
+
+    it('escapes LIKE wildcards in q', () => {
+      expect(repo.adminCountEntities({ q: '%' })).toBe(0);
+      expect(repo.adminCountEntities({ q: '_' })).toBe(0);
+      expect(repo.adminCountEntities({ q: '%.ts' })).toBe(0);
+    });
+  });
+
   describe('truncateAll', () => {
     it('wipes all derived rows and leaves memory untouched', () => {
       insertMemory('m1');
