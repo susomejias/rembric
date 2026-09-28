@@ -130,6 +130,10 @@ describe('memories list (client data-table)', () => {
     const archived = await renderMemories({ status: 'archived' });
     expect(archived).toContain('Select project memory — beta memory"');
     expect(archived).toContain('>archived<');
+
+    const all = await renderMemories({ status: 'all' });
+    expect(all).toContain('Select project memory — alpha memory"');
+    expect(all).toContain('Select project memory — beta memory"');
   });
 
   it('links the memory title to its detail page with the judgments title styling', async () => {

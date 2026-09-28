@@ -127,7 +127,7 @@ export default async function MemoriesPage({
   };
 
   const wantsNeedsReview = filters.review === 'needs_review';
-  const status = filters.status as MemoryStatus;
+  const status = filters.status === 'all' ? undefined : (filters.status as MemoryStatus);
   const type = filters.type === '' ? undefined : (filters.type as MemoryType);
   const ftsQuery = sanitizeFtsQuery(filters.q);
 
@@ -280,7 +280,7 @@ export default async function MemoriesPage({
           }
           quickFilter={{
             paramKey: 'status',
-            active: filters.status,
+            active: filters.status === 'all' ? null : filters.status,
             options: MEMORY_STATUSES.map((value) => ({
               value,
               label: value.charAt(0).toUpperCase() + value.slice(1),
@@ -294,7 +294,7 @@ export default async function MemoriesPage({
             ),
             allLabel: 'All',
             label: 'Filter by status',
-            defaultValue: 'active',
+            defaultValue: 'all',
           }}
         />
         <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />

@@ -59,7 +59,7 @@ export interface SearchBm25IdsOpts {
 }
 
 export interface AdminListMemoriesOpts {
-  status: MemoryStatus;
+  status?: MemoryStatus;
   type?: MemoryType;
   projectId?: string;
   limit: number;
@@ -785,7 +785,8 @@ export class MemoryRepository {
     query: string,
     opts: Pick<AdminListMemoriesOpts, 'status' | 'type' | 'projectId'>,
   ): SQL[] {
-    const conds: SQL[] = [sql`memory_fts MATCH ${query}`, sql`m.status = ${opts.status}`];
+    const conds: SQL[] = [sql`memory_fts MATCH ${query}`];
+    if (opts.status) conds.push(sql`m.status = ${opts.status}`);
     if (opts.type) conds.push(sql`m.type = ${opts.type}`);
     if (opts.projectId) conds.push(scopeWhere(projectScope(opts.projectId), 'm'));
     return conds;
@@ -809,7 +810,8 @@ export class MemoryRepository {
   }
 
   adminList(opts: AdminListMemoriesOpts): Memory[] {
-    const conditions: SQL[] = [eq(memory.status, opts.status)];
+    const conditions: SQL[] = [];
+    if (opts.status) conditions.push(eq(memory.status, opts.status));
     if (opts.type) conditions.push(eq(memory.type, opts.type));
     if (opts.projectId) conditions.push(scopeCondition(projectScope(opts.projectId)));
     return this.db
@@ -823,7 +825,8 @@ export class MemoryRepository {
   }
 
   adminCount(opts: Omit<AdminListMemoriesOpts, 'limit' | 'offset'>): number {
-    const conditions: SQL[] = [eq(memory.status, opts.status)];
+    const conditions: SQL[] = [];
+    if (opts.status) conditions.push(eq(memory.status, opts.status));
     if (opts.type) conditions.push(eq(memory.type, opts.type));
     if (opts.projectId) conditions.push(scopeCondition(projectScope(opts.projectId)));
     const row = this.db
