@@ -5,6 +5,8 @@ import { createTestDb, type TestDb } from '../db';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
 
+import { PAGE_SIZE } from '@/components/dashboard/support';
+
 installViewMocks('/dashboard/prompts');
 
 const CLIENT_PAGE_SIZE = 10;
@@ -78,7 +80,7 @@ async function renderPrompts(params: Record<string, string> = {}): Promise<strin
 describe('prompts list (client data-table)', () => {
   it('loads one server page (50 rows) with the true non-deleted total', async () => {
     const html = await renderPrompts();
-    expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->2');
+    expect(html).toContain(`1–${PAGE_SIZE} of ${GLOBAL_COUNT + PROJECT_COUNT}`);
     expect(html).not.toContain(`1–${CLIENT_PAGE_SIZE} of 50`);
   });
 

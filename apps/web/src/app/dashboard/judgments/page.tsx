@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation';
 import type { ActionState } from '@/components/dashboard/action-form';
 import { JudgmentsTable } from '@/components/dashboard/judgments-table';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { ServerPager } from '@/components/dashboard/pager';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
 import { Page } from '@/components/dashboard/ui';
@@ -129,6 +128,7 @@ export default async function JudgmentsPage({
           actions={{ orphan: orphanJudgment, bulkOrphan: bulkOrphanJudgments }}
           csrf={csrf}
           selectable
+          pagination={{ page, pageCount: pages, totalRows: total, pageSize: PAGE_SIZE }}
           toolbar={
             <TableSearch value={q} placeholder="Search judgments…" ariaLabel="Search judgments" />
           }
@@ -146,7 +146,6 @@ export default async function JudgmentsPage({
             label: 'Filter by status',
           }}
         />
-        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
     </Page>
   );

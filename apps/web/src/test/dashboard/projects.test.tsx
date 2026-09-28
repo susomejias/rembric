@@ -123,7 +123,7 @@ describe('the projects table follows the sessions pattern', () => {
 
     const html = await renderProjects();
 
-    expect(html).toContain('1–10 of 12');
+    expect(html).toContain('1–12 of 12');
     expect(html).toContain('Search projects…');
   });
 

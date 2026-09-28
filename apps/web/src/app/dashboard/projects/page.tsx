@@ -215,7 +215,7 @@ export default async function ProjectsPage({
           allLabel: 'All',
           label: 'Filter by state',
         }}
-        pageSize={10}
+        pageSize={20}
       />
     </Page>
   );

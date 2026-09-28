@@ -7,7 +7,7 @@ import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } f
 
 installViewMocks('/dashboard/consolidation');
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 const SEEDED = PAGE_SIZE + 2;
 
 const MALFORMED_SUMMARY = '{not json <b>raw</b>';

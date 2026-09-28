@@ -10,6 +10,10 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import {
+  useServerPagination,
+  type TablePaginationSpec,
+} from '@/components/dashboard/server-pagination';
 import { ReviewPill, StatusPill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -58,6 +62,7 @@ export function MemoriesTable({
   selectable = false,
   toolbar,
   quickFilter,
+  pagination,
 }: {
   rows: readonly MemoryRowData[];
   actions: MemoryServerActions;
@@ -66,8 +71,10 @@ export function MemoriesTable({
   selectable?: boolean;
   toolbar?: React.ReactNode;
   quickFilter?: TableQuickFilterSpec;
+  pagination?: TablePaginationSpec;
 }) {
   const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
+  const paginationControl = useServerPagination(pagination ?? null);
   const columns: DataTableColumn<MemoryRowData>[] = [
     {
       id: 'memory',
@@ -197,6 +204,7 @@ export function MemoriesTable({
       rowActions={(row) => <MemoryRowMenu row={row} actions={actions} csrf={csrf} />}
       toolbar={toolbar}
       quickFilterControl={quickFilterControl ?? undefined}
+      pagination={paginationControl}
     />
   );
 }

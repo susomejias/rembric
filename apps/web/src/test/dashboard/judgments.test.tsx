@@ -7,11 +7,11 @@ import { seedProject } from '../default-project';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
 
+import { PAGE_SIZE } from '@/components/dashboard/support';
 import type { Services } from '@/lib/services';
 
 installViewMocks('/dashboard/judgments');
 
-const PAGE_SIZE = 50;
 const SEEDED = PAGE_SIZE + 2;
 
 const MALFORMED_EVIDENCE = '{not json <b>raw</b>';
@@ -154,8 +154,7 @@ describe('judgments list verdict pill and routing', () => {
       .run();
 
     const html = await renderJudgments();
-    expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->2');
-    expect(html).not.toContain('1–10 of 50');
+    expect(html).toContain(`1–${PAGE_SIZE} of ${SEEDED + 1}`);
     expect(html).not.toContain(`${SEEDED} ROWS`);
   });
 });

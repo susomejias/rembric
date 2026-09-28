@@ -6,7 +6,6 @@ import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { ServerPager } from '@/components/dashboard/pager';
 import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
 import { SessionsTable } from '@/components/dashboard/sessions-table';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
@@ -238,6 +237,7 @@ export default async function SessionsPage({
         bulkAbandon={bulkAbandonSession}
         bulkRemove={bulkDeleteSession}
         selectable
+        pagination={{ page, pageCount: pages, totalRows: total, pageSize: PAGE_SIZE }}
         toolbar={
           <TableSearch value={q} placeholder="Search sessions…" ariaLabel="Search sessions" />
         }
@@ -259,8 +259,6 @@ export default async function SessionsPage({
           label: 'Filter by status',
         }}
       />
-
-      <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
     </div>
   );
 }

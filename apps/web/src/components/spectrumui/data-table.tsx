@@ -157,6 +157,22 @@ export interface DataTableColumn<T> {
   headerClassName?: string;
 }
 
+/**
+ * Server-owned pagination. The table renders the footer and its arrows, but the
+ * page, the page count and the total come from the server (usually URL params),
+ * so the footer stays truthful when the client only holds one page of rows.
+ */
+export interface DataTablePagination {
+  /** 1-based page the server rendered. */
+  page: number;
+  pageCount: number;
+  /** Rows per page the server sliced with. */
+  pageSize: number;
+  /** Rows across every page — the footer range and the live-region count. */
+  totalRows: number;
+  onPageChange: (page: number) => void;
+}
+
 export interface DataTableQuickFilterOption {
   value: string;
   label?: React.ReactNode;
@@ -246,6 +262,11 @@ export interface DataTableProps<T> {
 
   /** Rows per page. Omit to render every row. */
   pageSize?: number;
+  /**
+   * Server-owned paging. When set, the table renders the footer from these
+   * numbers and never slices `data` itself (the server already did).
+   */
+  pagination?: DataTablePagination;
 
   loading?: boolean;
   skeletonRows?: number;
@@ -726,6 +747,7 @@ export function DataTable<T>({
   rowActions,
   onDelete,
   pageSize,
+  pagination,
   loading = false,
   skeletonRows = 5,
   emptyState,
@@ -813,13 +835,30 @@ export function DataTable<T>({
     });
   }, [filtered, sort, columns]);
 
-  const pageCount = pageSize ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
+  const serverPaged = pagination !== undefined;
+  // The server owns the slice size too, so the footer can render without the
+  // caller passing `pageSize` a second time.
+  const effectivePageSize = serverPaged ? pagination.pageSize : pageSize;
+  const totalCount = serverPaged ? pagination.totalRows : sorted.length;
+  const pageCount = serverPaged
+    ? Math.max(1, pagination.pageCount)
+    : effectivePageSize
+      ? Math.max(1, Math.ceil(sorted.length / effectivePageSize))
+      : 1;
   // Clamped on the way out as well as in an effect, so a shrinking result set
   // never renders a blank page for one frame.
-  const safePage = Math.min(page, pageCount - 1);
+  const safePage = serverPaged
+    ? Math.min(Math.max(1, pagination.page), pageCount) - 1
+    : Math.min(page, pageCount - 1);
   const visible = React.useMemo(
-    () => (pageSize ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize) : sorted),
-    [sorted, pageSize, safePage],
+    () =>
+      serverPaged || !effectivePageSize
+        ? sorted
+        : sorted.slice(
+            safePage * effectivePageSize,
+            safePage * effectivePageSize + effectivePageSize,
+          ),
+    [sorted, effectivePageSize, safePage, serverPaged],
   );
 
   // A filtered result set is a different list, so page 3 of it means nothing.
@@ -1149,8 +1188,10 @@ export function DataTable<T>({
   };
 
   const showEmpty = !loading && visible.length === 0;
-  const rangeStart = sorted.length === 0 ? 0 : safePage * (pageSize ?? sorted.length) + 1;
-  const rangeEnd = pageSize ? Math.min(sorted.length, (safePage + 1) * pageSize) : sorted.length;
+  const rangeStart = totalCount === 0 ? 0 : safePage * (effectivePageSize ?? totalCount) + 1;
+  const rangeEnd = effectivePageSize
+    ? Math.min(totalCount, (safePage + 1) * effectivePageSize)
+    : totalCount;
 
   return (
     <div className={cn('w-full', className)}>
@@ -1909,7 +1950,7 @@ export function DataTable<T>({
           )}
         </div>
 
-        {pageSize && !loading && sorted.length > 0 && (
+        {effectivePageSize && !loading && totalCount > 0 && (
           <nav
             aria-label="Pagination"
             className={cn(
@@ -1920,14 +1961,16 @@ export function DataTable<T>({
           >
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
               <FlipDigits
-                value={`${rangeStart}–${rangeEnd} of ${sorted.length}`}
+                value={`${rangeStart}–${rangeEnd} of ${totalCount}`}
                 instant={!motionOn}
               />
             </p>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => setPage(safePage - 1)}
+                onClick={() =>
+                  serverPaged ? pagination.onPageChange(safePage) : setPage(safePage - 1)
+                }
                 disabled={safePage === 0}
                 aria-label="Previous page"
                 className={cn(
@@ -1940,7 +1983,9 @@ export function DataTable<T>({
               </button>
               <button
                 type="button"
-                onClick={() => setPage(safePage + 1)}
+                onClick={() =>
+                  serverPaged ? pagination.onPageChange(safePage + 2) : setPage(safePage + 1)
+                }
                 disabled={safePage >= pageCount - 1}
                 aria-label="Next page"
                 className={cn(
@@ -1960,7 +2005,7 @@ export function DataTable<T>({
       <div role="status" aria-live="polite" className="sr-only">
         {loading
           ? 'Loading rows'
-          : `${sorted.length} ${sorted.length === 1 ? 'row' : 'rows'}${
+          : `${totalCount} ${totalCount === 1 ? 'row' : 'rows'}${
               selected.length > 0 ? `, ${selected.length} selected` : ''
             }`}
       </div>

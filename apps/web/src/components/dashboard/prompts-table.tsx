@@ -9,6 +9,10 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import {
+  useServerPagination,
+  type TablePaginationSpec,
+} from '@/components/dashboard/server-pagination';
 import { shortId } from '@/components/dashboard/support';
 import { Pill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
@@ -57,6 +61,7 @@ export function PromptsTable({
   selectable = false,
   toolbar,
   quickFilter,
+  pagination,
 }: {
   rows: readonly PromptRowData[];
   actions: PromptServerActions;
@@ -64,8 +69,10 @@ export function PromptsTable({
   selectable?: boolean;
   toolbar?: React.ReactNode;
   quickFilter?: TableQuickFilterSpec;
+  pagination?: TablePaginationSpec;
 }) {
   const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
+  const paginationControl = useServerPagination(pagination ?? null);
   const columns: DataTableColumn<PromptRowData>[] = [
     {
       id: 'prompt',
@@ -158,6 +165,7 @@ export function PromptsTable({
       rowActions={(row) => <PromptRowMenu row={row} actions={actions} csrf={csrf} />}
       toolbar={toolbar}
       quickFilterControl={quickFilterControl ?? undefined}
+      pagination={paginationControl}
     />
   );
 }

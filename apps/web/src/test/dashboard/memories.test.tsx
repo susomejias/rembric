@@ -14,12 +14,13 @@ import {
   servicesRef,
 } from './harness';
 
+import { PAGE_SIZE } from '@/components/dashboard/support';
+
 installViewMocks('/dashboard/memories');
 
 // The page loads one server page (PAGE_SIZE) while the header reports the true
 // filtered total, so the fixture overflows the window on purpose.
-const PAGE_SIZE = 50;
-const OVERFLOW = PAGE_SIZE * 10 + 2;
+const OVERFLOW = 502;
 const SEEDED = 52;
 
 function widget(id: string, overrides: Partial<NewMemory> = {}): NewMemory {
@@ -90,7 +91,7 @@ describe('memories list header and bounded window', () => {
     const html = await renderMemories();
     expect(html).toContain('Search memories…');
     expect(html).not.toContain('1–10 of 50');
-    expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->11');
+    expect(html).toContain(`1–${PAGE_SIZE} of ${OVERFLOW}`);
     expect(html).toContain('Pagination');
   });
 

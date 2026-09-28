@@ -6,7 +6,6 @@ import { redirect } from 'next/navigation';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { ServerPager } from '@/components/dashboard/pager';
 import { PromptsTable } from '@/components/dashboard/prompts-table';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
@@ -162,6 +161,7 @@ export default async function PromptsPage({
           actions={{ remove: deletePrompt, restore: undeletePrompt, bulkRemove: bulkDeletePrompt }}
           csrf={csrf}
           selectable
+          pagination={{ page, pageCount: pages, totalRows: total, pageSize: PAGE_SIZE }}
           toolbar={
             <TableSearch value={q} placeholder="Search prompts…" ariaLabel="Search prompts" />
           }
@@ -175,7 +175,6 @@ export default async function PromptsPage({
             label: 'Filter by lifecycle',
           }}
         />
-        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
     </Page>
   );

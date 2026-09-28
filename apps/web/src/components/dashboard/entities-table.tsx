@@ -6,6 +6,10 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import {
+  useServerPagination,
+  type TablePaginationSpec,
+} from '@/components/dashboard/server-pagination';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { cn } from '@/lib/utils';
 
@@ -35,12 +39,15 @@ export function EntitiesTable({
   rows,
   toolbar,
   quickFilter,
+  pagination,
 }: {
   rows: readonly EntityRowData[];
   toolbar?: React.ReactNode;
   quickFilter?: TableQuickFilterSpec;
+  pagination?: TablePaginationSpec;
 }) {
   const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
+  const paginationControl = useServerPagination(pagination ?? null);
   const columns: DataTableColumn<EntityRowData>[] = [
     {
       id: 'entity',
@@ -108,6 +115,7 @@ export function EntitiesTable({
       )}
       toolbar={toolbar}
       quickFilterControl={quickFilterControl ?? undefined}
+      pagination={paginationControl}
     />
   );
 }

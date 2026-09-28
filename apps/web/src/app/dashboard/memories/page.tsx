@@ -21,7 +21,6 @@ import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './
 import type { ActionState } from '@/components/dashboard/action-form';
 import { MemoriesTable } from '@/components/dashboard/memories-table';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { ServerPager } from '@/components/dashboard/pager';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
 import { Flash, Page } from '@/components/dashboard/ui';
@@ -271,6 +270,7 @@ export default async function MemoriesPage({
           csrf={csrf}
           bulkArchive={bulkArchiveMemory}
           selectable
+          pagination={{ page, pageCount: pages, totalRows: total, pageSize: PAGE_SIZE }}
           toolbar={
             <TableSearch
               value={filters.q.trim()}
@@ -297,7 +297,6 @@ export default async function MemoriesPage({
             defaultValue: 'all',
           }}
         />
-        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
     </Page>
   );

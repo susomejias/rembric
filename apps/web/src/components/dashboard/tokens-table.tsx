@@ -50,7 +50,7 @@ export function TokensTable({
   selectable = false,
   toolbar,
   quickFilter,
-  pageSize = 10,
+  pageSize = 20,
 }: {
   rows: readonly TokenRowData[];
   actions: TokenServerActions;

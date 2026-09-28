@@ -83,7 +83,7 @@ describe('sessions list (client data-table)', () => {
     expect(html).toContain('Select claude-code session — S4"');
     expect(html).toContain('Filter by status');
     expect(html).toContain('Search sessions…');
-    expect(html).not.toContain('1–4 of 4');
+    expect(html).toContain('1–4 of 4');
   });
 
   it('no longer renders the totals subtitle under the h1', async () => {

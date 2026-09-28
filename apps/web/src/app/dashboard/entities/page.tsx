@@ -9,7 +9,6 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { EntitiesTable } from '@/components/dashboard/entities-table';
 import { PageHelp } from '@/components/dashboard/page-help';
-import { ServerPager } from '@/components/dashboard/pager';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
 import { Flash, Page } from '@/components/dashboard/ui';
@@ -115,6 +114,7 @@ export default async function EntitiesPage({
               : '—',
             linkCount: entity.linkCount,
           }))}
+          pagination={{ page, pageCount: pages, totalRows: total, pageSize: PAGE_SIZE }}
           toolbar={
             <TableSearch value={q} placeholder="Search entities…" ariaLabel="Search entities" />
           }
@@ -131,7 +131,6 @@ export default async function EntitiesPage({
             label: 'Filter by kind',
           }}
         />
-        <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
       </div>
     </Page>
   );
