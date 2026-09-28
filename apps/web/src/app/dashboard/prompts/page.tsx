@@ -1,4 +1,4 @@
-import { DomainError } from '@rembric/core';
+import { DomainError, sanitizeFtsQuery } from '@rembric/core';
 import type { Prompt } from '@rembric/db';
 import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
@@ -9,7 +9,8 @@ import { PageHelp } from '@/components/dashboard/page-help';
 import { ServerPager } from '@/components/dashboard/pager';
 import { PromptsTable } from '@/components/dashboard/prompts-table';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
-import { Flash, Page, StatCard, StatGrid } from '@/components/dashboard/ui';
+import { TableSearch } from '@/components/dashboard/table-search';
+import { Flash, Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -85,6 +86,8 @@ export default async function PromptsPage({
   const justDeleted = singleParam(params['deleted']);
   const justUndeleted = singleParam(params['undeleted']);
   const includeDeleted = singleParam(params['include_deleted']) === '1';
+  const q = singleParam(params['q']).trim();
+  const ftsQuery = sanitizeFtsQuery(q);
 
   const { repos } = getServices();
   const csrf = {
@@ -98,14 +101,15 @@ export default async function PromptsPage({
 
   const activeCount = repos.prompts.adminCount({ includeDeleted: false });
   const deletedCount = repos.prompts.adminCount({ includeDeleted: true }) - activeCount;
-  const total = repos.prompts.adminCount({ includeDeleted });
+  const total = ftsQuery
+    ? repos.prompts.adminCountFts(ftsQuery)
+    : repos.prompts.adminCount({ includeDeleted });
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(Math.max(1, Number.parseInt(singleParam(params['page']), 10) || 1), pages);
-  const rows: Prompt[] = repos.prompts.adminList({
-    includeDeleted,
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
-  });
+  const offset = (page - 1) * PAGE_SIZE;
+  const rows: Prompt[] = ftsQuery
+    ? repos.prompts.adminSearchFts(ftsQuery, PAGE_SIZE, offset)
+    : repos.prompts.adminList({ includeDeleted, limit: PAGE_SIZE, offset });
 
   return (
     <Page>
@@ -115,27 +119,8 @@ export default async function PromptsPage({
             <h1 className="text-3xl font-semibold tracking-tight text-foreground">Prompts</h1>
             <PageHelp text="Prompts captured from agent sessions, with lifecycle states." />
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {`${total} MATCHING · ${rows.length} rows · ${activeCount} live · ${deletedCount} deleted`}
-          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {includeDeleted ? (
-            <Link
-              href="/dashboard/prompts"
-              className="border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:border-primary"
-            >
-              Hide deleted
-            </Link>
-          ) : (
-            <Link
-              href="/dashboard/prompts?include_deleted=1"
-              className="border border-border px-4 py-2.5 text-sm text-foreground transition-colors hover:border-primary"
-            >
-              Show deleted
-            </Link>
-          )}
-        </div>
+        <div className="flex shrink-0 items-center gap-3" />
       </section>
 
       {justDeleted ? (
@@ -155,22 +140,6 @@ export default async function PromptsPage({
           </Flash>
         </div>
       ) : null}
-
-      <StatGrid className="mt-6 sm:grid-cols-3 xl:grid-cols-3">
-        <StatCard
-          k="live PROMPTS"
-          v={activeCount}
-          tone="lime"
-          sub={<span>VISIBLE TO AGENTS</span>}
-        />
-        <StatCard
-          k="SOFT-deleted"
-          v={deletedCount}
-          tone={deletedCount > 0 ? 'amber' : 'dim'}
-          sub={<span>HIDDEN UNLESS SHOWN</span>}
-        />
-        <StatCard k="IN WINDOW" v={rows.length} sub={<span>LOADED FOR THE LIST</span>} />
-      </StatGrid>
 
       <PromptsTable
         rows={rows.map((prompt) => ({
@@ -192,8 +161,16 @@ export default async function PromptsPage({
         actions={{ remove: deletePrompt, restore: undeletePrompt, bulkRemove: bulkDeletePrompt }}
         csrf={csrf}
         selectable
-        searchable
-        pageSize={10}
+        toolbar={<TableSearch value={q} placeholder="Search prompts…" ariaLabel="Search prompts" />}
+        quickFilter={{
+          paramKey: 'include_deleted',
+          active: includeDeleted ? '1' : null,
+          options: [{ value: '1', label: 'Soft-deleted' }],
+          counts: { '1': deletedCount },
+          totalCount: activeCount,
+          allLabel: 'Live',
+          label: 'Filter by lifecycle',
+        }}
       />
       <ServerPager page={page} total={total} pageSize={PAGE_SIZE} params={params} />
     </Page>

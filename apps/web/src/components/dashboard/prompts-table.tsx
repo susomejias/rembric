@@ -5,6 +5,10 @@ import Link from 'next/link';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
+import {
+  useServerQuickFilter,
+  type TableQuickFilterSpec,
+} from '@/components/dashboard/quick-filter';
 import { shortId } from '@/components/dashboard/support';
 import { Pill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
@@ -51,16 +55,17 @@ export function PromptsTable({
   actions,
   csrf,
   selectable = false,
-  searchable = false,
-  pageSize,
+  toolbar,
+  quickFilter,
 }: {
   rows: readonly PromptRowData[];
   actions: PromptServerActions;
   csrf: PromptCsrfTokens;
   selectable?: boolean;
-  searchable?: boolean;
-  pageSize?: number;
+  toolbar?: React.ReactNode;
+  quickFilter?: TableQuickFilterSpec;
 }) {
+  const quickFilterControl = useServerQuickFilter(quickFilter ?? null);
   const columns: DataTableColumn<PromptRowData>[] = [
     {
       id: 'prompt',
@@ -110,13 +115,6 @@ export function PromptsTable({
       rowId={(row) => row.id}
       rowLabel={(row) => `prompt ${row.title}`}
       caption="Captured prompts with scope, session and status"
-      searchable={searchable}
-      searchPlaceholder="Search prompts…"
-      searchText={(row) =>
-        `${row.title} ${row.content} ${row.project} ${row.agent} ${row.tags.join(' ')} ${
-          row.sessionId ?? ''
-        }`
-      }
       variant="panel"
       density="default"
       emptyState={
@@ -158,7 +156,8 @@ export function PromptsTable({
         </div>
       )}
       rowActions={(row) => <PromptRowMenu row={row} actions={actions} csrf={csrf} />}
-      pageSize={pageSize}
+      toolbar={toolbar}
+      quickFilterControl={quickFilterControl ?? undefined}
     />
   );
 }

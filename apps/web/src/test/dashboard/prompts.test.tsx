@@ -11,8 +11,6 @@ const CLIENT_PAGE_SIZE = 10;
 const GLOBAL_COUNT = 52;
 const PROJECT_COUNT = 3;
 const DELETED_COUNT = 2;
-const NON_DELETED_TOTAL = GLOBAL_COUNT + PROJECT_COUNT;
-const ALL_TOTAL = NON_DELETED_TOTAL + DELETED_COUNT;
 
 let t: TestDb;
 
@@ -80,21 +78,19 @@ async function renderPrompts(params: Record<string, string> = {}): Promise<strin
 describe('prompts list (client data-table)', () => {
   it('loads one server page (50 rows) with the true non-deleted total', async () => {
     const html = await renderPrompts();
-    expect(html).toContain(`${NON_DELETED_TOTAL} MATCHING`);
-    expect(html).toContain('50 rows');
     expect(html).toContain('Page <!-- -->1<!-- --> of <!-- -->2');
-    expect(html).toContain('VISIBLE TO AGENTS');
-    expect(html).toContain('SOFT-deleted');
+    expect(html).not.toContain(`1–${CLIENT_PAGE_SIZE} of 50`);
   });
 
-  it('caps the client-rendered rows at the table page size', async () => {
+  it('offers the lifecycle pills (live vs soft-deleted) with counts', async () => {
     const html = await renderPrompts();
-    expect(html).toContain(`1–${CLIENT_PAGE_SIZE} of 50`);
+    expect(html).toContain('aria-label="Filter by lifecycle"');
+    expect(html).toContain('Soft-deleted');
+    expect(html).toContain('>Live<');
   });
 
   it('exposes the search box and the row checkboxes without window-local chips', async () => {
     const html = await renderPrompts();
-    expect(html).not.toContain('Filter by status');
     expect(html).toContain('Search prompts…');
     expect(html).toContain('Select all rows on this page');
     expect(html).toContain('Select prompt prompt G0"');
@@ -118,14 +114,15 @@ describe('prompts list (client data-table)', () => {
 
   it('include_deleted adds the deleted rows and flips the total', async () => {
     const html = await renderPrompts({ include_deleted: '1' });
-    expect(html).toContain(`${ALL_TOTAL} MATCHING`);
     expect(html).toContain('Select prompt prompt D1"');
-    expect(html).toContain('Hide deleted');
+    expect(html).toContain('aria-pressed="true"');
   });
 
-  it('the header toggle offers the deleted view and the default view', async () => {
-    expect(await renderPrompts()).toContain('/dashboard/prompts?include_deleted=1');
-    expect(await renderPrompts()).toContain('Show deleted');
+  it('the lifecycle pills start on Live and offer the deleted view', async () => {
+    const html = await renderPrompts();
+    expect(html).toContain('>Live<');
+    expect(html).toContain('Soft-deleted');
+    expect(html).toContain('aria-pressed="true"');
   });
 });
 

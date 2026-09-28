@@ -88,6 +88,29 @@ describe('PromptsRepository', () => {
     });
   });
 
+  describe('adminCountFts', () => {
+    it('counts the same match set the list returns, including soft-deleted rows', () => {
+      const hits = repo.adminSearchFts('alpha', 10, 0);
+      expect(hits.map((p) => p.id).sort()).toEqual(['P1', 'P2', 'P3']);
+      expect(repo.adminCountFts('alpha')).toBe(hits.length);
+    });
+
+    it('returns 0 for no matches', () => {
+      expect(repo.adminSearchFts('zulu', 10, 0)).toEqual([]);
+      expect(repo.adminCountFts('zulu')).toBe(0);
+    });
+
+    it('is independent of paging — the true count, not one page slice', () => {
+      expect(repo.adminSearchFts('alpha', 1, 0)).toHaveLength(1);
+      expect(repo.adminCountFts('alpha')).toBe(3);
+    });
+
+    it('leaves the non-FTS count path unchanged when no q is present (control)', () => {
+      expect(repo.adminCount({ includeDeleted: true })).toBe(3);
+      expect(repo.adminCount({ includeDeleted: false })).toBe(2);
+    });
+  });
+
   describe('adminList', () => {
     it('hides soft-deleted rows by default, newest first', () => {
       const rows = repo.adminList({ includeDeleted: false, limit: 10, offset: 0 });

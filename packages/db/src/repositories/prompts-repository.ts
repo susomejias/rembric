@@ -171,6 +171,17 @@ export class PromptsRepository {
     return this.db.select().from(prompts).where(inArray(prompts.id, ids)).all();
   }
 
+  /** Total FTS matches for the same join `adminSearchFts` pages over, including soft-deleted. */
+  adminCountFts(query: string): number {
+    const row = this.db.get<{ v: number }>(sql`
+      SELECT COUNT(*) AS v
+      FROM prompts p
+      JOIN prompts_fts f ON f.rowid = p.rowid
+      WHERE prompts_fts MATCH ${query}
+    `) as { v: number } | undefined;
+    return row?.v ?? 0;
+  }
+
   private adminFilterConditions(opts: AdminPromptFilters): SQL[] {
     const conditions: SQL[] = [];
     if (!opts.includeDeleted) conditions.push(isNull(prompts.deletedAt));
