@@ -50,9 +50,7 @@ type MutableGlobal = typeof globalThis & {
 const globalForApp = globalThis as MutableGlobal;
 
 function resetAppGlobals(): void {
-  try {
-    globalForApp.__rembricDb?.close();
-  } catch {}
+  globalForApp.__rembricDb?.close();
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
@@ -162,6 +160,9 @@ describe('MCP protocol conformance', () => {
     const summary = tools.tools.find((tool) => tool.name === 'memory.session_summary');
     expect(summary?.description).toBeDefined();
     expect(summary!.description).toContain(SUMMARY_SECTIONS);
+    expect(summary!.description!.slice(0, 1000)).toContain(
+      'Write readable prose with normal spaces and punctuation. Condense wording, never join words to fit the cap; keep technical literals unchanged.',
+    );
     expect(summary!.description).not.toContain(
       'Goal · Accomplished · Decisions+why · Verified+how · Unfinished+why · Files',
     );

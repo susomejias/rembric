@@ -56,7 +56,7 @@ export function MarkdownPanel({
           </button>
         </div>
       </div>
-      <div className="px-5 py-5 text-sm leading-7 text-muted-foreground md:px-6">
+      <div className="px-5 py-5 text-sm leading-7 text-foreground md:px-6">
         <ReactMarkdown components={MARKDOWN_COMPONENTS}>{markdown}</ReactMarkdown>
       </div>
     </section>
@@ -108,7 +108,7 @@ export const MARKDOWN_COMPONENTS = {
   ),
   hr: () => <hr className="my-4 border-border" />,
   blockquote: ({ children }: { children?: ReactNode }) => (
-    <blockquote className="mb-3 border-l-2 border-primary/30 pl-4 text-muted-foreground">
+    <blockquote className="mb-3 border-l-2 border-primary/30 pl-4 text-foreground">
       {children}
     </blockquote>
   ),

@@ -202,7 +202,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
       {summary && !row.summaryFinal ? (
         <>
           <SectionBar name="Summary" more={<Pill tone="dim">RAW</Pill>} />
-          <pre className="mb-5 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-muted-foreground">
+          <pre className="mb-5 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-foreground">
             {summary}
           </pre>
         </>

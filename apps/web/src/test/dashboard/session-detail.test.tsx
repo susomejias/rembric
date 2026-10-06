@@ -1,4 +1,5 @@
-import { agentSessions, tokens } from '@rembric/db';
+import { AgentSessionsService } from '@rembric/core';
+import { agentSessions, createRepositories, tokens } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTestDb, type TestDb } from '../db';
@@ -26,7 +27,7 @@ beforeEach(() => {
         status: 'ended',
         startedAt: new Date(500),
         description: 'seed goal here',
-        summary: 'Goal: fix the bug.\n\n**Accomplished**: fixed it.',
+        summary: 'Goal: fix the bug.\n\n**Accomplished**: fixed it.\n\n> Evidence with spaces.',
         summaryFinal: true,
       },
       {
@@ -63,15 +64,31 @@ describe('session detail curation-state rendering', () => {
     expect(html).toContain('<strong class="font-medium text-primary">Accomplished</strong>');
     expect(html).not.toContain('>RAW<');
     expect(html).toContain('seed goal here');
+    expect(html).toContain('text-sm leading-7 text-foreground');
+    expect(html).toMatch(/<blockquote[^>]*text-foreground[^>]*>/);
+    expect(html).toContain('Evidence with spaces.');
   });
 
   it('renders an uncurated summary as escaped preformatted text with a RAW chip', async () => {
     const html = await renderSessionDetail('S-RAW');
     expect(html).toContain('>RAW<');
-    expect(html).toMatch(/<pre[^>]*>[\s\S]*fix the bug[\s\S]*<\/pre>/);
+    expect(html).toMatch(/<pre[^>]*text-foreground[^>]*>[\s\S]*fix the bug[\s\S]*<\/pre>/);
     expect(html).not.toContain('<strong>Fixed it.</strong>');
     expect(html).toContain('**Fixed it.**');
     expect(html).toContain('seed goal here');
+  });
+
+  it.each([
+    'Migration local es único DDL persistente. Pruebas existentes ROLLBACK.',
+    'Migration local es únicoDDLpersistente. Pruebasexistentes ROLLBACK.',
+  ])('preserves stored summary text through writing and rendering: %s', async (body) => {
+    const repos = createRepositories(t.handle.db);
+    const sessions = new AgentSessionsService(repos, t.handle.db);
+    const summary = `## Verified+how\n\n${body}`;
+    sessions.writeSummary('S-EMPTY', { tokenId: 'tk1', summary, final: true });
+    expect(repos.agentSessions.adminGetDetail('S-EMPTY')?.summary).toBe(summary);
+    const html = await renderSessionDetail('S-EMPTY');
+    expect(html).toContain(`<p class="mb-3 leading-7 last:mb-0">${body}</p>`);
   });
 
   it('renders no summary and no chip for an empty session', async () => {
