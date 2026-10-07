@@ -276,3 +276,278 @@ export const RembricPlugin: Plugin = async (ctx) => {
     },
   };
 };
+
+// --- opencode 2.x ------------------------------------------------------------------
+//
+// opencode 2.x does not load the V1 shape above. It resolves a *default* export
+// carrying `{ id, setup }` and drives it through the `ctx` domains. The V1 hooks
+// stay exported by name because 1.x invokes every named export as a plugin
+// function, so the V2 entry point is the default export and must never be named.
+//
+// Two V2 properties shape the adapter:
+//   - There is no `chat.message` part array. Recall and session-opening nudges are
+//     delivered as transient system text through the `context` hook, so they never
+//     enter the user's persisted turn.
+//   - A V2 system part lives for exactly one model request. The injected block is
+//     therefore cached per session and re-pushed on every request until the session
+//     is compacted or closed, and a cache miss rehydrates from the daemon rather
+//     than sending that request without context.
+
+type V2SystemPart = { type: string; text?: string };
+
+type V2PromptInput = {
+  readonly sessionID: string;
+  readonly messageID?: string;
+  prompt: { text?: string };
+};
+
+type V2ContextInput = {
+  readonly sessionID: string;
+  system: V2SystemPart[];
+};
+
+interface V2SessionHooks {
+  readonly prompt: V2PromptInput;
+  readonly context: V2ContextInput;
+}
+
+type V2EventEnvelope = {
+  type?: string;
+  data?: Record<string, unknown>;
+  properties?: Record<string, unknown>;
+};
+
+type V2ToolExecuteBefore = { readonly sessionID?: string };
+
+type V2PluginContext = {
+  readonly app: { readonly version: string };
+  readonly location: { readonly directory: string };
+  readonly session: {
+    hook<Name extends keyof V2SessionHooks>(
+      name: Name,
+      callback: (input: V2SessionHooks[Name]) => Promise<void> | void,
+    ): Promise<unknown>;
+    get(input: { sessionID: string }): Promise<unknown>;
+  };
+  readonly tool: {
+    hook(
+      name: 'execute.before',
+      callback: (input: V2ToolExecuteBefore) => Promise<void> | void,
+    ): Promise<unknown>;
+  };
+  readonly event: {
+    subscribe(input: { signal: AbortSignal }): AsyncIterable<V2EventEnvelope>;
+  };
+};
+
+interface V2Plugin {
+  readonly id: string;
+  readonly setup: (context: V2PluginContext) => Promise<(() => Promise<void> | void) | void>;
+}
+
+// opencode versions event names (`.1`) and may carry the payload under either
+// `data` or `properties`.
+function unwrapV2Event(raw: V2EventEnvelope): { type: string; data: Record<string, unknown> } {
+  return {
+    type: (raw.type ?? '').replace(/\.\d+$/, ''),
+    data: raw.data ?? raw.properties ?? {},
+  };
+}
+
+const RembricPluginV2: V2Plugin = {
+  id: 'rembric.lifecycle',
+  async setup(ctx) {
+    const directory = ctx.location.directory;
+    const slug = readRembricSlug(directory);
+    const core = createSessionProtocol({
+      agent: 'opencode',
+      serverUrl: process.env.REMBRIC_SERVER_URL,
+      apiToken: process.env.REMBRIC_API_TOKEN,
+      slug,
+      cwd: directory,
+    });
+
+    if (core.disabled) {
+      diag(`rembric: ${core.disabledReason ?? 'disabled'}`);
+      return;
+    }
+
+    const injected = new Map<string, string>();
+    const lastPrompt = new Map<string, string>();
+    const reported = new Set<string>();
+    const belongs = new Map<string, boolean>();
+    const assistantText = new Map<string, Map<number, string>>();
+    const closed = { value: false };
+
+    async function buildBlock(sessionID: string, text: string): Promise<string> {
+      const lines: string[] = [];
+      try {
+        lines.push(...core.nudgesForTurn(sessionID, text));
+      } catch {
+        // A nudge failure must never break a model request.
+      }
+      try {
+        lines.push(...(await core.recallHints(sessionID, text)));
+      } catch {
+        // Recall is best-effort.
+      }
+      return lines.filter(Boolean).join('\n');
+    }
+
+    // Resolved once per session and remembered: 2.x events carry no project scope
+    // of their own, and the check runs on every context hook.
+    async function belongsHere(sessionID: string): Promise<boolean> {
+      const known = belongs.get(sessionID);
+      if (known !== undefined) return known;
+      let result: boolean;
+      try {
+        const session = (await ctx.session.get({ sessionID })) as
+          | { location?: { directory?: string }; directory?: string }
+          | undefined;
+        const sessionDirectory = session?.location?.directory ?? session?.directory;
+        result = sessionDirectory === undefined || sessionDirectory === directory;
+      } catch {
+        // An unresolvable session is not ours to report.
+        result = false;
+      }
+      belongs.set(sessionID, result);
+      return result;
+    }
+
+    await ctx.session.hook('prompt', async (input) => {
+      if (closed.value) return;
+      const sessionID = input.sessionID;
+      if (core.isSubAgent(sessionID)) return;
+
+      reported.delete(sessionID);
+      core.beginTurn(sessionID);
+      // Covers a session resumed without a fresh session.created event.
+      await core.ensureSession(sessionID);
+
+      const text = input.prompt.text ?? '';
+      if (text) {
+        lastPrompt.set(sessionID, text);
+        core.appendUserMessage(sessionID, text);
+      }
+
+      const block = await buildBlock(sessionID, text);
+      if (block) injected.set(sessionID, block);
+    });
+
+    await ctx.session.hook('context', async (input) => {
+      if (closed.value) return;
+      const sessionID = input.sessionID;
+      if (core.isSubAgent(sessionID)) return;
+      if (!(await belongsHere(sessionID))) return;
+
+      // A resumed session (host or plugin restart) has an empty cache; rebuild it
+      // from the daemon instead of sending this request without context.
+      if (!injected.has(sessionID)) {
+        const block = await buildBlock(sessionID, lastPrompt.get(sessionID) ?? '');
+        if (block) injected.set(sessionID, block);
+      }
+
+      const block = injected.get(sessionID);
+      if (block) input.system.push({ type: 'text', text: block });
+    });
+
+    await ctx.tool.hook('execute.before', (input) => {
+      if (input.sessionID) core.markToolUsed(input.sessionID);
+    });
+
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        for await (const raw of ctx.event.subscribe({ signal: controller.signal })) {
+          if (closed.value) break;
+          const { type, data } = unwrapV2Event(raw);
+
+          if (type === 'session.created') {
+            const sessionID = String(data.sessionID ?? '');
+            if (!sessionID) continue;
+            if (data.parentID) {
+              core.markSubAgent(sessionID);
+              continue;
+            }
+            if (!(await belongsHere(sessionID))) continue;
+            await core.ensureSession(sessionID);
+            continue;
+          }
+
+          if (type === 'session.deleted') {
+            const sessionID = String(data.sessionID ?? '');
+            if (!sessionID) continue;
+            reported.delete(sessionID);
+            injected.delete(sessionID);
+            lastPrompt.delete(sessionID);
+            belongs.delete(sessionID);
+            for (const entry of core.forgetSession(sessionID) ?? []) {
+              if (entry?.id) assistantText.delete(entry.id);
+            }
+            continue;
+          }
+
+          // 2.x streams assistant text as `session.text.*`, not as message parts.
+          // `ended` carries the finished text for one ordinal, so accumulating by
+          // ordinal is idempotent and survives retries.
+          if (type === 'session.text.ended') {
+            const sessionID = String(data.sessionID ?? '');
+            const messageID = String(data.assistantMessageID ?? '');
+            const text = String(data.text ?? '');
+            if (!sessionID || !messageID || !text) continue;
+            if (core.isSubAgent(sessionID) || !core.isKnown(sessionID)) continue;
+            let parts = assistantText.get(messageID);
+            if (!parts) {
+              parts = new Map<number, string>();
+              assistantText.set(messageID, parts);
+            }
+            parts.set(Number(data.ordinal ?? 0), text);
+            const joined = Array.from(parts.entries())
+              .sort((a, b) => a[0] - b[0])
+              .map(([, part]) => part)
+              .join('\n')
+              .trim();
+            if (joined) core.upsertAssistantMessage(sessionID, messageID, joined);
+            continue;
+          }
+
+          if (type === 'session.compaction.ended') {
+            const sessionID = String(data.sessionID ?? '');
+            if (!sessionID || core.isSubAgent(sessionID) || !core.isKnown(sessionID)) continue;
+            // Compaction rewrites the transcript, so the cached block is stale.
+            injected.delete(sessionID);
+            await core.flushSessionSummary(sessionID);
+            continue;
+          }
+
+          if (type === 'session.idle' || type === 'session.execution.succeeded') {
+            const sessionID = String(data.sessionID ?? '');
+            if (!sessionID || core.isSubAgent(sessionID) || !core.isKnown(sessionID)) continue;
+            core.scheduleIdleFlush(sessionID);
+            if (!reported.has(sessionID)) {
+              reported.add(sessionID);
+              void core.reportTurn(sessionID);
+            }
+          }
+        }
+      } catch (error) {
+        if (!closed.value) diag(`rembric: event stream ended: ${String(error).slice(0, 200)}`);
+      }
+    })();
+
+    diag(`rembric: v2 plugin ready (project ${slug ?? 'unset'}, opencode ${ctx.app.version})`);
+
+    return () => {
+      closed.value = true;
+      controller.abort();
+      core.flushAllFireAndForget();
+      injected.clear();
+      lastPrompt.clear();
+      reported.clear();
+      belongs.clear();
+      assistantText.clear();
+    };
+  },
+};
+
+export default RembricPluginV2;

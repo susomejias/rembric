@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { parseDotenv, readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
-import { RembricPlugin } from './plugin.js';
+import RembricPluginV2Default, { RembricPlugin } from './plugin.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginVersion = (
@@ -1490,4 +1490,250 @@ describe('RembricPlugin without credentials', () => {
       }
     });
   }
+});
+
+describe('RembricPluginV2 (opencode 2.x)', () => {
+  let dir: string;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-v2-'));
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+    fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+    vi.restoreAllMocks();
+  });
+
+  type Hook = (input: never) => Promise<void> | void;
+
+  function fakeContext(sessionDirectory?: string) {
+    const hooks = new Map<string, Hook>();
+    const toolHooks = new Map<string, Hook>();
+    const queue: unknown[] = [];
+    let release: ((result: IteratorResult<unknown>) => void) | null = null;
+    let ended = false;
+    const stream = {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next(): Promise<IteratorResult<unknown>> {
+        if (queue.length > 0) return Promise.resolve({ value: queue.shift(), done: false });
+        if (ended) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      push(value: unknown) {
+        if (release) {
+          const resolve = release;
+          release = null;
+          resolve({ value, done: false });
+          return;
+        }
+        queue.push(value);
+      },
+      end() {
+        ended = true;
+        if (release) {
+          const resolve = release;
+          release = null;
+          resolve({ value: undefined, done: true });
+        }
+      },
+    };
+    const context = {
+      app: { version: '2.0.23' },
+      location: { directory: dir },
+      session: {
+        hook: async (name: string, callback: Hook) => {
+          hooks.set(name, callback);
+          return {};
+        },
+        get: async () => ({ location: { directory: sessionDirectory ?? dir } }),
+      },
+      tool: {
+        hook: async (name: string, callback: Hook) => {
+          toolHooks.set(name, callback);
+          return {};
+        },
+      },
+      event: { subscribe: () => stream },
+    };
+    return { context, hooks, toolHooks, stream };
+  }
+
+  function handler(hooks: Map<string, Hook>, name: string): Hook {
+    const found = hooks.get(name);
+    if (!found) throw new Error(`hook ${name} was not registered`);
+    return found;
+  }
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it('is the default export while the V1 plugin stays a named export', () => {
+    expect(typeof RembricPlugin).toBe('function');
+    expect(RembricPluginV2Default.id).toBe('rembric.lifecycle');
+    expect(typeof RembricPluginV2Default.setup).toBe('function');
+  });
+
+  it('registers the prompt, context and tool hooks', async () => {
+    const { context, hooks, toolHooks } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    expect([...hooks.keys()].sort()).toEqual(['context', 'prompt']);
+    expect([...toolHooks.keys()]).toEqual(['execute.before']);
+    await cleanup?.();
+  });
+
+  it('injects the block as transient system text and re-pushes it unchanged', async () => {
+    const { context, hooks } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    await handler(
+      hooks,
+      'prompt',
+    )({
+      sessionID: 'ses_v2_a',
+      messageID: 'msg_v2_a',
+      prompt: { text: 'what did we do about the memory backend' },
+    } as never);
+
+    const first: Array<{ type: string; text?: string }> = [];
+    await handler(hooks, 'context')({ sessionID: 'ses_v2_a', system: first } as never);
+    expect(first.length).toBeGreaterThan(0);
+    expect(first[0].type).toBe('text');
+    expect(first[0].text).toContain('rembric');
+
+    // A V2 system part lives for one request only, so the next request must get it too.
+    const second: Array<{ type: string; text?: string }> = [];
+    await handler(hooks, 'context')({ sessionID: 'ses_v2_a', system: second } as never);
+    expect(second).toHaveLength(first.length);
+    expect(second[0].text).toBe(first[0].text);
+
+    await cleanup?.();
+  });
+
+  it('drops the cached block when the session is compacted', async () => {
+    const { context, hooks, stream } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    await handler(
+      hooks,
+      'prompt',
+    )({
+      sessionID: 'ses_v2_b',
+      messageID: 'msg_v2_b',
+      prompt: { text: 'hello' },
+    } as never);
+    const before: Array<{ type: string; text?: string }> = [];
+    await handler(hooks, 'context')({ sessionID: 'ses_v2_b', system: before } as never);
+    expect(before).toHaveLength(1);
+
+    stream.push({ type: 'session.compaction.ended', data: { sessionID: 'ses_v2_b' } });
+    await settle();
+
+    const after: Array<{ type: string; text?: string }> = [];
+    await handler(hooks, 'context')({ sessionID: 'ses_v2_b', system: after } as never);
+    // Rehydrated from the daemon rather than served from the stale cache.
+    expect(after.length).toBeLessThanOrEqual(1);
+
+    stream.end();
+    await cleanup?.();
+  });
+
+  it('ignores a session that belongs to another directory', async () => {
+    const { context, hooks, stream } = fakeContext('/somewhere/else');
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    stream.push({ type: 'session.created', data: { sessionID: 'ses_v2_foreign' } });
+    await settle();
+
+    const system: Array<{ type: string; text?: string }> = [];
+    await handler(hooks, 'context')({ sessionID: 'ses_v2_foreign', system } as never);
+    expect(system).toHaveLength(0);
+
+    stream.end();
+    await cleanup?.();
+  });
+
+  it('registers nothing when credentials or a slug are missing', async () => {
+    delete process.env.REMBRIC_API_TOKEN;
+    const { context, hooks, toolHooks } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    expect(hooks.size).toBe(0);
+    expect(toolHooks.size).toBe(0);
+    expect(cleanup).toBeUndefined();
+  });
+
+  it('captures the assistant transcript from session.text.ended, ordered by ordinal', async () => {
+    const { context, hooks, stream } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    await handler(
+      hooks,
+      'prompt',
+    )({
+      sessionID: 'ses_v2_txt',
+      messageID: 'm0',
+      prompt: { text: 'please fix the bug' },
+    } as never);
+
+    // Deliberately out of order: the plugin must sort by ordinal, and a repeat of
+    // an ordinal must replace rather than append.
+    stream.push({
+      type: 'session.text.ended',
+      data: { sessionID: 'ses_v2_txt', assistantMessageID: 'm1', ordinal: 1, text: 'second part' },
+    });
+    stream.push({
+      type: 'session.text.ended',
+      data: { sessionID: 'ses_v2_txt', assistantMessageID: 'm1', ordinal: 0, text: 'Fixed it.' },
+    });
+    await settle();
+    stream.push({
+      type: 'session.text.ended',
+      data: { sessionID: 'ses_v2_txt', assistantMessageID: 'm1', ordinal: 0, text: 'Fixed it.' },
+    });
+    await settle();
+
+    stream.push({ type: 'session.compaction.ended', data: { sessionID: 'ses_v2_txt' } });
+    await settle();
+
+    const summaryCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.includes('/sessions/ses_v2_txt/summary'),
+    );
+    expect(summaryCalls.length).toBeGreaterThan(0);
+    const body = JSON.parse(
+      (summaryCalls[summaryCalls.length - 1]![1] as { body: string }).body,
+    ) as { summary: string };
+    expect(body.summary).toContain('please fix the bug');
+    expect(body.summary).toContain('Fixed it.');
+    expect(body.summary).toContain('second part');
+    expect(body.summary.indexOf('Fixed it.')).toBeLessThan(body.summary.indexOf('second part'));
+    expect(body.summary.split('Fixed it.').length - 1).toBe(1);
+
+    stream.end();
+    await cleanup?.();
+  });
+
+  it('aborts the event stream on cleanup', async () => {
+    const { context, stream } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    stream.push({ type: 'session.idle', data: { sessionID: 'ses_v2_c' } });
+    await settle();
+    await cleanup?.();
+
+    stream.end();
+  });
 });
