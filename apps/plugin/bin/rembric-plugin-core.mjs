@@ -1,6 +1,6 @@
 export const POST_TIMEOUT_MS = 3000;
 // Turn-START path: it must resolve before the model's first token, so its budget is a fraction of the background POST timeout.
-const RECALL_HINTS_TIMEOUT_MS = 200;
+const RECALL_HINTS_TIMEOUT_MS = 500;
 // The client cuts first: what never leaves the process cannot leak.
 const RECALL_PROMPT_MAX_CHARS = 500;
 const IDLE_DEBOUNCE_MS = 500;
