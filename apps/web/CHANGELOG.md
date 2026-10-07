@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.18](https://github.com/susomejias/rembric/compare/server-v0.28.17...server-v0.28.18) (2026-10-07)
+
+
+### Bug Fixes
+
+* **sessions:** improve summary readability and text contrast ([6476eff](https://github.com/susomejias/rembric/commit/6476eff30816f0e7de76fa018dc3874a608f3356))
+
 ## [0.28.17](https://github.com/susomejias/rembric/compare/server-v0.28.16...server-v0.28.17) (2026-09-28)
 
 
