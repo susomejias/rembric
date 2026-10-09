@@ -196,7 +196,7 @@ jobs:
           echo -n "${DIGEST#sha256:}" > "/tmp/digests/${{ matrix.arch }}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: digest-${{ matrix.arch }}
           path: /tmp/digests/${{ matrix.arch }}
