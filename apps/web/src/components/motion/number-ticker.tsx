@@ -22,6 +22,7 @@ export interface NumberTickerProps {
   digitClassName?: string;
   locale?: boolean;
   format?: (value: number) => string;
+  ariaLabel?: string;
 }
 
 export function NumberTicker({
@@ -37,6 +38,7 @@ export function NumberTicker({
   digitClassName,
   locale,
   format,
+  ariaLabel,
 }: NumberTickerProps) {
   const containerRef = useRef<HTMLSpanElement>(null);
   const inView = useInView(containerRef, { once: true, amount: 0.6 });
@@ -60,7 +62,7 @@ export function NumberTicker({
     const chars = text.split('');
     return chars.map((char, i) => ({ char, id: `g-${chars.length - 1 - i}` }));
   }, [text]);
-  const readableText = `${prefix ?? ''}${text}${suffix ?? ''}`;
+  const readableText = ariaLabel ?? `${prefix ?? ''}${text}${suffix ?? ''}`;
 
   const [entered, setEntered] = useState(false);
   useEffect(() => {
