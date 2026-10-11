@@ -292,7 +292,7 @@ Controls how `memory.save` surfaces conflict candidates to the agent for fresh-c
 
 ## Dashboard
 
-Self-hosted operator surface for every memory, session, prompt, judgment, and consolidation op. SSR HTML + HTMX, brutalist on purpose, no JS framework, no telemetry. Auth is one admin token — no onboarding flow.
+Self-hosted operator surface for every memory, session, prompt, judgment, entity, and consolidation op. Dark monochrome surfaces with a lime accent. Auth is one admin token — no onboarding flow.
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-login.png" alt="Sign-in" width="100%">
@@ -304,24 +304,18 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
   <img src="./docs/screenshots/dashboard-overview.png" alt="Overview" width="100%">
 </p>
 
-<p align="center"><i>Overview · counters, pending judgments queue, recent agent sessions.</i></p>
+<p align="center"><i>Overview · memory activity, active sessions, latest judgments, consolidation and system health.</i></p>
 
 <details>
-<summary><b>More surfaces</b> — consolidation health · memories · sessions · judgments · consolidation · projects · tokens · updates · maintenance</summary>
+<summary><b>More surfaces</b> — memories · sessions · judgments · entities · consolidation · projects · tokens · updates · maintenance</summary>
 
 <br>
-
-<p align="center">
-  <img src="./docs/screenshots/dashboard-consolidation-health.png" alt="Consolidation health" width="100%">
-</p>
-
-<p align="center"><i>Consolidation health · last run, ops applied, orphan pendings, 7-day activity, system info.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-memories.png" alt="Memories list" width="100%">
 </p>
 
-<p align="center"><i>Memories · append-only; filter by scope, status, type, FTS5 search.</i></p>
+<p align="center"><i>Memories · status filters, needs-review queue, search, and bulk actions.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-sessions.png" alt="Sessions list" width="100%">
@@ -333,13 +327,25 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
   <img src="./docs/screenshots/dashboard-memory-detail.png" alt="Memory detail" width="100%">
 </p>
 
-<p align="center"><i>Memory detail · status, scope, project, type, full content body.</i></p>
+<p align="center"><i>Memory detail · status, scope, project, type, review state, and content.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-memory-detail-judgments.png" alt="Memory detail judgments and actions" width="100%">
+</p>
+
+<p align="center"><i>Memory detail · related judgments, predecessors, confirmations, and lifecycle actions.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-session-detail.png" alt="Session detail" width="100%">
 </p>
 
-<p align="center"><i>Session detail · run metadata, summary, and memories attached to the session.</i></p>
+<p align="center"><i>Session detail · run metadata and summary.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-session-detail-memories.png" alt="Session detail attached memories and prompts" width="100%">
+</p>
+
+<p align="center"><i>Session detail · memories and prompts attached to the run.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-judgments.png" alt="Judgments" width="100%">
@@ -351,7 +357,19 @@ Self-hosted operator surface for every memory, session, prompt, judgment, and co
   <img src="./docs/screenshots/dashboard-judgment-detail.png" alt="Judgment detail" width="100%">
 </p>
 
-<p align="center"><i>Judgment detail · source, target, verdict, confidence, reason, and evidence for one relation.</i></p>
+<p align="center"><i>Judgment detail · verdict, confidence, source, and target memories.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-judgment-detail-evidence.png" alt="Judgment detail reason and evidence" width="100%">
+</p>
+
+<p align="center"><i>Judgment detail · reason, evidence, and available actions.</i></p>
+
+<p align="center">
+  <img src="./docs/screenshots/dashboard-entities.png" alt="Entities list" width="100%">
+</p>
+
+<p align="center"><i>Entities · exact identifiers, kind filters, project links, and index rebuild.</i></p>
 
 <p align="center">
   <img src="./docs/screenshots/dashboard-consolidation.png" alt="Consolidation" width="100%">
