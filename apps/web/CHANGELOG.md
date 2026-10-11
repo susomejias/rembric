@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.29.1](https://github.com/susomejias/rembric/compare/server-v0.29.0...server-v0.29.1) (2026-10-11)
+
+
+### Features
+
+* **dashboard:** add seasonal wrapped stories and native sharing ([f26b893](https://github.com/susomejias/rembric/commit/f26b8936e6a54499388cfc02b36ef01e4e6aabf2))
+* **db:** add privacy-safe yearly wrapped aggregates ([66769b0](https://github.com/susomejias/rembric/commit/66769b004c65a1bc3297a99ccae013cd1fbbec1e))
+* **wrapped:** render shareable cards with accessible compact counts ([5455e1e](https://github.com/susomejias/rembric/commit/5455e1ea6661223c2a3479538880aa8354942ca2))
+
 ## [0.29.0](https://github.com/susomejias/rembric/compare/server-v0.28.18...server-v0.29.0) (2026-10-11)
 
 
