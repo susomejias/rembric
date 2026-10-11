@@ -4,6 +4,22 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.34.0](https://github.com/susomejias/rembric/compare/plugin-v0.33.2...plugin-v0.34.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** memory.get, memory.session_get, memory.confirm and memory.judge are replaced by their _batch forms without aliases. Upgrade server and plugins together.
+
+### Features
+
+* **mcp:** replace single tools with explicit batches ([9f87f99](https://github.com/susomejias/rembric/commit/9f87f990a89c3c9950c28d321529b917c8bba2a4))
+
+
+### Bug Fixes
+
+* **plugin:** restrict Hermes server URLs to HTTP(S) ([1e5f210](https://github.com/susomejias/rembric/commit/1e5f210ae2277c4f128a8baa929125ca68dd39ca))
+
 ## [0.33.2](https://github.com/susomejias/rembric/compare/plugin-v0.33.1...plugin-v0.33.2) (2026-10-07)
 
 
