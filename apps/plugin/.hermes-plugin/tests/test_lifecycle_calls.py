@@ -59,6 +59,17 @@ class LifecycleTest(unittest.TestCase):
     def _provider(self):
         return self.mod.RembricMemoryProvider()
 
+    def test_file_server_url_is_refused_before_urllib_access(self) -> None:
+        base = self.tmp.as_uri()
+        target = self.tmp / "api/myproj/sessions"
+        target.parent.mkdir(parents=True)
+        target.write_text(json.dumps({"canary": "local-file"}))
+        self.mod.os.environ["REMBRIC_SERVER_URL"] = base
+        with patch.object(self.mod, "urlopen", wraps=self.mod.urlopen) as opened:
+            self.assertIsNone(self.mod._api_request(base, "myproj", "/sessions", {}))
+            self.assertFalse(self._provider().is_available())
+            self.assertEqual(opened.call_count, 0)
+
     @patch("rembric_hermes_plugin.urlopen")
     def test_initialize_posts_session_then_resume(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeResponse()

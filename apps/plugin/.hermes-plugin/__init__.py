@@ -32,6 +32,7 @@ import re
 import sys
 import threading
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -225,6 +226,11 @@ def _stderr(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _http_url(base: str, path: str) -> str | None:
+    url = base.rstrip("/") + path
+    return url if url.lower().startswith(("http://", "https://")) else None
+
+
 def _api_request(
     base: str,
     slug: str,
@@ -239,7 +245,10 @@ def _api_request(
     if not base or not token or not slug:
         _stderr(f"[rembric] missing base/token/slug; skipping POST {path}")
         return None
-    url = f"{base.rstrip('/')}/api/{slug}{path}"
+    url = _http_url(base, f"/api/{slug}{path}")
+    if url is None:
+        _stderr("[rembric] server URL must use HTTP(S); skipping request")
+        return None
     data = json.dumps(body or {}).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {token}",
@@ -251,10 +260,8 @@ def _api_request(
             raw = resp.read()
     except HTTPError as err:
         detail = ""
-        try:
+        with suppress(Exception):
             detail = err.read().decode("utf-8", errors="replace")
-        except Exception:  # noqa: BLE001 — body read is best-effort
-            pass
         _stderr(f"[rembric] POST {path} failed: {err} body={detail}")
         return None
     except (URLError, TimeoutError) as err:
@@ -345,7 +352,9 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         token = os.environ.get("REMBRIC_API_TOKEN")
         if not base or not token:
             return False
-        url = f"{base.rstrip('/')}/healthz"
+        url = _http_url(base, "/healthz")
+        if url is None:
+            return False
         req = Request(
             url,
             method="GET",
