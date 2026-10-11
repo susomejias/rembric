@@ -83,15 +83,15 @@ Because the `inputSchema` travels verbatim, the harness validates arguments agai
 #### Scenario: The plugin source contains no tool inventory
 
 - **WHEN** `apps/plugin/.pi-plugin/index.ts` is read at HEAD
-- **THEN** it contains no occurrence of any server tool name as a literal (for example `memory.save`, `memory.search`, `memory.judge`) outside of comments and test fixtures
+- **THEN** it contains no occurrence of any server tool name as a literal (for example `memory.save`, `memory.search`, `memory.judge_batch`) outside of comments and test fixtures
 
 #### Scenario: A proxied call reaches the database
 
 - **GIVEN** a running server and an initialised extension
 - **WHEN** the harness invokes the registered `memory.save` tool with a valid title and content
 - **THEN** the proxied `tools/call` SHALL return a non-error result
-- **AND** an independent `memory.get` on the returned id SHALL return the saved row
-- **AND** the control — `memory.get` on an id that was never saved — SHALL return `not_found`
+- **AND** an independent `memory.get_batch({ ids: [id] })` SHALL return the saved row in `memories`
+- **AND** the control — `memory.get_batch({ ids: [missingId] })` — SHALL return MCP `isError: true`, `memories: []` and an associated `not_found` error for `missingId`
 
 #### Scenario: The forwarded schema is the one both layers enforce
 
@@ -529,9 +529,9 @@ A surface that says "four clients" after this change is a documentation defect, 
 
 ### Requirement: The shutdown reason decides whether the session is ended
 
-`session_shutdown` is not a process-death signal. The harness declares `SessionShutdownEvent { type: "session_shutdown"; reason: "quit" | "reload" | "new" | "resume" | "fork"; targetSessionFile?: string }` (`dist/core/extensions/types.d.ts:462-468` of `@earendil-works/pi-coding-agent@0.84.1`), documented as "Fired before an extension runtime is torn down due to quit, reload, or session replacement", and four of the five reasons are session replacement inside a surviving process.
-
 The extension SHALL issue the session end **only** when `reason` is a member of the explicit end-set `{quit, new, resume, fork}`. On `reload` it SHALL NOT end the session, because `reload` is the same session continuing. An end issued on a surviving session costs `session_id = NULL` on every later `memory.save` and `session_not_found` from `memory.session_summary` until the next `before_agent_start` ensure-and-resume repairs it, and there is no reason to incur a repairable fault when the correct branch is free. The existence of the resume path SHALL NOT be treated as making a wrong end cheap: within a single agent turn nothing re-runs `before_agent_start`, so the writes made between the wrong end and the next turn are lost to `session_id = NULL` and are not recoverable afterwards.
+
+`session_shutdown` is not a process-death signal. The harness declares `SessionShutdownEvent { type: "session_shutdown"; reason: "quit" | "reload" | "new" | "resume" | "fork"; targetSessionFile?: string }` (`dist/core/extensions/types.d.ts:462-468` of `@earendil-works/pi-coding-agent@0.84.1`), documented as "Fired before an extension runtime is torn down due to quit, reload, or session replacement", and four of the five reasons are session replacement inside a surviving process.
 
 The extension SHALL NOT branch its resume on `reason`, `session_start`, or any other host signal; it SHALL issue exactly one `POST /api/<slug>/sessions/<id>/resume` after the FIRST `/sessions` ensure for that id in the process, which for this client is the shared core's registration entry point called from `before_agent_start` (`plugin-session-protocol`). Conditioning on a signal is not merely unnecessary here, it is unavailable: Pi's cold-start resume is reported as `reason: "startup"` on the `session_start` event — the harness substitutes `{ type: "session_start", reason: "startup" }` when no explicit event is supplied (`dist/core/agent-session.js:152` of `@earendil-works/pi-coding-agent@0.84.1`, reached from `dist/main.js:569-570` where the initial runtime passes `sessionStartEvent: undefined`) — so `pi -r`, `pi -c` and `pi --session <file>` are indistinguishable from a clean start, and `getEntries()` does not separate them either, since a persisted header-only session file yields zero entries exactly as a new session does.
 
@@ -787,6 +787,8 @@ Pi has no compaction event, so nothing about this changes the accepted-risk clau
 
 ### Requirement: The Pi extension SHALL declare its session identity on the MCP transport
 
+The extension SHALL therefore declare its identity on the MCP transport itself: once the host row exists for this process — that is, after the first successful `/sessions` `ensure` for that id — it SHALL call `memory.session_resume` with `{ sessionId: <host session id> }`, the id Pi itself generated (`ctx.sessionManager.getSessionId()`). The declaration is id-targeted, so it guesses nothing: it is the only form of session resolution that cannot be confounded by a second live row, and it makes the transport binding that `memory.session_start` consults first exist from turn zero rather than after the model happens to call something.
+
 Today the extension tells the server which session it owns only over HTTP: the shared
 core's `ensure` + single `/resume` register and revive the host-uuid row, and nothing on
 the MCP channel ever names that row. The consequence is that every MCP write and every
@@ -794,15 +796,6 @@ model-initiated `memory.session_start` on the extension's own transport has to _
 which session it belongs to, by the windowed sole-active lookup the `sessions`
 capability describes — an inference that goes wrong exactly when the operator runs
 several Pi sessions in the same project at once, which is the load-bearing use case.
-
-The extension SHALL therefore declare its identity on the MCP transport itself: once the
-host row exists for this process — that is, after the first successful `/sessions`
-`ensure` for that id — it SHALL call `memory.session_resume` with `{ sessionId: <host
-session id> }`, the id Pi itself generated (`ctx.sessionManager.getSessionId()`). The
-declaration is id-targeted, so it guesses nothing: it is the only form of session
-resolution that cannot be confounded by a second live row, and it makes the transport
-binding that `memory.session_start` consults first exist from turn zero rather than
-after the model happens to call something.
 
 `memory.session_resume` is the mandated verb, and `memory.session_start` is prohibited
 for this purpose. Resuming a row that is already `active` is a successful no-op on the
