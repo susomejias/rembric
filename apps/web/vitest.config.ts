@@ -85,6 +85,7 @@ export default defineConfig({
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
       '../plugin/.pi-plugin/*.test.ts',
+      '../plugin/.opencode-plugin/*.test.ts',
       '../plugin/mcp-bridge/*.test.ts',
       '../plugin/test/*.test.ts',
       '../../install.test.ts',

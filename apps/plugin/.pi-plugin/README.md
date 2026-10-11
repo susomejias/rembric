@@ -83,7 +83,7 @@ Every Rembric tool result is collapsed to a single line — outcome, the tool's 
 
 ```
 ✓ memory.context · 170 lines · ctrl+o to expand
-✗ memory.get · 5 lines · ctrl+o to expand
+✗ memory.get_batch · 5 lines · ctrl+o to expand
 ```
 
 Press that key (`app.tools.expand`, `ctrl+o` by default — the line names whatever you have bound) to see the complete result text, unchanged, and press it again to collapse. A failed call is marked separately and Pi paints its row on the error background; expanding it shows the whole diagnostic, error code included.

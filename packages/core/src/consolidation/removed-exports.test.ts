@@ -61,7 +61,7 @@ describe('9.13 — legacy consolidator detectors stay deleted', () => {
         const formatted = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join('\n');
         throw new Error(
           `Legacy detector '${symbol}' was reintroduced. The v0.1 LLM-driven detection ` +
-            `is deleted; use save-time candidate detection + memory.judge instead.\n${formatted}`,
+            `is deleted; use save-time candidate detection + memory.judge_batch instead.\n${formatted}`,
         );
       }
       expect(offenders).toEqual([]);

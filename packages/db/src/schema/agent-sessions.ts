@@ -1,3 +1,4 @@
+import { desc, sql } from 'drizzle-orm';
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 import { projects } from './projects.js';
@@ -39,6 +40,9 @@ export const agentSessions = sqliteTable(
   (table) => ({
     tokenStatusIdx: index('sessions_token_status_idx').on(table.tokenId, table.status),
     projectStartedIdx: index('sessions_project_started_idx').on(table.projectId, table.startedAt),
+    projectStartedIdLiveIdx: index('sessions_project_started_id_live_idx')
+      .on(table.projectId, desc(table.startedAt), desc(table.id))
+      .where(sql`deleted_at IS NULL`),
     statusStartedIdx: index('sessions_status_started_idx').on(table.status, table.startedAt),
   }),
 );

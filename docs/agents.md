@@ -20,28 +20,28 @@ Header: Authorization: Bearer <agent-token>
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 
-Every tool call is authorized against the token's scope and the connection's effective (resolved) scope — not just at connection time. A call with insufficient scope fails with `forbidden`; a `memory.judge`/`memory.compare` target outside the effective scope fails with `not_found` (existence never leaks across scopes).
+Every tool call is authorized against the token's scope and the connection's effective (resolved) scope — not just at connection time. A call with insufficient scope fails with `forbidden`; a `memory.judge_batch`/`memory.compare` target outside the effective scope fails with `not_found` (existence never leaks across scopes).
 
-| Token scope         | Can call                                             | Cannot call                                                                          | `across_projects` reaches |
-| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------- |
-| `*`                 | Every tool, any scope                                | —                                                                                    | every project             |
-| `read:*`            | Every read-classified tool, any scope                | Any write-classified tool (`memory.save`, `memory.judge`, `memory.session_start`, …) | every project             |
-| `projects`          | Every tool, scoped to the projects the token names   | Any tool whose effective scope resolves outside that set                             | exactly those projects    |
-| `read:projects`     | Read-classified tools, scoped to that same set       | Writes, and reads whose effective scope resolves outside that set                    | exactly those projects    |
-| `project:<id>`      | Every tool, scoped to project `<id>` only            | Any tool whose effective scope resolves to another project                           | that one project          |
-| `read:project:<id>` | Read-classified tools, scoped to project `<id>` only | Writes, and reads whose effective scope resolves to another project                  | that one project          |
+| Token scope         | Can call                                             | Cannot call                                                                                | `across_projects` reaches |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------- |
+| `*`                 | Every tool, any scope                                | —                                                                                          | every project             |
+| `read:*`            | Every read-classified tool, any scope                | Any write-classified tool (`memory.save`, `memory.judge_batch`, `memory.session_start`, …) | every project             |
+| `projects`          | Every tool, scoped to the projects the token names   | Any tool whose effective scope resolves outside that set                                   | exactly those projects    |
+| `read:projects`     | Read-classified tools, scoped to that same set       | Writes, and reads whose effective scope resolves outside that set                          | exactly those projects    |
+| `project:<id>`      | Every tool, scoped to project `<id>` only            | Any tool whose effective scope resolves to another project                                 | that one project          |
+| `read:project:<id>` | Read-classified tools, scoped to project `<id>` only | Writes, and reads whose effective scope resolves to another project                        | that one project          |
 
 Recommended: the shipped client plugins default to `*` or a matching `project:<id>` token so every tool works as documented. Reserve `read:*` / `read:project:<id>` for read-only integrations (dashboards, analytics) that must never write. Mint a `projects` / `read:projects` token by ticking two or more projects on the create form — see [Tokens that reach several projects](./updates.md#tokens-that-reach-several-projects).
 
 **OAuth 2.1 — no static token.** OAuth-capable clients (Claude Code as a remote MCP server, ChatGPT custom connectors) can connect without minting a token: set `REMBRIC_PUBLIC_URL` (the https issuer; `http://localhost` allowed for local testing) and the server runs the authorization-code + PKCE flow itself. The client points at the same `…/mcp[/<slug>]` URL with **no `Authorization` header**; the first connect opens a consent screen where you sign in with the admin token and approve, after which the client manages the token (refresh included). It is off unless `REMBRIC_PUBLIC_URL` is set, and the static-token path above is unchanged — both kinds of token authenticate `/mcp` identically.
 
-The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge`, when to call `memory.session_summary`). Clients that support `initialize.instructions` — Claude Code, Codex CLI and Pi among them — inject it into the system prompt. Other clients still get the same protocol via each tool's description.
+The MCP server emits a short `instructions` block at handshake teaching the proactive-save protocol (when to save, when to call `memory.judge_batch`, when to call `memory.session_summary`). Clients that support `initialize.instructions` — Claude Code, Codex CLI and Pi among them — inject it into the system prompt. Other clients still get the same protocol via each tool's description.
 
 ## Searching across projects
 
 One tool crosses the project boundary, and only when asked: `memory.search({across_projects: true})`. It is read-only, opt-in, and absent it behaves exactly as a server that does not implement it — the last column of the table above is the whole authorization rule, evaluated per candidate project, so a widened search never reaches a project the token could not open directly. Archived projects are never in the set: a connection at an archived project's slug is refused at authentication, so a widening that admitted one would serve rows the same token cannot ask for.
 
-No other surface widens. `memory.context`, `memory.get`, `memory.timeline`, `memory.stats`, the automatic recall paths and the HTTP `/api/<slug>/memory/search` endpoint all stay on one project and accept no such argument.
+No other surface widens. `memory.context`, `memory.get_batch`, `memory.timeline`, `memory.stats`, the automatic recall paths and the HTTP `/api/<slug>/memory/search` endpoint all stay on one project and accept no such argument.
 
 The response says what actually happened rather than what was asked for:
 
@@ -53,7 +53,7 @@ Two behaviours worth knowing before you turn it on:
 - **A widened page can be _smaller_ than the narrow one, and can replace its rows entirely — by two different mechanisms, only one of which is flagged.** Ranking is pure relevance with no home-project preference, and the relevance gate is computed over the widened pool. Where the gate cuts rows the page comes back short and carries `gateShortened: true`; measured on a real two-project corpus, a query returning 6 home rows narrow returned 1 foreign row widened. Where foreign rows simply outrank yours the page comes back **full**, so there is no flag to read — `searchedProjects[]` and each row's own project are the only signal that your rows were outranked rather than absent.
 - **It costs 2.2–3.0× a narrow search end to end**, measured through the real search path at 1 000 / 20 000 / 50 000 memories, widening from a project holding most of the corpus. From a small project it reaches 12×, because each authorized project contributes its own full candidate window and a small project's narrow search is very cheap to start with. That is why the tool's own description tells the model to widen only on an explicit ask or a genuinely broad exploration, rather than by habit.
 
-A widened read changes nothing about where writes go: `memory.save` on the same connection still lands in the connection's own project, and `memory.get` still answers `not_found` for a memory in another project — including one a widened search just returned.
+A widened read changes nothing about where writes go: `memory.save` on the same connection still lands in the connection's own project, and `memory.get_batch` still answers `not_found` for a memory in another project — including one a widened search just returned.
 
 ## Reading prior context
 
@@ -61,12 +61,35 @@ A widened read changes nothing about where writes go: `memory.save` on the same 
 
 Two of its lists ask the agent to act, and they are deliberately different shapes:
 
-- `pendingJudgments[]` — **pairwise** conflicts (source ↔ target) surfaced at save time and aged past the orphan threshold; close each with `memory.judge`. See [docs/relations.md](./relations.md).
-- `needsReview[]` — **unary** memories (one memory, no counterpart) that have not been re-affirmed within their type's shelf life. `reviewState` (also carried on every `memory.search` / `memory.get` row) flips to `needs_review` when the affirmation baseline — `max(created_at, last confirmation)` — plus the per-type TTL has elapsed. It is a read-time derivation: nothing is stored, no sweep runs. Resolve each entry with the verb that fits: `memory.confirm` if it's still true (records a confirmation, advancing the baseline), `memory.save` + `topic_key` if it changed, or `memory.judge` if it contradicts another memory. Reading a memory does **not** clear `needs_review` — only affirmation does.
+- `pendingJudgments[]` — **pairwise** conflicts (source ↔ target) surfaced at save time and aged past the orphan threshold; close each with `memory.judge_batch`. See [docs/relations.md](./relations.md).
+- `needsReview[]` — **unary** memories (one memory, no counterpart) that have not been re-affirmed within their type's shelf life. `reviewState` (also carried on every `memory.search` / `memory.get_batch` row) flips to `needs_review` when the affirmation baseline — `max(created_at, last confirmation)` — plus the per-type TTL has elapsed. It is a read-time derivation: nothing is stored, no sweep runs. Resolve each entry with the verb that fits: `memory.confirm_batch` if it's still true (records a confirmation, advancing the baseline), `memory.save` + `topic_key` if it changed, or `memory.judge_batch` if it contradicts another memory. Reading a memory does **not** clear `needs_review` — only affirmation does.
 
-When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.session_get({ sessionId })` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
+When a session's snippet isn't enough — typically when **resuming work in another client (multi-agent / cross-client handoff)** — call `memory.session_get_batch({ ids: [sessionId] })` and read `sessions[0]` to fetch that session's **full, untruncated** summary on demand. It is read-only and scope-enforced: a session id outside the caller's scope (or soft-deleted) returns `not_found`. Truncation is display-only; the full summary always stays in storage (cap: the server-side `SUMMARY_MAX_CHARS`).
 
-A curated summary write is merged section-wise: the `##` sections it carries replace their stored counterparts, and the ones it omits keep their stored text. `sessionId` is the tool's only property — an unknown one is refused, not ignored. There is no version history behind the merge: what a write does replace is gone, with no restore, so an agent that cannot see the earlier work should read the stored summary here before rewriting a section.
+A curated summary write is merged section-wise: the `##` sections it carries replace their stored counterparts, and the ones it omits keep their stored text. Recovery uses a one-item `ids` array. Unknown properties and retired scalar arguments are refused, not ignored. There is no version history behind the merge: what a write does replace is gone, with no restore, so an agent that cannot see the earlier work should read the stored summary here before rewriting a section.
+
+## Complete batch reads by date
+
+For “what have I worked on this week?”, retrieve the full session summaries directly:
+
+```json
+{
+  "from": "2026-10-05T00:00:00+02:00",
+  "to": "2026-10-12T00:00:00+02:00",
+  "limit": 20,
+  "offset": 0
+}
+```
+
+Pass this to `memory.session_get_batch`. Choose the interval and explicit timezone for the question, not these example dates. Sessions are selected by their activity span overlapping `[from,to)`; `memory.get_batch` accepts the same arguments but selects memory creation time, including active, superseded and archived rows. Both return current complete records, not historical snapshots or proof that every fact happened during that interval. Omit `to` to use server now.
+
+Use either dates or `ids: [id, ...]`, never both. Reads return `{ sessions|memories, errors, total, nextOffset }`. Each page has at most 20 outcomes, including errors; content is complete without a new byte budget. Resend the same selection with `offset: nextOffset` until it is `null`. Pages are live views, not frozen cursors. ID selections deduplicate before pagination.
+
+Handle each `errors[]` entry beside the valid records. Missing/foreign/deleted session IDs are indistinguishable `not_found` failures. Mixed success is not an MCP error; an attempted page with no success sets `isError: true` (`not_found` if all are missing, otherwise `batch_failed`). Empty selections/pages succeed. Successful memory reads advance resolved-head access, never affirmation or merely projected predecessors.
+
+Mutations require reviewed explicit items: `memory.confirm_batch({ ids: [id], verdict: "affirm" })` or `memory.judge_batch({ judgments: [{ judgmentId, relation: "related" }] })`, with 1–20 submitted items and no date selectors. Confirmations are atomic; never split them automatically. Judgments are ordered independent transactions, keep duplicates and retain all results; an all-failed judgment batch sets MCP `isError: true`.
+
+The four original tool names and scalar arguments have no aliases. Upgrade the server and all five clients together through the installer; restart the client to rediscover tools. Roll back both components together if needed, keeping the normal database backup precautions. HTTP session lifecycle endpoints are unchanged.
 
 ## Validated configs
 
@@ -101,7 +124,7 @@ memory.context is only optional auxiliary background for high-level recap of pas
 sessions/work; it is not a source of truth and must never replace memory.search.
 
 Save durable facts/preferences/decisions/configs with memory.save; use topic_key
-when updating. Resolve candidates with memory.judge. If built-in memory conflicts
+when updating. Resolve candidates with memory.judge_batch. If built-in memory conflicts
 with Rembric, Rembric wins. Before closing work topics, call
 memory.session_summary.
 ```
@@ -529,5 +552,5 @@ After registering, ask the agent to list its tools — you should see the `memor
 ## Cross-references
 
 - Tool surface and parameters: each tool's MCP description (call `tools/list` from your client).
-- Relation graph and `memory.judge` cadence: [docs/relations.md](./relations.md).
+- Relation graph and `memory.judge_batch` cadence: [docs/relations.md](./relations.md).
 - Session deletion / undelete: dashboard `/dashboard/sessions` (toggle `?include_deleted=1` to surface soft-deleted rows).

@@ -14,7 +14,7 @@ ALL SQL lives under `packages/db/src/` — one repository per aggregate in `db/r
 
 Before you measure anything, work out how often the query runs. This decides whether a finding is urgent or noise, and it is the single most common way a performance audit wastes everyone's time.
 
-- **Per-turn** — `memory.save` (plus its candidate detection and entity linking), `memory.search`, `memory.get`, `memory.context`, token auth on every request, the session activity touch. A few ms here is real. **This is where to spend your effort.**
+- **Per-turn** — `memory.save` (plus its candidate detection and entity linking), `memory.search`, `memory.get_batch`, `memory.context`, token auth on every request, the session activity touch. A few ms here is real. **This is where to spend your effort.**
 - **Per-session-start / background** — the consolidation sweep, the embedding and entity backfill workers. Tens of ms is tolerable; hundreds is not, because the worker holds the event loop for the whole batch.
 - **Dashboard / operator** — one human, occasional clicks. Cost barely matters. Do NOT optimise these unless the plan shows something pathological (a full scan that will grow unbounded), and say plainly that the cost is acceptable.
 

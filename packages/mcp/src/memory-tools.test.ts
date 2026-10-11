@@ -14,8 +14,9 @@ import {
 } from '@rembric/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
-import { buildMemoryHandlers } from '@rembric/mcp';
+import { buildMemoryHandlers, memoryGetSchema } from '@rembric/mcp';
 
 import {
   createTestDb,
@@ -321,7 +322,7 @@ describe('memory.save — candidatesDetected', () => {
   });
 });
 
-describe('memory.get / memory.search — entitiesTotal', () => {
+describe('memory.get_batch / memory.search — entitiesTotal', () => {
   const CAP = 10;
 
   interface EntityView {
@@ -342,7 +343,8 @@ describe('memory.get / memory.search — entitiesTotal', () => {
     const repos = createRepositories(db.handle.db);
     const h = buildMemoryHandlers({ logInternalError, memory, repos, projects });
     return runWithContext(fakeContext(projectA), async () => ({
-      single: parseText<EntityView>(await h.get({ id })),
+      single: parseText<{ memories: EntityView[] }>(await h.get({ ids: [id], relations_limit: 50 }))
+        .memories[0]!,
       batch: parseText<{ memories: EntityView[] }>(await h.get({ ids: [id] })).memories[0]!,
       search: parseText<{ memories: EntityView[] }>(await h.search({})).memories.find(
         (r) => (r as unknown as { id: string }).id === id,
@@ -502,9 +504,9 @@ describe('memory.get / memory.search — entitiesTotal', () => {
     linkPaths(repos, m.id, 27);
     const h = buildMemoryHandlers({ logInternalError, memory, repos, projects });
     const raw = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(h.get({ id: m.id })),
+      Promise.resolve(h.get({ ids: [m.id], relations_limit: 50 })),
     );
-    const payload = parseText<Record<string, unknown>>(raw);
+    const payload = parseText<{ memories: Record<string, unknown>[] }>(raw).memories[0]!;
     expect(payload).not.toHaveProperty('entitiesTruncated');
     const entityBooleans = Object.entries(payload).filter(
       ([k, v]) => /entit/i.test(k) && typeof v === 'boolean',
@@ -552,17 +554,18 @@ describe('memory.title — read payloads expose the saved title', () => {
     expect(row?.title).toBe('pnpm is the package manager');
   });
 
-  it('memory.get returns memory.title and head.title for a saved memory', async () => {
+  it('memory.get_batch returns memory.title and head.title for a saved memory', async () => {
     const saved = memory.save(
       { type: 'user', title: 'prefers dark mode', content: 'always dark theme' },
       projectScope(projectA.id),
     );
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: saved.id })),
+      Promise.resolve(handlers.get({ ids: [saved.id], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
-    const payload = parseText<{ memory: { title: string }; head: { title: string } }>(r);
-    expect(payload.memory.title).toBe('prefers dark mode');
+    const payload = parseText<{ memories: { title: string; head: { title: string } }[] }>(r)
+      .memories[0]!;
+    expect(payload.title).toBe('prefers dark mode');
     expect(payload.head.title).toBe('prefers dark mode');
   });
 });
@@ -668,7 +671,7 @@ describe('memory.search — entity filter (add-entity-index)', () => {
   });
 });
 
-describe('memory.get / memory.confirm — strict path scoping', () => {
+describe('memory.get_batch / memory.confirm_batch — strict path scoping', () => {
   let defaultId: string;
   let projectAId: string;
   let projectBId: string;
@@ -690,7 +693,7 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('path-scoped: get(default-project id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: defaultId })),
+      Promise.resolve(handlers.get({ ids: [defaultId], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -698,7 +701,7 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('path-scoped: get(other-project id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: projectBId })),
+      Promise.resolve(handlers.get({ ids: [projectBId], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -706,16 +709,16 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('path-scoped: get(own-project id) → ok', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: projectAId })),
+      Promise.resolve(handlers.get({ ids: [projectAId], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
-    const payload = parseText<{ memory: { id: string } }>(r);
-    expect(payload.memory.id).toBe(projectAId);
+    const payload = parseText<{ memories: { id: string }[] }>(r).memories[0]!;
+    expect(payload.id).toBe(projectAId);
   });
 
   it('unscoped /mcp: get(project id) → not_found  (the previously-leaky path is now closed)', async () => {
     const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.get({ id: projectAId })),
+      Promise.resolve(handlers.get({ ids: [projectAId], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -723,14 +726,14 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('unscoped /mcp: get(default-project id) → ok', async () => {
     const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.get({ id: defaultId })),
+      Promise.resolve(handlers.get({ ids: [defaultId], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
   });
 
   it('path-scoped: confirm(default-project id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.confirm({ id: defaultId })),
+      Promise.resolve(handlers.confirm({ ids: [defaultId] })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -738,7 +741,7 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('path-scoped: confirm(other-project id) → not_found', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.confirm({ id: projectBId })),
+      Promise.resolve(handlers.confirm({ ids: [projectBId] })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -746,7 +749,7 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('unscoped /mcp: confirm(project id) → not_found  (was leaky, now closed)', async () => {
     const r = await runWithContext(fakeContext(null), () =>
-      Promise.resolve(handlers.confirm({ id: projectAId })),
+      Promise.resolve(handlers.confirm({ ids: [projectAId] })),
     );
     expect(isErrorResponse(r)).toBe(true);
     expect(parseText<{ code: string }>(r).code).toBe('not_found');
@@ -754,7 +757,7 @@ describe('memory.get / memory.confirm — strict path scoping', () => {
 
   it('path-scoped: confirm(own-project id) → ok', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.confirm({ id: projectAId })),
+      Promise.resolve(handlers.confirm({ ids: [projectAId] })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
   });
@@ -815,7 +818,7 @@ describe('memory.archive — strict path scoping', () => {
   });
 });
 
-describe('memory.confirm — batch (ids)', () => {
+describe('memory.confirm_batch — batch (ids)', () => {
   it('confirms each id once; duplicates collapse to one; reports the count', async () => {
     const m1 = memory.save({ type: 'user', title: 'c1', content: 'c1' }, projectScope(projectA.id));
     const m2 = memory.save({ type: 'user', title: 'c2', content: 'c2' }, projectScope(projectA.id));
@@ -836,18 +839,18 @@ describe('memory.confirm — batch (ids)', () => {
   it('single-id confirm still returns { ok: true }', async () => {
     const m = memory.save({ type: 'user', title: 's', content: 's' }, projectScope(projectA.id));
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.confirm({ id: m.id })),
+      Promise.resolve(handlers.confirm({ ids: [m.id] })),
     );
     expect(parseText<{ ok: boolean }>(r).ok).toBe(true);
     expect(memory.get(m.id, projectScope(projectA.id))?.confirmationCount).toBe(1);
   });
 });
 
-describe('memory.confirm — verdict=refute (separate-access-from-usefulness)', () => {
+describe('memory.confirm_batch — verdict=refute (separate-access-from-usefulness)', () => {
   it('rejects a refute with no reason', async () => {
     const m = memory.save({ type: 'user', title: 'r', content: 'r' }, projectScope(projectA.id));
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.confirm({ id: m.id, verdict: 'refute' })),
+      Promise.resolve(handlers.confirm({ ids: [m.id], verdict: 'refute' })),
     );
     expect(isErrorResponse(r)).toBe(true);
   });
@@ -856,7 +859,7 @@ describe('memory.confirm — verdict=refute (separate-access-from-usefulness)', 
     const m = memory.save({ type: 'user', title: 'r', content: 'r' }, projectScope(projectA.id));
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(
-        handlers.confirm({ id: m.id, verdict: 'refute', reason: 'no longer accurate' }),
+        handlers.confirm({ ids: [m.id], verdict: 'refute', reason: 'no longer accurate' }),
       ),
     );
     expect(isErrorResponse(r)).toBeFalsy();
@@ -961,7 +964,7 @@ describe('memory.search — relation expansion (include_relations)', () => {
   });
 });
 
-describe('memory.search / memory.get — relation annotations', () => {
+describe('memory.search / memory.get_batch — relation annotations', () => {
   const MARKER = 'zzfloodmarker';
   let relHandlers: ReturnType<typeof buildMemoryHandlers>;
   let relations: RelationsService;
@@ -1041,7 +1044,7 @@ describe('memory.search / memory.get — relation annotations', () => {
     expect(calm?.relationsTotal).toBe(3);
   });
 
-  it('the batch `memory.get` form agrees with search', async () => {
+  it('the batch `memory.get_batch` form agrees with search', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(relHandlers.get({ ids: [floodedId, calmId] })),
     );
@@ -1056,11 +1059,13 @@ describe('memory.search / memory.get — relation annotations', () => {
     expect(memories[0]?.relations).toEqual(searched?.relations);
   });
 
-  it('the single-id `memory.get` form reports the same total at its own default of 50', async () => {
+  it('the single-id `memory.get_batch` form reports the same total at its own default of 50', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(relHandlers.get({ id: floodedId })),
+      Promise.resolve(relHandlers.get({ ids: [floodedId], relations_limit: 50 })),
     );
-    const payload = parseText<{ relations: { kind: string }[]; relationsTotal: number }>(r);
+    const payload = parseText<{
+      memories: { relations: { kind: string }[]; relationsTotal: number }[];
+    }>(r).memories[0]!;
     expect(payload.relations).toHaveLength(13);
     expect(payload.relations[0]?.kind).toBe('conflicts_with');
     expect(payload.relationsTotal).toBe(13);
@@ -1100,9 +1105,11 @@ describe('memory.search / memory.get — relation annotations', () => {
       expect(batchRow?.relationsTotal).toBe(60);
 
       const single = await runWithContext(fakeContext(projectA), () =>
-        Promise.resolve(relHandlers.get({ id: floodedId })),
+        Promise.resolve(relHandlers.get({ ids: [floodedId], relations_limit: 50 })),
       );
-      const singleRow = parseText<{ relations: unknown[]; relationsTotal: number }>(single);
+      const singleRow = parseText<{ memories: { relations: unknown[]; relationsTotal: number }[] }>(
+        single,
+      ).memories[0]!;
       expect(singleRow.relations).toHaveLength(50);
       expect(singleRow.relationsTotal).toBe(60);
     });
@@ -1119,7 +1126,7 @@ describe('memory.search / memory.get — relation annotations', () => {
   });
 });
 
-describe('memory.get — batch (ids)', () => {
+describe('memory.get_batch — batch (ids)', () => {
   let aId1: string;
   let aId2: string;
   let bId: string;
@@ -1129,38 +1136,43 @@ describe('memory.get — batch (ids)', () => {
     bId = memory.save({ type: 'user', title: 'b', content: 'b' }, projectScope(projectB.id)).id;
   });
 
-  it('returns an ordered in-scope batch; unknown and cross-scope ids go to notFound (no leak)', async () => {
+  it('returns ordered in-scope memories and associated errors without a notFound alias', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(handlers.get({ ids: [aId2, 'nope', bId, aId1] })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
-    const { memories, notFound } = parseText<{
+    const payload = parseText<{
       memories: { id: string }[];
-      notFound: string[];
+      errors: { id: string; code: string }[];
     }>(r);
-    expect(memories.map((m) => m.id)).toEqual([aId2, aId1]);
-    expect(notFound).toEqual(['nope', bId]);
+    expect(payload.memories.map((m) => m.id)).toEqual([aId2, aId1]);
+    expect(payload.errors.map(({ id, code }) => ({ id, code }))).toEqual([
+      { id: 'nope', code: 'not_found' },
+      { id: bId, code: 'not_found' },
+    ]);
+    expect(payload).not.toHaveProperty('notFound');
   });
 
-  it('legacy single-id request is unchanged', async () => {
+  it('a one-item batch returns complete metadata in memories', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: aId1 })),
+      Promise.resolve(handlers.get({ ids: [aId1], relations_limit: 50 })),
     );
-    const payload = parseText<{ memory: { id: string }; head: { id: string } }>(r);
-    expect(payload.memory.id).toBe(aId1);
+    const payload = parseText<{ memories: { id: string; head: { id: string } }[] }>(r).memories[0]!;
+    expect(payload.id).toBe(aId1);
     expect(payload.head.id).toBe(aId1);
   });
 
-  it('supplying both id and ids is invalid_input', async () => {
-    const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.get({ id: aId1, ids: [aId2] })),
-    );
-    expect(parseText<{ code: string }>(r).code).toBe('invalid_input');
+  it('strict schema refuses scalar and mixed inputs with a passing array control', () => {
+    const schema = z.object(memoryGetSchema).strict();
+    expect(schema.safeParse({ ids: [aId1] }).success).toBe(true);
+    expect(schema.safeParse({ id: aId1 }).success).toBe(false);
+    expect(schema.safeParse({ id: aId1, ids: [aId2] }).success).toBe(false);
   });
 
-  it('supplying neither id nor ids is invalid_input', async () => {
-    const r = await runWithContext(fakeContext(projectA), () => Promise.resolve(handlers.get({})));
-    expect(parseText<{ code: string }>(r).code).toBe('invalid_input');
+  it('strict schema accepts a period selector but requires nonempty ids when provided', () => {
+    const schema = z.object(memoryGetSchema).strict();
+    expect(schema.safeParse({ from: '2025-01-01T00:00:00Z' }).success).toBe(true);
+    expect(schema.safeParse({ ids: [] }).success).toBe(false);
   });
 });
 
@@ -1248,18 +1260,18 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     expect(memories.every((m) => m.scope === 'project' && m.projectId === projectA.id)).toBe(true);
   });
 
-  it('memory.get on a project id resolves once the router has activated that project', async () => {
+  it('memory.get_batch on a project id resolves once the router has activated that project', async () => {
     const saved = memory.save(
       { type: 'user', title: 'gettable', content: 'gettable' },
       projectScope(projectA.id),
     );
     router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
     const r = await runWithContext(unscopedContextWithSession(), () =>
-      Promise.resolve(routerHandlers.get({ id: saved.id })),
+      Promise.resolve(routerHandlers.get({ ids: [saved.id], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
-    const payload = parseText<{ memory: { id: string } }>(r);
-    expect(payload.memory.id).toBe(saved.id);
+    const payload = parseText<{ memories: { id: string }[] }>(r).memories[0]!;
+    expect(payload.id).toBe(saved.id);
   });
 });
 
@@ -1522,7 +1534,7 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
   });
 });
 
-describe('memory.confirm — session attachment (fix-audited-defects)', () => {
+describe('memory.confirm_batch — session attachment (fix-audited-defects)', () => {
   let agentSessions: AgentSessionsService;
   let confirmHandlers: ReturnType<typeof buildMemoryHandlers>;
   let realTokenId: string;
@@ -1574,7 +1586,7 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
     );
 
     const r = await runWithContext(ctxWithRealToken(projectA), () =>
-      confirmHandlers.confirm({ id: m.id, sessionId: 'sess-confirm-explicit' }),
+      confirmHandlers.confirm({ ids: [m.id], sessionId: 'sess-confirm-explicit' }),
     );
     expect(isErrorResponse(r)).toBeFalsy();
     expect(confirmationSessionIdFor(m.id)).toBe('sess-confirm-explicit');
@@ -1593,7 +1605,7 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
     );
 
     const r = await runWithContext(ctxWithRealToken(projectA), () =>
-      confirmHandlers.confirm({ id: m.id }),
+      confirmHandlers.confirm({ ids: [m.id] }),
     );
     expect(isErrorResponse(r)).toBeFalsy();
     expect(confirmationSessionIdFor(m.id)).toBe('sess-confirm-fallback');
@@ -1606,7 +1618,7 @@ describe('memory.confirm — session attachment (fix-audited-defects)', () => {
     );
 
     const r = await runWithContext(ctxWithRealToken(projectA), () =>
-      confirmHandlers.confirm({ id: m.id }),
+      confirmHandlers.confirm({ ids: [m.id] }),
     );
     expect(isErrorResponse(r)).toBeFalsy();
     expect(confirmationSessionIdFor(m.id)).toBeNull();

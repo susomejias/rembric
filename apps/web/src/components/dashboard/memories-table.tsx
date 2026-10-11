@@ -247,7 +247,7 @@ function MemoryRowMenu({
               <ConfirmSubmit
                 tone="warn"
                 title="Re-affirm this memory?"
-                description="Records a memory.confirm affirmation now, moving the row back to fresh past its per-type TTL. The content is unchanged."
+                description="Records a memory.confirm_batch affirmation now, moving the row back to fresh past its per-type TTL. The content is unchanged."
                 confirmLabel="CONFIRM MEMORY"
               >
                 <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>

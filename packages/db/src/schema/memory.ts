@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 import { projects } from './projects.js';
@@ -57,6 +57,12 @@ export const memory = sqliteTable(
       table.projectId,
       table.status,
       table.createdAt,
+    ),
+    scopeProjectCreatedIdIdx: index('memory_scope_project_created_id_idx').on(
+      table.scope,
+      table.projectId,
+      desc(table.createdAt),
+      desc(table.id),
     ),
     statusCreatedIdx: index('memory_status_created_idx').on(table.status, table.createdAt),
     typeInScopeIdx: index('memory_type_in_scope_idx').on(table.scope, table.projectId, table.type),

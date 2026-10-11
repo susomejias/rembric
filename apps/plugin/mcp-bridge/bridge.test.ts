@@ -296,7 +296,7 @@ describe('stdio to HTTP transport', () => {
         jsonrpc: '2.0',
         id: 2,
         method: 'tools/call',
-        params: { name: 'memory.get', arguments: {} },
+        params: { name: 'memory.get_batch', arguments: {} },
       });
       expect(await client.nextLine()).toMatchObject({
         id: 2,

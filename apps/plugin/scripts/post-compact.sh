@@ -33,7 +33,7 @@ fi
 
 cat <<'PROTOCOL'
 rembric: Resumed from a compaction. BEFORE continuing:
-1. Call memory.session_get to read the stored summary.
+1. Call memory.session_get_batch({ ids: [sessionId] }) and read sessions[0] in full.
 2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state: sent `##` sections REPLACE their stored counterpart; omitted ones STAY.
    - title: ≤100 chars, not the cwd.
    - summary: ≤10000 chars. Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):

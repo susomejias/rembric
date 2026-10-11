@@ -215,26 +215,42 @@ export class MemoryService {
   }
 
   get(id: string, scope: Scope): MemoryWithHistory | null {
-    const found = this.unsafeGetById(id);
-    if (!found || !memoryMatchesScope(found, scope)) return null;
-
-    const { rows: predecessors, truncated } = this.collectPredecessors(found);
-    const { head, truncated: headTruncated } = this.findHead(found);
-    const confirmationCount = this.repos.memory.countConfirmations(head.id);
+    const history = this.getHistory(id, scope);
+    if (!history) return null;
+    const { head } = history;
     const ts = this.repos.memory.reviewTimestampsByIds([head.id]).get(head.id);
-    const lastConfirmedAt = ts?.affirmedAt ?? null;
-    const lastRefutedAt = ts?.refutedAt ?? null;
-    const { reviewState, reviewAfter, reviewEscalated } = deriveReviewState(
+    const review = deriveReviewState(
       {
         type: head.type,
         createdAt: head.createdAt,
         status: head.status,
-        lastConfirmedAt,
-        lastRefutedAt,
+        lastConfirmedAt: ts?.affirmedAt ?? null,
+        lastRefutedAt: ts?.refutedAt ?? null,
       },
       this.now(),
     );
-    this.repos.memory.touchLastSeen(head.id, this.now());
+    this.recordAccess(head.id, scope);
+    return { ...history, ...review };
+  }
+
+  forPeriod(scope: Scope, from: Date, to: Date, limit = 20, offset = 0) {
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) {
+      throw new DomainError('invalid_input', 'from must be before to, using valid ISO timestamps.');
+    }
+    return this.repos.memory.forPeriod(
+      scope,
+      from,
+      to,
+      Math.min(20, Math.max(1, limit)),
+      Math.max(0, offset),
+    );
+  }
+
+  getHistory(id: string, scope: Scope): Omit<MemoryWithHistory, keyof DerivedReview> | null {
+    const found = this.unsafeGetById(id);
+    if (!found || !memoryMatchesScope(found, scope)) return null;
+    const { rows: predecessors, truncated } = this.collectPredecessors(found);
+    const { head, truncated: headTruncated } = this.findHead(found);
     return {
       memory: found,
       predecessors,
@@ -242,11 +258,16 @@ export class MemoryService {
       truncated,
       head,
       headTruncated,
-      confirmationCount,
-      reviewState,
-      reviewAfter,
-      reviewEscalated,
+      confirmationCount: this.repos.memory.countConfirmations(head.id),
     };
+  }
+
+  recordAccess(id: string, scope: Scope): void {
+    const found = this.unsafeGetById(id);
+    if (!found || !memoryMatchesScope(found, scope)) {
+      throw new DomainError('memory_not_found', 'Memory not found.');
+    }
+    this.repos.memory.touchLastSeen(id, this.now());
   }
 
   getMany(ids: readonly string[], scope: Scope): Memory[] {
@@ -425,14 +446,14 @@ export class MemoryService {
       if (!opts.reason || opts.reason.trim().length === 0) {
         throw new DomainError(
           'invalid_input',
-          'memory.confirm: verdict=refute requires a non-empty reason',
+          'memory.confirm_batch: verdict=refute requires a non-empty reason',
         );
       }
-      assertNoNul('memory.confirm', 'reason', opts.reason);
+      assertNoNul('memory.confirm_batch', 'reason', opts.reason);
     }
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) {
-      throw new DomainError('memory_not_found', `memory.confirm: id=${id} not found`);
+      throw new DomainError('memory_not_found', `memory.confirm_batch: id=${id} not found`);
     }
     const { head, truncated } = this.findHead(found);
     const ts = this.now();

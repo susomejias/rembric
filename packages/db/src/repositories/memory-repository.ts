@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
@@ -10,7 +10,7 @@ import {
   type MemoryType,
   type NewMemory,
 } from '../schema/memory.js';
-import { projectScope, type SearchScope } from '../scope.js';
+import { projectScope, type Scope, type SearchScope } from '../scope.js';
 
 import { idJsonSet, projectIdsOf, scopeCondition, scopeWhere } from './scope-clause.js';
 
@@ -108,6 +108,25 @@ export class MemoryRepository {
         LIMIT ${opts.limit}
       `,
     );
+  }
+
+  forPeriod(scope: Scope, from: Date, to: Date, limit: number, offset: number) {
+    const condition = and(
+      scopeCondition(scope),
+      gte(memory.createdAt, from),
+      lt(memory.createdAt, to),
+    );
+    const total =
+      this.db.select({ count: count() }).from(memory).where(condition).get()?.count ?? 0;
+    const rows = this.db
+      .select({ id: memory.id })
+      .from(memory)
+      .where(condition)
+      .orderBy(desc(memory.createdAt), desc(memory.id))
+      .limit(limit)
+      .offset(offset)
+      .all();
+    return { ids: rows.map((row) => row.id), total };
   }
 
   /** Recent in-scope memories (memory.context), newest by last-seen/created. */

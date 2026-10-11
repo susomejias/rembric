@@ -33,6 +33,43 @@ afterEach(() => {
   db.cleanup();
 });
 
+describe('batch read service boundaries', () => {
+  it('period selection validates each date and ordering with a nonempty scoped control', () => {
+    const scope = projectScope(projectId);
+    const saved = memory.save(
+      { type: 'reference', title: 'period control', content: 'complete' },
+      scope,
+    );
+    const from = saved.createdAt;
+    const to = new Date(from.getTime() + 1);
+    expect(memory.forPeriod(scope, from, to).ids).toEqual([saved.id]);
+    for (const [start, end] of [
+      [new Date(NaN), to],
+      [from, new Date(NaN)],
+      [from, from],
+      [to, from],
+    ]) {
+      expect(() => memory.forPeriod(scope, start!, end!)).toThrow(DomainError);
+    }
+  });
+
+  it('recordAccess rejects missing and foreign IDs without touching foreign rows', () => {
+    const scope = projectScope(projectId);
+    const own = memory.save({ type: 'reference', title: 'owned', content: 'control' }, scope);
+    const otherScope = defaultProjectScope(db.handle);
+    const foreign = memory.save(
+      { type: 'reference', title: 'foreign', content: 'private' },
+      otherScope,
+    );
+    clock.advance(1000);
+    expect(() => memory.recordAccess('missing', scope)).toThrow(DomainError);
+    expect(() => memory.recordAccess(foreign.id, scope)).toThrow(DomainError);
+    expect(memory.unsafeGetById(foreign.id)?.lastSeenAt).toEqual(foreign.lastSeenAt);
+    expect(() => memory.recordAccess(own.id, scope)).not.toThrow();
+    expect(memory.unsafeGetById(own.id)?.lastSeenAt).toEqual(clock.now());
+  });
+});
+
 describe('memory.getMany (scoped batch retrieve)', () => {
   it('returns in-scope rows in request order and omits cross-scope/missing ids', () => {
     const otherId = projects.create({ slug: 'other-app' }).id;

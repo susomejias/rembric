@@ -593,6 +593,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0034_session_nudge_gate.sql',
       '0035_drop_session_summary_versions.sql',
       '0036_session_turn_report_anchor.sql',
+      '0037_batch_period_indexes.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1060,6 +1061,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
       '0034_session_nudge_gate.sql',
       '0035_drop_session_summary_versions.sql',
       '0036_session_turn_report_anchor.sql',
+      '0037_batch_period_indexes.sql',
     ]);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);

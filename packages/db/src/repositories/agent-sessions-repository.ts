@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -9,6 +9,7 @@ import {
 } from '../schema/agent-sessions.js';
 import { projects, type Project } from '../schema/projects.js';
 import { tokens, type Token } from '../schema/tokens.js';
+import type { Scope } from '../scope.js';
 
 export type AdminSessionRow = Pick<
   AgentSession,
@@ -163,6 +164,29 @@ export class AgentSessionsRepository {
   /** Bump `last_activity_at` — called by every write that resolves to this session. */
   touchActivity(id: string, at: Date): void {
     this.db.update(agentSessions).set({ lastActivityAt: at }).where(eq(agentSessions.id, id)).run();
+  }
+
+  forPeriod(scope: Scope, from: Date, to: Date, limit: number, offset: number) {
+    const condition = and(
+      scope.projectId === null
+        ? isNull(agentSessions.projectId)
+        : eq(agentSessions.projectId, scope.projectId),
+      isNull(agentSessions.deletedAt),
+      lt(agentSessions.startedAt, to),
+      sql`coalesce(${agentSessions.lastActivityAt}, ${agentSessions.startedAt}) >= ${from.getTime()}`,
+      sessionHasContentSql('sessions', { requireCuratedSummary: false }),
+    );
+    const total =
+      this.db.select({ count: count() }).from(agentSessions).where(condition).get()?.count ?? 0;
+    const sessions = this.db
+      .select()
+      .from(agentSessions)
+      .where(condition)
+      .orderBy(desc(agentSessions.startedAt), desc(agentSessions.id))
+      .limit(limit)
+      .offset(offset)
+      .all();
+    return { sessions, total };
   }
 
   recentForContext(projectId: string | null, limit: number): AgentSession[] {

@@ -183,7 +183,7 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
     expect(payload.code).toBe('forbidden');
   });
 
-  it('memory.judge rejects a read:* token with forbidden; the relation stays pending', async () => {
+  it('memory.judge_batch rejects a read:* token with forbidden; the relation stays pending', async () => {
     const source = memory.save(
       { type: 'project', title: 'src', content: 'src' },
       { kind: 'project', projectId: projectA.id },
@@ -196,7 +196,10 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
 
     const r = await runWithContext(
       ctxFor('read:*', { project: projectA, requestedSlug: projectA.slug }),
-      () => relationsHandlers.judge({ judgmentId: pending.judgmentId, relation: 'related' }),
+      () =>
+        relationsHandlers.judge({
+          judgments: [{ judgmentId: pending.judgmentId, relation: 'related' }],
+        }),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);
@@ -310,12 +313,12 @@ describe('project-restricted token cannot read or write outside its project', ()
     expect(payload.code).toBe('forbidden');
   });
 
-  it('memory.session_get: project:A token resolved to project B → forbidden', async () => {
+  it('memory.session_get_batch: project:A token resolved to project B → forbidden', async () => {
     const tokenId = tokenFor(`project:${projectA.id}`).id;
     const sess = agentSessions.start({ tokenId, projectId: projectB.id, agent: 'x' });
     router.setActiveProject(tokenId, MCP_SESSION_ID, projectB.id, 'tool-explicit');
     const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
-      sessionHandlers.sessionGet({ sessionId: sess.id }),
+      sessionHandlers.sessionGet({ ids: [sess.id] }),
     );
     const { isError, payload } = decode(r);
     expect(isError).toBe(true);

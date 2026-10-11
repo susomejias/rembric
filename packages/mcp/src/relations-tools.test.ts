@@ -13,8 +13,9 @@ import {
   type Token,
 } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
-import { buildRelationsHandlers } from '@rembric/mcp';
+import { buildRelationsHandlers, judgeSchema } from '@rembric/mcp';
 import { suggestTopicKey } from '@rembric/mcp';
 
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
@@ -90,7 +91,7 @@ beforeEach(() => {
 
 afterEach(() => db.cleanup());
 
-describe('memory.judge — batch form', () => {
+describe('memory.judge_batch — batch form', () => {
   it('judges each item independently: a bogus id errors without rolling back the good ones', async () => {
     db.handle.db
       .insert(memory)
@@ -144,45 +145,46 @@ describe('memory.judge — batch form', () => {
     const p = relations.createPending({ sourceId: 'A', targetId: 'B' });
 
     const r = await runWithContext(fakeContext(), () =>
-      Promise.resolve(handlers.judge({ judgmentId: p.judgmentId, relation: 'related' })),
+      Promise.resolve(
+        handlers.judge({ judgments: [{ judgmentId: p.judgmentId, relation: 'related' }] }),
+      ),
     );
-    const out = parse<{ ok: boolean; judgmentId: string; status: string }>(r);
+    const out = parse<{ results: { ok: boolean; judgmentId: string; status: string }[] }>(r)
+      .results[0]!;
     expect(out.ok).toBe(true);
     expect(out.judgmentId).toBe(p.judgmentId);
     expect(out.status).toBe('judged');
   });
 
-  it('rejects supplying BOTH single fields and judgments (spec: exactly one)', async () => {
+  it('rejects retired scalar fields with a passing judgments-array control', () => {
     db.handle.db
       .insert(memory)
       .values([mem('A', 'a'), mem('B', 'b')])
       .run();
     const p = relations.createPending({ sourceId: 'A', targetId: 'B' });
-    const r = await runWithContext(fakeContext(), () =>
-      Promise.resolve(
-        handlers.judge({
-          judgmentId: p.judgmentId,
-          relation: 'related',
-          judgments: [{ judgmentId: p.judgmentId, relation: 'related' }],
-        }),
-      ),
-    );
-    const out = parse<{ ok: boolean; code: string }>(r);
-    expect(out.ok).toBe(false);
-    expect(out.code).toBe('invalid_input');
+    const schema = z.object(judgeSchema).strict();
+    expect(
+      schema.safeParse({ judgments: [{ judgmentId: p.judgmentId, relation: 'related' }] }).success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        judgmentId: p.judgmentId,
+        relation: 'related',
+        judgments: [{ judgmentId: p.judgmentId, relation: 'related' }],
+      }).success,
+    ).toBe(false);
     // The pending row must remain untouched (no silent partial judge).
     expect(repos.relations.findByJudgmentId(p.judgmentId)?.status).toBe('pending');
   });
 
-  it('rejects supplying NEITHER single fields nor judgments', async () => {
-    const r = await runWithContext(fakeContext(), () => Promise.resolve(handlers.judge({})));
-    const out = parse<{ ok: boolean; code: string }>(r);
-    expect(out.ok).toBe(false);
-    expect(out.code).toBe('invalid_input');
+  it('requires a nonempty judgments array', () => {
+    const schema = z.object(judgeSchema).strict();
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ judgments: [] }).success).toBe(false);
   });
 });
 
-describe('memory.judge — cross-scope targets never leak existence', () => {
+describe('memory.judge_batch — cross-scope targets never leak existence', () => {
   let projects: ProjectsService;
   let projectA: Project;
   let projectB: Project;
@@ -204,7 +206,9 @@ describe('memory.judge — cross-scope targets never leak existence', () => {
     const pending = relations.createPending({ sourceId: 'SB', targetId: 'TB' });
 
     const r = await runWithContext(fakeContext(projectA), () =>
-      Promise.resolve(handlers.judge({ judgmentId: pending.judgmentId, relation: 'related' })),
+      Promise.resolve(
+        handlers.judge({ judgments: [{ judgmentId: pending.judgmentId, relation: 'related' }] }),
+      ),
     );
     const out = parse<{ ok: boolean; code: string }>(r);
     expect(out.ok).toBe(false);

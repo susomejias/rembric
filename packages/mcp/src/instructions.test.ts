@@ -15,6 +15,22 @@ describe('MCP initialize instructions', () => {
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
   });
 
+  it('teaches batch selectors, complete pages and errors without retired recommendations', () => {
+    for (const requestedSlug of [null, 'rembric', 'x'.repeat(64)]) {
+      const text = buildInstructions({ requestedSlug });
+      expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
+      expect(text).toContain('memory.get_batch(creation)');
+      expect(text).toContain('memory.session_get_batch(activity)');
+      expect(text).toContain('ids OR from/to');
+      expect(text).toContain('limit≤20');
+      expect(text).toContain('offset=nextOffset until null');
+      expect(text).toContain('full current data/errors');
+      expect(text).toContain('all failed=isError');
+      expect(text).toContain('memory.judge_batch({judgments:[…]})');
+      expect(text).not.toMatch(/memory\.(get|session_get|confirm|judge)(?!_batch)\b/);
+    }
+  });
+
   it('carries the exact Markdown summary headings on separate lines in both variants', () => {
     const headings = [
       '## Goal',

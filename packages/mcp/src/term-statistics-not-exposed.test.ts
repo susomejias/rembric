@@ -97,7 +97,11 @@ describe('term statistics are not a response channel', () => {
         ),
       ),
       text(await runWithContext(context(), () => handlers.context({}))),
-      text(await runWithContext(context(), () => handlers.get({ id: rows[0]!.id }))),
+      text(
+        await runWithContext(context(), () =>
+          handlers.get({ ids: [rows[0]!.id], relations_limit: 50 }),
+        ),
+      ),
       text(
         await runWithContext(context(), () =>
           handlers.save({

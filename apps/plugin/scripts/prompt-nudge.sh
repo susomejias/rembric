@@ -11,7 +11,7 @@ trap 'exit 0' ERR
 
 SESSION_OPENING_NUDGE='rembric: New session — before you finish this turn, call memory.session_summary with a title and a single `## Goal` section describing what this session is for; the other five canonical headings are intentionally left out.'
 SESSION_ID_NUDGE_TEMPLATE='rembric: sessionId="{{SESSION_ID}}" — pass it explicitly to memory.save/memory.session_summary/memory.save_prompt now, to guarantee correct attachment; never guess a different one.'
-RESUMED_READ_NUDGE='rembric: this session existed before this process attached to it — call memory.session_get before your next memory.session_summary write.'
+RESUMED_READ_NUDGE='rembric: Resumed session: read memory.session_get_batch({ ids: [sessionId] }) / sessions[0] in full before writing memory.session_summary.'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_api.sh

@@ -6,16 +6,21 @@ import { describe, expect, it } from 'vitest';
 
 import {
   contextSchema,
+  memoryConfirmSchema,
   memorySaveSchema,
   memorySearchSchema,
-} from '../../server/src/mcp/memory-tools.js';
-import { sessionSummarySchema } from '../../server/src/mcp/session-tools.js';
+} from '../../../packages/mcp/src/memory-tools.js';
+import { judgeSchema } from '../../../packages/mcp/src/relations-tools.js';
+import { sessionGetSchema, sessionSummarySchema } from '../../../packages/mcp/src/session-tools.js';
 
 const SCHEMAS: Record<string, Record<string, unknown>> = {
   save: memorySaveSchema,
   search: memorySearchSchema,
   context: contextSchema,
   session_summary: sessionSummarySchema,
+  session_get_batch: sessionGetSchema,
+  confirm_batch: memoryConfirmSchema,
+  judge_batch: judgeSchema,
 };
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,16 +39,22 @@ function parse(file: string): { name: string; description: string; body: string 
 }
 
 const EXPECTED: Record<string, { tool: string; keys: string[] }[]> = {
-  'context.md': [{ tool: 'save', keys: ['topic_key'] }],
+  'context.md': [
+    { tool: 'confirm_batch', keys: ['ids'] },
+    { tool: 'save', keys: ['topic_key'] },
+    { tool: 'judge_batch', keys: ['judgments'] },
+    { tool: 'session_get_batch', keys: ['from', 'to', 'limit', 'offset'] },
+  ],
   'recall.md': [{ tool: 'search', keys: ['query', 'limit'] }],
   'remember.md': [{ tool: 'save', keys: ['type', 'title', 'content'] }],
   'summary.md': [{ tool: 'session_summary', keys: ['title', 'summary'] }],
 };
 
 function callSites(body: string): { tool: string; keys: string[] }[] {
-  return [...body.matchAll(/memory\.([a-z_]+)\(\{([^{}]*)\}\)/g)].map((m) => ({
+  return [...body.matchAll(/memory\.([a-z_]+)\(\{(.*?)\}\)/g)].map((m) => ({
     tool: m[1]!,
     keys: m[2]!
+      .replace(/\[[^\]]*\]/g, '')
       .split(',')
       .map((entry) => entry.split(':')[0]!.trim())
       .filter(Boolean),
@@ -55,6 +66,17 @@ function objectCallCount(body: string): number {
 }
 
 describe('command bodies name only arguments their tool accepts', () => {
+  it('parses array arguments without mistaking nested fields for tool arguments', () => {
+    expect(
+      callSites(
+        'memory.judge_batch({ judgments: [{ judgmentId, relation: "related" }, { judgmentId, relation: "compatible" }] })',
+      ),
+    ).toEqual([{ tool: 'judge_batch', keys: ['judgments'] }]);
+    expect(callSites('memory.confirm_batch({ ids: [first, second], verdict: "affirm" })')).toEqual([
+      { tool: 'confirm_batch', keys: ['ids', 'verdict'] },
+    ]);
+  });
+
   it('ships exactly four commands', () => {
     expect(commandFiles).toEqual(Object.keys(EXPECTED));
   });

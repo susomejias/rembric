@@ -269,7 +269,7 @@
             <h3>Conflicts get judged</h3>
             <p>
               Contradictions surface as <code>candidates[]</code> and are closed with
-              <code>memory.judge</code>. Same-topic writes supersede atomically by
+              <code>memory.judge_batch</code>. Same-topic writes supersede atomically by
               <code>topic_key</code> — the old row flips to <code>superseded</code>, never deleted.
             </p>
           </div>
@@ -287,7 +287,8 @@
             <h3>Memory ages out</h3>
             <p>
               A deterministic sweep decays stale rows by access + confidence and flags others for
-              review via <code>memory.confirm</code> — no cron, no LLM, throttled on session start.
+              review via <code>memory.confirm_batch</code> — no cron, no LLM, throttled on session
+              start.
             </p>
           </div>
         </div>

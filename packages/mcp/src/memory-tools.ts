@@ -47,8 +47,8 @@ import {
   serializeMemory,
   snippet,
 } from './_shared.js';
-import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
-import { ok } from './result.js';
+import { errToMcp, isDomainError, itemError, mcpError, type ErrorReportingDeps } from './errors.js';
+import { batchResult, ok } from './result.js';
 
 /** An entry carries two snippets and two titles, ~2x a recentMemories row, so 50 costs about what `memories: 100` does. */
 const PENDING_JUDGMENTS_MAX = 50;
@@ -62,8 +62,6 @@ export const TIMELINE_WINDOW_MAX = 50;
 
 /** Per-surface `relations` defaults; the maximum and the multi-row default are shared. */
 const RELATION_ANNOTATION_DEFAULT = MULTI_ROW_ANNOTATION_DEFAULT;
-/** Single-id `memory.get` is the deliberate deep read, so it defaults to the maximum. */
-const RELATION_ANNOTATION_DEFAULT_SINGLE = RELATION_ANNOTATION_MAX;
 
 /** The text must keep naming `min(relationsTotal, MAX)`: a bare `relationsTotal` is the ask this schema rejects. */
 function relationsLimitParam(defaults: string) {
@@ -85,7 +83,7 @@ function relationsLimitParam(defaults: string) {
         `against the other (e.g. ${Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / RELATION_ANNOTATION_MAX)} ` +
         `rows at ${RELATION_ANNOTATION_MAX}, or the row maximum at the default). ` +
         'Over-budget is REJECTED too. On the multi-row surfaces a judged `reason` is truncated; ' +
-        'single-id `memory.get` reads one memory at the maximum and returns it verbatim.',
+        'single-item `memory.get_batch({ids:[id],relations_limit:50})` returns complete reasons.',
     );
 }
 
@@ -128,7 +126,7 @@ export const memorySearchSchema = {
     .boolean()
     .optional()
     .describe(
-      'Also read the other projects this token is allowed to read — never one it is not. Leave it off for ordinary recall: pass it only when the user explicitly asks about other projects, or when this project answered nothing. `searchedProjects[]` in the response names the projects actually read, and `widened:true` appears only when that was more than one; a token that reaches a single project gets its ordinary result. Reads only — it does not change where memory.save writes, and memory.get still refuses an id from another project.',
+      'Also read the other projects this token is allowed to read — never one it is not. Leave it off for ordinary recall: pass it only when the user explicitly asks about other projects, or when this project answered nothing. `searchedProjects[]` in the response names the projects actually read, and `widened:true` appears only when that was more than one; a token that reaches a single project gets its ordinary result. Reads only — it does not change where memory.save writes, and memory.get_batch still refuses an id from another project.',
     ),
   include_relations: z
     .boolean()
@@ -159,7 +157,7 @@ export const memorySearchSchema = {
     .min(1)
     .optional()
     .describe(
-      "Truncate each result's `content` to this many characters (ellipsis appended) so a broad triage scan stays cheap; omit for full content, then drill in with memory.get.",
+      "Truncate each result's `content` to this many characters (ellipsis appended) so a broad triage scan stays cheap; omit for full content, then drill in with memory.get_batch.",
     ),
   fields: z
     .array(z.string())
@@ -171,37 +169,52 @@ export const memorySearchSchema = {
 };
 
 export const memoryGetSchema = {
-  id: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('A single memory id. Provide exactly one of `id` or `ids`.'),
   ids: z
     .array(z.string().min(1))
     .min(1)
-    .max(100)
     .optional()
     .describe(
-      'Batch: fetch several memories by id in one scoped call. Out-of-scope/unknown ids come back in `notFound`. Provide exactly one of `id` or `ids`.',
+      'Memory IDs in requested order; duplicates removed before paging. Use IDs OR from/to, never both. A one-item array reads one memory; missing/foreign IDs have errors.',
     ),
-  relations_limit: relationsLimitParam(
-    `default ${RELATION_ANNOTATION_DEFAULT_SINGLE} with \`id\`, ${RELATION_ANNOTATION_DEFAULT} with \`ids\``,
-  ),
+  from: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      'ISO timestamp with offset: inclusive creation-time start. Select all in-scope statuses by createdAt, not lastSeenAt. Current records/history, not historical snapshots; mutually exclusive with ids.',
+    ),
+  to: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      'ISO timestamp with offset: exclusive creation-time end; defaults to server now. Requires from < to.',
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .optional()
+    .describe(
+      'Outcomes per page, including errors; default/max20. Full records, no byte-based truncation.',
+    ),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      'Default0. Continue with nextOffset until null using the same selection. Period pages are live views; only successfully served records count as access.',
+    ),
+  relations_limit: relationsLimitParam(`default ${RELATION_ANNOTATION_DEFAULT}`),
 };
 
 export const memoryConfirmSchema = {
-  id: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('A single memory id. Provide exactly one of `id` or `ids`.'),
   ids: z
     .array(z.string().min(1))
     .min(1)
-    .max(100)
-    .optional()
+    .max(20)
     .describe(
-      'Batch: record the same verdict over several memories in one call (e.g. re-affirm all of memory.context.needsReview). Provide exactly one of `id` or `ids`.',
+      '1–20 memory IDs, deduplicated; one shared verdict. Atomic: any failed target rolls back every confirmation. Use a one-element array for one memory.',
     ),
   sessionId: z
     .string()
@@ -349,55 +362,59 @@ export const memorySearchOutput = {
 };
 
 export const memoryGetOutput = {
-  memory: z
-    .object({
-      id: z.string(),
-      scope: z.string(),
-      projectId: z.string().nullable(),
-      type: z.string(),
-      title: z.string(),
-      content: z.string(),
-      tags: z.array(z.string()),
-      status: z.string(),
-      replaces: z.array(z.string()),
-      createdAt: z.string(),
-      topicKey: z.string().nullable(),
-    })
-    .optional(),
-  head: z
-    .object({ id: z.string(), title: z.string(), content: z.string(), status: z.string() })
-    .optional(),
-  predecessors: z
-    .array(
-      z.object({
-        id: z.string(),
-        title: z.string(),
-        status: z.string(),
-        createdAt: z.string(),
+  memories: z.array(
+    memoryRow
+      .required({
+        scope: true,
+        projectId: true,
+        content: true,
+        tags: true,
+        status: true,
+        replaces: true,
+        createdAt: true,
+        lastSeenAt: true,
+        topicKey: true,
+        relations: true,
+        relationsTotal: true,
+        entities: true,
+        entitiesTotal: true,
+      })
+      .extend({
+        head: z.object({
+          id: z.string(),
+          title: z.string(),
+          content: z.string(),
+          status: z.string(),
+        }),
+        predecessors: z.array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            status: z.string(),
+            createdAt: z.string(),
+          }),
+        ),
+        predecessorCount: z.number(),
+        truncated: z.boolean(),
+        headTruncated: z.boolean(),
+        confirmationCount: z.number(),
       }),
-    )
-    .optional(),
-  predecessorCount: z.number().optional(),
-  truncated: z.boolean().optional(),
-  /** True when head resolution stopped at its hop cap without reaching an active row. */
-  headTruncated: z.boolean().optional(),
-  confirmationCount: z.number().optional(),
-  relations: z.array(relationView).optional(),
-  relationsTotal: z.number().optional(),
-  entities: z.array(entityRef).optional(),
-  entitiesTotal: z.number().optional(),
-  reviewState: z.string().optional(),
-  reviewAfter: z.string().nullable().optional(),
-  /** True once the memory has sat in `needs_review` past its escalation window. */
-  reviewEscalated: z.boolean().optional(),
-  // Batch response (when `ids` is provided).
-  memories: z.array(memoryRow).optional(),
-  notFound: z.array(z.string()).optional(),
+  ),
+  errors: z.array(
+    z.object({
+      id: z.string(),
+      code: z.string(),
+      message: z.string(),
+      errorId: z.string().optional(),
+    }),
+  ),
+  total: z.number(),
+  nextOffset: z.number().nullable(),
 };
 
 export const memoryConfirmOutput = {
   ok: z.literal(true),
-  confirmed: z.number().optional(),
+  confirmed: z.number(),
   /** True when resolving the supersedes-chain head stopped at its hop cap. */
   headTruncated: z.boolean().optional(),
 };
@@ -741,7 +758,7 @@ function annotationBudgetError(
       `the ${RELATION_ANNOTATION_RESPONSE_BUDGET} a single response may carry. Either lower ` +
       `${rowParam} to ${affordable} at relations_limit ${perRow}, or keep ${rowParam} ${rows} at ` +
       `relations_limit ${Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / rows)} or below. For one ` +
-      "memory's annotations at the maximum, use memory.get with a single `id` — it is exempt by " +
+      "memory's annotations at the maximum, use memory.get_batch with `ids: [id]` — it is exempt by " +
       'construction and returns each `reason` verbatim.',
   );
 }
@@ -894,122 +911,102 @@ async function handleSearch(
   }
 }
 
-async function handleGet(
-  deps: MemoryToolDeps,
-  args: { id?: string; ids?: string[]; relations_limit?: number },
-) {
+async function handleGet(deps: MemoryToolDeps, args: z.infer<z.ZodObject<typeof memoryGetSchema>>) {
+  if (
+    args.ids !== undefined
+      ? args.from !== undefined || args.to !== undefined
+      : args.from === undefined
+  ) {
+    return mcpError('invalid_input', 'Provide either ids or from/to, never both.');
+  }
   try {
     const { scope } = await resolveEffectiveScope(deps);
-
-    const hasId = typeof args.id === 'string' && args.id.length > 0;
-    const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
-    if (hasId === hasIds) {
-      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
-    }
-
     assertAuthorized('read', scope, deps);
-    if (args.ids !== undefined) {
-      const batchBudget = annotationBudgetError(
-        'ids',
-        args.ids.length,
-        args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
-      );
-      if (batchBudget) return batchBudget;
-      const rows = deps.memory.getMany(args.ids, scope);
-      const relations = deps.relations
-        ? deps.relations.listForMemories(
-            rows.map((m) => m.id),
-            args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
-          )
-        : null;
-      const entitiesByMemory = deps.repos
-        ? deps.repos.entities.findEntitiesForMemories(rows.map((m) => m.id))
-        : new Map<string, { kind: string; value: string }[]>();
-      // One batched confirmation lookup for the whole page, never per row.
-      const review = deps.memory.reviewStateForMemories(rows);
-      const found = new Set(rows.map((m) => m.id));
-      return ok({
-        memories: rows.map((m) => {
-          const ents = entitiesByMemory.get(m.id) ?? [];
-          const annotations = relations?.get(m.id);
-          const r = review.get(m.id);
-          return {
-            id: m.id,
-            scope: m.scope,
-            projectId: m.projectId,
-            type: m.type,
-            title: m.title,
-            content: m.content,
-            tags: m.tags,
-            status: m.status,
-            replaces: m.replaces,
-            createdAt: m.createdAt,
-            lastSeenAt: m.lastSeenAt,
-            topicKey: m.topicKey,
-            relations: boundAnnotationReasons(annotations?.views ?? [], ANNOTATION_REASON_CHARS),
-            relationsTotal: annotations?.total ?? 0,
-            ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
-            ...(r && r.reviewState !== null
-              ? {
-                  reviewState: r.reviewState,
-                  reviewAfter: r.reviewAfter ?? null,
-                  reviewEscalated: r.reviewEscalated,
-                }
-              : {}),
-          };
-        }),
-        notFound: args.ids.filter((id) => !found.has(id)),
-      });
+    const offset = args.offset ?? 0;
+    const limit = args.limit ?? 20;
+    const ids = args.ids ? [...new Set(args.ids)] : null;
+    const selection = ids
+      ? null
+      : deps.memory.forPeriod(
+          scope,
+          new Date(args.from!),
+          args.to ? new Date(args.to) : new Date(),
+          limit,
+          offset,
+        );
+    const total = ids?.length ?? selection!.total;
+    const page = ids ? ids.slice(offset, offset + limit) : selection!.ids;
+    const errors: z.infer<typeof memoryGetOutput.errors> = [];
+    const histories = [];
+    for (const id of page) {
+      try {
+        const history = deps.memory.getHistory(id, scope);
+        if (history) histories.push(history);
+        else errors.push({ id, code: 'not_found', message: 'Item not found.' });
+      } catch (err) {
+        errors.push({ id, ...itemError(err, deps.logInternalError) });
+      }
     }
-
-    if (args.id === undefined) {
-      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
-    }
-    const result = deps.memory.get(args.id, scope);
-    if (!result) {
-      return mcpError('not_found', `memory '${args.id}' not found`);
-    }
-    const annotations = deps.relations?.listForMemory(
-      result.memory.id,
-      args.relations_limit ?? RELATION_ANNOTATION_DEFAULT_SINGLE,
+    const rows = histories.map((h) => h.memory);
+    const relations = deps.relations?.listForMemories(
+      rows.map((m) => m.id),
+      args.relations_limit ?? RELATION_ANNOTATION_DEFAULT,
     );
-    const ents = deps.repos ? deps.repos.entities.findEntitiesForMemory(result.memory.id) : [];
-    return ok({
-      memory: {
-        id: result.memory.id,
-        scope: result.memory.scope,
-        projectId: result.memory.projectId,
-        type: result.memory.type,
-        title: result.memory.title,
-        content: result.memory.content,
-        tags: result.memory.tags,
-        status: result.memory.status,
-        replaces: result.memory.replaces,
-        createdAt: result.memory.createdAt,
-        topicKey: result.memory.topicKey,
-      },
-      head: {
-        id: result.head.id,
-        title: result.head.title,
-        content: result.head.content,
-        status: result.head.status,
-      },
-      predecessors: result.predecessors,
-      predecessorCount: result.predecessorCount,
-      truncated: result.truncated,
-      headTruncated: result.headTruncated,
-      confirmationCount: result.confirmationCount,
-      relations: annotations?.views ?? [],
-      relationsTotal: annotations?.total ?? 0,
-      ...projectEntities(ents, ENTITIES_PROJECTION_CAP),
-      ...(result.reviewState === null
-        ? {}
-        : {
-            reviewState: result.reviewState,
-            reviewAfter: result.reviewAfter ?? null,
-            reviewEscalated: result.reviewEscalated,
-          }),
-    });
+    const entities = deps.repos?.entities.findEntitiesForMemories(rows.map((m) => m.id));
+    const review = deps.memory.reviewStateForMemories(rows);
+    const memories = [];
+    for (const h of histories) {
+      const m = h.memory;
+      try {
+        const annotations = relations?.get(m.id);
+        const r = review.get(m.id);
+        const entry = {
+          id: m.id,
+          scope: m.scope,
+          projectId: m.projectId,
+          type: m.type,
+          title: m.title,
+          content: m.content,
+          tags: m.tags,
+          status: m.status,
+          replaces: m.replaces,
+          createdAt: m.createdAt,
+          lastSeenAt: m.lastSeenAt,
+          topicKey: m.topicKey,
+          head: {
+            id: h.head.id,
+            title: h.head.title,
+            content: h.head.content,
+            status: h.head.status,
+          },
+          predecessors: h.predecessors,
+          predecessorCount: h.predecessorCount,
+          truncated: h.truncated,
+          headTruncated: h.headTruncated,
+          confirmationCount: h.confirmationCount,
+          relations:
+            page.length === 1
+              ? (annotations?.views ?? [])
+              : boundAnnotationReasons(annotations?.views ?? [], ANNOTATION_REASON_CHARS),
+          relationsTotal: annotations?.total ?? 0,
+          ...projectEntities(entities?.get(m.id) ?? [], ENTITIES_PROJECTION_CAP),
+          ...(r && r.reviewState !== null
+            ? {
+                reviewState: r.reviewState,
+                reviewAfter: r.reviewAfter ?? null,
+                reviewEscalated: r.reviewEscalated,
+              }
+            : {}),
+        };
+        deps.memory.recordAccess(h.head.id, scope);
+        memories.push(entry);
+      } catch (err) {
+        errors.push({ id: m.id, ...itemError(err, deps.logInternalError) });
+      }
+    }
+    errors.sort((a, b) => page.indexOf(a.id) - page.indexOf(b.id));
+    const nextOffset = offset + page.length < total ? offset + page.length : null;
+    return batchResult({ memories, errors, total, nextOffset }, memories.length, errors);
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
@@ -1017,52 +1014,23 @@ async function handleGet(
 
 async function handleConfirm(
   deps: MemoryToolDeps,
-  args: {
-    id?: string;
-    ids?: string[];
-    sessionId?: string;
-    verdict?: 'affirm' | 'refute';
-    reason?: string;
-  },
+  args: z.infer<z.ZodObject<typeof memoryConfirmSchema>>,
 ) {
   const ctx = getRequestContext();
-
   try {
     const { scope } = await resolveEffectiveScope(deps);
-
-    const hasId = typeof args.id === 'string' && args.id.length > 0;
-    const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
-    if (hasId === hasIds) {
-      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
-    }
-
     assertAuthorized('write', scope, deps);
-    const confirmProjectId = scope.projectId;
-    let sessionId: string | undefined;
-    try {
-      sessionId = resolveActiveSessionId(deps, confirmProjectId, args.sessionId) ?? undefined;
-    } catch (err) {
-      return errToMcp(err, deps.logInternalError);
-    }
-    const opts = {
+    const sessionId = resolveActiveSessionId(deps, scope.projectId, args.sessionId) ?? undefined;
+    const { confirmed, headTruncated } = deps.memory.confirmMany(args.ids, scope, {
       source: { tokenName: ctx.token.name },
       sessionId,
       verdict: args.verdict,
       reason: args.reason,
-    };
-    if (args.ids !== undefined) {
-      const { confirmed, headTruncated } = deps.memory.confirmMany(args.ids, scope, opts);
-      return ok({ ok: true, confirmed, ...(headTruncated ? { headTruncated } : {}) });
-    }
-    if (args.id === undefined) {
-      return mcpError('invalid_input', 'provide exactly one of `id` or `ids`');
-    }
-    const { headTruncated } = deps.memory.confirm(args.id, scope, opts);
-    return ok({ ok: true, ...(headTruncated ? { headTruncated } : {}) });
+    });
+    return ok({ ok: true, confirmed, ...(headTruncated ? { headTruncated } : {}) });
   } catch (err) {
-    if (isDomainError(err) && err.code === 'memory_not_found') {
+    if (isDomainError(err) && err.code === 'memory_not_found')
       return mcpError('not_found', 'memory not found');
-    }
     return errToMcp(err, deps.logInternalError);
   }
 }

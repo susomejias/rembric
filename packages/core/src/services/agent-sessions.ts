@@ -435,6 +435,24 @@ export class AgentSessionsService {
     return this.repos.agentSessions.findSoleActiveForReuse(input.tokenId, input.projectId) ?? null;
   }
 
+  getInScope(id: string, scope: Scope): AgentSession | null {
+    const row = this.getById(id);
+    return row && !row.deletedAt && row.projectId === scope.projectId ? row : null;
+  }
+
+  forPeriod(scope: Scope, from: Date, to: Date, limit = 20, offset = 0) {
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) {
+      throw new DomainError('invalid_input', 'from must be before to, using valid ISO timestamps.');
+    }
+    return this.repos.agentSessions.forPeriod(
+      scope,
+      from,
+      to,
+      clamp(limit, 1, 20),
+      Math.max(0, offset),
+    );
+  }
+
   recentForContext(input: RecentForContextInput): AgentSession[] {
     const limit = clamp(input.limit ?? 5, 1, 25);
     return this.repos.agentSessions.recentForContext(input.projectId, limit);
@@ -714,14 +732,14 @@ function precedenceSet(
       if (!hasAnyHeading(incomingSummary) && hasAnyHeading(storedSummary)) {
         throw new DomainError(
           'invalid_input',
-          'sessions: summary has no ## section, but the stored summary already uses the canonical ## Markdown structure (## Goal, ## Accomplished, ## Decisions+why, ## Verified+how, ## Unfinished+why, ## Files) — include at least one ## heading to merge, or call memory.session_get to read what is stored',
+          'sessions: summary has no ## section, but the stored summary already uses the canonical ## Markdown structure (## Goal, ## Accomplished, ## Decisions+why, ## Verified+how, ## Unfinished+why, ## Files) — include at least one ## heading to merge, or call memory.session_get_batch to read what is stored',
         );
       }
       const merged = mergeSummarySections(storedSummary, incomingSummary);
       if (merged.length > SUMMARY_MAX_CHARS) {
         throw new DomainError(
           'invalid_input',
-          `sessions: merged summary would be ${merged.length} characters, exceeding the ${SUMMARY_MAX_CHARS}-character cap — condense the ## sections and resend; read the stored summary with memory.session_get first`,
+          `sessions: merged summary would be ${merged.length} characters, exceeding the ${SUMMARY_MAX_CHARS}-character cap — condense the ## sections and resend; read the stored summary with memory.session_get_batch first`,
         );
       }
       summarySet = { summary: merged, summaryFinal: summary.final, ...stamp };

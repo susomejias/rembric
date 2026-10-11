@@ -124,9 +124,8 @@ _RELEVANCE_HINT = (
     "prompt before responding, to surface relevant prior work.</memory-hint>"
 )
 _RESUMED_READ_HINT = (
-    "<memory-hint>this session existed before this process attached to it "
-    "— call memory.session_get before your next memory.session_summary "
-    "write.</memory-hint>"
+    "<memory-hint>Resumed session: read memory.session_get_batch({ ids: [sessionId] }) "
+    "/ sessions[0] in full before writing memory.session_summary.</memory-hint>"
 )
 # Sending ONE section is a legitimate write only because a `##` section a
 # curated write omits keeps its stored text (`sessions`, section-wise
@@ -144,7 +143,7 @@ _SESSION_OPENING_HINT = (
 _POST_COMPACT_HINT = (
     "<memory-hint>Resumed from a compaction. BEFORE "
     "continuing:\n"
-    "1. Call memory.session_get to read the stored summary.\n"
+    "1. Call memory.session_get_batch({ ids: [sessionId] }) and read sessions[0] in full.\n"
     "2. Call memory.session_summary({title, summary}) with the CURRENT "
     "COMPLETE state: sent `##` sections REPLACE their stored "
     "counterpart; omitted ones STAY.\n"
@@ -446,7 +445,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "proactively.\n\n"
             "SAVE: On each real fix/decision/discovery/config/pattern/preference, "
             "call memory.save(title≤100, content); evolving topic: topic_key, "
-            "candidates[]→memory.judge.\n"
+            "candidates[]→memory.judge_batch.\n"
             "RECALL: before work in an area untouched this session, before diagnosing "
             "a possibly-known error, before building something that may already exist "
             "— or asked to recall: call memory.context (memory.search for keywords) "

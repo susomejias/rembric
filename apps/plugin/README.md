@@ -37,6 +37,12 @@ The rest of this file is the Claude Code plugin reference. For Codex see [`docs/
 
 > **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 6 hook types via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
 
+## Batch tools and recovery
+
+All five clients use `memory.get_batch`, `memory.session_get_batch`, `memory.confirm_batch` and `memory.judge_batch`, without old-name aliases. A one-item array replaces an individual read/mutation. Upgrade or roll back server and plugins together, then restart the client for discovery. [Date-based weekly recall, pages and errors](../../docs/agents.md#complete-batch-reads-by-date).
+
+Before rewriting a resumed summary, call `memory.session_get_batch({ ids: [sessionId] })` and read `sessions[0]` in full; context snippets are not the stored complete state. Pi registers provider-safe underscore names (e.g. `memory_session_get_batch`) and forwards canonical names and arrays unchanged.
+
 ## What you get
 
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
@@ -44,7 +50,7 @@ The rest of this file is the Claude Code plugin reference. For Codex see [`docs/
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
 - **Eight lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
   - `SessionStart` (matcher `startup|resume|clear|fork`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent), then `/api/<slug>/sessions/<id>/resume`, which returns a row a previous run ended (or the sweep abandoned) to `active` so a reopened conversation keeps its memories. Also nudges the agent to load recent context.
-  - `SessionStart` (matcher `compact`) injects a multi-line nudge into the post-compact model context directing it to call `memory.session_summary` and `memory.context` if detail is missing.
+  - `SessionStart` (matcher `compact`) injects a multi-line nudge to read `memory.session_get_batch({ ids: [sessionId] })` / `sessions[0]` in full before rewriting via `memory.session_summary`; use `memory.context` only for missing detail.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
   - `UserPromptSubmit` (matcher-less, every prompt) prints, on plain stdout, whatever the previous turn's report cached: the session-summary reminder the SERVER composed from the session's own state, plus the session-opening line on a newly created session. It counts nothing — the firing decision belongs to the server.
   - `PreCompact` POSTs the live transcript to `/api/<slug>/sessions/<id>/summary` BEFORE compaction wipes context, so the snapshot survives independent of model cooperation.

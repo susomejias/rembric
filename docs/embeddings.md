@@ -103,7 +103,7 @@ memory.save (MCP)                            ← packages/mcp/src/memory-tools.t
    │     │                                          similarity = token containment)
    │     └─ dedupe by target, higher score wins, cap CANDIDATES_PER_SAVE_MAX
    │
-   └─ response: candidates[] → the agent closes each with memory.judge
+   └─ response: candidates[] → the agent closes each with memory.judge_batch
 ```
 
 The two passes are complementary by design: FTS5 anchors on stable

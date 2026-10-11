@@ -15,6 +15,7 @@ function countStatements<T>(t: TestDb, run: (repos: ReturnType<typeof createRepo
   const raw = fresh.raw;
   const bound = raw.prepare.bind(raw);
   const seen: string[] = [];
+  const bindings: unknown[][] = [];
   const wrap = (stmt: object, text: string): object =>
     new Proxy(stmt, {
       get(target, prop) {
@@ -24,6 +25,7 @@ function countStatements<T>(t: TestDb, run: (repos: ReturnType<typeof createRepo
         if (prop === 'all' || prop === 'get' || prop === 'run') {
           return (...params: unknown[]) => {
             seen.push(text.replace(/\s+/g, ' ').trim());
+            bindings.push(params);
             return method.apply(target, params);
           };
         }
@@ -40,7 +42,7 @@ function countStatements<T>(t: TestDb, run: (repos: ReturnType<typeof createRepo
   });
   const result = run(createRepositories(fresh.db));
   fresh.raw.close();
-  return { result, statements: seen };
+  return { result, statements: seen, bindings };
 }
 
 let t: TestDb;
@@ -119,7 +121,7 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
   it('memory.get on a long chain reads no predecessor content', () => {
     const { headId } = seedChain(30);
 
-    const { result, statements } = countStatements(t, (repos) => {
+    const { result, statements, bindings } = countStatements(t, (repos) => {
       const svc = new MemoryService(repos, t.handle.db);
       return svc.get(headId, scope);
     });
@@ -131,13 +133,18 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
       (s) => /"content"/.test(s) && /from "memory"/i.test(s) && !/insert/i.test(s),
     );
     expect(statements.filter((s) => s.includes('WITH RECURSIVE anc'))).toHaveLength(1);
-    expect(statements).toHaveLength(6);
+    expect(statements).toHaveLength(7);
     expect(
       statements.filter((s) =>
         /select "id", "title", "status", "created_at" from "memory"/i.test(s),
       ),
     ).toHaveLength(1);
-    expect(selectsContent).toHaveLength(1);
+    expect(selectsContent).toHaveLength(2);
+    expect(
+      statements.flatMap((statement, index) =>
+        selectsContent.includes(statement) ? [bindings[index]] : [],
+      ),
+    ).toEqual([[headId], [headId]]);
   });
 });
 

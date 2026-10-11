@@ -16,8 +16,8 @@ import {
   unresolvableSlug,
   unresolvableSlugError,
 } from './_shared.js';
-import { errToMcp, mcpError, type ErrorReportingDeps } from './errors.js';
-import { ok } from './result.js';
+import { errToMcp, itemError, mcpError, type ErrorReportingDeps } from './errors.js';
+import { batchResult, ok } from './result.js';
 
 export const sessionStartSchema = {
   agent: z.string().min(1).max(120).optional(),
@@ -40,7 +40,40 @@ export const sessionResumeSchema = {
 };
 
 export const sessionGetSchema = {
-  sessionId: z.string().min(1),
+  ids: z
+    .array(z.string().min(1))
+    .min(1)
+    .optional()
+    .describe(
+      'Session IDs; duplicates removed before paging. Use IDs OR from/to, never both. A one-item array supports summary recovery.',
+    ),
+  from: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      'ISO timestamp with offset: inclusive interval start. Select session activity spans overlapping [from,to); not a historical summary snapshot. Mutually exclusive with ids.',
+    ),
+  to: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      'ISO timestamp with offset: exclusive interval end; defaults to server now. Requires from < to.',
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .optional()
+    .describe(
+      'Outcomes per page, including errors; default/max20. Full summaries without byte-based truncation.',
+    ),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Default0. Continue with nextOffset until null; period pages are live reads.'),
 };
 
 export interface SessionToolDeps extends ErrorReportingDeps {
@@ -93,13 +126,29 @@ export const sessionResumeOutput = {
 };
 
 export const sessionGetOutput = {
-  id: z.string(),
-  agent: z.string(),
-  status: z.string(),
-  startedAt: z.string(),
-  endedAt: z.string().nullable(),
-  title: z.string().nullable(),
-  summary: z.string().nullable(),
+  sessions: z.array(
+    z.object({
+      id: z.string(),
+      agent: z.string(),
+      status: z.string(),
+      startedAt: z.string(),
+      endedAt: z.string().nullable(),
+      lastActivityAt: z.string().nullable(),
+      title: z.string().nullable(),
+      summary: z.string().nullable(),
+      summaryFinal: z.boolean(),
+    }),
+  ),
+  errors: z.array(
+    z.object({
+      id: z.string(),
+      code: z.string(),
+      message: z.string(),
+      errorId: z.string().optional(),
+    }),
+  ),
+  total: z.number(),
+  nextOffset: z.number().nullable(),
 };
 
 export function buildSessionHandlers(deps: SessionToolDeps) {
@@ -349,24 +398,60 @@ function rejectIfDeleted(
   return null;
 }
 
-async function handleSessionGet(deps: SessionToolDeps, args: { sessionId: string }) {
-  let scope: Scope;
+async function handleSessionGet(
+  deps: SessionToolDeps,
+  args: z.infer<z.ZodObject<typeof sessionGetSchema>>,
+) {
+  if (
+    args.ids !== undefined
+      ? args.from !== undefined || args.to !== undefined
+      : args.from === undefined
+  ) {
+    return mcpError('invalid_input', 'Provide either ids or from/to, never both.');
+  }
   try {
-    scope = await requireScope(deps, 'read');
+    const scope = await requireScope(deps, 'read');
+    const offset = args.offset ?? 0;
+    const limit = args.limit ?? 20;
+    const ids = args.ids ? [...new Set(args.ids)] : null;
+    const selection = ids
+      ? null
+      : deps.agentSessions.forPeriod(
+          scope,
+          new Date(args.from!),
+          args.to ? new Date(args.to) : new Date(),
+          limit,
+          offset,
+        );
+    const total = ids?.length ?? selection!.total;
+    const page = ids ? ids.slice(offset, offset + limit) : selection!.sessions.map((s) => s.id);
+    const sessions = [];
+    const errors: z.infer<typeof sessionGetOutput.errors> = [];
+    for (const id of page) {
+      try {
+        const row = deps.agentSessions.getInScope(id, scope);
+        if (!row) {
+          errors.push({ id, code: 'not_found', message: 'Item not found.' });
+          continue;
+        }
+        sessions.push({
+          id: row.id,
+          agent: row.agent,
+          status: row.status,
+          startedAt: row.startedAt,
+          endedAt: row.endedAt,
+          lastActivityAt: row.lastActivityAt,
+          title: row.title,
+          summary: row.summary,
+          summaryFinal: row.summaryFinal,
+        });
+      } catch (err) {
+        errors.push({ id, ...itemError(err, deps.logInternalError) });
+      }
+    }
+    const nextOffset = offset + page.length < total ? offset + page.length : null;
+    return batchResult({ sessions, errors, total, nextOffset }, sessions.length, errors);
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-  const row = deps.agentSessions.getById(args.sessionId);
-  if (!row || row.deletedAt || row.projectId !== scope.projectId) {
-    return mcpError('not_found', `session '${args.sessionId}' not found in this scope`);
-  }
-  return ok({
-    id: row.id,
-    agent: row.agent,
-    status: row.status,
-    startedAt: row.startedAt,
-    endedAt: row.endedAt,
-    title: row.title,
-    summary: row.summary,
-  });
 }

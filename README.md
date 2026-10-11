@@ -290,6 +290,12 @@ Controls how `memory.save` surfaces conflict candidates to the agent for fresh-c
 
 </details>
 
+## Complete recall by date
+
+“What have I worked on this week?” → `memory.session_get_batch({ from, to, limit: 20, offset: 0 })` returns full current session summaries for the activity interval. Use `memory.get_batch` with the same dates for memories created then. Both also accept `ids: [id, ...]`, never IDs and dates together. Inspect `errors` alongside valid records and continue with `offset: nextOffset` until null.
+
+Confirmation and judgment use `memory.confirm_batch({ ids: [id] })` and `memory.judge_batch({ judgments: [{ judgmentId, relation }] })` (1–20 items). No aliases for the four retired tools: upgrade/roll back server and plugins together. [Intervals, complete-content semantics and examples](./docs/agents.md#complete-batch-reads-by-date).
+
 ## Dashboard
 
 Self-hosted operator surface for every memory, session, prompt, judgment, entity, and consolidation op. Dark monochrome surfaces with a lime accent. Auth is one admin token — no onboarding flow.
@@ -430,12 +436,12 @@ Single Node process, single SQLite file, packaged as a multi-arch Docker image (
 
 Four load-bearing invariants:
 
-- **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
+- **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge_batch` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
 - **Project scoping by construction**: every memory is attached to exactly one `project_id`. Consolidation, relations and every write never cross scope. One read may, and only when asked: `memory.search({across_projects: true})` reads the projects the connection's token is authorized to read and names them in `searchedProjects[]` — opt-in, read-only, and a compile error on any write path. See [docs/agents.md](./docs/agents.md#searching-across-projects).
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
 - **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them, unless an endpoint has been retired since — those are withheld from the agent queue and left to the sweep. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
 
-Memory also exposes a **derived review state** alongside decay: a `needs_review` flag on `memory.search` / `memory.get` rows (and a `needsReview[]` list in `memory.context`) for active memories whose per-type shelf life elapsed without re-affirmation. It is computed at read time — no column, no sweep — and is cleared by re-affirming with `memory.confirm` (not by merely reading). See [docs/relations.md](./docs/relations.md) for the relation taxonomy and the review axis.
+Memory also exposes a **derived review state** alongside decay: a `needs_review` flag on `memory.search` / `memory.get_batch` rows (and a `needsReview[]` list in `memory.context`) for active memories whose per-type shelf life elapsed without re-affirmation. It is computed at read time — no column, no sweep — and is cleared by re-affirming with `memory.confirm_batch` (not by merely reading). See [docs/relations.md](./docs/relations.md) for the relation taxonomy and the review axis.
 
 ### Entity index (exact-address retrieval)
 
@@ -539,7 +545,7 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
    └───────────────────────────────────────────────────────────────────────┘
 ```
 
-Two staleness axes, deliberately distinct: **decay** runs in the background sweep above (access + confidence, keyed on `last_seen_at` → archives); **review** is derived in the request path on `memory.search` / `memory.get` / `memory.context` (affirmation, keyed on `max(created_at, last confirmation) + per-type TTL` → flags `needs_review`). Review adds no table, no tool, and no background work — it is computed at read time and cleared by `memory.confirm`.
+Two staleness axes, deliberately distinct: **decay** runs in the background sweep above (access + confidence, keyed on `last_seen_at` → archives); **review** is derived in the request path on `memory.search` / `memory.get_batch` / `memory.context` (affirmation, keyed on `max(created_at, last confirmation) + per-type TTL` → flags `needs_review`). Review adds no table, no tool, and no background work — it is computed at read time and cleared by `memory.confirm_batch`.
 
 </details>
 

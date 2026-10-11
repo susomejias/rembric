@@ -7,8 +7,8 @@ import { MEMORY_TYPES, type Repositories, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
 import { requireScope } from './_shared.js';
-import { errToMcp, isDomainError, mcpError, type ErrorReportingDeps } from './errors.js';
-import { ok } from './result.js';
+import { errToMcp, isDomainError, itemError, mcpError, type ErrorReportingDeps } from './errors.js';
+import { batchResult, ok } from './result.js';
 import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
 
 export const suggestTopicKeySchema = {
@@ -27,14 +27,8 @@ const JUDGE_RELATIONS = [
 ] as const;
 
 export const judgeSchema = {
-  judgmentId: z.string().min(1).optional(),
-  relation: z.enum(JUDGE_RELATIONS).optional(),
-  reason: z.string().max(2000).optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  evidence: z.unknown().optional(),
   judgments: z
     .array(
-      // By hand: the registrar's `.strict()` reaches only the top-level shape.
       z
         .object({
           judgmentId: z.string().min(1),
@@ -46,10 +40,9 @@ export const judgeSchema = {
         .strict(),
     )
     .min(1)
-    .max(25)
-    .optional()
+    .max(20)
     .describe(
-      'Batch: close several judgmentIds (e.g. all of memory.save.candidates[]) in one call.',
+      '1–20 ordered judgments, each in its own transaction. Do not deduplicate; inspect every result. A one-item array judges one candidate.',
     ),
 };
 
@@ -84,24 +77,19 @@ export const suggestTopicKeyOutput = {
 };
 
 export const judgeOutput = {
-  ok: z.literal(true),
-  judgmentId: z.string().optional(),
-  relation: z.string().optional(),
-  status: z.string().optional(),
-  judgedAt: z.string().optional(),
-  results: z
-    .array(
-      z.object({
-        ok: z.boolean(),
-        judgmentId: z.string(),
-        relation: z.string().optional(),
-        status: z.string().optional(),
-        judgedAt: z.string().optional(),
-        code: z.string().optional(),
-        message: z.string().optional(),
-      }),
-    )
-    .optional(),
+  ok: z.boolean(),
+  results: z.array(
+    z.object({
+      ok: z.boolean(),
+      judgmentId: z.string(),
+      relation: z.string().optional(),
+      status: z.string().optional(),
+      judgedAt: z.string().optional(),
+      code: z.string().optional(),
+      message: z.string().optional(),
+      errorId: z.string().optional(),
+    }),
+  ),
 };
 
 export const compareOutput = {
@@ -179,96 +167,46 @@ function maskNotFound(code: DomainError['code']): string {
 
 async function handleJudge(
   deps: RelationsToolDeps,
-  args: {
-    judgmentId?: string;
-    relation?: (typeof JUDGE_RELATIONS)[number];
-    reason?: string;
-    confidence?: number;
-    evidence?: unknown;
-    judgments?: Array<{
-      judgmentId: string;
-      relation: (typeof JUDGE_RELATIONS)[number];
-      reason?: string;
-      confidence?: number;
-      evidence?: unknown;
-    }>;
-  },
+  args: z.infer<z.ZodObject<typeof judgeSchema>>,
 ) {
   const ctx = getRequestContext();
-
-  // Exactly one of the single fields or `judgments` (spec: both/neither → invalid_input).
-  const hasSingle = args.judgmentId !== undefined || args.relation !== undefined;
-  const hasBatch = args.judgments !== undefined;
-  if (hasSingle === hasBatch) {
-    return mcpError(
-      'invalid_input',
-      'provide exactly one of {judgmentId, relation} or {judgments: [...]}',
-    );
-  }
-
   let scope: Scope;
   try {
     scope = await requireScope(deps, 'write');
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-
-  if (args.judgments !== undefined) {
-    const results = args.judgments.map((j) => {
-      try {
-        const row = deps.relations.judgeInScope(j.judgmentId, scope, {
-          relation: j.relation,
-          reason: j.reason,
-          confidence: j.confidence,
-          evidence: j.evidence,
-          actor: ctx.token.name,
-          kind: 'agent',
-        });
-        return {
-          ok: true as const,
-          judgmentId: row.judgmentId,
-          relation: row.relation,
-          status: row.status,
-          judgedAt: row.judgedAt,
-        };
-      } catch (err) {
-        if (isDomainError(err)) {
-          return {
-            ok: false as const,
-            judgmentId: j.judgmentId,
-            code: maskNotFound(err.code),
-            message: err.message,
-          };
-        }
-        throw err;
-      }
-    });
-    return ok({ ok: true, results });
-  }
-
-  if (args.judgmentId === undefined || args.relation === undefined) {
-    return mcpError('invalid_input', 'provide either {judgmentId, relation} or {judgments: [...]}');
-  }
-  try {
-    const row = deps.relations.judgeInScope(args.judgmentId, scope, {
-      relation: args.relation,
-      reason: args.reason,
-      confidence: args.confidence,
-      evidence: args.evidence,
-      actor: ctx.token.name,
-      kind: 'agent',
-    });
-    return ok({
-      ok: true,
-      judgmentId: row.judgmentId,
-      relation: row.relation,
-      status: row.status,
-      judgedAt: row.judgedAt,
-    });
-  } catch (err) {
-    if (isDomainError(err)) return mcpError(maskNotFound(err.code), err.message);
-    throw err;
-  }
+  const results = args.judgments.map((j) => {
+    try {
+      const row = deps.relations.judgeInScope(j.judgmentId, scope, {
+        relation: j.relation,
+        reason: j.reason,
+        confidence: j.confidence,
+        evidence: j.evidence,
+        actor: ctx.token.name,
+        kind: 'agent',
+      });
+      return {
+        ok: true as const,
+        judgmentId: row.judgmentId,
+        relation: row.relation,
+        status: row.status,
+        judgedAt: row.judgedAt,
+      };
+    } catch (err) {
+      return {
+        ok: false as const,
+        judgmentId: j.judgmentId,
+        ...itemError(err, deps.logInternalError),
+      };
+    }
+  });
+  const successes = results.filter((r) => r.ok).length;
+  return batchResult(
+    { ok: successes > 0, results },
+    successes,
+    results.filter((r) => !r.ok),
+  );
 }
 
 async function handleCompare(

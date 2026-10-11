@@ -27,6 +27,18 @@ export function mcpError(code: string, message: string, extra?: Record<string, u
   };
 }
 
+export function itemError(err: unknown, logInternalError: LogInternalError) {
+  if (isDomainError(err)) {
+    const notFound = err.code.endsWith('_not_found');
+    return {
+      code: notFound ? 'not_found' : err.code,
+      message: notFound ? 'Item not found.' : err.message,
+    };
+  }
+  const errorId = logInternalError(err, 'unhandled MCP batch item error');
+  return { code: 'internal_error', message: 'An unexpected error occurred.', errorId };
+}
+
 export function errToMcp(err: unknown, logInternalError: LogInternalError) {
   if (isDomainError(err)) {
     return mcpError(err.code, err.message, err.details);

@@ -103,9 +103,11 @@ const read = async <T>(fn: () => unknown): Promise<T> =>
 
 describe('the annotation reason is bounded on the multi-row surfaces only', () => {
   it('search and batch get truncate a 2000-char reason identically', async () => {
-    const { sourceId } = judgedPair();
+    const { sourceId, targetId } = judgedPair();
     const search = await read<{ memories: Row[] }>(() => handlers.search({}));
-    const batch = await read<{ memories: Row[] }>(() => handlers.get({ ids: [sourceId] }));
+    const batch = await read<{ memories: Row[] }>(() =>
+      handlers.get({ ids: [sourceId, targetId] }),
+    );
 
     const fromSearch = search.memories.find((m) => m.id === sourceId)!.relations[0]!;
     const fromBatch = batch.memories[0]!.relations[0]!;
@@ -117,9 +119,11 @@ describe('the annotation reason is bounded on the multi-row surfaces only', () =
     expect(fromBatch).toEqual(fromSearch);
   });
 
-  it('single-id memory.get returns the reason verbatim — it is the drill-down destination', async () => {
+  it('single-id memory.get_batch returns the reason verbatim — it is the drill-down destination', async () => {
     const { sourceId } = judgedPair();
-    const single = await read<Row>(() => handlers.get({ id: sourceId }));
+    const single = (
+      await read<{ memories: Row[] }>(() => handlers.get({ ids: [sourceId], relations_limit: 50 }))
+    ).memories[0]!;
     expect(single.relations[0]!.reason).toBe(STORED_REASON);
     expect(single.relations[0]!.reason).toHaveLength(2_000);
     expect(single.relations[0]!.reason!.includes('…')).toBe(false);
@@ -152,12 +156,12 @@ describe('the annotation reason is bounded on the multi-row surfaces only', () =
   });
 
   it('drift guard: every multi-row annotation surface bounds the reason', async () => {
-    const { sourceId } = judgedPair();
+    const { sourceId, targetId } = judgedPair();
     const surfaces: Record<string, Row | undefined> = {
       search: (await read<{ memories: Row[] }>(() => handlers.search({}))).memories.find(
         (m) => m.id === sourceId,
       ),
-      batchGet: (await read<{ memories: Row[] }>(() => handlers.get({ ids: [sourceId] })))
+      batchGet: (await read<{ memories: Row[] }>(() => handlers.get({ ids: [sourceId, targetId] })))
         .memories[0],
     };
     for (const [name, row] of Object.entries(surfaces)) {
@@ -197,12 +201,12 @@ describe('the aggregate annotation budget', () => {
         `lower limit to ${Math.floor(RELATION_ANNOTATION_RESPONSE_BUDGET / RELATION_ANNOTATION_MAX)}`,
       ),
     );
-    expect(body.message).toContain('memory.get');
+    expect(body.message).toContain('memory.get_batch');
     // Rejected, not partially served.
     expect(body).not.toHaveProperty('memories');
   });
 
-  it('rejects the batch get equivalent on ids.length', async () => {
+  it('budgets batch get by its served page, not the full IDs selection', async () => {
     const scope = projectScope(project.id);
     const ids = Array.from(
       { length: 100 },
@@ -211,10 +215,15 @@ describe('the aggregate annotation budget', () => {
     const raw = (await runWithContext(fakeContext(project), () =>
       Promise.resolve(handlers.get({ ids, relations_limit: RELATION_ANNOTATION_MAX })),
     )) as { isError?: boolean; content: { text: string }[] };
-    expect(raw.isError).toBe(true);
-    const body = JSON.parse(raw.content[0]!.text) as { code: string; message: string };
-    expect(body.code).toBe('invalid_input');
-    expect(body.message).toContain('ids');
+    expect(raw.isError).not.toBe(true);
+    const body = JSON.parse(raw.content[0]!.text) as {
+      memories: Row[];
+      total: number;
+      nextOffset: number;
+    };
+    expect(body.memories).toHaveLength(20);
+    expect(body.total).toBe(100);
+    expect(body.nextOffset).toBe(20);
   });
 
   it('never rejects the defaults, and serves every legal trade', async () => {
@@ -264,11 +273,11 @@ describe('the aggregate annotation budget', () => {
     expect(overBudget(RANK_WINDOW_CEILING, RELATION_ANNOTATION_MAX)).toBe(true);
   });
 
-  it('single-id memory.get is exempt by construction, not by a special case', async () => {
+  it('single-id memory.get_batch is exempt by construction, not by a special case', async () => {
     expect(overBudget(1, RELATION_ANNOTATION_MAX)).toBe(false);
     const { sourceId } = judgedPair();
     const raw = (await runWithContext(fakeContext(project), () =>
-      Promise.resolve(handlers.get({ id: sourceId, relations_limit: RELATION_ANNOTATION_MAX })),
+      Promise.resolve(handlers.get({ ids: [sourceId], relations_limit: RELATION_ANNOTATION_MAX })),
     )) as { isError?: boolean };
     expect(raw.isError).toBeUndefined();
   });
@@ -341,7 +350,7 @@ describe('the worst legal annotation payload is a named, asserted ceiling', () =
     );
   }, 300_000);
 
-  it('single-id memory.get, which keeps reason verbatim, is also under the ceiling', async () => {
+  it('single-id memory.get_batch, which keeps reason verbatim, is also under the ceiling', async () => {
     const scope = projectScope(project.id);
     const source = memory.save({ type: 'project', title: 'deep', content: 'z'.repeat(600) }, scope);
     for (let j = 0; j < RELATION_ANNOTATION_MAX; j += 1) {
@@ -359,10 +368,10 @@ describe('the worst legal annotation payload is a named, asserted ceiling', () =
       });
     }
     const raw = (await runWithContext(fakeContext(project), () =>
-      Promise.resolve(handlers.get({ id: source.id, relations_limit: RELATION_ANNOTATION_MAX })),
+      Promise.resolve(handlers.get({ ids: [source.id], relations_limit: RELATION_ANNOTATION_MAX })),
     )) as { isError?: boolean; content: { text: string }[]; structuredContent?: unknown };
     expect(raw.isError).toBeUndefined();
-    const body = JSON.parse(raw.content[0]!.text) as Row;
+    const body = (JSON.parse(raw.content[0]!.text) as { memories: Row[] }).memories[0]!;
     expect(body.relations).toHaveLength(RELATION_ANNOTATION_MAX);
     // Verbatim here, which is exactly why the single-id surface needs measuring too.
     expect(body.relations[0]!.reason).toHaveLength(2_000);

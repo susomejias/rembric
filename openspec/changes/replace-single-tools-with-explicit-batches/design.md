@@ -1,0 +1,40 @@
+## Context
+
+The existing memory read has incompatible single and batch payloads; only the single read carries ancestry and confirmation count. Confirmations and judgments already have batch implementations, but optional singular arguments obscure the contract. Session reads are single-only. Every client carries agent-facing recovery instructions.
+
+## Goals / Non-Goals
+
+Goals: four explicit suffix-named batch tools, no aliases, one-item support, bounded complete metadata, strict scope, atomic confirmations, independent judgments and coordinated client migration.
+
+Non-goals: new tools beyond the replacements, speculative index changes, dependencies, context byte budgets, Pi compaction events, replay receipts or timing instrumentation.
+
+## Decisions
+
+1. Explicit-ID reads accept a nonempty array of IDs and return at most20 outcomes per page, using `limit` (default/max20) and `offset` (default0). Deduplicate before slicing; successful entries plus errors count toward the page size. Return `total` and nullable `nextOffset`. Confirm and judge accept at most20 items per call and do not paginate mutations automatically. Reject singular fields; both reads accept either IDs or `from`/optional `to`, never both. Mutations do not select by dates.
+2. Read envelopes are `{ memories, errors, total, nextOffset }` and `{ sessions, errors, total, nextOffset }`, where each error carries `{ id, code, message }`. Deduplicate IDs in first-occurrence order. Missing, cross-project and deleted-session IDs produce the same `not_found` code and generic message, revealing only the caller-supplied ID. Preserve valid data beside failed-item errors; do not throw away an entire read batch because one item fails. If the page contains attempted items and none succeeds, return the same collection/error information with MCP `isError: true` and a top-level failure code/message, including for a batch of one. An all-not-found batch has top-level `not_found`; other all-failed batches have `batch_failed`. Schema, authorization and scope-resolution failures remain top-level failures before item processing. Unexpected item-local failures are logged and reported with sanitized `internal_error`, never stack traces or raw exception messages. Do not duplicate errors as a separate `notFound` list.
+3. Memory entries retain the existing flat batch row and add `head`, content-free bounded `predecessors`, `predecessorCount`, `truncated`, `headTruncated` and `confirmationCount`. Reuse history assembly in the service instead of duplicate ancestry logic in MCP. Derive requested-row review state in one batched lookup; non-active rows omit it.
+4. Every successful batch memory read counts as access, whether the batch contains one or many IDs. Preserve the former individual-read chain behavior: advance `last_seen_at` on the successfully dereferenced target's resolved head, not on every projected predecessor. Missing, foreign and failed targets are not touched. Reading is not affirmation and never clears `needs_review`. This replaces the former pure batch-read behavior; internal service single reads retain their access semantics. Do not vary semantics by array length. This is the owner's explicit grill-me choice, overriding the provisional pure-read design.
+5. Relation annotations default to 10, maximum 50, with the existing aggregate budget of 4000. A one-item deep read explicitly requests `relations_limit: 50`; retain verbatim reasons for one-item reads and bounded reasons for multi-item reads. This keeps deep-read capability without adding another mode or tool.
+6. Confirm uses existing `confirmMany`: deduplicated input, chain-head recording, one transaction, same attribution, affirmation/refutation and head-cap behavior. Always return `confirmed`.
+7. Judge uses the existing per-item transaction and ordered `results`. Preserve duplicates and input order: two judgments of the same ID intentionally produce a success followed by a conflict, not silent deduplication. A mixed or fully successful batch returns `{ ok: true, results }` without MCP `isError`. If every judgment fails, including a one-item batch, return MCP `isError: true` and `{ ok: false, code, message, results }`, retaining all item errors. Apply the same top-level failure code selection as reads: `not_found` for entirely not-found results, otherwise `batch_failed`. This changes failure signaling, not transaction boundaries.
+8. Session period selection uses explicit ISO timestamps with offsets, `[from,to)` (to defaults to server now). Select non-deleted in-project sessions whose activity span overlaps the interval: startedAt < to and coalesce(lastActivityAt,startedAt) >= from. Reuse the existing content-presence predicate, allowing stored fallback summaries. Order startedAt DESC then id DESC; paginate by offset like existing search. Return the current stored summary, not a historical snapshot or proof that every fact in it happened during the interval. Empty selections/pages succeed with empty arrays and no item errors. Period pages are live views; no snapshot/cursor machinery.
+9. Memory periods use the same ISO-offset `[from,to)` selection and default server now, but filter requested rows by immutable createdAt. Include all in-scope statuses, order createdAt DESC/id DESC and return current complete records/history, not historical snapshots. Access updates do not change selection; each served record's resolved head is touched, never unserved pages or merely projected history. Confirm/judge remain explicit item mutations. Audit installed indexes and count/page plans at1k/20k/50k; add an index only after reproduced measurements demonstrate benefit.
+10. Only item-count limits are introduced. No new byte/token budgets, fragmented content or special cursors. Large complete summaries are accepted by the owner. The existing input/content/history/annotation safety contracts remain.
+11. Migrate shared nudges and all five adapters together. Dynamic discovery needs no hardcoded tool list; only embedded instructions, examples and test calls change. Old names are absent from runtime discovery and instructions, but remain in changelog history and explicit removal tests.
+
+Alternatives rejected: aliases violate the approved tool-count and replacement requirement; nested duplicate memory envelopes waste payload; omitting history loses the individual-read use case; global transaction/deduplication for judgments changes existing semantics.
+
+## Risks / Trade-offs
+
+[Risk] Old server/new plugin or new server/old plugin fails → coordinated upgrades, explicit strict failures and documented rollback of both components.
+[Trade-off] Rich reads walk bounded ancestry per memory → accepted to preserve requested functionality; reuse existing predecessor/head caps and preserve batched annotation/entity/review reads.
+[Risk] Existing normative single-form requirements conflict → replace the four operation requirements and session read requirement, and adapt annotation/recovery clauses in delta specs before implementation.
+[Trade-off] A broad explicit-ID read now refreshes access signals for all successful targets → accepted by the owner; search and context listings still do not count as access, and reading does not clear `needs_review`. Teach an explicit deep annotation bound of 50.
+
+## Migration Plan
+
+Deploy the server and unified plugin together; apply any evidence-backed additive index migration through the existing runner. Replace old names and singular arguments in active consumers, not archived changes/changelogs. Verify real tools/list, strict validation, mixed success with associated errors, all-failed multi-item and one-item `isError` results, history, isolation and mutation behavior. Roll back server and plugins together if deployment fails.
+
+## Open Questions
+
+None. Weekly work recall uses direct period retrieval in one call per page. Documentation and actual MCP instructions/schema descriptions are completion gates. Context byte budgeting and Pi compaction recovery remain separate changes.

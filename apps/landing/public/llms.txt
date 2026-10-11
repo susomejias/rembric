@@ -2,7 +2,9 @@
 
 > Self-hosted memory, sessions, and an operator dashboard for AI coding agents. One Docker image, one process, one SQLite file — reversible by design, and shared across any MCP client (Claude Code, Codex CLI, ChatGPT, Cursor, and more).
 
-Rembric (from _remember + fabric_) is the persistent memory layer beneath AI coding agents. Agents call MCP tools — `memory.save`, `memory.context`, `memory.search`, `memory.judge`, `memory.confirm` — against one append-only store: memories are never deleted or rewritten, every change is journaled in `consolidation_ops` and is reversible. It is self-hosted: a single Node process over one SQLite file, with no data leaving your infrastructure. It solves the problem that AI coding agents forget everything between sessions, including decisions and rejected approaches that leave no trace in the code.
+Rembric (from _remember + fabric_) is the persistent memory layer beneath AI coding agents. Agents call MCP tools — `memory.save`, `memory.context`, `memory.search`, `memory.judge_batch`, `memory.confirm_batch` — against one append-only store: memories are never deleted or rewritten, every change is journaled in `consolidation_ops` and is reversible. It is self-hosted: a single Node process over one SQLite file, with no data leaving your infrastructure. It solves the problem that AI coding agents forget everything between sessions, including decisions and rejected approaches that leave no trace in the code.
+
+For a weekly work recap, `memory.session_get_batch({ from, to, limit: 20, offset: 0 })` returns full current summaries for session activity spans; `memory.get_batch` with the same ISO-offset dates selects memories created in that interval. Reads accept IDs OR dates, return valid records beside errors, and continue via nextOffset. Mutations require explicit arrays, at most 20 items. The four original single-form names have no aliases; upgrade/rollback server and all client plugins together.
 
 ## Docs
 

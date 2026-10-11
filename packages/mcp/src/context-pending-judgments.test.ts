@@ -13,8 +13,9 @@ import {
   type Token,
 } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
-import { buildMemoryHandlers } from '@rembric/mcp';
+import { buildMemoryHandlers, memoryGetOutput, judgeOutput } from '@rembric/mcp';
 import { buildObservabilityHandlers } from '@rembric/mcp';
 import { buildRelationsHandlers } from '@rembric/mcp';
 
@@ -294,9 +295,11 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
     expect(payload.pendingJudgmentsTotal).toBe(0);
 
     const got = decode(
-      await runWithContext(makeContext(adminToken), () => handlers.get({ id: counterpart.id })),
+      await runWithContext(makeContext(adminToken), () =>
+        handlers.get({ ids: [counterpart.id], relations_limit: 50 }),
+      ),
     ).payload;
-    const annotations = got.relations as { judgmentId?: string; status: string }[];
+    const annotations = z.object(memoryGetOutput).parse(got).memories[0]!.relations;
     expect(annotations.map((r) => r.judgmentId)).toContain(jid);
 
     const relationHandlers = buildRelationsHandlers({
@@ -308,11 +311,13 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
     });
     const judged = decode(
       await runWithContext(makeContext(adminToken), () =>
-        relationHandlers.judge({ judgmentId: jid, relation: 'related', reason: 'still reachable' }),
+        relationHandlers.judge({
+          judgments: [{ judgmentId: jid, relation: 'related', reason: 'still reachable' }],
+        }),
       ),
     );
     expect(judged.isError).toBe(false);
-    expect(judged.payload.status).toBe('judged');
+    expect(z.object(judgeOutput).parse(judged.payload).results[0]!.status).toBe('judged');
   });
 
   it('an aged pair whose target was archived is withheld on the same terms', async () => {

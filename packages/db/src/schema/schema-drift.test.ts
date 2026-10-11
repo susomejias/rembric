@@ -39,6 +39,14 @@ const SHADOW_TABLE = /^(memory_fts|prompts_fts|memory_vec)/;
 
 const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   {
+    name: 'memory_scope_project_created_id_idx',
+    sql: 'CREATE INDEX memory_scope_project_created_id_idx ON memory (scope, project_id, created_at DESC, id DESC)',
+  },
+  {
+    name: 'sessions_project_started_id_live_idx',
+    sql: 'CREATE INDEX sessions_project_started_id_live_idx ON sessions (project_id, started_at DESC, id DESC) WHERE deleted_at IS NULL',
+  },
+  {
     name: 'confirmations_memory_id_idx',
     sql: 'CREATE INDEX confirmations_memory_id_idx ON confirmations (memory_id)',
   },

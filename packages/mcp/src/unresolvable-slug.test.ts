@@ -120,9 +120,9 @@ function countRows(): { memories: number; prompts: number } {
 }
 
 describe('reads on an unresolvable slug refuse rather than widen', () => {
-  it('memory.get on a default-project id returns project_not_found and no content', async () => {
+  it('memory.get_batch on a default-project id returns project_not_found and no content', async () => {
     const r = await runWithContext(ctxFor(), () =>
-      Promise.resolve(memoryHandlers().get({ id: defaultMemoryId })),
+      Promise.resolve(memoryHandlers().get({ ids: [defaultMemoryId], relations_limit: 50 })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
@@ -131,17 +131,19 @@ describe('reads on an unresolvable slug refuse rather than widen', () => {
     expect(JSON.stringify(body)).not.toContain('default-project row about tabs');
   });
 
-  it('memory.get with neither id nor ids reports the unusable connection, not invalid_input', async () => {
-    const r = await runWithContext(ctxFor(), () => Promise.resolve(memoryHandlers().get({})));
+  it('memory.get_batch reports the unusable connection for a valid-shaped request', async () => {
+    const r = await runWithContext(ctxFor(), () =>
+      memoryHandlers().get({ ids: ['unresolved-control'] }),
+    );
     expect(decode(r).body.code).toBe('project_not_found');
   });
 
-  it('memory.get with neither id nor ids is still invalid_input on a resolvable slug', async () => {
+  it('the same valid request is not_found on a resolvable slug', async () => {
     const r = await runWithContext(
       ctxFor({ project: realProject, requestedSlug: realProject.slug }),
-      () => Promise.resolve(memoryHandlers().get({})),
+      () => memoryHandlers().get({ ids: ['unresolved-control'] }),
     );
-    expect(decode(r).body.code).toBe('invalid_input');
+    expect(decode(r).body.code).toBe('not_found');
   });
 });
 
@@ -461,15 +463,15 @@ describe('error messages name only reachable remedies', () => {
 const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.save': { type: 'user', title: 't', content: 'c' },
   'memory.search': {},
-  'memory.get': { id: 'placeholder' },
-  'memory.confirm': { id: 'placeholder' },
+  'memory.get_batch': { ids: ['placeholder'] },
+  'memory.confirm_batch': { ids: ['placeholder'] },
   'memory.archive': { id: 'placeholder' },
   'memory.session_start': {},
   'memory.session_end': {},
   'memory.session_summary': { summary: 's' },
   'memory.session_resume': { sessionId: 'placeholder' },
   'memory.context': {},
-  'memory.session_get': { sessionId: 'placeholder' },
+  'memory.session_get_batch': { ids: ['placeholder'] },
   'memory.timeline': { memoryId: 'placeholder' },
   'memory.capture_passive': { text: '## Key Learnings\n\n1. one learning' },
   'memory.save_prompt': { content: 'c', title: 't' },
@@ -477,7 +479,7 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.doctor': {},
   'memory.stats': {},
   'memory.suggest_topic_key': { type: 'user', title: 't' },
-  'memory.judge': { judgmentId: 'placeholder', relation: 'related' },
+  'memory.judge_batch': { judgments: [{ judgmentId: 'placeholder', relation: 'related' }] },
   'memory.compare': {
     memoryIdA: 'a',
     memoryIdB: 'b',

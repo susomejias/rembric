@@ -134,8 +134,8 @@ export function navEntryForPath(pathname: string): NavEntry | undefined {
 export function badgeTooltip(key: BadgeKey, badge: BadgeBreakdown): string {
   const head =
     key === 'pendingJudgments'
-      ? `${badge.total} pending judgment candidate${badge.total === 1 ? '' : 's'} across all projects — resolve with memory.judge`
-      : `${badge.total} active memor${badge.total === 1 ? 'y' : 'ies'} past their review TTL across all projects — re-affirm with memory.confirm`;
+      ? `${badge.total} pending judgment candidate${badge.total === 1 ? '' : 's'} across all projects — resolve with memory.judge_batch`
+      : `${badge.total} active memor${badge.total === 1 ? 'y' : 'ies'} past their review TTL across all projects — re-affirm with memory.confirm_batch`;
   const lines = [...badge.byProject]
     .sort((a, z) => z.count - a.count)
     .map((row) => `${row.label}: ${row.count}`);

@@ -247,17 +247,19 @@ describe('RembricPlugin handlers', () => {
     expect(out.context[0]).toContain("'demo'");
   });
 
-  it('experimental.session.compacting directs memory.session_get before memory.session_summary, and states the cap', async () => {
+  it('experimental.session.compacting directs memory.session_get_batch before memory.session_summary, and states the cap', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
     const out: { context: string[] } = { context: [] };
     await handlers['experimental.session.compacting']!({ sessionID: 's1' } as never, out as never);
     const text = out.context[0];
-    expect(text).toContain('memory.session_get');
+    expect(text).toContain('memory.session_get_batch');
     expect(text).toContain('10000');
     expect(text).toContain(
       'Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files',
     );
-    expect(text.indexOf('memory.session_get')).toBeLessThan(text.indexOf('memory.session_summary'));
+    expect(text.indexOf('memory.session_get_batch')).toBeLessThan(
+      text.indexOf('memory.session_summary'),
+    );
   });
 
   it('experimental.session.compacting carries no window-only framing', async () => {
@@ -285,7 +287,7 @@ describe('RembricPlugin handlers', () => {
     const out: { context: string[] } = { context: [] };
     await handlers['experimental.session.compacting']!({} as never, out as never);
     expect(out.context).toHaveLength(1);
-    expect(out.context[0]).toContain('memory.session_get');
+    expect(out.context[0]).toContain('memory.session_get_batch');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

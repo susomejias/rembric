@@ -341,7 +341,7 @@ describe('collapsed and expanded tool-result rendering', () => {
   });
 
   it('expands a failure to its full diagnostic text, error code included', () => {
-    const out = renderToolResultLines(ERROR_PAYLOAD, true, true, 'memory.get', HINT, THEME);
+    const out = renderToolResultLines(ERROR_PAYLOAD, true, true, 'memory.get_batch', HINT, THEME);
 
     expect(out.join('\n')).toBe(ERROR_PAYLOAD);
     expect(out.join('\n')).toContain('"code": "not_found"');
@@ -363,7 +363,14 @@ describe('collapsed and expanded tool-result rendering', () => {
   });
 
   it('counts newline-delimited lines, not rendered rows', () => {
-    const out = renderToolResultLines('x'.repeat(500), false, false, 'memory.get', HINT, THEME);
+    const out = renderToolResultLines(
+      'x'.repeat(500),
+      false,
+      false,
+      'memory.get_batch',
+      HINT,
+      THEME,
+    );
 
     expect(plain(out[0])).toContain(' 1 line ');
     expect(out[0]).not.toContain('500');
@@ -520,14 +527,18 @@ describe('proxied calls reach the database', () => {
     expect(save.refused).toBe(false);
     const id = savedId(save.text);
 
-    const get = await callThroughExtension(toolNamed(harness, 'memory.get'), { id });
+    const get = await callThroughExtension(toolNamed(harness, 'memory.get_batch'), {
+      ids: [id],
+      relations_limit: 50,
+    });
     expect(get.refused).toBe(false);
     expect(get.text).toContain('pi proxy round trip');
   });
 
   it('the control — a fabricated id returns not_found', async () => {
-    const get = await callThroughExtension(toolNamed(harness, 'memory.get'), {
-      id: 'mem_this_id_was_never_saved',
+    const get = await callThroughExtension(toolNamed(harness, 'memory.get_batch'), {
+      ids: ['mem_this_id_was_never_saved'],
+      relations_limit: 50,
     });
     expect(get.text).toContain('not_found');
   });
@@ -556,12 +567,15 @@ describe('an MCP error result is signalled by throwing', () => {
   }
 
   it('rejects with the MCP result text verbatim when the result carries isError', async () => {
-    const reference = await wireResult('memory.get', { id: FABRICATED });
+    const reference = await wireResult('memory.get_batch', {
+      ids: [FABRICATED],
+      relations_limit: 50,
+    });
     expect(reference.isError).toBe(true);
     expect(reference.text).toContain('not_found');
 
-    const thrown = await toolNamed(harness, 'memory.get')
-      .execute('call-error', { id: FABRICATED })
+    const thrown = await toolNamed(harness, 'memory.get_batch')
+      .execute('call-error', { ids: [FABRICATED], relations_limit: 50 })
       .then(
         () => null,
         (err: unknown) => err,
@@ -622,7 +636,7 @@ describe('the registered renderers', () => {
   });
 
   it('reads the error flag off the render context, where a result-reader would see nothing', () => {
-    const tool = toolNamed(harness, 'memory.get');
+    const tool = toolNamed(harness, 'memory.get_batch');
 
     const rendered = tool
       .renderResult?.(RESULT, OPTIONS, THEME, { ...CONTEXT, isError: true })

@@ -39,6 +39,40 @@ beforeEach(() => {
 
 afterEach(() => db.cleanup());
 
+describe('batch session service boundaries', () => {
+  it('period selection validates each date and ordering with a complete scoped control', () => {
+    const scope = projectScope(projectId);
+    const own = sessions.start({ tokenId, projectId, agent: 'pi' });
+    sessions.writeSummary(own.id, { tokenId, summary: '## Goal\nperiod control', final: true });
+    const from = own.startedAt;
+    const to = new Date(from.getTime() + 1);
+    expect(sessions.forPeriod(scope, from, to).sessions.map((s) => s.id)).toEqual([own.id]);
+    for (const [start, end] of [
+      [new Date(NaN), to],
+      [from, new Date(NaN)],
+      [from, from],
+      [to, from],
+    ]) {
+      expect(() => sessions.forPeriod(scope, start!, end!)).toThrow(DomainError);
+    }
+  });
+
+  it('getInScope masks missing, foreign and deleted sessions with a live control', () => {
+    const scope = projectScope(projectId);
+    const own = sessions.start({ tokenId, projectId, agent: 'pi' });
+    const foreign = sessions.start({
+      tokenId,
+      projectId: defaultProjectScope(db.handle).projectId,
+      agent: 'pi',
+    });
+    expect(sessions.getInScope(own.id, scope)?.id).toBe(own.id);
+    expect(sessions.getInScope('missing', scope)).toBeNull();
+    expect(sessions.getInScope(foreign.id, scope)).toBeNull();
+    sessions.softDelete(own.id, { tokenId });
+    expect(sessions.getInScope(own.id, scope)).toBeNull();
+  });
+});
+
 describe('AgentSessionsService', () => {
   it('start inserts an active row with the provided fields', () => {
     const s = sessions.start({

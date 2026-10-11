@@ -18,7 +18,7 @@ import {
   TokensService,
 } from '@rembric/core';
 import type * as CoreModule from '@rembric/core';
-import { agentSessions, createRepositories } from '@rembric/db';
+import { agentSessions, createRepositories, projectScope } from '@rembric/db';
 import {
   CONTEXT_MEMORIES_MAX,
   CONTEXT_PROMPTS_MAX,
@@ -26,6 +26,7 @@ import {
   DESCRIPTION_MAX_LENGTH,
   TIMELINE_WINDOW_MAX,
 } from '@rembric/mcp';
+import type { judgeOutput, memoryGetOutput, sessionGetOutput } from '@rembric/mcp';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -68,6 +69,14 @@ function routeFetch(url: string | URL, init?: RequestInit): Promise<Response> {
   const handler = method === 'GET' ? GET : method === 'DELETE' ? DELETE : POST;
   return handler(request, { params: Promise.resolve(rest.length > 0 ? { path: rest } : {}) });
 }
+
+type MemoryPage = {
+  [K in keyof typeof memoryGetOutput]: ReturnType<(typeof memoryGetOutput)[K]['parse']>;
+};
+type SessionPage = {
+  [K in keyof typeof sessionGetOutput]: ReturnType<(typeof sessionGetOutput)[K]['parse']>;
+};
+type JudgePage = { [K in keyof typeof judgeOutput]: ReturnType<(typeof judgeOutput)[K]['parse']> };
 
 interface ToolResult {
   content: Array<{ type: string; text?: string }>;
@@ -129,6 +138,724 @@ describe('MCP protocol conformance', () => {
     return client;
   }
 
+  it('explicit batches: discovers only canonical replacements with strict one-item controls', async () => {
+    const client = await connect();
+    try {
+      const tools = (await client.listTools()).tools;
+      const names = tools.map((t) => t.name);
+      const instructions = client.getInstructions() ?? '';
+      expect(instructions).toContain('ids OR from/to');
+      expect(instructions).toContain('offset=nextOffset until null');
+      expect(instructions).not.toMatch(/memory\.(get|session_get|confirm|judge)(?!_batch)\b/);
+      for (const name of ['memory.get_batch', 'memory.session_get_batch']) {
+        const tool = tools.find((t) => t.name === name)!;
+        expect(tool.inputSchema).toMatchObject({
+          additionalProperties: false,
+          properties: {
+            ids: { type: 'array', minItems: 1, items: { type: 'string' } },
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' },
+            limit: { type: 'integer', minimum: 1, maximum: 20 },
+            offset: { type: 'integer', minimum: 0 },
+          },
+        });
+        expect(tool.description).toContain('never both');
+        expect(tool.description).toContain('current');
+        expect(tool.description).toContain('isError:true');
+        expect(tool.description!.length).toBeLessThanOrEqual(1900);
+      }
+      expect(tools.find((t) => t.name === 'memory.confirm_batch')?.description).toContain('Atomic');
+      expect(tools.find((t) => t.name === 'memory.judge_batch')?.inputSchema).toMatchObject({
+        properties: {
+          judgments: { minItems: 1, maxItems: 20, items: { additionalProperties: false } },
+        },
+      });
+      for (const name of ['get', 'session_get', 'confirm', 'judge']) {
+        expect(names).toContain(`memory.${name}_batch`);
+        expect(names).not.toContain(`memory.${name}`);
+        expect((await client.callTool({ name: `memory.${name}`, arguments: {} })).isError).toBe(
+          true,
+        );
+      }
+      const saved = await client.callTool({
+        name: 'memory.save',
+        arguments: { type: 'reference', title: 'batch control', content: 'complete content' },
+      });
+      const id = (readJson(saved as ToolResult) as { id: string }).id;
+      expect(id).toBeTruthy();
+      for (const name of ['memory.get_batch', 'memory.confirm_batch']) {
+        expect((await client.callTool({ name, arguments: { ids: [id] } })).isError).not.toBe(true);
+        for (const arguments_ of [
+          { id },
+          { ids: [id], id },
+          { ids: [] },
+          { ids: [id], extra: true },
+        ]) {
+          expect((await client.callTool({ name, arguments: arguments_ })).isError).toBe(true);
+        }
+      }
+      expect(
+        (
+          await client.callTool({
+            name: 'memory.confirm_batch',
+            arguments: { ids: Array(21).fill(id) },
+          })
+        ).isError,
+      ).toBe(true);
+      for (const arguments_ of [
+        { ids: [id], limit: 21 },
+        { ids: [id], offset: -1 },
+      ]) {
+        expect(
+          (await client.callTool({ name: 'memory.get_batch', arguments: arguments_ })).isError,
+        ).toBe(true);
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('explicit batches: memory pages count errors and preserve full data and ancestry', async () => {
+    const client = await connect();
+    try {
+      const scope = projectScope(defaultProject(services.db).id);
+      const other = new ProjectsService(createRepositories(services.db.db)).create({
+        slug: 'batch-foreign',
+      });
+      const source = services.memory.save(
+        { type: 'reference', title: 'before', content: 'old', topicKey: 'batch-history' },
+        scope,
+      );
+      const head = services.memory.save(
+        { type: 'reference', title: 'after', content: '☀'.repeat(9000), topicKey: 'batch-history' },
+        scope,
+      );
+      const foreign = services.memory.save(
+        { type: 'reference', title: 'private', content: 'private' },
+        projectScope(other.id),
+      );
+      const ids = [
+        head.id,
+        'batch-missing',
+        foreign.id,
+        source.id,
+        ...Array.from(
+          { length: 19 },
+          (_, i) =>
+            services.memory.save({ type: 'reference', title: `batch-${i}`, content: 'full' }, scope)
+              .id,
+        ),
+      ];
+      const firstResult = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: { ids: [...ids, head.id] },
+      });
+      expect(firstResult.isError).not.toBe(true);
+      const first = readJson(firstResult as ToolResult) as MemoryPage;
+      expect(first.total).toBe(ids.length);
+      expect(first.nextOffset).toBe(20);
+      expect(first.memories.length + first.errors.length).toBe(20);
+      expect(first.memories[0]?.content).toBe(head.content);
+      expect(first.memories[0]?.predecessors).toContainEqual(
+        expect.objectContaining({ id: source.id }),
+      );
+      expect(first.memories[0]?.predecessors.every((p) => !('content' in p))).toBe(true);
+      expect(first.memories[1]?.head.id).toBe(head.id);
+      expect(first.memories[1]?.reviewState).toBeUndefined();
+      expect(first.errors.map((e) => e.id)).toEqual(['batch-missing', foreign.id]);
+      expect(first.errors[0]?.message).toBe(first.errors[1]?.message);
+      expect(first.errors.every((e) => e.code === 'not_found')).toBe(true);
+      const second = readJson(
+        (await client.callTool({
+          name: 'memory.get_batch',
+          arguments: { ids, offset: 20 },
+        })) as ToolResult,
+      ) as MemoryPage;
+      expect([...first.memories, ...second.memories].map((m) => m.id)).toEqual(
+        ids.filter((id) => id !== 'batch-missing' && id !== foreign.id),
+      );
+      expect(second.nextOffset).toBeNull();
+      for (const failedIds of [['batch-missing'], ['batch-missing', foreign.id]]) {
+        const result = await client.callTool({
+          name: 'memory.get_batch',
+          arguments: { ids: failedIds },
+        });
+        expect(result.isError).toBe(true);
+        expect(readJson(result as ToolResult)).toMatchObject({
+          code: 'not_found',
+          memories: [],
+          errors: failedIds.map((id) => ({ id, code: 'not_found' })),
+        });
+      }
+      const empty = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: { ids, offset: 100 },
+      });
+      expect(empty.isError).not.toBe(true);
+      expect(readJson(empty as ToolResult)).toMatchObject({
+        memories: [],
+        errors: [],
+        nextOffset: null,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('explicit batches: period selection paginates full summaries, spans activity and excludes foreign/deleted/contentless sessions', async () => {
+    const project = new ProjectsService(createRepositories(services.db.db)).create({
+      slug: 'batch-period',
+    });
+    const other = new ProjectsService(createRepositories(services.db.db)).create({
+      slug: 'batch-period-foreign',
+    });
+    const token = services.tokens.create({ name: 'batch-period-token', scope: '*' }).token;
+    const repos = createRepositories(services.db.db);
+    const summary = '☀'.repeat(9000);
+    function seed(
+      id: string,
+      startedAt: string,
+      lastActivityAt: string | null,
+      projectId = project.id,
+      deleted = false,
+      content: string | null = summary,
+    ) {
+      return repos.agentSessions.insert({
+        id,
+        tokenId: token.id,
+        projectId,
+        agent: 'pi',
+        startedAt: new Date(startedAt),
+        lastActivityAt: lastActivityAt ? new Date(lastActivityAt) : null,
+        summary: content,
+        summaryFinal: false,
+        deletedAt: deleted ? new Date('2026-10-10T00:00:00Z') : null,
+      })!;
+    }
+    for (let i = 0; i < 21; i++)
+      seed(
+        `batch-period-${i.toString().padStart(2, '0')}`,
+        '2026-10-06T00:00:00Z',
+        '2026-10-09T00:00:00Z',
+      );
+    seed('batch-spanning', '2026-10-01T00:00:00Z', '2026-10-05T00:00:00Z');
+    seed('batch-before', '2026-10-01T00:00:00Z', '2026-10-04T23:59:59Z');
+    seed('batch-after', '2026-10-12T00:00:00Z', null);
+    seed('batch-foreign-session', '2026-10-06T00:00:00Z', null, other.id);
+    seed('batch-deleted-session', '2026-10-06T00:00:00Z', null, project.id, true);
+    seed('batch-empty-session', '2026-10-06T00:00:00Z', null, project.id, false, null);
+    const before = repos.agentSessions.getById('batch-spanning');
+    const client = await connect({ projectSlug: project.slug });
+    try {
+      const args = { from: '2026-10-05T02:00:00+02:00', to: '2026-10-12T00:00:00Z' };
+      const result = await client.callTool({ name: 'memory.session_get_batch', arguments: args });
+      expect(result.isError).not.toBe(true);
+      const first = readJson(result as ToolResult) as SessionPage;
+      expect(first.total).toBe(22);
+      expect(first.sessions).toHaveLength(20);
+      expect(first.sessions.every((s) => s.summary === summary && s.summaryFinal === false)).toBe(
+        true,
+      );
+      expect(first.errors).toEqual([]);
+      expect(first.nextOffset).toBe(20);
+      const second = readJson(
+        (await client.callTool({
+          name: 'memory.session_get_batch',
+          arguments: { ...args, offset: first.nextOffset },
+        })) as ToolResult,
+      ) as SessionPage;
+      expect([...first.sessions, ...second.sessions].map((s) => s.id)).toEqual([
+        ...Array.from(
+          { length: 21 },
+          (_, i) => `batch-period-${(20 - i).toString().padStart(2, '0')}`,
+        ),
+        'batch-spanning',
+      ]);
+      expect(second.nextOffset).toBeNull();
+      expect(repos.agentSessions.getById('batch-spanning')).toEqual(before);
+      for (const arguments_ of [
+        {},
+        { sessionId: 'batch-spanning' },
+        { ...args, ids: ['batch-spanning'] },
+        { ids: ['batch-spanning'], from: args.from },
+        { ids: ['batch-spanning'], to: args.to },
+        { to: args.to },
+        { ...args, from: args.to },
+        { ...args, limit: 21 },
+        { ...args, offset: -1 },
+        { ...args, extra: true },
+        { from: '2026-10-05', to: args.to },
+      ])
+        expect(
+          (await client.callTool({ name: 'memory.session_get_batch', arguments: arguments_ }))
+            .isError,
+        ).toBe(true);
+      const control = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: { ids: ['batch-spanning'] },
+      });
+      expect(control.isError).not.toBe(true);
+      expect(readJson(control as ToolResult)).toMatchObject({
+        sessions: [{ id: 'batch-spanning', summary }],
+      });
+      const contentless = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: { ids: ['batch-empty-session'] },
+      });
+      expect(contentless.isError).not.toBe(true);
+      expect(readJson(contentless as ToolResult)).toMatchObject({
+        sessions: [{ id: 'batch-empty-session', summary: null }],
+      });
+      const empty = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: { from: '2027-01-01T00:00:00Z', to: '2027-01-02T00:00:00Z' },
+      });
+      expect(empty.isError).not.toBe(true);
+      expect(readJson(empty as ToolResult)).toMatchObject({
+        sessions: [],
+        errors: [],
+        total: 0,
+        nextOffset: null,
+      });
+      const mixed = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: {
+          ids: [
+            'batch-spanning',
+            'batch-foreign-session',
+            'batch-deleted-session',
+            'missing-session',
+          ],
+        },
+      });
+      expect(mixed.isError).not.toBe(true);
+      expect(readJson(mixed as ToolResult)).toMatchObject({
+        sessions: [{ id: 'batch-spanning' }],
+        errors: ['batch-foreign-session', 'batch-deleted-session', 'missing-session'].map((id) => ({
+          id,
+          code: 'not_found',
+        })),
+      });
+      const ids = [
+        'batch-spanning',
+        'missing-session',
+        ...first.sessions.map((s) => s.id),
+        'batch-spanning',
+        'missing-session',
+      ];
+      const idFirstResult = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: { ids },
+      });
+      expect(idFirstResult.isError).not.toBe(true);
+      const idFirst = readJson(idFirstResult as ToolResult) as SessionPage;
+      expect(idFirst.total).toBe(22);
+      expect(idFirst.sessions.length + idFirst.errors.length).toBe(20);
+      expect(idFirst.nextOffset).toBe(20);
+      const idSecond = readJson(
+        (await client.callTool({
+          name: 'memory.session_get_batch',
+          arguments: { ids, offset: idFirst.nextOffset },
+        })) as ToolResult,
+      ) as SessionPage;
+      expect([...idFirst.sessions, ...idSecond.sessions].map((s) => s.id)).toEqual([
+        'batch-spanning',
+        ...first.sessions.map((s) => s.id),
+      ]);
+      expect(idFirst.errors).toEqual([
+        { id: 'missing-session', code: 'not_found', message: 'Item not found.' },
+      ]);
+      expect(idSecond.errors).toEqual([]);
+      expect(idSecond.nextOffset).toBeNull();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('explicit batches: successful dereferences touch all resolved heads, not failed/foreign/projected rows or review baselines', async () => {
+    const repos = createRepositories(services.db.db);
+    const ownProject = new ProjectsService(repos).create({ slug: 'batch-access-home' });
+    const scope = projectScope(ownProject.id);
+    const old = new Date('2020-01-01T00:00:00Z');
+    const clocked = new MemoryService(repos, services.db.db, () => old);
+    const first = clocked.save(
+      { type: 'feedback', title: 'ancestor', content: 'first', topicKey: 'batch-access-history' },
+      scope,
+    );
+    const middle = clocked.save(
+      { type: 'feedback', title: 'middle', content: 'middle', topicKey: 'batch-access-history' },
+      scope,
+    );
+    const head = clocked.save(
+      { type: 'feedback', title: 'head', content: 'head', topicKey: 'batch-access-history' },
+      scope,
+    );
+    const second = clocked.save(
+      { type: 'feedback', title: 'independent', content: 'second' },
+      scope,
+    );
+    const failed = clocked.save(
+      { type: 'feedback', title: 'fails locally', content: 'failed' },
+      scope,
+    );
+    const project = new ProjectsService(repos).create({ slug: 'batch-access-foreign' });
+    const foreign = clocked.save(
+      { type: 'feedback', title: 'foreign', content: 'foreign' },
+      projectScope(project.id),
+    );
+    clocked.confirm(middle.id, scope);
+    const baseline = repos.memory.reviewTimestampsByIds([head.id]).get(head.id);
+    const original = services.memory.getHistory.bind(services.memory);
+    const marker = 'private exception diagnostic';
+    const spy = vi.spyOn(services.memory, 'getHistory').mockImplementation((id, s) => {
+      if (id === failed.id) throw new Error(marker);
+      return original(id, s);
+    });
+    const client = await connect({ projectSlug: ownProject.slug });
+    try {
+      const result = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: {
+          ids: [head.id, second.id, middle.id, failed.id, foreign.id, 'access-missing'],
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(readJson(result as ToolResult))).not.toContain(marker);
+      const page = readJson(result as ToolResult) as MemoryPage;
+      expect(page.memories.map((m) => m.id)).toEqual([head.id, second.id, middle.id]);
+      expect(page.errors.map((e) => [e.id, e.code])).toEqual([
+        [failed.id, 'internal_error'],
+        [foreign.id, 'not_found'],
+        ['access-missing', 'not_found'],
+      ]);
+      expect(page.memories[0]?.confirmationCount).toBe(1);
+      expect(page.memories[2]?.confirmationCount).toBe(1);
+      expect(page.memories[2]?.head.id).toBe(head.id);
+      expect(page.memories[2]?.reviewState).toBeUndefined();
+      for (const id of [head.id, second.id]) {
+        expect(repos.memory.unsafeGetById(id)!.lastSeenAt!.getTime()).toBeGreaterThan(
+          old.getTime(),
+        );
+        expect(page.memories.find((m) => m.id === id)?.reviewState).toBe('needs_review');
+      }
+      for (const id of [first.id, middle.id, failed.id, foreign.id]) {
+        expect(repos.memory.unsafeGetById(id)?.lastSeenAt).toEqual(old);
+      }
+      expect(repos.memory.reviewTimestampsByIds([head.id]).get(head.id)).toEqual(baseline);
+      const allFailed = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: { ids: [failed.id] },
+      });
+      expect(allFailed.isError).toBe(true);
+      expect(readJson(allFailed as ToolResult)).toMatchObject({
+        code: 'batch_failed',
+        memories: [],
+        errors: [{ id: failed.id, code: 'internal_error' }],
+      });
+      repos.memory.touchLastSeen(head.id, old);
+      const one = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: { ids: [middle.id] },
+      });
+      expect(one.isError).not.toBe(true);
+      expect(repos.memory.unsafeGetById(head.id)!.lastSeenAt!.getTime()).toBeGreaterThan(
+        old.getTime(),
+      );
+      expect(repos.memory.unsafeGetById(middle.id)?.lastSeenAt).toEqual(old);
+    } finally {
+      spy.mockRestore();
+      await client.close();
+    }
+  });
+
+  it('explicit batches: local session errors preserve null-summary controls and all-failed signaling', async () => {
+    const token = services.tokens.create({ name: 'batch-session-errors', scope: '*' }).token;
+    const projectId = defaultProject(services.db).id;
+    const failed = services.agentSessions.start({ tokenId: token.id, projectId, agent: 'pi' });
+    const valid = services.agentSessions.start({ tokenId: token.id, projectId, agent: 'pi' });
+    const original = services.agentSessions.getInScope.bind(services.agentSessions);
+    const marker = 'private session error';
+    const spy = vi.spyOn(services.agentSessions, 'getInScope').mockImplementation((id, scope) => {
+      if (id === failed.id) throw new Error(marker);
+      return original(id, scope);
+    });
+    const client = await connect();
+    try {
+      const result = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: { ids: [failed.id, valid.id] },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(readJson(result as ToolResult))).not.toContain(marker);
+      expect(readJson(result as ToolResult)).toMatchObject({
+        sessions: [{ id: valid.id, summary: null }],
+        errors: [{ id: failed.id, code: 'internal_error' }],
+      });
+      for (const ids of [[failed.id], [failed.id, 'unknown-session']]) {
+        const allFailed = await client.callTool({
+          name: 'memory.session_get_batch',
+          arguments: { ids },
+        });
+        expect(allFailed.isError).toBe(true);
+        expect(readJson(allFailed as ToolResult)).toMatchObject({
+          code: 'batch_failed',
+          sessions: [],
+        });
+      }
+      const missing = await client.callTool({
+        name: 'memory.session_get_batch',
+        arguments: { ids: ['unknown-session'] },
+      });
+      expect(missing.isError).toBe(true);
+      expect(readJson(missing as ToolResult)).toMatchObject({
+        code: 'not_found',
+        sessions: [],
+        errors: [{ id: 'unknown-session', code: 'not_found' }],
+      });
+    } finally {
+      spy.mockRestore();
+      await client.close();
+    }
+  });
+
+  it('explicit batches: confirms atomically and judges ordered duplicates independently with all-failed errors', async () => {
+    const scope = projectScope(defaultProject(services.db).id);
+    const repos = createRepositories(services.db.db);
+    const a = services.memory.save({ type: 'reference', title: 'judge-a', content: 'a' }, scope);
+    const b = services.memory.save({ type: 'reference', title: 'judge-b', content: 'b' }, scope);
+    const c = services.memory.save({ type: 'reference', title: 'judge-c', content: 'c' }, scope);
+    const d = services.memory.save({ type: 'reference', title: 'judge-d', content: 'd' }, scope);
+    const p1 = services.relations.createPending({ sourceId: a.id, targetId: b.id });
+    const p2 = services.relations.createPending({ sourceId: c.id, targetId: d.id });
+    const client = await connect();
+    try {
+      const rolledBack = await client.callTool({
+        name: 'memory.confirm_batch',
+        arguments: { ids: [a.id, 'confirm-missing'] },
+      });
+      expect(rolledBack.isError).toBe(true);
+      expect(repos.memory.countConfirmations(a.id)).toBe(0);
+      const confirmed = await client.callTool({
+        name: 'memory.confirm_batch',
+        arguments: { ids: [a.id, b.id, a.id] },
+      });
+      expect(confirmed.isError).not.toBe(true);
+      expect(readJson(confirmed as ToolResult)).toMatchObject({ ok: true, confirmed: 2 });
+      expect(repos.memory.countConfirmations(a.id)).toBe(1);
+      expect(repos.memory.countConfirmations(b.id)).toBe(1);
+      for (const args of [
+        { judgmentId: p1.judgmentId, relation: 'related' },
+        {
+          judgments: [
+            { judgmentId: p1.judgmentId, relation: 'related' },
+            { judgmentId: p2.judgmentId, relation: 'invented' },
+          ],
+        },
+        {
+          judgments: [
+            { judgmentId: p1.judgmentId, relation: 'related' },
+            { judgmentId: p2.judgmentId, relation: 'related', extra: true },
+          ],
+        },
+        {
+          judgments: [
+            { judgmentId: p1.judgmentId, relation: 'related' },
+            { judgmentId: '', relation: 'related' },
+          ],
+        },
+        { judgments: [{ judgmentId: p1.judgmentId, relation: 'related', confidence: 2 }] },
+        { judgments: [] },
+        { judgments: Array(21).fill({ judgmentId: p1.judgmentId, relation: 'related' }) },
+      ]) {
+        expect(
+          (await client.callTool({ name: 'memory.judge_batch', arguments: args })).isError,
+        ).toBe(true);
+        expect(repos.relations.findByJudgmentId(p1.judgmentId)?.status).toBe('pending');
+        expect(repos.relations.findByJudgmentId(p2.judgmentId)?.status).toBe('pending');
+      }
+      const result = await client.callTool({
+        name: 'memory.judge_batch',
+        arguments: {
+          judgments: [
+            { judgmentId: p1.judgmentId, relation: 'related' },
+            { judgmentId: 'judge-missing', relation: 'related' },
+            { judgmentId: p2.judgmentId, relation: 'supersedes' },
+            { judgmentId: p1.judgmentId, relation: 'related' },
+          ],
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const judged = readJson(result as ToolResult) as JudgePage;
+      expect(judged.ok).toBe(true);
+      expect(judged.results.map((r) => [r.judgmentId, r.ok])).toEqual([
+        [p1.judgmentId, true],
+        ['judge-missing', false],
+        [p2.judgmentId, true],
+        [p1.judgmentId, false],
+      ]);
+      expect(repos.relations.findByJudgmentId(p1.judgmentId)?.status).toBe('judged');
+      expect(repos.relations.findByJudgmentId(p2.judgmentId)?.status).toBe('judged');
+      expect(repos.memory.unsafeGetById(d.id)?.status).toBe('superseded');
+      for (const judgments of [
+        [{ judgmentId: 'judge-missing', relation: 'related' }],
+        [
+          { judgmentId: 'judge-missing', relation: 'related' },
+          { judgmentId: 'another-missing', relation: 'related' },
+        ],
+      ]) {
+        const failed = await client.callTool({
+          name: 'memory.judge_batch',
+          arguments: { judgments },
+        });
+        expect(failed.isError).toBe(true);
+        expect(readJson(failed as ToolResult)).toMatchObject({
+          ok: false,
+          code: 'not_found',
+          results: judgments.map((j) => ({
+            judgmentId: j.judgmentId,
+            ok: false,
+            code: 'not_found',
+          })),
+        });
+      }
+      const conflict = await client.callTool({
+        name: 'memory.judge_batch',
+        arguments: { judgments: [{ judgmentId: p1.judgmentId, relation: 'related' }] },
+      });
+      expect(conflict.isError).toBe(true);
+      expect(readJson(conflict as ToolResult)).toMatchObject({
+        ok: false,
+        code: 'batch_failed',
+        results: [{ judgmentId: p1.judgmentId, ok: false, code: 'conflict' }],
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('explicit batches: memory creation periods serve complete stable pages without widening scope or selecting by access time', async () => {
+    const repos = createRepositories(services.db.db);
+    const projects = new ProjectsService(repos);
+    const own = projects.create({ slug: 'batch-memory-period' });
+    const other = projects.create({ slug: 'batch-memory-period-foreign' });
+    const scope = projectScope(own.id);
+    const now = Date.now();
+    const day = 86_400_000;
+    const from = new Date(now - 7 * day);
+    const to = new Date(now - 3 * day);
+    const inside = new Date(now - 5 * day);
+    const large = '☀'.repeat(9000);
+    const saveAt = (at: Date, title: string, topicKey?: string, target = scope) =>
+      new MemoryService(repos, services.db.db, () => at).save(
+        {
+          type: 'reference',
+          title,
+          content: title === 'large' ? large : title,
+          topicKey,
+        },
+        target,
+      );
+    const expected = Array.from({ length: 21 }, (_, i) =>
+      saveAt(inside, i === 20 ? 'large' : `inside-${i}`),
+    );
+    expected.push(saveAt(from, 'inclusive start'));
+    const predecessor = saveAt(inside, 'before revision', 'batch-memory-period-history');
+    const head = saveAt(inside, 'after revision', 'batch-memory-period-history');
+    expected.push(predecessor, head);
+    const archived = saveAt(inside, 'archived');
+    services.memory.archive(archived.id, scope);
+    expected.push(archived);
+    const before = saveAt(new Date(from.getTime() - 1), 'before range');
+    repos.memory.touchLastSeen(before.id, inside);
+    const exclusive = saveAt(to, 'exclusive end');
+    const foreign = saveAt(inside, 'foreign', undefined, projectScope(other.id));
+    const future = saveAt(new Date(now + day), 'future');
+    const client = await connect({ projectSlug: own.slug });
+    try {
+      const control = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: { ids: [head.id] },
+      });
+      expect(control.isError).not.toBe(true);
+      const args = { from: from.toISOString(), to: to.toISOString() };
+      const firstResult = await client.callTool({ name: 'memory.get_batch', arguments: args });
+      expect(firstResult.isError).not.toBe(true);
+      const first = readJson(firstResult as ToolResult) as MemoryPage;
+      expect(first.total).toBe(expected.length);
+      expect(first.memories).toHaveLength(20);
+      expect(first.errors).toEqual([]);
+      expect(first.nextOffset).toBe(20);
+      const second = readJson(
+        (await client.callTool({
+          name: 'memory.get_batch',
+          arguments: { ...args, offset: first.nextOffset },
+        })) as ToolResult,
+      ) as MemoryPage;
+      const rows = [...first.memories, ...second.memories];
+      const ordered = expected.sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id),
+      );
+      expect(rows.map((m) => m.id)).toEqual(ordered.map((m) => m.id));
+      expect(second.nextOffset).toBeNull();
+      expect(rows.find((m) => m.title === 'large')?.content).toBe(large);
+      expect(rows.find((m) => m.id === predecessor.id)).toMatchObject({
+        status: 'superseded',
+        head: { id: head.id },
+      });
+      expect(rows.find((m) => m.id === archived.id)?.status).toBe('archived');
+      for (const id of [before.id, exclusive.id, foreign.id, future.id])
+        expect(rows.some((m) => m.id === id)).toBe(false);
+      const repeated = readJson(
+        (await client.callTool({ name: 'memory.get_batch', arguments: args })) as ToolResult,
+      ) as MemoryPage;
+      expect(repeated.memories.map((m) => m.id)).toEqual(first.memories.map((m) => m.id));
+      expect(repeated.total).toBe(first.total);
+      const current = readJson(
+        (await client.callTool({
+          name: 'memory.get_batch',
+          arguments: { from: from.toISOString(), limit: 20 },
+        })) as ToolResult,
+      ) as MemoryPage;
+      expect(current.total).toBe(expected.length + 1);
+      expect(current.memories.some((m) => m.id === future.id)).toBe(false);
+      for (const arguments_ of [
+        {},
+        { ids: [head.id], ...args },
+        { ids: [head.id], from: args.from },
+        { ids: [head.id], to: args.to },
+        { to: args.to },
+        { from: args.to, to: args.from },
+        { from: args.to, to: args.to },
+        { ...args, limit: 21 },
+        { ...args, offset: -1 },
+        { ...args, limit: 1.5 },
+        { ...args, offset: 0.5 },
+        { ...args, from: '2026-10-05' },
+        { ...args, from: args.from.slice(0, -1) },
+        { ...args, extra: true },
+      ])
+        expect(
+          (await client.callTool({ name: 'memory.get_batch', arguments: arguments_ })).isError,
+        ).toBe(true);
+      const empty = await client.callTool({
+        name: 'memory.get_batch',
+        arguments: {
+          from: new Date(now + 2 * day).toISOString(),
+          to: new Date(now + 3 * day).toISOString(),
+        },
+      });
+      expect(empty.isError).not.toBe(true);
+      expect(readJson(empty as ToolResult)).toMatchObject({
+        memories: [],
+        errors: [],
+        total: 0,
+        nextOffset: null,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('handshakes and reports server name', async () => {
     const client = await connect();
     const info = client.getServerVersion();
@@ -175,7 +902,12 @@ describe('MCP protocol conformance', () => {
     const tools = await client.listTools();
     const names = tools.tools.map((t) => t.name).sort();
     expect(names).toEqual(
-      expect.arrayContaining(['memory.confirm', 'memory.get', 'memory.save', 'memory.search']),
+      expect.arrayContaining([
+        'memory.confirm_batch',
+        'memory.get_batch',
+        'memory.save',
+        'memory.search',
+      ]),
     );
     expect(names).toEqual(
       expect.arrayContaining([
@@ -228,7 +960,7 @@ describe('MCP protocol conformance', () => {
     expect(desc).toContain('a full page is not proof of relevance');
 
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
-    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1873);
+    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1885);
   });
 
   it('memory.archive description steers against autonomous retirement', async () => {
@@ -414,7 +1146,7 @@ describe('MCP protocol conformance', () => {
     const { tools } = await client.listTools();
     await client.close();
 
-    for (const name of ['memory.search', 'memory.get']) {
+    for (const name of ['memory.search', 'memory.get_batch']) {
       const schema = tools.find((t) => t.name === name)?.inputSchema as
         | { properties?: { relations_limit?: { maximum?: number; description?: string } } }
         | undefined;
@@ -442,7 +1174,7 @@ describe('MCP protocol conformance', () => {
 
     for (const call of [
       { name: 'memory.search', arguments: { query: 'probe', relations_limit: 51 } },
-      { name: 'memory.get', arguments: { id, relations_limit: 51 } },
+      { name: 'memory.get_batch', arguments: { ids: [id], relations_limit: 51 } },
     ]) {
       const rejected = (await client.callTool(call)) as ToolResult;
       expect(rejected.isError, call.name).toBe(true);
@@ -453,16 +1185,16 @@ describe('MCP protocol conformance', () => {
     }
 
     const atMax = (await client.callTool({
-      name: 'memory.get',
-      arguments: { id, relations_limit: RELATION_ANNOTATION_MAX },
+      name: 'memory.get_batch',
+      arguments: { ids: [id], relations_limit: RELATION_ANNOTATION_MAX },
     })) as ToolResult;
     expect(atMax.isError).toBeFalsy();
-    expect(readJson(atMax)).toMatchObject({ relations: [], relationsTotal: 0 });
+    expect(readJson(atMax)).toMatchObject({ memories: [{ relations: [], relationsTotal: 0 }] });
 
     await client.close();
   });
 
-  it("memory.get's batch form reports the same review metadata and replaces as the single-id form", async () => {
+  it('memory.get_batch preserves deep metadata in both one-item and multi-item pages', async () => {
     const projects = new ProjectsService(createRepositories(services.db.db));
     const project =
       projects.findBySlug('integration-batch-parity') ??
@@ -486,29 +1218,33 @@ describe('MCP protocol conformance', () => {
     const headId = await save('batch parity head');
 
     const refuted = (await client.callTool({
-      name: 'memory.confirm',
-      arguments: { id: headId, verdict: 'refute', reason: 'batch parity probe' },
+      name: 'memory.confirm_batch',
+      arguments: { ids: [headId], verdict: 'refute', reason: 'batch parity probe' },
     })) as ToolResult;
     expect(refuted.isError).toBeFalsy();
 
     const single = (await client.callTool({
-      name: 'memory.get',
-      arguments: { id: headId },
+      name: 'memory.get_batch',
+      arguments: { ids: [headId], relations_limit: 50 },
     })) as ToolResult;
     const batch = (await client.callTool({
-      name: 'memory.get',
+      name: 'memory.get_batch',
       arguments: { ids: [headId, predecessorId] },
     })) as ToolResult;
     expect(single.isError).toBeFalsy();
     expect(batch.isError).toBeFalsy();
 
-    const singleBody = readJson(single) as {
-      reviewState?: string;
-      reviewAfter?: string | null;
-      reviewEscalated?: boolean;
-      lastSeenAt?: unknown;
-      memory: { replaces: string[] };
-    };
+    const singleBody = (
+      readJson(single) as {
+        memories: {
+          replaces: string[];
+          reviewState?: string;
+          reviewAfter?: string | null;
+          reviewEscalated?: boolean;
+          lastSeenAt?: unknown;
+        }[];
+      }
+    ).memories[0]!;
     const entries = (readJson(batch) as { memories: Record<string, unknown>[] }).memories;
     const head = entries.find((m) => m.id === headId);
     const predecessor = entries.find((m) => m.id === predecessorId);
@@ -522,7 +1258,7 @@ describe('MCP protocol conformance', () => {
     expect(head!.reviewAfter).toBe(singleBody.reviewAfter);
     expect(head!.reviewEscalated).toBe(singleBody.reviewEscalated);
     expect(head!.replaces).toEqual([predecessorId]);
-    expect(head!.replaces).toEqual(singleBody.memory.replaces);
+    expect(head!.replaces).toEqual(singleBody.replaces);
 
     expect(predecessor!.status).toBe('superseded');
     for (const field of ['reviewState', 'reviewAfter', 'reviewEscalated']) {
@@ -530,7 +1266,7 @@ describe('MCP protocol conformance', () => {
     }
 
     expect('lastSeenAt' in head!).toBe(true);
-    expect('lastSeenAt' in singleBody).toBe(false);
+    expect('lastSeenAt' in singleBody).toBe(true);
     for (const field of [
       'head',
       'predecessors',
@@ -539,7 +1275,7 @@ describe('MCP protocol conformance', () => {
       'headTruncated',
       'confirmationCount',
     ]) {
-      expect(field in head!, `${field} on a batch entry`).toBe(false);
+      expect(field in head!, `${field} on a batch entry`).toBe(true);
     }
 
     await client.close();
@@ -727,12 +1463,12 @@ describe('MCP protocol conformance', () => {
     });
 
     it.each([
-      ['memory.context', 1432],
+      ['memory.context', 1444],
       ['memory.search_prompts', 428],
-      ['memory.session_start', 971],
+      ['memory.session_start', 977],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1549],
+      ['memory.save', 1555],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
@@ -1103,9 +1839,9 @@ describe('MCP protocol conformance', () => {
   it('advertises behavioral annotations consistent with the append-only/closed-store invariants', async () => {
     const READ_TOOLS = new Set([
       'memory.search',
-      'memory.get',
+      'memory.get_batch',
       'memory.context',
-      'memory.session_get',
+      'memory.session_get_batch',
       'memory.timeline',
       'memory.search_prompts',
       'memory.doctor',
@@ -1117,7 +1853,7 @@ describe('MCP protocol conformance', () => {
     ]);
     const WRITE_TOOLS = new Set([
       'memory.save',
-      'memory.confirm',
+      'memory.confirm_batch',
       'memory.archive',
       'memory.capture_passive',
       'memory.save_prompt',
@@ -1125,7 +1861,7 @@ describe('MCP protocol conformance', () => {
       'memory.session_summary',
       'memory.session_end',
       'memory.session_resume',
-      'memory.judge',
+      'memory.judge_batch',
       'memory.compare',
       'project.use',
     ]);
@@ -1226,15 +1962,15 @@ describe('MCP protocol conformance', () => {
     expect(searchedPayload.memories.map((m) => m.id)).toContain(savedPayload.id);
 
     const got = (await client.callTool({
-      name: 'memory.get',
-      arguments: { id: savedPayload.id },
+      name: 'memory.get_batch',
+      arguments: { ids: [savedPayload.id], relations_limit: 50 },
     })) as ToolResult;
-    const gotPayload = readJson(got) as { memory: { id: string } };
-    expect(gotPayload.memory.id).toBe(savedPayload.id);
+    const gotPayload = (readJson(got) as { memories: { id: string }[] }).memories[0]!;
+    expect(gotPayload.id).toBe(savedPayload.id);
 
     const confirmed = (await client.callTool({
-      name: 'memory.confirm',
-      arguments: { id: savedPayload.id },
+      name: 'memory.confirm_batch',
+      arguments: { ids: [savedPayload.id] },
     })) as ToolResult;
     expect(confirmed.isError).toBeFalsy();
 
@@ -1424,16 +2160,14 @@ describe('MCP protocol conformance', () => {
     };
     expect(stats.memoriesByStatus).toEqual({ active: 1 });
 
-    const batch = (await call('memory.get', { ids: [bId, ...outsiders] })).body as {
-      memories: { id: string }[];
-      notFound: string[];
-    };
+    const batch = (await call('memory.get_batch', { ids: [bId, ...outsiders] })).body as MemoryPage;
     expect(batch.memories.map((m) => m.id)).toEqual([bId]);
-    expect(batch.notFound.sort()).toEqual([...outsiders].sort());
+    expect(batch.errors.map((e) => e.id).sort()).toEqual([...outsiders].sort());
+    expect(batch.errors.every((e) => e.code === 'not_found')).toBe(true);
 
-    expect((await call('memory.get', { id: bId })).result.isError).toBeFalsy();
+    expect((await call('memory.get_batch', { ids: [bId] })).result.isError).toBeFalsy();
     for (const outside of outsiders) {
-      const denied = await call('memory.get', { id: outside });
+      const denied = await call('memory.get_batch', { ids: [outside] });
       expect(denied.result.isError).toBe(true);
       expect(JSON.stringify(denied.body)).toContain('not_found');
     }
@@ -1687,8 +2421,8 @@ describe('MCP protocol conformance', () => {
       offset: 0,
     });
     await call('memory.search', { entity: 'strictnesscontrolaaa' });
-    await call('memory.get', { id: saved.id, relations_limit: 5 });
-    await call('memory.get', { ids: [saved.id] });
+    await call('memory.get_batch', { ids: [saved.id], relations_limit: 5 });
+    await call('memory.get_batch', { ids: [saved.id] });
     await call('memory.context', {
       sessions: 2,
       prompts: 2,
@@ -1838,8 +2572,8 @@ describe('MCP protocol conformance', () => {
     await record('path-scoped / session_start elsewhere', scoped, 'memory.session_start', {
       project: 'somewhere-else',
     });
-    await record('path-scoped / cross-project get', scoped, 'memory.get', {
-      id: '01JJJJJJJJJJJJJJJJJJJJJJJJ',
+    await record('path-scoped / cross-project get', scoped, 'memory.get_batch', {
+      ids: ['01JJJJJJJJJJJJJJJJJJJJJJJJ'],
     });
     await scoped.close();
 
@@ -1875,7 +2609,7 @@ describe('MCP protocol conformance', () => {
       },
       'path-scoped / cross-project get': {
         code: 'not_found',
-        message: "memory '01JJJJJJJJJJJJJJJJJJJJJJJJ' not found",
+        message: 'No requested item could be processed.',
       },
       'path-less / token denied the default project': {
         code: 'forbidden',
@@ -2237,7 +2971,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.session_get returns the FULL summary while memory.context returns a snippet', async () => {
+  it('memory.session_get_batch returns the FULL summary while memory.context returns a snippet', async () => {
     const client = await connect();
 
     const started = (await client.callTool({
@@ -2263,11 +2997,12 @@ describe('MCP protocol conformance', () => {
     expect(seen?.summary?.length).toBeLessThanOrEqual(350);
 
     const got = (await client.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
     expect(got.isError).toBeFalsy();
-    const gotPayload = readJson(got) as { id: string; summary: string | null };
+    const gotPayload = (readJson(got) as { sessions: { id: string; summary: string | null }[] })
+      .sessions[0]!;
     expect(gotPayload.id).toBe(sessionId);
     expect(gotPayload.summary).toBe(fullSummary);
 
@@ -2275,7 +3010,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.session_get succeeds with only sessionId and carries no `versions` key', async () => {
+  it('memory.session_get_batch succeeds with a one-item IDs array and carries no `versions` key', async () => {
     const client = await connect();
     const started = (await client.callTool({
       name: 'memory.session_start',
@@ -2288,11 +3023,11 @@ describe('MCP protocol conformance', () => {
     });
 
     const got = (await client.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
     expect(got.isError).toBeFalsy();
-    const payload = readJson(got) as { summary: string | null };
+    const payload = (readJson(got) as { sessions: { summary: string | null }[] }).sessions[0]!;
     expect(payload.summary).toBe('Goal: the argument is gone, not just unused.');
     expect(payload).not.toHaveProperty('versions');
 
@@ -2300,7 +3035,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.session_get refuses a stale caller still sending `limit`, naming the tool and the property', async () => {
+  it('memory.session_get_batch refuses a stale scalar sessionId alongside valid IDs', async () => {
     const client = await connect();
     const started = (await client.callTool({
       name: 'memory.session_start',
@@ -2309,19 +3044,19 @@ describe('MCP protocol conformance', () => {
     const { sessionId } = readJson(started) as { sessionId: string };
 
     const rejected = (await client.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId, limit: 2 },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId], sessionId },
     })) as ToolResult;
     const message = rejected.content.find((c) => c.type === 'text')?.text ?? '';
     expect(rejected.isError).toBe(true);
-    expect(message).toContain('limit');
-    expect(message).toContain('memory.session_get');
+    expect(message).toContain('sessionId');
+    expect(message).toContain('memory.session_get_batch');
 
     await client.callTool({ name: 'memory.session_end', arguments: {} });
     await client.close();
   });
 
-  it('memory.session_get returns not_found for a cross-scope session', async () => {
+  it('memory.session_get_batch returns not_found for a cross-scope session', async () => {
     const projects = new ProjectsService(createRepositories(services.db.db));
     projects.create({ slug: 'getsession-proj' });
 
@@ -2338,8 +3073,8 @@ describe('MCP protocol conformance', () => {
       arguments: { summary: 'Goal: lives in a project.' },
     });
     const inScope = (await pinned.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
     expect(inScope.isError).toBeFalsy();
     await pinned.callTool({ name: 'memory.session_end', arguments: {} });
@@ -2347,15 +3082,15 @@ describe('MCP protocol conformance', () => {
 
     const globalClient = await connect();
     const got = (await globalClient.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
     expect(got.isError).toBe(true);
     expect((readJson(got) as { code?: string }).code).toBe('not_found');
     await globalClient.close();
   });
 
-  it('memory.session_get returns not_found for a soft-deleted session', async () => {
+  it('memory.session_get_batch returns not_found for a soft-deleted session', async () => {
     const client = await connect();
     const started = (await client.callTool({
       name: 'memory.session_start',
@@ -2374,8 +3109,8 @@ describe('MCP protocol conformance', () => {
       .run();
 
     const got = (await client.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
     expect(got.isError).toBe(true);
     expect((readJson(got) as { code?: string }).code).toBe('not_found');
@@ -2404,10 +3139,12 @@ describe('MCP protocol conformance', () => {
     await client.callTool({ name: 'memory.session_end', arguments: { sessionId } });
 
     const closed = (await client.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
-    const closedPayload = readJson(closed) as { status: string; endedAt: string | null };
+    const closedPayload = (
+      readJson(closed) as { sessions: { status: string; endedAt: string | null }[] }
+    ).sessions[0]!;
     expect(closedPayload.status).toBe('ended');
     expect(closedPayload.endedAt).toEqual(expect.any(String));
 
@@ -2429,10 +3166,12 @@ describe('MCP protocol conformance', () => {
     expect(resumed.isError).toBeFalsy();
 
     const reread = (await client.callTool({
-      name: 'memory.session_get',
-      arguments: { sessionId },
+      name: 'memory.session_get_batch',
+      arguments: { ids: [sessionId] },
     })) as ToolResult;
-    const rereadPayload = readJson(reread) as { status: string; endedAt: string | null };
+    const rereadPayload = (
+      readJson(reread) as { sessions: { status: string; endedAt: string | null }[] }
+    ).sessions[0]!;
     expect(rereadPayload.status).toBe('active');
     expect(rereadPayload.endedAt).toBeNull();
 
@@ -2489,11 +3228,11 @@ describe('MCP protocol conformance', () => {
     expect(secondPayload.id).not.toBe(firstPayload.id);
 
     const got = (await client.callTool({
-      name: 'memory.get',
-      arguments: { id: firstPayload.id },
+      name: 'memory.get_batch',
+      arguments: { ids: [firstPayload.id], relations_limit: 50 },
     })) as ToolResult;
-    const gotPayload = readJson(got) as { memory: { status: string } };
-    expect(gotPayload.memory.status).toBe('superseded');
+    const gotPayload = (readJson(got) as { memories: { status: string }[] }).memories[0]!;
+    expect(gotPayload.status).toBe('superseded');
 
     const searched = (await client.callTool({
       name: 'memory.search',
@@ -2555,16 +3294,22 @@ describe('MCP protocol conformance', () => {
 
     const judgmentId = payload.candidates[0]!.judgmentId;
     const judgement = (await client.callTool({
-      name: 'memory.judge',
+      name: 'memory.judge_batch',
       arguments: {
-        judgmentId,
-        relation: 'related',
-        confidence: 0.9,
-        reason: 'overlapping content',
+        judgments: [
+          {
+            judgmentId,
+            relation: 'related',
+            confidence: 0.9,
+            reason: 'overlapping content',
+          },
+        ],
       },
     })) as ToolResult;
     expect(judgement.isError).toBeFalsy();
-    const judgedPayload = readJson(judgement) as { status: string; relation: string };
+    const judgedPayload = (
+      readJson(judgement) as { results: { status: string; relation: string }[] }
+    ).results[0]!;
     expect(judgedPayload.status).toBe('judged');
     expect(judgedPayload.relation).toBe('related');
 
@@ -2716,8 +3461,8 @@ describe('MCP protocol conformance', () => {
     const savedPayload = readJson(saved) as { id: string };
 
     const got = (await client.callTool({
-      name: 'memory.get',
-      arguments: { id: savedPayload.id },
+      name: 'memory.get_batch',
+      arguments: { ids: [savedPayload.id], relations_limit: 50 },
     })) as ToolResult;
     expect(got.isError).toBeFalsy();
     const tl = (await client.callTool({
@@ -2733,18 +3478,18 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('returns a structured error when memory.get is called with an unknown id', async () => {
+  it('returns a structured error when memory.get_batch is called with an unknown id', async () => {
     const client = await connect();
     const result = (await client.callTool({
-      name: 'memory.get',
-      arguments: { id: 'definitely-not-an-id' },
+      name: 'memory.get_batch',
+      arguments: { ids: ['definitely-not-an-id'], relations_limit: 50 },
     })) as ToolResult;
     expect(result.isError).toBe(true);
     const payload = readJson(result) as { code?: string };
     expect(payload.code).toBe('not_found');
     await client.close();
   });
-  it('memory.context exposes aged pending judgments and memory.judge clears them', async () => {
+  it('memory.context exposes aged pending judgments and memory.judge_batch clears them', async () => {
     const client = await connect();
 
     const saveOne = (await client.callTool({
@@ -2811,11 +3556,15 @@ describe('MCP protocol conformance', () => {
     expect(inventoryIds).toContain('jdg-fresh-itest');
 
     const judged = (await client.callTool({
-      name: 'memory.judge',
+      name: 'memory.judge_batch',
       arguments: {
-        judgmentId: 'jdg-aged-itest',
-        relation: 'not_conflict',
-        reason: 'integration cleanup',
+        judgments: [
+          {
+            judgmentId: 'jdg-aged-itest',
+            relation: 'not_conflict',
+            reason: 'integration cleanup',
+          },
+        ],
       },
     })) as ToolResult;
     expect(judged.isError).toBeFalsy();
@@ -2874,12 +3623,17 @@ describe('MCP protocol conformance', () => {
     const sPayload = readJson(searched) as { memories: { id: string; reviewState?: string }[] };
     expect(sPayload.memories.find((m) => m.id === id)?.reviewState).toBe('needs_review');
 
-    const got = (await client.callTool({ name: 'memory.get', arguments: { id } })) as ToolResult;
-    expect((readJson(got) as { reviewState?: string }).reviewState).toBe('needs_review');
+    const got = (await client.callTool({
+      name: 'memory.get_batch',
+      arguments: { ids: [id], relations_limit: 50 },
+    })) as ToolResult;
+    expect(
+      (readJson(got) as { memories: { reviewState?: string }[] }).memories[0]!.reviewState,
+    ).toBe('needs_review');
 
     const confirmed = (await client.callTool({
-      name: 'memory.confirm',
-      arguments: { id },
+      name: 'memory.confirm_batch',
+      arguments: { ids: [id] },
     })) as ToolResult;
     expect(confirmed.isError).toBeFalsy();
 
