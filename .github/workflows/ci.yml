@@ -318,10 +318,10 @@ jobs:
             || { echo "::error::arm64 boot did not open /data/data.db"; \
                  echo "$LOGS"; exit 1; }
           applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
-          [ "$applied" = 37 ] \
-            || { echo "::error::expected 37 migrations, got $applied"; \
+          [ "$applied" = 38 ] \
+            || { echo "::error::expected 38 migrations, got $applied"; \
                  echo "$LOGS"; exit 1; }
-          echo "arm64 boot smoke: healthz=200, /data/data.db, 37 migrations ✓"
+          echo "arm64 boot smoke: healthz=200, /data/data.db, 38 migrations ✓"
           docker rm -f rembric-arm64-smoke
 
   docker-build-check-web:
@@ -367,7 +367,7 @@ jobs:
           secrets: |
             hf_token=${{ secrets.HF_TOKEN }}
 
-      - name: Boot smoke — healthz, data dir, 37 migrations
+      - name: Boot smoke — healthz, data dir, 38 migrations
         run: |
           set -eu
           TOK=ci-web-token-0123456789
@@ -400,10 +400,10 @@ jobs:
             || { echo "::error::web boot did not open /data/data.db"; \
                  echo "$LOGS"; exit 1; }
           # The migrations dir arrives through outputFileTracingIncludes, so
-          # a boot that applies fewer than 37 means that path broke silently.
+          # a boot that applies fewer than 38 means that path broke silently.
           applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
-          [ "$applied" = 37 ] \
-            || { echo "::error::expected 37 migrations, got $applied"; \
+          [ "$applied" = 38 ] \
+            || { echo "::error::expected 38 migrations, got $applied"; \
                  echo "$LOGS"; exit 1; }
-          echo "web boot smoke: healthz=200, /data/data.db, 37 migrations ✓"
+          echo "web boot smoke: healthz=200, /data/data.db, 38 migrations ✓"
           docker rm -f rembric-web-smoke
