@@ -728,11 +728,13 @@ This nudge is the only mechanism that covers the case where Codex CLI cannot inj
 
 ### Requirement: A process that resumes a pre-existing session SHALL be told ONCE that a stored summary may exist
 
-A process whose FIRST `POST /api/<slug>/sessions` of its lifetime reports `created: false` attached to a session it did not author. It cannot know whether a curated summary is already stored, and the model driving it cannot see the turns that produced one. It SHALL therefore emit, once, a standalone line directing the model to read the stored summary (`memory.session_get`) before its next curated write.
+A process whose FIRST `POST /api/<slug>/sessions` of its lifetime reports `created: false` attached to a session it did not author. It cannot know whether a curated summary is already stored, and the model driving it cannot see the turns that produced one. It SHALL therefore emit, once, a standalone line directing the model to read the stored summary (`memory.session_get_batch`) before its next curated write.
 
 **What the line buys is the QUALITY of the rewrite AND the part of its safety the server cannot provide.** The server's own protection is preservation by OMISSION and nothing else (`sessions`, "A curated session-summary write MUST be merged section-wise with the stored summary"): a `##` section the write does not carry survives byte-identically, and a curated write carrying no `##` heading at all against a sectioned stored summary is refused outright. That covers the model which forgets a section and the model which collapses the document into one paragraph. It does NOT cover the model which carries a section and puts less under it — that write replaces the section and the previous bytes are retained nowhere.
 
 The line closes exactly that residual: a model can only preserve what it can see, so directing it to read the stored summary first is what turns an in-section rewrite into a condensation instead of a substitution. Its absence is therefore no longer free, and this requirement SHALL NOT claim that it is. It remains a nudge and not a precondition — the server SHALL NOT gate a curated write on a prior read, because a model that never reads still writes a summary worth having for the sections it does carry.
+
+The line SHALL direct `memory.session_get_batch({ ids: [sessionId] })` and consumption of the full `sessions[]` entry before a curated write.
 
 The line SHALL be governed by four constraints:
 
@@ -780,7 +782,7 @@ The verdict marker SHALL remain write-once per session id. The write-once proper
 
 A compaction is the moment at which the stored summary matters most and is least visible: the model that continues has lost the turns it would summarise, and this injection is the only instruction it receives before it acts. The block SHALL therefore be ordered read-then-write:
 
-1. Read the stored summary (`memory.session_get`).
+1. Read the stored summary (`memory.session_get_batch({ ids: [sessionId] })`) from the full `sessions[]` entry.
 2. Write the session's CURRENT COMPLETE state with `memory.session_summary` — what was just read, brought up to date with the surviving window — **and SHALL be told what the write does to the stored value, in terms that are true under the section-wise merge: each `##` section the write carries replaces its stored counterpart, and a section the write omits keeps its stored text. Sending a summary of the window alone therefore replaces every section the window happens to mention and silently leaves the rest stale.**
 3. Recall further prior context (`memory.context` / `memory.search`) when what was read is not enough.
 
@@ -790,14 +792,14 @@ The block SHALL NOT ask for a summary of the compacted window, and SHALL NOT ask
 
 This block is also the compaction re-arm of the read directive specified in "A process that resumes a pre-existing session SHALL be told ONCE that a stored summary may exist". A compacted context is, for that purpose, a fresh attachment to a pre-existing session, and the injection at the compaction boundary is the earliest point at which the model can act on it — so it carries the directive itself rather than depending on a later reminder firing or on a relaxed first-ensure marker.
 
-Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state what a curated summary write replaces and what it keeps"), which carries the merge and current-state obligations on every turn but no `memory.session_get` directive. That is a named gap, not a solved problem.
+Where a client has NO compaction hook, this requirement SHALL NOT cause one to be added. That client's coverage is its always-present protocol block (`mcp-api`, "The `instructions` block MUST state what a curated summary write replaces and what it keeps"), which carries the merge and current-state obligations on every turn but no `memory.session_get_batch` directive. That is a named gap, not a solved problem.
 
 The block SHALL keep every obligation it already carries: the `10000` cap substring and one copy of the text shared by the clients that use it. It SHALL carry the exact canonical Markdown heading directive. **A reworded block SHALL be re-measured against the published ≤700-byte cap in the same commit as the wording**, and the measured value recorded. Measured on the shipped fixture after the merge correction: the `rembric:`-prefixed `postCompact` is **599 bytes** and the unprefixed `postCompactCore` is **590**, against the 683 bytes the direct-replacement wording measured and the 675 the pre-correction fixture measured.
 
 #### Scenario: The block asks for the current whole state, after a read
 
 - **WHEN** the post-compaction injection is emitted
-- **THEN** it SHALL direct the model to call `memory.session_get` before writing
+- **THEN** it SHALL direct the model to call `memory.session_get_batch` before writing
 - **AND** it SHALL ask for the session's current complete state
 - **AND** it SHALL state that the `##` sections the write carries replace their stored counterparts and that omitted sections keep their stored text
 
@@ -825,6 +827,8 @@ The block SHALL keep every obligation it already carries: the `10000` cap substr
 - **THEN** the text SHALL come from the shared fixture contract, byte-identical, with no per-client copy
 
 ### Requirement: Every client with a compaction event MUST inject the read-then-rewrite directive, and where no such event exists a thin rewrite MUST be an accepted, partly-unrecoverable loss
+
+**The accepted-risk clause, for a client with no compaction event.** This requirement SHALL NOT cause a client to invent one, and the absence SHALL be recorded as an accepted risk rather than tracked as an open defect:
 
 A compaction is the only moment at which a curated summary is rewritten by a model that cannot see what it is rewriting. Whether the client injects an instruction at that moment therefore decides whether the rewrite is informed or blind, and this requirement fixes both the per-client matrix and the meaning of an absent injection.
 
@@ -860,8 +864,6 @@ This finding is scoped to the READ directive specifically: it says a stronger nu
 - **`on_pre_compress`'s return value SHALL remain the empty string.** Its documented destination is the compressor prompt — the summariser that builds the compacted window, not the agent that continues afterwards. Placing the directive there would instruct the wrong consumer and would shape the window instead of the stored summary, which is the exact confusion this contract exists to remove.
 - **It SHALL be emitted once, on the first `prefetch()` after the compaction, as its own line**, independent of every other line that turn's `prefetch()` may carry; none SHALL replace another. The one exception is the resumed-read line: where it and this directive would both be emitted on the same turn, only this directive SHALL be emitted, because it is a strict superset of the read instruction the other carries. The per-turn summary line this clause used to name no longer exists — the stretch-close reminder is server-composed and arrives as the notice (`session-nudges`, "Recall, the session opening and the resumed-read line MUST stay client-composed, and the split MUST be stated") — and naming it here would pin a line no client emits.
 - **Its flags SHALL reset on session end and session switch**, matching the provider's existing per-session counters and warned flags.
-
-**The accepted-risk clause, for a client with no compaction event.** This requirement SHALL NOT cause a client to invent one, and the absence SHALL be recorded as an accepted risk rather than tracked as an open defect:
 
 - The expected outcome on such a client is a THIN post-compaction rewrite — a full-looking summary of the window the model can still see, with earlier detail gone from the stored value. That is the no-block arm measured above, and it is an accepted outcome, not a bug report.
 - **The mitigation is the write contract, and it is PARTIAL. This requirement SHALL state the partiality rather than claim recoverability it does not have.** The server retains no copy of replaced text: there is no version history, no journal payload and no restore verb (`sessions`, "A session summary MUST follow the documented structure"). What protects a thin rewrite is preservation by omission (`sessions`, "A curated session-summary write MUST be merged section-wise with the stored summary"), which reaches exactly two of the three shapes this failure takes:

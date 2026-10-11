@@ -550,9 +550,9 @@ These statistics are aggregates over the whole index and are therefore NOT scope
 
 ### Requirement: Term-statistics lookups MUST be keyed on the index's own terms
 
-The relevance level looks a term up in the index's own statistics, so a token the tokenizer would never have produced finds no entry, receives the weight reserved for a term the corpus has never seen — the maximum — and the level silently treats the corpus's commonest word as its rarest. A term is therefore only safe to look up if the index itself produced it.
-
 The terms whose document frequencies are read SHALL be obtained from the full-text index's own tokenizer, by tokenising the query text through an FTS5 table declared with that same tokenizer and reading the resulting terms back, in the same read that resolves their document frequencies. The application SHALL NOT reproduce the index's tokenizer in order to key that read.
+
+The relevance level looks a term up in the index's own statistics, so a token the tokenizer would never have produced finds no entry, receives the weight reserved for a term the corpus has never seen — the maximum — and the level silently treats the corpus's commonest word as its rarest. A term is therefore only safe to look up if the index itself produced it.
 
 Reproducing it is not merely undesirable, it is unavailable, and the requirement is written this way because the alternative was measured and does not exist. The index's rule disagrees with any application-side rule in at least three independent ways — which characters delimit a term, whether text is compared decomposed or precomposed, and whether case folding is per-codepoint or context-sensitive — and its diacritic-folding table is neither "fold everything" nor "fold nothing", so agreement cannot be recovered by choosing a folding option on either side. A rule that agrees on one set of scripts trades away another.
 
@@ -1020,9 +1020,9 @@ Without `adminBypass: true`, the method SHALL throw `DomainError('forbidden', ..
 
 ### Requirement: `procedural` MUST be a first-class memory type
 
-Procedural knowledge — how a task is performed in this codebase, a runbook, a workflow — is the highest-value memory class for a coding agent and has a shelf life unlike any existing type. It is currently expressible only as `reference`, which deliberately carries **no** review TTL and a ten-year decay window on the grounds that a reference is a pointer whose staleness surfaces when used. A runbook is not a pointer: it goes stale silently when the underlying process changes, and a stale runbook actively misleads.
-
 The memory-type enum SHALL include `procedural`, with its own review TTL and its own decay window, distinct from `reference`. Existing rows SHALL NOT be reclassified: assigning a type is a content judgement, and the server SHALL NOT make it on the agent's behalf.
+
+Procedural knowledge — how a task is performed in this codebase, a runbook, a workflow — is the highest-value memory class for a coding agent and has a shelf life unlike any existing type. It is currently expressible only as `reference`, which deliberately carries **no** review TTL and a ten-year decay window on the grounds that a reference is a pointer whose staleness surfaces when used. A runbook is not a pointer: it goes stale silently when the underlying process changes, and a stale runbook actively misleads.
 
 #### Scenario: A procedural memory needs review on its own schedule
 
@@ -1047,7 +1047,7 @@ Each memory with `status = 'active'` SHALL expose a **derived, read-time-only** 
 
 For an `active` memory of type `T`:
 
-- `reviewBaseline` SHALL be `max(created_at, latest AFFIRMING confirmation event_ts)` — the last time the memory was **affirmed** (its own creation, or a `memory.confirm` with verdict `affirm` recorded against the head of its supersedes chain). A refuting confirmation SHALL NOT advance it. `last_seen_at` SHALL NOT be used as the baseline: it is the ACCESS signal, advanced by dereferencing a memory (`memory.get` on a single id), by an affirming `memory.confirm`, and by an operator undoing a decay archival — never by a search returning a row, and never by the batch `memory.get({ids})` form. Access and affirmation are different facts about a memory, which is the whole reason the two axes exist.
+- `reviewBaseline` SHALL be `max(created_at, latest AFFIRMING confirmation event_ts)` — the last time the memory was **affirmed** (its own creation, or a `memory.confirm_batch` with verdict `affirm` recorded against the head of its supersedes chain). A refuting confirmation SHALL NOT advance it. `last_seen_at` SHALL NOT be used as the baseline: it is the ACCESS signal, advanced by every successfully served dereference through `memory.get_batch`, whether one or many IDs are requested, by an affirming `memory.confirm_batch`, and by an operator undoing a decay archival — never by a search returning a row. A successful batch dereference SHALL advance the resolved head, not every projected predecessor; failed, missing and out-of-scope targets SHALL not be touched. Access and affirmation are different facts about a memory, which is the whole reason the two axes exist.
 - `reviewAfter` SHALL be `reviewBaseline + REVIEW_TTL_MS[T]` when `REVIEW_TTL_MS` has an entry for `T`, and `null` otherwise.
 - `reviewState` SHALL be `'needs_review'` when `reviewAfter` is non-null AND `reviewAfter <= now`; otherwise `'fresh'`.
 - A refutation newer than `reviewBaseline` SHALL force `reviewState = 'needs_review'` regardless of `T`'s TTL, and `reviewAfter` SHALL then report the refutation's timestamp.
@@ -1073,15 +1073,15 @@ The time derivation SHALL live in one pure function (`deriveReviewState`) so it 
 #### Scenario: Confirming a memory clears needs_review
 
 - **GIVEN** an `active` memory currently deriving `reviewState = 'needs_review'`
-- **WHEN** `memory.confirm` records an affirming confirmation event at `now`
+- **WHEN** `memory.confirm_batch` records an affirming confirmation event at `now`
 - **THEN** the next derivation SHALL use `reviewBaseline = now`, yielding `reviewAfter = now + REVIEW_TTL_MS[type]` and `reviewState = 'fresh'`
 - **AND** no `memory` row SHALL have been mutated to achieve this (the confirmation is the only write, plus the access-signal touch that an affirmation carries)
 
 #### Scenario: Reading a memory does NOT clear needs_review
 
 - **GIVEN** an `active` memory deriving `reviewState = 'needs_review'`
-- **WHEN** the memory is dereferenced via `memory.get({id})` (which advances `last_seen_at`), fetched via `memory.get({ids})` (which does not), or returned by `memory.search` (which does not)
-- **THEN** its derived `reviewState` SHALL remain `'needs_review'` in all three cases — access does not count as affirmation, whether or not the read advanced the access signal
+- **WHEN** the memory is successfully dereferenced via `memory.get_batch({ids: [id]})` or a multi-item `memory.get_batch` (both advance the resolved head's `last_seen_at`), or returned by `memory.search` (which does not)
+- **THEN** its derived `reviewState` SHALL remain `'needs_review'` in every case — access does not count as affirmation, whether or not the read advanced the access signal
 
 #### Scenario: A type without a TTL never needs review on the clock
 
@@ -1107,7 +1107,7 @@ A memory appearing in a page of search results is evidence that it ranked, not t
 
 Whatever signal the system adopts for "accessed", it SHALL be advanced only by an interaction that distinguishes a dereferenced memory from a listed one, and any row that is filtered out before reaching the caller SHALL NOT have its access signal advanced.
 
-The shipped resolution is the strongest form of that rule: search advances the access signal for **no** row — neither the rows it returns nor the rows it drops — and only dereferencing a memory by id advances it. The drop-before-return scenario below is therefore satisfied vacuously today; it remains a stated requirement so that a future re-introduction of a search-time touch cannot reach a row the caller never saw.
+Search SHALL advance the access signal for **no** row — neither the rows it returns nor the rows it drops — and every successful `memory.get_batch` dereference, whether selected by IDs or creation period, SHALL advance its resolved head's access signal, regardless of batch size. Failed, missing and foreign targets, and merely projected predecessors, SHALL NOT be touched. The drop-before-return scenario remains a stated requirement so that a future re-introduction of a search-time touch cannot reach a row the caller never saw.
 
 #### Scenario: A broad search does not confer durability on every hit
 
@@ -1117,8 +1117,9 @@ The shipped resolution is the strongest form of that rule: search advances the a
 
 #### Scenario: A dereferenced memory is treated as accessed
 
-- **WHEN** a memory is fetched by id
-- **THEN** its access signal SHALL be advanced
+- **WHEN** a memory is successfully fetched by explicit ID or creation period through `memory.get_batch`, in a batch of one or many
+- **THEN** its resolved head's access signal SHALL be advanced
+- **AND** no mere predecessor projection or failed target SHALL receive an access update
 
 #### Scenario: A row dropped before return is not touched
 
@@ -1170,9 +1171,9 @@ Its consequences for the review queue SHALL be exactly these:
 
 ### Requirement: The review queue MUST have a terminal state
 
-A memory that is retrieved regularly but never re-affirmed crosses its review TTL and then remains `needs_review` indefinitely: reads deliberately do not clear it, and — because reads advance the access signal — decay cannot archive it either. The two staleness axes do not cover this case, and the affected population only grows.
-
 The escalation SHALL be a **read-time derived signal**, `reviewEscalated`, true once the memory has been unaffirmed for a bounded multiple of its own type TTL (`reviewBaseline + ttl * (1 + ESCALATION_MULTIPLIER) <= now`). It SHALL be derived by the same pure function as the rest of the review state, SHALL be reported on the single-`id` `memory.get` read alongside `reviewState`/`reviewAfter` (see `mcp-api`), and SHALL introduce no column, no sweep and no new mutation verb. It SHALL NOT be produced by the decay axis: the decay pass reads `last_seen_at` and the confidence floor only, and coupling it to the review clock would break the orthogonality the two axes are built on.
+
+A memory that is retrieved regularly but never re-affirmed crosses its review TTL and then remains `needs_review` indefinitely: reads deliberately do not clear it, and — because reads advance the access signal — decay cannot archive it either. The two staleness axes do not cover this case, and the affected population only grows.
 
 Two populations are deliberately outside the escalation clock, and both are stated rather than left implicit:
 
@@ -1390,9 +1391,9 @@ That overlap measure SHALL remain UNWEIGHTED, and SHALL NOT be replaced by the i
 
 ### Requirement: The rank window MUST be wide enough for the rank constant it uses
 
-Reciprocal Rank Fusion with rank constant `k` only preserves the intended ordering when the rank window is wide enough that a bottom-of-window row present in both branches cannot outscore a rank-1 row present in one branch. That condition is `2/(k + window) <= 1/(k + 1)`, i.e. the window must be at least `k + 2`. With `k = 60` and the default result limit the window is currently 38, well below the crossover, so the invariant is violated on the default path.
-
 The rank window SHALL be floored at or above the crossover implied by the rank constant, so that a single-branch rank-1 match is never displaced by rows whose only advantage is appearing in both branches' windows. Both retrievers already over-fetch and the dense kNN cost is flat in `k`, so the floor SHALL be implemented by widening the window rather than by lowering the rank constant. This guarantee is bounded by construction: at most `window - (rank_constant + 2)` rows can simultaneously rank below the crossover in both branches. A single-branch match displaced by more genuinely-relevant competitors than fit on a page is not a violation of this requirement — no window floor can or should prevent a page from filling with better matches.
+
+Reciprocal Rank Fusion with rank constant `k` only preserves the intended ordering when the rank window is wide enough that a bottom-of-window row present in both branches cannot outscore a rank-1 row present in one branch. That condition is `2/(k + window) <= 1/(k + 1)`, i.e. the window must be at least `k + 2`. With `k = 60` and the default result limit the window is currently 38, well below the crossover, so the invariant is violated on the default path.
 
 The guarantee is a property of **fusion**, and it holds over fused RRF scores only. The post-fusion boost is applied afterwards and is explicitly licensed to reorder near-ties (see "The post-fusion boost's documented guarantee MUST match its behavior"): its reachable multiplier spread is far wider than the fusion margin this floor protects, so a boosted row CAN overtake a single-branch rank-1 row. That is the boost doing its job, not a window violation, and the two requirements SHALL be read in that order.
 

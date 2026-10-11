@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the Model Context Protocol surface exposed by Rembric over Streamable HTTP, including transport, project scoping, authentication, tool contracts (`memory.save`, `memory.search`, `memory.get`, `memory.confirm`), and error conventions.
+Defines the Model Context Protocol surface exposed by Rembric over Streamable HTTP, including transport, project scoping, authentication, tool contracts and error conventions.
 
 ## Requirements
 
@@ -307,83 +307,6 @@ The `memory.search` description SHALL state what an abstaining response means an
 - **THEN** the description SHALL NOT attribute abstention to the relevance floor
 - **AND** the test SHALL fail if that attribution is reintroduced
 
-### Requirement: The `memory.get` tool MUST return the memory and its history
-
-`memory.get` SHALL accept an `id` and SHALL return the memory's content, status, scope, project, tags, `topicKey`, `replaces`, a bounded predecessor projection derived from `replaces`, and the affirming-confirmation count for the current head. The predecessor projection is bounded and content-free — see the `memory` capability, "Supersedes-chain reads MUST be bounded and content-free"; the response SHALL carry `predecessorCount` and `truncated` so a caller can tell that more ancestry exists. The memory row SHALL NOT expose the internal `source` provenance blob (token name, agent, model), which is operator data surfaced on the dashboard and never returned to an agent.
-
-For an `active` memory, the response SHALL additionally include the derived review metadata (see the `memory` capability): `reviewState` (`'fresh'` | `'needs_review'`), `reviewAfter` when non-null, and `reviewEscalated`. For non-`active` memories these fields SHALL be omitted.
-
-`memory.get` SHALL additionally accept an OPTIONAL `ids` array as a back-compatible batch form. Exactly one of `id` or `ids` SHALL be supplied; supplying both, or neither, SHALL be an `invalid_input` error. When `id` is supplied, the response shape SHALL be unchanged from the single-memory form above. When `ids` is supplied, the response SHALL contain an ordered `memories` array — one per id that resolves to an in-scope, token-authorized memory, in the same order the ids were requested, each entry carrying the per-memory shape enumerated below — plus a `notFound` array listing the requested ids that did not resolve. The batch form SHALL be scope-enforced via a scoped service read: an id outside the connection's effective scope SHALL be reported in `notFound` and SHALL NOT leak the memory's content or existence, identically to how the single-`id` form treats an out-of-scope id as not found. The `ids` array SHALL be bounded by a maximum length; a request exceeding it SHALL be an `invalid_input` error.
-
-A batch entry SHALL carry: the memory's own columns (`id`, `scope`, `projectId`, `type`, `title`, `content`, `tags`, `status`, `replaces`, `createdAt`, `topicKey`), `lastSeenAt`, the bounded `relations`/`relationsTotal` projection, the bounded `entities`/`entitiesTotal` projection, and the derived review metadata (`reviewState`, `reviewAfter`, `reviewEscalated`) on exactly the same terms as the single-`id` form — present for an `active` memory, omitted otherwise. The review metadata SHALL be derived in ONE batched lookup for the whole page rather than per row, matching how the search surface already derives it; a batch read SHALL NOT omit it, because `memory.context.needsReview` hands the agent a list of ids and the taught follow-up is a batch read, so an omission there tells the agent that nothing needs review.
-
-The two forms differ deliberately in the following respects, and ONLY these. Each difference SHALL be enumerated here rather than implied by a parity claim, because a claim of identical shape that the payloads do not honour is undetectable by any scenario written against it:
-
-- The single-`id` form dereferences ONE memory and advances its access signal, while the batch form is a pure read and advances nothing, so a bulk pull cannot reshuffle decay eligibility or context recency for every id it names (see the `memory` capability, "A dereferenced memory is treated as accessed").
-- The single-`id` form carries the ancestry projection — `head`, `predecessors`, `predecessorCount`, `truncated`, `headTruncated` — and `confirmationCount`; the batch form SHALL NOT. Those are per-target walks, and performing one per id would turn a bulk read into N ancestry queries. A caller needing history for a specific row SHALL use the single-`id` form, and the `memory.get` description SHALL NOT promise ancestry on the batch form.
-- `lastSeenAt` is carried by the batch form only. The single-`id` form advances the very signal it would be reporting, so the value it could return is the timestamp its own call just wrote — tautological rather than informative.
-
-#### Scenario: Retrieve a merged memory
-
-- **WHEN** an authenticated client calls `memory.get` with the id of a merged memory M
-- **THEN** the response SHALL include M's content, M's predecessors as `{id, title, status, createdAt}` projections, and the confirmation count against M
-
-#### Scenario: memory.get reports review state for an active memory
-
-- **GIVEN** an `active` memory M whose derived `reviewState` is `'fresh'`
-- **WHEN** an authenticated client calls `memory.get('M')`
-- **THEN** the response SHALL include `reviewState: 'fresh'` and `reviewAfter` (the non-null derived timestamp for M's type)
-
-#### Scenario: memory.get with a single id is unchanged
-
-- **WHEN** an authenticated client calls `memory.get({ id: 'M' })` (no `ids`)
-- **THEN** the response SHALL be the single-memory shape (memory, head, bounded predecessors, confirmationCount, relations, and review metadata when active)
-
-#### Scenario: memory.get with ids returns an ordered batch
-
-- **GIVEN** in-scope memories M1, M2, M3 all readable by the calling token
-- **WHEN** an authenticated client calls `memory.get({ ids: ['M2', 'M1', 'M3'] })`
-- **THEN** the response SHALL include `memories` ordered `[M2, M1, M3]`, each carrying the enumerated batch per-memory shape, and `notFound: []`
-
-#### Scenario: The batch form advances no access signal
-
-- **GIVEN** decay-eligible in-scope memories M1 and M2
-- **WHEN** an authenticated client calls `memory.get({ ids: ['M1', 'M2'] })`
-- **THEN** neither row's `last_seen_at` SHALL have been advanced, and both SHALL remain decay-eligible
-
-#### Scenario: memory.get batch never leaks a cross-scope id
-
-- **GIVEN** memory X exists in a DIFFERENT project than the connection's effective scope, and in-scope memory M1
-- **WHEN** an authenticated client calls `memory.get({ ids: ['M1', 'X'] })`
-- **THEN** the response `memories` SHALL contain only M1, and `X` SHALL appear in `notFound`
-- **AND** the response SHALL NOT include X's content, title, or any field distinguishing "out of scope" from "does not exist"
-
-#### Scenario: memory.get rejects ambiguous id arguments
-
-- **WHEN** an authenticated client calls `memory.get` with BOTH `id` and `ids` set, or with NEITHER set
-- **THEN** the server SHALL return an `invalid_input` error and SHALL NOT return any memory
-
-#### Scenario: The batch form carries the review metadata, verified against the single form
-
-- **GIVEN** one `active` in-scope memory M whose derived `reviewState` is `'needs_review'`
-- **WHEN** an authenticated client calls `memory.get({ id: 'M' })` and `memory.get({ ids: ['M'] })` on the same connection, adjacent in time
-- **THEN** both responses SHALL carry `reviewState`, `reviewAfter` and `reviewEscalated` for M, with equal values
-- **AND** a `superseded` or `archived` id in the same batch SHALL carry none of the three, so the omission remains status-driven rather than form-driven
-- **AND** the two calls SHALL be the control for each other: a test asserting only the batch form cannot distinguish a correct batch from a scope in which no row needs review
-
-#### Scenario: The batch form carries `replaces`
-
-- **GIVEN** an in-scope memory M that superseded a predecessor, so `M.replaces` is non-empty
-- **WHEN** an authenticated client calls `memory.get({ ids: ['M'] })`
-- **THEN** the entry for M SHALL carry `replaces` with the same value the single-`id` form returns for M
-- **AND** the entry SHALL NOT carry `head`, `predecessors`, `predecessorCount`, `truncated`, `headTruncated` or `confirmationCount` — `replaces` is a column on the row, the ancestry projection is a walk
-
-#### Scenario: `lastSeenAt` is a deliberate asymmetry, not a drift
-
-- **WHEN** an authenticated client calls `memory.get({ ids: ['M'] })` and `memory.get({ id: 'M' })`
-- **THEN** the batch entry SHALL carry `lastSeenAt` and the single-`id` response SHALL NOT
-- **AND** the single-`id` call SHALL still advance M's access signal, which is why it does not report it
-
 ### Requirement: Memory-returning MCP reads MUST expose the title
 
 Every MCP tool that returns a memory SHALL include that memory's `title` field in the returned shape: `memory.search` result rows, `memory.get` (the memory object, its `head`, and each `predecessors[]` entry), `memory.timeline` neighbors (`before[]`/`after[]`), and `memory.context` (`recentMemories[]`, plus a source/target title on `pendingJudgments[]`, and `needsReview[]`). The title SHALL be returned in full (titles are capped at 100 chars, so no snippet truncation applies).
@@ -402,42 +325,6 @@ Every MCP tool that returns a memory SHALL include that memory's `title` field i
 
 - **WHEN** `memory.timeline` returns `before` or `after` neighbors
 - **THEN** each neighbor SHALL include its `title`
-
-### Requirement: The `memory.confirm` tool MUST follow the supersedes chain
-
-`memory.confirm` SHALL accept EITHER a single `id` OR an `ids: string[]` (the batch form) and SHALL insert a `confirmations` row for the current head of the supersedes chain reachable from each id. The tool SHALL NOT mutate any `memory` row.
-
-In the single form (`{ id }`), the response SHALL be `{ ok: true }`, unchanged from the prior contract.
-
-In the batch form (`{ ids }`), the server SHALL de-duplicate the ids, record one confirmation per distinct id against its chain head inside ONE transaction, and respond with `{ ok: true, confirmed: <count of distinct ids confirmed> }`. The batch form exists so that the up-to-3 ids returned by `memory.context.needsReview` can be re-affirmed in a single round-trip instead of N. Authorization SHALL be checked once against the resolved scope before any write. When any id is missing or outside the active scope, the call SHALL fail with code `not_found` and the transaction SHALL be rolled back (no partial confirmation), so the agent can re-issue with the valid subset. Exactly one of `id` or `ids` SHALL be supplied; supplying both or neither SHALL be rejected with `invalid_input`.
-
-#### Scenario: Confirming an outdated id
-
-- **GIVEN** memory A is superseded by M
-- **WHEN** an authenticated client calls `memory.confirm('A')`
-- **THEN** a row SHALL be inserted into `confirmations` with `memory_id = 'M'` and no `memory` row SHALL be updated
-
-#### Scenario: Batch-confirming the needsReview ids in one call
-
-- **GIVEN** `memory.context.needsReview` returned ids `[X, Y, Z]`, each the head of its chain
-- **WHEN** an authenticated client calls `memory.confirm({ ids: ['X', 'Y', 'Z'] })`
-- **THEN** within one transaction a `confirmations` row SHALL be inserted for each of X, Y, and Z, no `memory` row SHALL be updated, and the response SHALL be `{ ok: true, confirmed: 3 }`
-
-#### Scenario: Batch confirm de-duplicates repeated ids
-
-- **WHEN** an authenticated client calls `memory.confirm({ ids: ['X', 'X'] })`
-- **THEN** exactly ONE `confirmations` row SHALL be inserted for X's chain head and the response SHALL be `{ ok: true, confirmed: 1 }`
-
-#### Scenario: Batch confirm rejects an out-of-scope id atomically
-
-- **GIVEN** ids `[X, Q]` where Q belongs to a different scope (or does not exist)
-- **WHEN** an authenticated client calls `memory.confirm({ ids: ['X', 'Q'] })`
-- **THEN** the call SHALL fail with code `not_found`, and NO `confirmations` row SHALL be inserted for X either (the transaction is rolled back)
-
-#### Scenario: memory.confirm rejects supplying both `id` and `ids`
-
-- **WHEN** an authenticated client calls `memory.confirm({ id: 'X', ids: ['Y'] })` or `memory.confirm({})`
-- **THEN** the call SHALL be rejected with code `invalid_input` and SHALL NOT insert any `confirmations` row
 
 ### Requirement: The MCP server MUST expose a `memory.archive` tool
 
@@ -708,9 +595,9 @@ The title predates the behaviour: nothing is clamped, and the scenario pins the 
 
 ### Requirement: `memory.context` MUST offer a relevance channel alongside recency
 
-`memory.context` is the tool the protocol directs agents to when starting or resuming work, and its recency channel is ordered by activity alone — nothing about the work at hand influences it. Recency answers "what happened lately", which is not the same question as "what bears on this task", and on a corpus spanning several projects the two answers diverge quickly.
-
 `memory.context` SHALL accept an optional `focus` string and SHALL return a `relevantMemories[]` channel. The existing recency channel SHALL be unchanged and the two SHALL be separately labelled in the response, so the model can tell which rows were selected for relevance and which for recency.
+
+`memory.context` is the tool the protocol directs agents to when starting or resuming work, and its recency channel is ordered by activity alone — nothing about the work at hand influences it. Recency answers "what happened lately", which is not the same question as "what bears on this task", and on a corpus spanning several projects the two answers diverge quickly.
 
 The relevance channel is filled in two passes, in this order. First, an **entity pre-pass**: identifiers recognised in the seed text by the deterministic extractor are looked up as exact addresses, and their linked in-scope memories are admitted first, because an exact identifier match is stronger evidence than any ranked score. Second, if the channel is still under its cap, the scoped hybrid search that backs `memory.search` fills the remainder. Rows are deduped by id across both passes, and each row SHALL carry a `via` field (`'entity'` | `'ranked'`) naming the pass that found it, so the two populations stay distinguishable in the response — the same observability `memory.search`'s entity flag provides.
 
@@ -1162,60 +1049,6 @@ When the title and content together yield no usable slug — which is the case f
 
 - **WHEN** identical arguments are passed in two separate calls
 - **THEN** the returned `topic_key` SHALL be byte-identical (determinism)
-
-### Requirement: The MCP server MUST expose `memory.judge`
-
-The server SHALL register a `memory.judge` tool that closes pending judgments surfaced by `memory.save`. The schema SHALL accept EITHER a single judgment `{ judgmentId: string, relation: enum, reason?: string, confidence?: number, evidence?: any }` OR a batch `{ judgments: Array<{ judgmentId, relation, reason?, confidence?, evidence? }> }` (the array SHALL be non-empty and capped at 25 items; an empty array is rejected with `invalid_input`). Exactly one of the single fields or `judgments` SHALL be supplied; supplying both or neither SHALL be rejected with `invalid_input`. When `relation = 'supersedes'`, the server SHALL transition the target memory to `status = 'superseded'` and append the target's id to the source's `replaces[]`. Other relations SHALL only update the `memory_relations` row.
-
-The batch form exists so an agent can close every entry in `memory.save.candidates[]` in one round-trip. Each item in a batch SHALL run in its OWN judge transaction (the same per-call transaction the single form uses); there SHALL be NO outer transaction spanning the batch, so a failing item SHALL NOT roll back the others. The single-form response is unchanged: `{ ok: true, judgmentId, relation, status, judgedAt }`. The batch-form response SHALL be `{ ok: true, results: Array<{ ok: true, judgmentId, relation, status, judgedAt } | { ok: false, judgmentId, code, message }> }`, in input order, one entry per submitted item, where the error `code` is whatever `DomainError.code` that item raised (e.g. `memory_not_found` for an unknown id, `conflict` for an already-closed row).
-
-#### Scenario: Judging supersedes mutates the target memory
-
-- **GIVEN** a pending row J with source N (active) and target M (active)
-- **WHEN** the agent calls `memory.judge({judgmentId: J, relation: 'supersedes', confidence: 0.95})`
-- **THEN** within one transaction: M SHALL transition to `status = 'superseded'`, N's `replaces` SHALL include M's id, the relation row SHALL transition to `status = 'judged'` with `relation = 'supersedes'`, `marked_by_kind = 'agent'`
-
-#### Scenario: Judging conflicts_with does not mutate memory rows
-
-- **WHEN** the agent calls `memory.judge({judgmentId, relation: 'conflicts_with', reason})`
-- **THEN** only the `memory_relations` row SHALL change; both `memory` rows SHALL remain `active`
-
-#### Scenario: Judging `not_conflict` acknowledges and closes
-
-- **WHEN** the agent calls `memory.judge({judgmentId, relation: 'not_conflict'})`
-- **THEN** the relation row SHALL transition to `status = 'judged'` with `relation = 'not_conflict'`; no `memory` row SHALL be mutated; the annotation SHALL NOT surface in `memory.search` (`not_conflict` is hidden from default search annotations)
-
-#### Scenario: Judging an already-judged row
-
-- **WHEN** `memory.judge` is called (single form) on a row whose `status` is already `'judged'`
-- **THEN** the call SHALL fail and the original verdict SHALL remain unchanged
-
-#### Scenario: Judging with a bogus judgmentId
-
-- **WHEN** `judgmentId` matches no row (single form)
-- **THEN** the call SHALL fail and no row SHALL be mutated
-
-#### Scenario: Batch judge closes every candidate from one save
-
-- **GIVEN** three pending rows `[J1, J2, J3]` surfaced by one `memory.save`
-- **WHEN** the agent calls `memory.judge({ judgments: [{ judgmentId: J1, relation: 'not_conflict' }, { judgmentId: J2, relation: 'related', confidence: 0.8 }, { judgmentId: J3, relation: 'supersedes', confidence: 0.95 }] })`
-- **THEN** the response SHALL be `{ ok: true, results: [...] }` with three entries in input order, each `{ ok: true, judgmentId, relation, status: 'judged', judgedAt }`, and J3's target SHALL be `status = 'superseded'`
-
-#### Scenario: A bad item in a batch does NOT sink the others
-
-- **GIVEN** a batch `[{ judgmentId: J1, relation: 'not_conflict' }, { judgmentId: 'BOGUS', relation: 'related' }, { judgmentId: J3, relation: 'compatible' }]` where J1 and J3 are valid pending rows and `BOGUS` matches no row
-- **WHEN** the agent calls `memory.judge({ judgments })`
-- **THEN** the response `results` SHALL be `[{ ok: true, judgmentId: J1, ... }, { ok: false, judgmentId: 'BOGUS', code, message }, { ok: true, judgmentId: J3, ... }]`, and J1 and J3 SHALL be `status = 'judged'` (NOT rolled back by the failed middle item)
-
-#### Scenario: Batch judge rejects an empty or oversized array
-
-- **WHEN** the agent calls `memory.judge({ judgments: [] })`, or with more than 25 items
-- **THEN** the call SHALL be rejected with code `invalid_input` and SHALL NOT mutate any row
-
-#### Scenario: memory.judge rejects mixing the single and batch forms
-
-- **WHEN** the agent calls `memory.judge({ judgmentId: J1, relation: 'related', judgments: [...] })` or `memory.judge({})`
-- **THEN** the call SHALL be rejected with code `invalid_input` and SHALL NOT mutate any row
 
 ### Requirement: The MCP server MUST expose `memory.compare`
 
@@ -2162,83 +1995,6 @@ A future requirement that mandates ADDITIONAL description content SHALL either f
 - **THEN** the change SHALL either reword the description to fit the cap, or raise the cap and record both the re-verified client ceiling and the retained margin
 - **AND** the collision SHALL be resolved as an explicit decision rather than by truncation
 
-### Requirement: `memory.search` and `memory.get` MUST expose the annotation bound and its true total
-
-A bounded list whose depth is invisible cannot be told from a complete one, and a signal that something was withheld is useless without a way to ask for it. Both tools that project a memory's relation annotations SHALL therefore expose the bound as a parameter and the true count as a response field. (The ordering under that bound belongs to the `memory` capability, "Search results MUST carry relation annotations", and is not restated here.)
-
-`memory.search` and `memory.get` SHALL accept an OPTIONAL `relations_limit` integer that bounds the `relations` array projected per memory. Its DEFAULT SHALL be the surface's existing behaviour — 10 for `memory.search` result rows and for `memory.get`'s batch (`ids`) form, 50 for `memory.get`'s single (`id`) form — so a request that omits it receives exactly the annotations it receives today. Its MAXIMUM SHALL be a single shared value of 50 across all three surfaces, being the largest annotation bound the server already serves.
-
-A `relations_limit` above the maximum SHALL be REJECTED as an invalid argument, not silently clamped, consistent with every other numeric bound on this surface (`limit` rejects above 200). Rejection is only safe if the caller is told how to stay inside the bound, so the parameter's description SHALL state: the default; that `relationsTotal` reports how many annotations exist; that the correct follow-up ask is therefore `min(relationsTotal, <maximum>)`; and that a larger value is rejected rather than clamped. A description that instructs the agent to pass a total which may exceed the maximum SHALL be treated as a defect — it is the failure this repo already fixed once, when a tool description documented passing `pendingJudgmentsTotal` into a parameter that rejected it for exactly the queues worth draining.
-
-A per-row bound does not bound a response. `memory.search` accepts `limit` up to 200 and `memory.get` accepts up to 100 `ids`, each independent of `relations_limit`, so the two maxima multiply into a response the specification permitted and no requirement bounded. The multi-row surfaces SHALL therefore ALSO be bounded in aggregate: the product of the requested row count and the effective per-row annotation bound — `limit × effective relations bound` for `memory.search`, `ids.length × effective relations bound` for batch `memory.get` — SHALL NOT exceed a single named budget constant. The effective bound is the caller's `relations_limit` when supplied and the surface's default otherwise.
-
-The budget SHALL be the largest annotation count the server already serves to a caller who passes nothing — the largest row count ANY branch serves for an omitted `limit`, times the multi-row default — so that no request relying on DEFAULTS can ever be rejected and the aggregate ceiling introduces no payload regime that is not already shipping. The check SHALL be applied to the EFFECTIVE row count — the number of rows the request would actually serve — and not to the value the caller declared. Where a branch substitutes its own page size for an omitted `limit`, budgeting against the declared value bounds nothing on that branch.
-
-It follows that the budget is a TRADE rather than a reduction: a caller MAY spend it on many rows with few annotations each, or few rows with the maximum annotations each, and any combination whose product is within the budget SHALL be served.
-
-A request whose product exceeds the budget SHALL be REJECTED with an invalid-argument error, on the same terms and for the same reason as an over-maximum `relations_limit`: silently serving fewer annotations than asked for would be indistinguishable from a complete list except by comparison against `relationsTotal`, which is the truncation-flag defect in a new place. The rejection SHALL name both parameters, the budget, and at least one legal combination, so the caller can comply in the same turn. Because the constraint spans two parameters it cannot be declared in a single field's schema; the `relations_limit` description SHALL therefore state that the two bounds are jointly limited and how to trade between them, and SHALL name single-id `memory.get` as the way to read one memory's annotations at the maximum.
-
-Every response row carrying `relations` SHALL carry `relationsTotal` alongside it, on the same terms as `pendingJudgmentsTotal`: the count of annotations that exist for that memory, never the returned list's length restated. It SHALL be present whether or not the list was bounded. No companion boolean SHALL be added — truncation is `relationsTotal > relations.length`, and a redundant flag beside a total is duplicated state.
-
-`relations_limit` SHALL NOT alter which memories a read returns, their order, or their scope — it bounds a per-row projection only, like `snippet` and `fields`. The aggregate budget SHALL likewise never change a served response: it either admits the request unchanged or rejects it. In particular the budget SHALL NOT be enforced by serving fewer annotations on some rows than on others, which would make a row's `relations` depend on the other rows in the page.
-
-#### Scenario: The default is unchanged
-
-- **WHEN** `memory.search` is called without `relations_limit`
-- **THEN** each result row SHALL carry at most 10 annotations, exactly as before this parameter existed
-- **AND** each row SHALL carry `relationsTotal`
-
-#### Scenario: A caller raises the bound to the total it was told
-
-- **GIVEN** a search whose result row reports `relationsTotal: 40` beside 10 annotations
-- **WHEN** the caller repeats the search with `relations_limit: 40`
-- **THEN** that row SHALL carry 40 annotations and `relationsTotal: 40`
-
-#### Scenario: An over-ask is rejected, not clamped
-
-- **WHEN** `memory.search` or `memory.get` is called with `relations_limit: 51`
-- **THEN** the call SHALL fail with an invalid-argument error and SHALL NOT return a clamped result
-
-#### Scenario: A request whose product exceeds the budget is rejected
-
-- **WHEN** `memory.search` is called with the maximum `limit` and the maximum `relations_limit`, whose product exceeds the budget
-- **THEN** the call SHALL fail with an invalid-argument error naming both parameters, the budget, and at least one legal combination
-- **AND** no partial or reduced-annotation result SHALL be returned
-
-#### Scenario: A default request is never rejected by the budget
-
-- **WHEN** `memory.search` is called at the maximum `limit` without `relations_limit`, or `memory.get` is called with the maximum number of `ids` without `relations_limit`
-- **THEN** the request SHALL be served, because the budget is derived from exactly that worst case
-
-#### Scenario: The budget is spendable either way
-
-- **GIVEN** a budget equal to the largest row count any branch serves for an omitted `limit`, times the multi-row default
-- **WHEN** the caller asks for few rows with the maximum `relations_limit`, or for the maximum rows at the default annotation bound
-- **THEN** both requests SHALL be served, and only a request whose product exceeds the budget SHALL be rejected
-
-#### Scenario: The single-id deep read is unaffected by the budget
-
-- **WHEN** `memory.get` is called with `id` and `relations_limit: 50`
-- **THEN** the request SHALL be served, its product being one row times the maximum
-
-#### Scenario: The description teaches the bounded ask
-
-- **WHEN** an MCP client retrieves the tool description for `memory.search` or `memory.get`
-- **THEN** the `relations_limit` description SHALL state its default, its maximum, that `relationsTotal` reports the true count, that the follow-up ask is `min(relationsTotal, <maximum>)`, and that a larger value is rejected rather than clamped
-- **AND** it SHALL state that `relations_limit` and the row count are jointly bounded, how to trade between them, and that single-id `memory.get` reads one memory's annotations at the maximum
-
-#### Scenario: Both `memory.get` forms agree with search
-
-- **GIVEN** a memory carrying more annotations than 10
-- **WHEN** it is read via `memory.search`, via `memory.get` with `ids`, and via `memory.get` with `id`
-- **THEN** all three SHALL report the same `relationsTotal`, and each returned list SHALL be a prefix of the same ordered sequence of annotations, differing only in length according to that surface's default or the caller's `relations_limit` — and, for the `reason` field alone, in whether it is bounded (see "Relation annotation reasons MUST be bounded on multi-row reads")
-
-#### Scenario: The bound does not affect selection
-
-- **GIVEN** two searches differing only in `relations_limit`
-- **WHEN** both are executed
-- **THEN** they SHALL return the same memories in the same order, differing only in the length of each row's `relations` array
-
 ### Requirement: `memory.save` MUST report how many candidates its detection produced
 
 A bounded list whose depth is invisible cannot be told from a complete one. `memory.save` returns `candidates[]` capped by `CANDIDATES_PER_SAVE_MAX`, so a caller today cannot distinguish five-of-five from five-of-fifteen, and the pairs beyond the cap have no `memory_relations` row and therefore no `judgmentId` — making them unreachable from `memory.judge`, from `memory.context.pendingJudgments[]`, and from `/dashboard/judgments`, which is a view over that table. (The detection behaviour itself, including why those pairs are deliberately not recorded, belongs to the `memory` capability, "`memory.save` MUST surface candidate conflicts at save-time", and is not restated here.)
@@ -2327,11 +2083,7 @@ The description SHALL NOT name any request argument that raises the surfaced cou
 
 ### Requirement: Relation annotation reasons MUST be bounded on multi-row reads
 
-A judged annotation carries the judgment's `reason`, which `memory.judge` and `memory.compare`
-accept at up to 2 000 characters. On a read that projects annotations for MANY memories that field
-is the only term in an annotation that is not fixed-size, and it is multiplied by the row count.
-It SHALL therefore be bounded on those reads, exactly as `memory.context` already bounds every
-other stored-text projection it emits in a multi-item list.
+A judged annotation carries the judgment's `reason`, which `memory.judge` and `memory.compare` accept at up to 2 000 characters. On a read that projects annotations for MANY memories that field is the only term in an annotation that is not fixed-size, and it is multiplied by the row count. It SHALL therefore be bounded on those reads, exactly as `memory.context` already bounds every other stored-text projection it emits in a multi-item list.
 
 On the multi-row annotation surfaces — `memory.search` result rows and the batch (`ids`) form of
 `memory.get` — each judged annotation's `reason` SHALL be projected through the same truncation
@@ -2382,11 +2134,7 @@ shortened or re-validated by this bound, and the input cap on `reason` SHALL NOT
 
 ### Requirement: The worst-case annotation payload MUST be bounded by a named ceiling asserted in CI
 
-The annotation term of a response is entirely SCHEMA-derived: it is the product of the row bound
-(`limit`, or `ids.length`), the per-row annotation bound, and the per-annotation size bound. A
-product of declared bounds can be bounded in advance and MUST be, because a tool result larger
-than the caller's context window is not a degraded answer but a guaranteed overflow of the context
-the memory server exists to protect.
+The annotation term of a response is entirely SCHEMA-derived: it is the product of the row bound (`limit`, or `ids.length`), the per-row annotation bound, and the per-annotation size bound. A product of declared bounds can be bounded in advance and MUST be, because a tool result larger than the caller's context window is not a degraded answer but a guaranteed overflow of the context the memory server exists to protect.
 
 A single named constant SHALL express the maximum serialized size the annotation projection of any
 LEGAL request may reach. A CI test SHALL assert it by constructing the largest legal request at
@@ -3156,3 +2904,90 @@ The Hermes provider's `system_prompt_block()` is required elsewhere to stay byte
 
 - **WHEN** the Hermes provider's system-prompt block is compared to the server's base instructions text
 - **THEN** the two SHALL be byte-identical, so the clause is present in both
+
+### Requirement: The MCP surface SHALL use the explicit batch contracts
+
+The four replacements SHALL obey the `explicit-batch-tools` capability. Old registrations and singular arguments SHALL be absent. Real tools/list schemas SHALL require explicit arrays for mutations; both reads SHALL accept IDs or a period, mutually exclusively. Descriptions SHALL distinguish memory creation dates from session activity spans and state that period results are current records, not historical snapshots. Reads SHALL accept limit(max20)/offset and require collection fields, errors, total and nextOffset in output. Confirmation confirmed and judgment results SHALL be required. Scope and authorization errors SHALL remain top-level failures. Reads SHALL return successful data and associated `{ id, code, message }` entries in `errors`; they SHALL set MCP `isError: true` when attempted items exist but none succeeds, including for a one-item batch. `memory.judge_batch` SHALL apply the same all-failed signaling rule while retaining ordered per-item `results` and independent transactions. Successful memory batch targets SHALL advance their resolved heads' access signals regardless of batch size; reading SHALL NOT clear `needs_review`. Tool descriptions SHALL teach one-item arrays, complete metadata, partial reads, successful memory batch dereference access semantics and unchanged mutation guarantees. All other tools SHALL remain unchanged.
+
+#### Scenario: The same shape serves one and many
+
+- **WHEN** a client executes any replacement with one valid item, then multiple valid items
+- **THEN** both responses SHALL use the same collection or count envelope
+- **AND** old tool calls and scalar inputs SHALL fail at the MCP boundary
+
+### Requirement: `memory.search` and `memory.get_batch` MUST expose the annotation bound and its true total
+
+A bounded list whose depth is invisible cannot be told from a complete one, and a signal that something was withheld is useless without a way to ask for it. Both tools that project a memory's relation annotations SHALL therefore expose the bound as a parameter and the true count as a response field. (The ordering under that bound belongs to the `memory` capability, "Search results MUST carry relation annotations", and is not restated here.)
+
+`memory.search` and `memory.get_batch` SHALL accept an OPTIONAL `relations_limit` integer that bounds the `relations` array projected per memory. Its DEFAULT SHALL be the surface's existing behaviour — 10 for `memory.search` result rows and `memory.get_batch` entries — so a request that omits it receives exactly the annotations it receives today. Its MAXIMUM SHALL be a single shared value of 50 across both surfaces, being the largest annotation bound the server already serves.
+
+A `relations_limit` above the maximum SHALL be REJECTED as an invalid argument, not silently clamped, consistent with every other numeric bound on this surface (`limit` rejects above 200). Rejection is only safe if the caller is told how to stay inside the bound, so the parameter's description SHALL state: the default; that `relationsTotal` reports how many annotations exist; that the correct follow-up ask is therefore `min(relationsTotal, <maximum>)`; and that a larger value is rejected rather than clamped. A description that instructs the agent to pass a total which may exceed the maximum SHALL be treated as a defect — it is the failure this repo already fixed once, when a tool description documented passing `pendingJudgmentsTotal` into a parameter that rejected it for exactly the queues worth draining.
+
+A per-row bound does not bound a response. `memory.search` accepts `limit` up to 200 and `memory.get_batch` serves at most20 outcomes per page, each independent of `relations_limit`, so the two maxima multiply into a response the specification permitted and no requirement bounded. The multi-row surfaces SHALL therefore ALSO be bounded in aggregate: the product of the requested row count and the effective per-row annotation bound — `limit × effective relations bound` for `memory.search`, `page target count × effective relations bound` for batch `memory.get_batch` — SHALL NOT exceed a single named budget constant. The effective bound is the caller's `relations_limit` when supplied and the surface's default otherwise.
+
+The budget SHALL be the largest annotation count the server already serves to a caller who passes nothing — the largest row count ANY branch serves for an omitted `limit`, times the multi-row default — so that no request relying on DEFAULTS can ever be rejected and the aggregate ceiling introduces no payload regime that is not already shipping. The check SHALL be applied to the EFFECTIVE row count — the number of rows the request would actually serve — and not to the value the caller declared. Where a branch substitutes its own page size for an omitted `limit`, budgeting against the declared value bounds nothing on that branch.
+
+It follows that the budget is a TRADE rather than a reduction: a caller MAY spend it on many rows with few annotations each, or few rows with the maximum annotations each, and any combination whose product is within the budget SHALL be served.
+
+A request whose product exceeds the budget SHALL be REJECTED with an invalid-argument error, on the same terms and for the same reason as an over-maximum `relations_limit`: silently serving fewer annotations than asked for would be indistinguishable from a complete list except by comparison against `relationsTotal`, which is the truncation-flag defect in a new place. The rejection SHALL name both parameters, the budget, and at least one legal combination, so the caller can comply in the same turn. Because the constraint spans two parameters it cannot be declared in a single field's schema; the `relations_limit` description SHALL therefore state that the two bounds are jointly limited and how to trade between them, and SHALL name a one-item `memory.get_batch` with `relations_limit: 50` as the way to read one memory's annotations at the maximum.
+
+Every response row carrying `relations` SHALL carry `relationsTotal` alongside it, on the same terms as `pendingJudgmentsTotal`: the count of annotations that exist for that memory, never the returned list's length restated. It SHALL be present whether or not the list was bounded. No companion boolean SHALL be added — truncation is `relationsTotal > relations.length`, and a redundant flag beside a total is duplicated state.
+
+`relations_limit` SHALL NOT alter which memories a read returns, their order, or their scope — it bounds a per-row projection only, like `snippet` and `fields`. The aggregate budget SHALL likewise never change a served response: it either admits the request unchanged or rejects it. In particular the budget SHALL NOT be enforced by serving fewer annotations on some rows than on others, which would make a row's `relations` depend on the other rows in the page.
+
+#### Scenario: The default is unchanged
+
+- **WHEN** `memory.search` is called without `relations_limit`
+- **THEN** each result row SHALL carry at most 10 annotations, exactly as before this parameter existed
+- **AND** each row SHALL carry `relationsTotal`
+
+#### Scenario: A caller raises the bound to the total it was told
+
+- **GIVEN** a search whose result row reports `relationsTotal: 40` beside 10 annotations
+- **WHEN** the caller repeats the search with `relations_limit: 40`
+- **THEN** that row SHALL carry 40 annotations and `relationsTotal: 40`
+
+#### Scenario: An over-ask is rejected, not clamped
+
+- **WHEN** `memory.search` or `memory.get_batch` is called with `relations_limit: 51`
+- **THEN** the call SHALL fail with an invalid-argument error and SHALL NOT return a clamped result
+
+#### Scenario: A request whose product exceeds the budget is rejected
+
+- **WHEN** `memory.search` is called with the maximum `limit` and the maximum `relations_limit`, whose product exceeds the budget
+- **THEN** the call SHALL fail with an invalid-argument error naming both parameters, the budget, and at least one legal combination
+- **AND** no partial or reduced-annotation result SHALL be returned
+
+#### Scenario: A default request is never rejected by the budget
+
+- **WHEN** `memory.search` is called at the maximum `limit` without `relations_limit`, or `memory.get_batch` is called with at least20 distinct IDs without `relations_limit`
+- **THEN** the request SHALL be served, because the budget is derived from exactly that worst case
+
+#### Scenario: The budget is spendable either way
+
+- **GIVEN** a budget equal to the largest row count any branch serves for an omitted `limit`, times the multi-row default
+- **WHEN** the caller asks for few rows with the maximum `relations_limit`, or for the maximum rows at the default annotation bound
+- **THEN** both requests SHALL be served, and only a request whose product exceeds the budget SHALL be rejected
+
+#### Scenario: The single-id deep read is unaffected by the budget
+
+- **WHEN** `memory.get_batch` is called with `ids: [id]` and `relations_limit: 50`
+- **THEN** the request SHALL be served, its product being one row times the maximum
+
+#### Scenario: The description teaches the bounded ask
+
+- **WHEN** an MCP client retrieves the tool description for `memory.search` or `memory.get_batch`
+- **THEN** the `relations_limit` description SHALL state its default, its maximum, that `relationsTotal` reports the true count, that the follow-up ask is `min(relationsTotal, <maximum>)`, and that a larger value is rejected rather than clamped
+- **AND** it SHALL state that `relations_limit` and the row count are jointly bounded, how to trade between them, and that a one-item `memory.get_batch` with `relations_limit: 50` reads one memory's annotations at the maximum
+
+#### Scenario: Memory batch reads agree with search
+
+- **GIVEN** a memory carrying more annotations than 10
+- **WHEN** it is read via `memory.search`, via `memory.get_batch` with multiple `ids`, and via `memory.get_batch` with `ids: [id]`
+- **THEN** all three SHALL report the same `relationsTotal`, and each returned list SHALL be a prefix of the same ordered sequence of annotations, differing only in length according to that surface's default or the caller's `relations_limit` — and, for the `reason` field alone, in whether it is bounded (see "Relation annotation reasons MUST be bounded on multi-row reads")
+
+#### Scenario: The bound does not affect selection
+
+- **GIVEN** two searches differing only in `relations_limit`
+- **WHEN** both are executed
+- **THEN** they SHALL return the same memories in the same order, differing only in the length of each row's `relations` array

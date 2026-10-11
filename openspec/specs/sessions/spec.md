@@ -288,9 +288,9 @@ When a session is `status = 'active'` for the current MCP transport, the `projec
 
 ### Requirement: Server restart MUST mark in-flight sessions as abandoned
 
-In-process session routing state (`mcp-session-id` → active Rembric session id) is not persisted, so a restart loses every route into a live session and the rows it pointed at can never be closed by their own client.
-
 Stale-active retirement SHALL therefore run at startup **and** periodically thereafter (see "Session rows MUST record last activity, and stale-active retirement MUST be periodic"), and BOTH passes SHALL use the same single retirement query so they cannot diverge. That query SHALL key on `COALESCE(last_activity_at, started_at)` — not on `started_at` alone: a genuinely long-running session that is still being written to would otherwise be retired out from under its client at the 24-hour mark, and a row predating the `last_activity_at` column would otherwise never be retired at all. Rows whose effective last activity is older than the configured `SESSION_ABANDON_AFTER_MS` (default `24h`) SHALL be transitioned to `status = 'abandoned'` with `ended_at = now`.
+
+In-process session routing state (`mcp-session-id` → active Rembric session id) is not persisted, so a restart loses every route into a live session and the rows it pointed at can never be closed by their own client.
 
 #### Scenario: Server restarts while a session is active
 
@@ -781,53 +781,6 @@ A `NULL` stored session summary SHALL be emitted as `null` (not coerced to an em
 - **GIVEN** a content-bearing session that was never summarized with a title (only the auto-generated placeholder exists)
 - **WHEN** the agent calls `memory.context`
 - **THEN** the corresponding `recentSessions[].title` SHALL equal the stored (placeholder) title verbatim — no hiding or nulling logic is applied
-
-### Requirement: `memory.session_get` returns a session's full summary by id
-
-The MCP surface SHALL expose a `memory.session_get` tool that returns a single session, identified by `sessionId`, including its **full, untruncated** `summary` (in contrast to `memory.context`, which returns a bounded snippet). The handler SHALL resolve scope using the documented session-tool scope-resolution precedence (`ctx.project` via path-scoping, then `SessionRouter`, via `resolveEffectiveProject` / `scopeFromContext`) and SHALL treat a session whose `project_id` does not match the resolved scope as `not_found`. A soft-deleted session (`deleted_at IS NOT NULL`) SHALL be returned as `not_found`. The tool SHALL be read-only and SHALL NOT mutate any row.
-
-`memory.context` SHALL continue to return the bounded snippet for `recentSessions[].summary`; `memory.session_get` is the on-demand path for the full text (the multi-agent / cross-client handoff use case).
-
-**The tool SHALL declare exactly one input property, `sessionId`.** It SHALL NOT declare a `limit` argument and SHALL NOT return a `versions` field. Both existed only to page the retired `session_summary_versions` table, and there is nothing left for either to bound or carry. Because tool input schemas are strict (`mcp-api`, "Every MCP tool input schema MUST refuse an unknown property rather than ignore it"), a caller that still sends `limit` SHALL be REFUSED with the transport's invalid-parameters error naming the tool and the property, never have it silently dropped. That refusal is the designed behaviour of strictness and SHALL NOT be exempted for this argument: a model carrying a stale description is told that it is stale, which a silent drop cannot do.
-
-The full summary this tool returns is the ONLY session text the server holds, and the tool's description SHALL NOT imply the existence of any other. In particular it SHALL NOT offer, name, or hint at a recovery path for text a previous curated write displaced — after "A curated session-summary write MUST be merged section-wise with the stored summary" a section the write omits is not displaced at all, and a section the write carries is replaced with no copy retained anywhere.
-
-#### Scenario: Returns the full summary for an in-scope session
-
-- **GIVEN** a session `S` in the caller's scope with a stored `summary` longer than the `memory.context` snippet bound
-- **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
-- **THEN** the response SHALL include `S`'s full, untruncated `summary`
-
-#### Scenario: A cross-scope session id is not found
-
-- **GIVEN** a session `S` that belongs to a different project than the caller's resolved scope
-- **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
-- **THEN** the tool SHALL return a structured `not_found` error and SHALL NOT reveal `S`'s contents
-
-#### Scenario: A soft-deleted session is not found
-
-- **GIVEN** a session `S` in the caller's scope with `deleted_at IS NOT NULL`
-- **WHEN** the agent calls `memory.session_get({ sessionId: S.id })`
-- **THEN** the tool SHALL return a structured `not_found` error
-
-#### Scenario: The response carries no `versions` field
-
-- **GIVEN** any session `S` in the caller's scope, with or without a stored summary
-- **WHEN** `memory.session_get({ sessionId: S.id })` is called
-- **THEN** the response object SHALL NOT contain a `versions` key, in any form, including an empty array
-
-#### Scenario: A stale caller sending `limit` is refused, not silently accepted
-
-- **GIVEN** a connection whose model still carries the pre-retirement tool description
-- **WHEN** it calls `memory.session_get({ sessionId: S.id, limit: 2 })`
-- **THEN** the call SHALL be refused by input validation before the handler runs, with a message naming the tool and the property `limit`
-- **AND** no session SHALL be returned and no row SHALL be read
-
-#### Scenario: A call carrying only `sessionId` still succeeds
-
-- **GIVEN** the same session `S`
-- **WHEN** `memory.session_get({ sessionId: S.id })` is called
-- **THEN** the call SHALL succeed and return `S`'s full summary — the control that makes the refusal above attributable to `limit` alone rather than to a broken tool
 
 ### Requirement: `findActiveForTransport` MUST NOT guess under concurrent ambiguity
 
@@ -1487,3 +1440,37 @@ These columns SHALL be exempt from the summary/title `final` precedence machiner
 - **WHEN** both are driven through the same turns
 - **THEN** the lost-report timeline's `last_work_at` SHALL never be later than the kept-report timeline's at the same turn
 - **AND** the control SHALL pass in the same run: there SHALL be a turn on which the kept-report timeline returns a notice and the lost-report one returns none
+
+### Requirement: Batch session retrieval returns full summaries without mutating sessions
+
+`memory.session_get_batch` SHALL accept exactly one selector: a nonempty array of nonempty `ids`, or ISO timestamps with offsets `from` and optional `to` (default server now). `from < to` SHALL be required. Singular `sessionId`, mixed selectors and unknown properties SHALL be refused. Reads SHALL resolve and authorize the effective project through the shared resolver; no implicit cross-project widening SHALL occur.
+
+Both modes SHALL accept `limit` (default20, integer1–20) and `offset` (default0, nonnegative integer). ID mode SHALL deduplicate before paging, preserve order and report associated `not_found` errors for missing/foreign/deleted IDs. Period mode SHALL select non-deleted sessions with persisted content whose activity span overlaps `[from,to)`: `startedAt < to` and `coalesce(lastActivityAt,startedAt) >= from`. Stored fallback summaries SHALL qualify. Results SHALL be ordered by startedAt DESC then id DESC. Pages are live reads, not frozen snapshots.
+
+The response SHALL be `{ sessions, errors, total, nextOffset }`, with at most20 data/error outcomes. ID-mode total SHALL count distinct requested IDs; period-mode total SHALL count matching in-scope sessions. Offset continuation SHALL preserve complete summaries without a new byte limit or fragmentation. Empty selections/pages SHALL succeed. An attempted page whose every item fails SHALL return MCP `isError: true` with all associated errors.
+
+Entries SHALL preserve id, agent, status, startedAt, endedAt, title and the full persisted summary, and expose lastActivityAt and summaryFinal to distinguish scope of activity and curated versus fallback content. Null summaries SHALL remain null. The current stored summary SHALL NOT be presented as a historical snapshot or proof that all described work occurred within the selected interval. No versions or recovery of displaced text SHALL be promised. No session row SHALL be mutated; context snippets remain unchanged.
+
+#### Scenario: A period query answers without an ID-discovery round trip
+
+- **WHEN** an authenticated caller requests a week as `from`/ `to`
+- **THEN** the first call SHALL return full matching session entries directly, with continuation for more than20 outcomes
+- **AND** an older-started session with activity spanning that week SHALL be eligible, while foreign/deleted/outside sessions SHALL not
+
+#### Scenario: Mixed IDs and failed pages remain explicit
+
+- **WHEN** a page includes valid, absent, foreign and deleted IDs
+- **THEN** valid full summaries SHALL be returned alongside indistinguishable associated errors
+- **AND** a one-item missing page or entirely failed multi-item page SHALL set MCP isError
+
+#### Scenario: Strict limits have a passing control
+
+- **WHEN** IDs or a valid period are requested with `limit: 20` and `offset: 0`
+- **THEN** the call SHALL succeed
+- **AND** `limit: 21`, negative offset, reversed dates, mixed selectors or a singular sessionId SHALL fail
+
+#### Scenario: Large summaries remain complete
+
+- **WHEN** a page contains20 large stored summaries
+- **THEN** each SHALL be returned intact even when the combined byte size is large
+- **AND** no session SHALL be touched and no fragment or byte-budget error SHALL appear
