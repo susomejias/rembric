@@ -134,7 +134,7 @@ export function JudgmentsTable({
       cell: (row) => (
         <div className="flex min-w-0 flex-col">
           <Link
-            href={`/dashboard/memories/${row.sourceId}`}
+            href={`/dashboard/judgments/${row.id}`}
             className="truncate text-sm font-medium text-foreground transition-colors hover:text-primary"
           >
             {row.sourceTitle}

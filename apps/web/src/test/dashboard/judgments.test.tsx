@@ -104,10 +104,15 @@ describe('judgments list verdict pill and routing', () => {
     expect(html).not.toContain('/dashboard/relations');
   });
 
-  it('keeps the row menu content client-only, so detail links and orphan controls stay out of the SSR document', async () => {
+  it('links the judgment title to its detail instead of the source memory', async () => {
+    const html = await renderJudgments();
+    expect(html).toMatch(/<a[^>]*href="\/dashboard\/judgments\/REL-MALFORMED"[^>]*>widget RS<\/a>/);
+    expect(html).not.toContain('href="/dashboard/memories/RS"');
+  });
+
+  it('keeps the row menu content client-only, so menu labels and orphan controls stay out of the SSR document', async () => {
     const html = await renderJudgments();
     expect(html).toContain('Actions for judgment widget RS');
-    expect(html).not.toContain('href="/dashboard/judgments/REL-MALFORMED"');
     expect(html).not.toContain('View details');
     expect(html).not.toContain('Mark orphaned');
   });
