@@ -142,7 +142,11 @@ export function badgeTooltip(key: BadgeKey, badge: BadgeBreakdown): string {
   return lines.length > 0 ? `${head}\n${lines.join('\n')}` : head;
 }
 
-export const CHROME_FREE_PATHS = ['/dashboard/login', '/dashboard/oauth-consent'] as const;
+export const CHROME_FREE_PATHS = [
+  '/dashboard/login',
+  '/dashboard/oauth-consent',
+  '/dashboard/wrapped',
+] as const;
 
 export function isChromeFreePath(pathname: string | null | undefined): boolean {
   return CHROME_FREE_PATHS.some((path) => pathname === path || pathname?.startsWith(`${path}/`));

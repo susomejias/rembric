@@ -4,9 +4,11 @@ import type { ReactNode } from 'react';
 import { ActivityChart } from '@/components/dashboard/activity-chart';
 import { RowTooltip } from '@/components/dashboard/row-tooltip';
 import { formatBytes, relativeTime, truncate } from '@/components/dashboard/support';
+import { WrappedEntry } from '@/components/dashboard/wrapped-entry';
 import { NumberTicker } from '@/components/motion/number-ticker';
 import { getServices } from '@/lib/services';
 import { cn } from '@/lib/utils';
+import { getWrappedSeason } from '@/lib/wrapped-season';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +103,8 @@ export default function DashboardOverviewPage() {
       <section className="flex flex-col gap-4">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">Overview</h1>
       </section>
+
+      {getWrappedSeason(nowMs).visible && <WrappedEntry />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_460px]">
         <WidgetCard
