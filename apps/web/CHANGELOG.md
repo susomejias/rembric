@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.29.0](https://github.com/susomejias/rembric/compare/server-v0.28.18...server-v0.29.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** memory.get, memory.session_get, memory.confirm and memory.judge are replaced by their _batch forms without aliases. Upgrade server and plugins together.
+
+### Features
+
+* **mcp:** replace single tools with explicit batches ([9f87f99](https://github.com/susomejias/rembric/commit/9f87f990a89c3c9950c28d321529b917c8bba2a4))
+
+
+### Bug Fixes
+
+* **ci:** align batch spec references and migration gates ([f031665](https://github.com/susomejias/rembric/commit/f03166566dd50e0aaa4fa63cabec78917d083140))
+* **dashboard:** open judgment details from table titles ([ee37730](https://github.com/susomejias/rembric/commit/ee37730420a4c35a7385c4cbb862d298f7a1763f))
+
 ## [0.28.18](https://github.com/susomejias/rembric/compare/server-v0.28.17...server-v0.28.18) (2026-10-07)
 
 
