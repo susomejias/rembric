@@ -12,6 +12,7 @@ import { RelationsRepository } from './relations-repository.js';
 import { TermStatisticsRepository } from './term-statistics-repository.js';
 import { TokensRepository } from './tokens-repository.js';
 import { VectorsRepository } from './vectors-repository.js';
+import { WrappedRepository } from './wrapped-repository.js';
 
 export {
   AgentSessionsRepository,
@@ -48,6 +49,12 @@ export {
 export { TermStatisticsRepository } from './term-statistics-repository.js';
 export { TokensRepository, type AdminTokenProjectSlug } from './tokens-repository.js';
 export { decodeEmbedding, VectorsRepository } from './vectors-repository.js';
+export {
+  WrappedRepository,
+  WRAPPED_AGENTS,
+  type WrappedAgent,
+  type WrappedStats,
+} from './wrapped-repository.js';
 
 export interface Repositories {
   memory: MemoryRepository;
@@ -62,6 +69,7 @@ export interface Repositories {
   dashboardSessions: DashboardSessionsRepository;
   entities: EntitiesRepository;
   termStatistics: TermStatisticsRepository;
+  wrapped: WrappedRepository;
 }
 
 export function createRepositories(db: Db): Repositories {
@@ -78,5 +86,6 @@ export function createRepositories(db: Db): Repositories {
     dashboardSessions: new DashboardSessionsRepository(db),
     entities: new EntitiesRepository(db),
     termStatistics: new TermStatisticsRepository(db),
+    wrapped: new WrappedRepository(db),
   };
 }

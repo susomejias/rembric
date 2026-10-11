@@ -698,6 +698,7 @@ const SCOPED_CONTENT_REPOSITORIES = [
   'relations-repository.ts',
   'term-statistics-repository.ts',
   'vectors-repository.ts',
+  'wrapped-repository.ts',
 ] as const;
 
 const CONTROL_PLANE_REPOSITORIES = [
