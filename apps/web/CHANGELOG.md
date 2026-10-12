@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.3](https://github.com/susomejias/rembric/compare/server-v0.29.2...server-v0.29.3) (2026-10-12)
+
+
+### Features
+
+* **dashboard:** add entity and project insights to Wrapped ([07b79c7](https://github.com/susomejias/rembric/commit/07b79c731ea3fc87b7573649d87b3263783d16f2))
+
 ## [0.29.2](https://github.com/susomejias/rembric/compare/server-v0.29.1...server-v0.29.2) (2026-10-12)
 
 
