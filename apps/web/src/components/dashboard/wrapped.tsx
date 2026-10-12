@@ -19,6 +19,7 @@ import {
 import {
   createWrappedImage,
   formatWrappedCount,
+  wrappedEntityMemoryRows,
   WRAPPED_IMAGE_SIZES,
   WRAPPED_MONTHS,
   WRAPPED_TYPE_LABELS as TYPE_LABELS,
@@ -34,6 +35,8 @@ const TITLES = [
   'Your building crew.',
   'What you kept.',
   'Context, connected.',
+  'Your technical universe.',
+  'Where you focused.',
   'Day after day.',
   'Your high point.',
   'Take it with you.',
@@ -332,9 +335,11 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
                     slide === 2 && 'wrapped-agents-slide',
                     slide === 3 && 'wrapped-types-slide',
                     slide === 4 && 'wrapped-judgments-slide',
-                    slide === 5 && 'wrapped-rhythm-slide',
-                    slide === 6 && 'wrapped-months-slide',
-                    slide === 7 && 'wrapped-share-slide',
+                    slide === 5 && 'wrapped-entities-slide',
+                    slide === 6 && 'wrapped-projects-slide',
+                    slide === 7 && 'wrapped-rhythm-slide',
+                    slide === 8 && 'wrapped-months-slide',
+                    slide === 9 && 'wrapped-share-slide',
                   )}
                 >
                   <h1
@@ -513,7 +518,9 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
                       </p>
                     </>
                   )}
-                  {slide === 5 && (
+                  {slide === 5 && <EntityScene data={data} />}
+                  {slide === 6 && <ProjectScene data={data} />}
+                  {slide === 7 && (
                     <>
                       <div className="wrapped-hero">
                         <BigNumber value={data.activeDays} label="days active" lime />
@@ -535,7 +542,7 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
                       </p>
                     </>
                   )}
-                  {slide === 6 && (
+                  {slide === 8 && (
                     <>
                       <div className="wrapped-month-poster">
                         {peak > 0 ? (
@@ -569,7 +576,7 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
                       </p>
                     </>
                   )}
-                  {slide === 7 && (
+                  {slide === 9 && (
                     <>
                       <ShareImage data={data} />
                     </>
@@ -618,6 +625,92 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
   );
 }
 
+function EntityScene({ data }: { data: WrappedStats }) {
+  const rows = wrappedEntityMemoryRows(data.entities.memoryKinds);
+  const partial = data.entities.scannedMemories < data.entities.eligibleMemories;
+  return (
+    <>
+      {rows.length > 0 ? (
+        <>
+          <div className="wrapped-agent-pass">
+            <div className="wrapped-card-label">
+              <span>Most memories</span>
+              <span aria-hidden="true">↗</span>
+            </div>
+            <span className="wrapped-agent-mark" aria-hidden="true">
+              {'{ }'}
+            </span>
+            <p className="wrapped-agent-name">{rows[0]!.label}</p>
+            <Metric value={rows[0]!.n} label="memories with this type" />
+          </div>
+          {rows.length > 1 && <BarList rows={rows.slice(1)} unit="memories" />}
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No indexed entities linked to this year’s memories yet.
+        </p>
+      )}
+      <div className="wrapped-entity-totals">
+        <Metric value={data.entities.total} label="entities in total" />
+        <Metric value={data.entities.recurring} label="in multiple memories" />
+      </div>
+      {partial && (
+        <p className="wrapped-index-note">
+          Partial index · {data.entities.scannedMemories.toLocaleString('en-US')} /{' '}
+          {data.entities.eligibleMemories.toLocaleString('en-US')} project memories scanned
+        </p>
+      )}
+      <p className="sr-only">
+        Distinct kind and value pairs across projects, linked to retained memories saved this year.
+        Each type counts distinct memories; a memory with multiple types counts in each. Scanning
+        does not guarantee successful extraction.
+      </p>
+    </>
+  );
+}
+
+function ProjectScene({ data }: { data: WrappedStats }) {
+  const rows = data.projectMemories.top.map((n, i) => ({ label: `Project ${i + 1}`, n }));
+  if (data.projectMemories.other > 0) rows.push({ label: 'Other', n: data.projectMemories.other });
+  const total = rows.reduce((sum, row) => sum + row.n, 0);
+  return (
+    <>
+      <div className="wrapped-project-count">
+        <Metric value={data.projects} label="active projects" />
+      </div>
+      {total > 0 ? (
+        <>
+          <ul className="wrapped-type-deck wrapped-project-deck">
+            {rows.map((row) => (
+              <li key={row.label} className="wrapped-type-file">
+                <div className="wrapped-file-tab" aria-hidden="true" />
+                <span className="wrapped-type-name">{row.label}</span>
+                <Metric value={row.n} label={row.n === 1 ? 'memory' : 'memories'} />
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted-foreground">
+            Your leading project held{' '}
+            <strong className="text-foreground">
+              {((rows[0]!.n / total) * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%
+            </strong>{' '}
+            of your project-linked memories.
+          </p>
+          <p className="sr-only">
+            Anonymous ranks by memory saves, not stable project aliases. Global memories are
+            excluded from this distribution. Projects with sessions but no saves still count as
+            active.
+          </p>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No project-linked memories saved this year. Projects with sessions still count as active.
+        </p>
+      )}
+    </>
+  );
+}
+
 function BigNumber({ value, label, lime }: { value: number; label: string; lime?: boolean }) {
   return (
     <div
@@ -657,17 +750,17 @@ function Metric({ value, label }: { value: number; label: string }) {
     </div>
   );
 }
-function BarList({ rows }: { rows: { label: string; n: number }[] }) {
+function BarList({ rows, unit }: { rows: { label: string; n: number }[]; unit?: string }) {
   const reduce = useReducedMotion();
   const max = Math.max(1, ...rows.map((row) => row.n));
   return (
     <ul className="wrapped-bars flex flex-col">
       {rows.map((row, i) => (
         <li key={row.label} className="wrapped-bar-row">
-          <div className="relative z-10 flex justify-between gap-3 text-sm">
+          <div className="relative z-10 flex items-center justify-between gap-3 text-sm">
             <span>{row.label}</span>
             <span
-              className="font-mono text-xs text-muted-foreground"
+              className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground"
               title={row.n.toLocaleString('en-US')}
             >
               <NumberTicker
@@ -675,6 +768,7 @@ function BarList({ rows }: { rows: { label: string; n: number }[] }) {
                 format={formatWrappedCount}
                 ariaLabel={row.n.toLocaleString('en-US')}
               />
+              {unit && ` ${unit}`}
             </span>
           </div>
           <div className="wrapped-bar-track" aria-hidden="true">
@@ -820,7 +914,7 @@ function ShareImage({ data }: { data: WrappedStats }) {
         {ready ? (
           <Image
             src={image.url}
-            alt={`Exact export preview: ${data.memories} memories, ${data.sessions} sessions, ${data.judgments} judgments, ${data.activeDays} active days, ${data.longestStreak} day streak`}
+            alt={`Exact export preview: ${data.memories} memories, ${data.sessions} sessions, ${data.judgments} judgments, ${data.projects} active projects, ${data.entities.total} indexed entities, ${data.activeDays} active days, ${data.longestStreak} day streak${data.entities.scannedMemories < data.entities.eligibleMemories ? ', partial entity index' : ''}`}
             width={WRAPPED_IMAGE_SIZES[format].width}
             height={WRAPPED_IMAGE_SIZES[format].height}
             unoptimized

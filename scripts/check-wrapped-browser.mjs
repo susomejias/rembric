@@ -13,11 +13,18 @@ assert(
   process.env.AGENT_BROWSER_SESSION,
   'Set AGENT_BROWSER_SESSION to an authenticated browser session',
 );
-const env = { ...process.env, AGENT_BROWSER_RESTORE: process.env.AGENT_BROWSER_SESSION };
+const env = {
+  ...process.env,
+  AGENT_BROWSER_RESTORE: process.env.AGENT_BROWSER_RESTORE ?? process.env.AGENT_BROWSER_SESSION,
+};
 function browser(...args) {
   try {
     const result = JSON.parse(
-      execFileSync('agent-browser', [...args, '--json'], { env, encoding: 'utf8' }),
+      execFileSync(
+        'agent-browser',
+        ['--restore', env.AGENT_BROWSER_RESTORE, '--restore-save', 'never', ...args, '--json'],
+        { env, encoding: 'utf8' },
+      ),
     );
     assert(result.success, result.error);
     return result.data;
@@ -53,7 +60,7 @@ function tap(side, hold = 0) {
 try {
   browser('set', 'media', 'dark');
   browser('set', 'viewport', '390', '844');
-  browser('--restore', 'open', url.href);
+  browser('open', url.href);
   browser('wait', '--text', 'Your year.');
   assert.equal(screen(), 1);
   button('Pause story');
@@ -163,11 +170,11 @@ try {
   browser('set', 'viewport', '320', '640');
   assert.equal(evaluate('document.documentElement.scrollWidth > innerWidth'), false);
   browser('set', 'viewport', '390', '844');
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     browser('press', 'ArrowRight');
     wait(400);
   }
-  assert.equal(screen(), 6);
+  assert.equal(screen(), 8);
   const calendar = evaluate(
     `(() => { const year=Number(document.querySelector('#wrapped-year').value); return {months:document.querySelectorAll('.wrapped-calendar-month').length, cells:document.querySelectorAll('.wrapped-calendar-month > span').length, expected:(Date.UTC(year+1,0,1)-Date.UTC(year,0,1))/86400000, active:document.querySelectorAll('.wrapped-calendar-month .bg-primary').length, displayed:Number(document.querySelector('.wrapped-hero .sr-only').textContent.replaceAll(',',''))}; })()`,
   );
@@ -227,7 +234,11 @@ try {
     assert(result.match, 'Shared File and preview must contain identical bytes');
     assert.deepEqual(result.dimensions, format === 'square' ? [1080, 1080] : [1080, 1920]);
     assert.deepEqual(result.keys.sort(), ['files', 'title']);
-    assert.equal(screen(), 8, 'Format controls must not trigger side navigation');
+    assert.equal(screen(), 10, 'Format controls must not trigger side navigation');
+    assert(
+      evaluate('window.__canvasText.includes("entities")'),
+      'Entities must appear in the shared card',
+    );
     assert(
       evaluate('window.__canvasText.includes("judgments")'),
       'Judgments must appear in the shared card',
@@ -260,9 +271,9 @@ try {
   browser('find', 'role', 'button', 'click', '--name', 'Share Wrapped');
   assert.equal(evaluate('!!document.querySelector("[role=alert]")'), false);
   wait(7500);
-  assert.equal(screen(), 8, 'Sharing is the stable last screen');
+  assert.equal(screen(), 10, 'Sharing is the stable last screen');
 
-  browser('--restore', 'open', url.href);
+  browser('open', url.href);
   browser('set', 'media', 'dark', 'reduced-motion');
   evaluate('location.reload(); true');
   browser('wait', '--text', 'Your year.');
@@ -290,7 +301,7 @@ try {
   assert.equal(screen(), 2, 'Keyboard works with reduced motion');
   browser('set', 'viewport', '1470', '812');
   browser('press', 'Home');
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= 10; i++) {
     wait(200);
     assert.equal(screen(), i);
     const fit = evaluate(`(() => {
@@ -299,13 +310,102 @@ try {
         inner: content.scrollHeight > content.clientHeight + 1 };
     })()`);
     console.log(`Desktop screen ${i}:`, fit);
-    assert(!fit.outer && !fit.inner, `Desktop screen ${i} must fit the MacBook viewport`);
-    if (i < 8) browser('press', 'ArrowRight');
+    const denseEntities =
+      i === 6 &&
+      evaluate('document.querySelectorAll(".wrapped-entities-slide .wrapped-bar-row").length > 4');
+    assert(
+      !fit.outer && (!fit.inner || denseEntities),
+      `Desktop screen ${i} must fit unless its entity list is dense`,
+    );
+    if (i === 3 || i === 6) {
+      const cardGap = evaluate(`(() => {
+        const card = document.querySelector('.wrapped-agent-pass');
+        const row = document.querySelector('.wrapped-bar-row');
+        return card && row ? row.getBoundingClientRect().top - card.getBoundingClientRect().bottom : null;
+      })()`);
+      if (cardGap !== null) assert(cardGap >= 20, 'Rows clear the tilted card and its shadow');
+      assert(
+        evaluate(`Array.from(document.querySelectorAll('.wrapped-bar-row')).every(row => {
+          const label = row.querySelector('.relative > span').getBoundingClientRect();
+          const count = row.querySelector('[title] > span').getBoundingClientRect();
+          return Math.abs(label.top + label.height / 2 - count.top - count.height / 2) <= 0.75;
+        })`),
+        'Row counters are vertically centered with their labels',
+      );
+    }
+    if (i === 6) {
+      assert(
+        evaluate(
+          '!!document.querySelector(".wrapped-entity-totals") && !document.querySelector(".wrapped-entity-index")',
+        ),
+        'Entities use the session-card presentation, not the old index',
+      );
+      const entityPass = evaluate(
+        'document.querySelector(".wrapped-entities-slide .wrapped-agent-pass .wrapped-figure")?.getBoundingClientRect().width ?? null',
+      );
+      if (entityPass !== null) {
+        assert(entityPass > 100, 'The entity counter remains visible');
+        assert(
+          evaluate(
+            'document.querySelector(".wrapped-entities-slide .wrapped-agent-pass").textContent.includes("memories with this type")',
+          ),
+          'Entity counters use memories, not entity identities',
+        );
+        assert(
+          evaluate(
+            'Array.from(document.querySelectorAll(".wrapped-entities-slide .wrapped-bar-row")).every(e => e.textContent.includes("memories") && !e.textContent.includes("Other"))',
+          ),
+          'Every remaining type has its own memory count',
+        );
+      }
+    }
+    if (i === 7) {
+      assert(
+        evaluate(
+          '!!document.querySelector(".wrapped-project-count") && !document.querySelector(".wrapped-project-mosaic")',
+        ),
+        'Projects use the file-card direction',
+      );
+      assert(
+        evaluate(
+          'document.querySelectorAll(".wrapped-project-deck .wrapped-type-file").length <= 5',
+        ),
+        'Project cards remain bounded',
+      );
+    }
+    if (i < 10) browser('press', 'ArrowRight');
+  }
+  for (const [width, height] of [
+    [1280, 720],
+    [390, 844],
+    [320, 640],
+  ]) {
+    browser('set', 'viewport', String(width), String(height));
+    browser('press', 'Home');
+    for (let i = 0; i < 5; i++) browser('press', 'ArrowRight');
+    for (const title of ['Your technical universe.', 'Where you focused.']) {
+      browser('wait', '--text', title);
+      const fit = evaluate(
+        `(() => { const e = document.querySelector('.wrapped-content'); return { outer: document.documentElement.scrollHeight > innerHeight, horizontal: document.documentElement.scrollWidth > innerWidth, inner: e.scrollHeight > e.clientHeight + 1 }; })()`,
+      );
+      console.log(title, width, height, fit);
+      assert(!fit.outer && !fit.horizontal, 'New scenes stay within the viewport');
+      const denseEntities =
+        title === 'Your technical universe.' &&
+        evaluate(
+          'document.querySelectorAll(".wrapped-entities-slide .wrapped-bar-row").length > 4',
+        );
+      if (width > 480)
+        assert(!fit.inner || denseEntities, 'Desktop scenes fit unless the entity list is dense');
+      if (title === 'Your technical universe.') {
+        browser('press', 'ArrowRight');
+      }
+    }
   }
   console.log(
     'PASS: autoplay, pause/hold, taps, keyboard, reduced motion, layout, native-share API payload/activation/cancel/retry. Native OS sheet itself is not automated.',
   );
 } finally {
   browser('set', 'media', 'dark');
-  browser('--restore', 'open', url.href);
+  browser('open', url.href);
 }

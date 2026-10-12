@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
+import { ENTITY_KINDS, type EntityKind } from '../schema/entities.js';
 import { RELATION_VALUES, type RelationKind } from '../schema/memory-relations.js';
 import { MEMORY_TYPES, type MemoryType } from '../schema/memory.js';
 
@@ -21,6 +22,15 @@ export type WrappedStats = {
   judgments: number;
   judgmentTypes: Record<RelationKind, number>;
   projects: number;
+  projectMemories: { top: number[]; other: number };
+  entities: {
+    total: number;
+    recurring: number;
+    scannedMemories: number;
+    eligibleMemories: number;
+    kinds: { kind: EntityKind; n: number }[];
+    memoryKinds: { kind: EntityKind; n: number }[];
+  };
   activeDays: number;
   longestStreak: number;
   months: number[];
@@ -93,6 +103,54 @@ export class WrappedRepository {
       )
     `)?.n ?? 0;
 
+    const projectCounts = this.db.all<{ n: number }>(sql`
+      SELECT count(*) AS n FROM memory
+      WHERE created_at >= ${start} AND created_at < ${end} AND project_id IS NOT NULL
+      GROUP BY project_id ORDER BY n DESC, project_id
+    `);
+    const projectMemories = {
+      top: projectCounts.slice(0, 4).map((row) => row.n),
+      other: projectCounts.slice(4).reduce((sum, row) => sum + row.n, 0),
+    };
+    const entityKinds = this.db.all<{ kind: EntityKind; n: number; recurring: number }>(sql`
+      SELECT kind, count(*) AS n, sum(links >= 2) AS recurring FROM (
+        SELECT e.kind, e.value, count(DISTINCT m.id) AS links
+        FROM memory m
+        JOIN memory_entity_links l ON l.memory_id = m.id
+        JOIN memory_entities e ON e.id = l.entity_id
+        WHERE m.created_at >= ${start} AND m.created_at < ${end}
+          AND e.kind IN (${sql.join(
+            ENTITY_KINDS.map((kind) => sql`${kind}`),
+            sql`, `,
+          )})
+        GROUP BY e.kind, e.value
+      ) GROUP BY kind ORDER BY n DESC, kind
+    `);
+    const memoryKinds = this.db
+      .all<{ kind: EntityKind; n: number }>(
+        sql`
+      SELECT e.kind, count(DISTINCT m.id) AS n
+      FROM memory m
+      JOIN memory_entity_links l ON l.memory_id = m.id
+      JOIN memory_entities e ON e.id = l.entity_id
+      WHERE m.created_at >= ${start} AND m.created_at < ${end}
+      GROUP BY e.kind ORDER BY n DESC, e.kind
+    `,
+      )
+      .filter(({ kind }) => ENTITY_KINDS.includes(kind));
+    const coverage = this.db.get<{ scannedMemories: number; eligibleMemories: number }>(sql`
+      SELECT count(s.memory_id) AS scannedMemories, count(*) AS eligibleMemories
+      FROM memory m LEFT JOIN memory_entity_scan s ON s.memory_id = m.id
+      WHERE m.created_at >= ${start} AND m.created_at < ${end} AND m.project_id IS NOT NULL
+    `);
+    const entities = {
+      total: entityKinds.reduce((sum, row) => sum + row.n, 0),
+      recurring: entityKinds.reduce((sum, row) => sum + row.recurring, 0),
+      ...coverage,
+      kinds: entityKinds.map(({ kind, n }) => ({ kind, n })),
+      memoryKinds,
+    };
+
     const types: Record<MemoryType, number> = {
       user: 0,
       feedback: 0,
@@ -151,6 +209,8 @@ export class WrappedRepository {
       judgments,
       judgmentTypes,
       projects,
+      projectMemories,
+      entities,
       activeDays: days.length,
       longestStreak,
       months,

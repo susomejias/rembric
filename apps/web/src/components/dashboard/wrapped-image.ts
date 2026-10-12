@@ -1,4 +1,30 @@
-import type { MemoryType, WrappedStats } from '@rembric/db';
+import type { EntityKind, MemoryType, WrappedStats } from '@rembric/db';
+
+const ENTITY_LABELS: Record<EntityKind, string> = {
+  path: 'Paths',
+  git_ref: 'Git refs',
+  url: 'URLs',
+  error_code: 'Error codes',
+  ticket: 'Tickets',
+  cve_id: 'CVEs',
+  ip_address: 'IP addresses',
+  hostname: 'Hostnames',
+  env_var: 'Env vars',
+  uuid: 'UUIDs',
+  systemd_unit: 'Services',
+  mac_address: 'MAC addresses',
+};
+
+export function wrappedEntityMemoryRows(kinds: WrappedStats['entities']['memoryKinds']) {
+  return kinds.map(({ kind, n }) => ({ label: ENTITY_LABELS[kind], n }));
+}
+
+export function wrappedEntityRows(kinds: WrappedStats['entities']['kinds']) {
+  const rows = kinds.slice(0, 4).map(({ kind, n }) => ({ label: ENTITY_LABELS[kind], n }));
+  const other = kinds.slice(4).reduce((sum, row) => sum + row.n, 0);
+  if (other > 0) rows.push({ label: 'Other', n: other });
+  return rows;
+}
 
 export const WRAPPED_TYPE_LABELS: Record<MemoryType, string> = {
   user: 'Preferences',
@@ -60,10 +86,10 @@ export async function createWrappedImage(
 
   const story = format === 'story';
   const heroY = story ? 252 : 160;
-  const heroHeight = story ? 630 : 392;
-  const metricY = story ? 1060 : 674;
-  const activityY = story ? 1240 : 814;
-  const summaryY = story ? 1560 : 944;
+  const heroHeight = story ? 630 : 350;
+  const metricY = story ? 1150 : 710;
+  const activityY = story ? 1340 : 814;
+  const summaryY = story ? 1660 : 944;
   const context = ctx;
   function text(
     value: string,
@@ -156,15 +182,44 @@ export async function createWrappedImage(
   if (types.length === 0) text('No saves yet', 70, 0, 24, '#353e1b', sans, 350);
   ctx.restore();
 
+  const entityRows = wrappedEntityRows(data.entities.kinds);
+  const mixY = story ? 970 : 568;
+  const mixTotal = Math.max(1, data.entities.total);
+  let mixX = 96;
+  entityRows.forEach((row, i) => {
+    const segmentWidth = (888 * row.n) / mixTotal;
+    panel(
+      mixX,
+      mixY + 14,
+      segmentWidth,
+      10,
+      i === 0 ? '#c6f24e' : ['#a1a1aa', '#71717a', '#52525b', '#3f3f46'][i - 1]!,
+    );
+    text(`${row.label} ${formatWrappedCount(row.n)}`, 96 + i * 180, mixY, 16, '#a1a1aa', mono, 168);
+    mixX += segmentWidth;
+  });
+  if (entityRows.length === 0) text('No indexed entities yet', 96, mixY, 18, '#a1a1aa', mono);
+  if (data.entities.scannedMemories < data.entities.eligibleMemories)
+    text(
+      `Partial index · ${formatWrappedCount(data.entities.scannedMemories)} / ${formatWrappedCount(data.entities.eligibleMemories)} project memories scanned`,
+      96,
+      mixY + 48,
+      16,
+      '#a1a1aa',
+      mono,
+      888,
+    );
+
   const metrics = [
     [data.sessions, 'sessions'],
     [data.judgments, 'judgments'],
     [data.projects, 'active projects'],
+    [data.entities.total, 'entities'],
   ] as const;
   metrics.forEach(([n, label], i) => {
-    const x = 96 + i * 312;
-    text(formatWrappedCount(n), x, metricY, story ? 112 : 82, '#fafafa', sans, 258);
-    text(label, x, metricY + (story ? 48 : 38), story ? 25 : 21, '#a1a1aa', mono, 270);
+    const x = 96 + i * 228;
+    text(formatWrappedCount(n), x, metricY, story ? 86 : 64, '#fafafa', sans, 204);
+    text(label, x, metricY + (story ? 40 : 30), story ? 21 : 17, '#a1a1aa', mono, 204);
   });
 
   ctx.fillStyle = '#303326';
@@ -214,17 +269,17 @@ export async function createWrappedImage(
     text(
       `${formatWrappedCount(topAgent.n)} sessions`,
       96,
-      summaryY + (story ? 238 : 86),
+      summaryY + (story ? 174 : 86),
       20,
       '#c6f24e',
       mono,
       350,
     );
   text('Monthly saves', 540, summaryY, 21, '#a1a1aa', mono, 444);
-  const baseline = summaryY + (story ? 214 : 62);
+  const baseline = summaryY + (story ? 150 : 62);
   const peak = Math.max(1, ...data.months);
   data.months.forEach((n, i) => {
-    const barHeight = Math.max(3, (n / peak) * (story ? 176 : 36));
+    const barHeight = Math.max(3, (n / peak) * (story ? 112 : 36));
     panel(
       540 + i * 38,
       baseline - barHeight,

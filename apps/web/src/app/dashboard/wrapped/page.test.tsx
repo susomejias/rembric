@@ -1,4 +1,10 @@
-import { createRepositories, memory } from '@rembric/db';
+import {
+  createRepositories,
+  memory,
+  memoryEntities,
+  memoryEntityLinks,
+  projects,
+} from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestDb, type TestDb } from '../../../test/db';
@@ -86,6 +92,57 @@ describe('Wrapped server-to-client boundary', () => {
     });
     expect(JSON.stringify(page.props)).not.toContain('private');
   });
+  it('sends only anonymous entity and project aggregates across the client boundary', async () => {
+    const createdAt = new Date(Date.UTC(2026, 0, 1));
+    t.handle.db
+      .insert(projects)
+      .values({ id: 'private-project', slug: 'private-client', createdAt })
+      .run();
+    t.handle.db
+      .insert(memory)
+      .values({
+        id: 'private-memory',
+        projectId: 'private-project',
+        scope: 'project',
+        type: 'reference',
+        title: 'private-title',
+        content: 'private-content',
+        createdAt,
+      })
+      .run();
+    t.handle.db
+      .insert(memoryEntities)
+      .values({
+        id: 'private-entity',
+        scope: 'project',
+        projectId: 'private-project',
+        kind: 'hostname',
+        value: 'private.example',
+        createdAt,
+      })
+      .run();
+    t.handle.db
+      .insert(memoryEntityLinks)
+      .values({ entityId: 'private-entity', memoryId: 'private-memory' })
+      .run();
+    const page = await WrappedPage({ searchParams: Promise.resolve({ year: '2026' }) });
+    expect(page.props).toMatchObject({
+      data: {
+        projects: 1,
+        projectMemories: { top: [1], other: 0 },
+        entities: {
+          total: 1,
+          recurring: 0,
+          scannedMemories: 0,
+          eligibleMemories: 1,
+          kinds: [{ kind: 'hostname', n: 1 }],
+          memoryKinds: [{ kind: 'hostname', n: 1 }],
+        },
+      },
+    });
+    expect(JSON.stringify(page.props)).not.toContain('private');
+  });
+
   it('defaults invalid, repeated and future year parameters to the current UTC year', async () => {
     for (const year of ['2027', 'bad', '1969', '2025.0', ['2025', '2026']]) {
       const page = await WrappedPage({ searchParams: Promise.resolve({ year }) });

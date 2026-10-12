@@ -2,7 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { WrappedRepository, type MemoryType } from '@rembric/db';
 
-import { agentSessions, memory, memoryRelations, projects, tokens } from '../schema/index.js';
+import {
+  agentSessions,
+  memory,
+  memoryEntities,
+  memoryEntityLinks,
+  memoryEntityScan,
+  memoryRelations,
+  projects,
+  tokens,
+} from '../schema/index.js';
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
 const now = Date.UTC(2026, 5, 1);
@@ -69,7 +78,8 @@ function seed() {
       },
       {
         id: 'old',
-        scope: 'global',
+        scope: 'project',
+        projectId: 'private-project-c',
         type: 'project',
         title: 'private title',
         content: 'private memory',
@@ -277,6 +287,180 @@ describe('WrappedRepository', () => {
       'source',
     ])
       expect(payload).not.toContain(secret);
+  });
+
+  it('counts annual entity identities across projects, recurrence and partial scan coverage without leaking values', () => {
+    seed();
+    t.handle.db
+      .insert(memory)
+      .values({
+        id: 'unscanned-project-memory',
+        scope: 'project',
+        projectId: 'private-project-b',
+        type: 'reference',
+        title: 'private',
+        content: 'private',
+        createdAt: at(0, 3),
+      })
+      .run();
+    t.handle.db
+      .insert(memoryEntities)
+      .values([
+        {
+          id: 'e1',
+          scope: 'project',
+          projectId: 'private-project-a',
+          kind: 'path',
+          value: 'secret/path',
+          createdAt: at(0, 1),
+        },
+        {
+          id: 'e2',
+          scope: 'global',
+          kind: 'path',
+          value: 'secret/path',
+          createdAt: new Date(Date.UTC(2027, 0, 1)),
+        },
+        { id: 'e3', scope: 'global', kind: 'url', value: 'secret-url', createdAt: at(0, 1) },
+        {
+          id: 'e7',
+          scope: 'project',
+          projectId: 'private-project-a',
+          kind: 'path',
+          value: 'secret/second',
+          createdAt: at(0, 1),
+        },
+        { id: 'e4', scope: 'global', kind: 'ticket', value: 'secret-old', createdAt: at(0, 1) },
+        {
+          id: 'e5',
+          scope: 'project',
+          projectId: 'private-project-c',
+          kind: 'error_code',
+          value: 'secret-future',
+          createdAt: at(0, 1),
+        },
+        {
+          id: 'e6',
+          scope: 'global',
+          kind: 'private-kind' as typeof memoryEntities.$inferInsert.kind,
+          value: 'secret-value',
+          createdAt: at(0, 1),
+        },
+      ])
+      .run();
+    t.handle.db
+      .insert(memoryEntityLinks)
+      .values([
+        { entityId: 'e1', memoryId: 'secret-memory-1' },
+        { entityId: 'e1', memoryId: 'secret-memory-2' },
+        { entityId: 'e2', memoryId: 'secret-memory-3' },
+        { entityId: 'e3', memoryId: 'secret-memory-3' },
+        { entityId: 'e3', memoryId: 'old' },
+        { entityId: 'e3', memoryId: 'future' },
+        { entityId: 'e7', memoryId: 'secret-memory-1' },
+        { entityId: 'e4', memoryId: 'old' },
+        { entityId: 'e5', memoryId: 'future' },
+        { entityId: 'e6', memoryId: 'secret-memory-3' },
+      ])
+      .run();
+    t.handle.db
+      .insert(memoryEntityScan)
+      .values([
+        { memoryId: 'secret-memory-1', scannedAt: new Date(Date.UTC(2027, 0, 1)) },
+        { memoryId: 'secret-memory-2', scannedAt: at(0, 2) },
+        { memoryId: 'old', scannedAt: at(0, 1) },
+        { memoryId: 'future', scannedAt: at(0, 1) },
+      ])
+      .run();
+    const data = repo.adminYear(2026, now);
+    expect(data.entities).toEqual({
+      total: 3,
+      recurring: 1,
+      scannedMemories: 2,
+      eligibleMemories: 3,
+      kinds: [
+        { kind: 'path', n: 2 },
+        { kind: 'url', n: 1 },
+      ],
+      memoryKinds: [
+        { kind: 'path', n: 3 },
+        { kind: 'url', n: 1 },
+      ],
+    });
+    expect(JSON.stringify(data)).not.toMatch(/secret|private|e1|e2/);
+    expect(repo.adminYear(2025, now).entities).toMatchObject({
+      total: 2,
+      recurring: 0,
+      scannedMemories: 1,
+      eligibleMemories: 1,
+    });
+  });
+
+  it('counts scanned memories without entities and does not fabricate entities for an empty year', () => {
+    seed();
+    t.handle.db
+      .insert(memoryEntityScan)
+      .values({ memoryId: 'secret-memory-1', scannedAt: at(0, 1) })
+      .run();
+    expect(repo.adminYear(2026, now).entities).toEqual({
+      total: 0,
+      recurring: 0,
+      kinds: [],
+      memoryKinds: [],
+      scannedMemories: 1,
+      eligibleMemories: 2,
+    });
+    expect(repo.adminYear(2024, now).entities).toEqual({
+      total: 0,
+      recurring: 0,
+      kinds: [],
+      memoryKinds: [],
+      scannedMemories: 0,
+      eligibleMemories: 0,
+    });
+  });
+
+  it('returns only ranked project memory counts and Other, excluding global and future saves', () => {
+    seed();
+    t.handle.db
+      .insert(projects)
+      .values(
+        Array.from({ length: 6 }, (_, i) => ({
+          id: `secret-rank-${i}`,
+          slug: `secret-rank-${i}`,
+          createdAt: at(0, 1),
+        })),
+      )
+      .run();
+    for (let i = 0; i < 6; i++) {
+      t.handle.db
+        .insert(memory)
+        .values(
+          Array.from({ length: i + 1 }, (_, j) => ({
+            id: `secret-ranked-memory-${i}-${j}`,
+            scope: 'project' as const,
+            projectId: `secret-rank-${i}`,
+            type: 'reference' as const,
+            title: 'private',
+            content: 'private',
+            createdAt: at(0, 1),
+          })),
+        )
+        .run();
+    }
+    const data = repo.adminYear(2026, now);
+    expect(data.projects).toBe(8);
+    expect(data.projectMemories).toEqual({ top: [6, 5, 4, 3], other: 5 });
+    expect(JSON.stringify(data)).not.toMatch(/private|secret/);
+    expect(repo.adminYear(2024, now).projectMemories).toEqual({ top: [], other: 0 });
+  });
+
+  it('keeps session-only projects out of the memory distribution', () => {
+    seed();
+    expect(repo.adminYear(2026, now)).toMatchObject({
+      projects: 2,
+      projectMemories: { top: [2], other: 0 },
+    });
   });
 
   it('handles empty years and rejects invalid or future years', () => {
