@@ -1294,7 +1294,9 @@ export function DataTable<T>({
                 </div>
               )}
 
-              {toolbar}
+              {React.Children.map(toolbar, (control) => (
+                <React.Fragment key="toolbar-control">{control}</React.Fragment>
+              ))}
             </div>
           </div>
         )}
