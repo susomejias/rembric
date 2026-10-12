@@ -71,7 +71,7 @@ function NavMoreMenu({
               asChild
               className={cn('gap-2', entry.key === activeKey && 'text-primary')}
             >
-              <Link href={entry.href} prefetch>
+              <Link href={entry.href} prefetch={false}>
                 <Icon aria-hidden="true" className="size-4" />
                 {entry.label}
               </Link>
@@ -101,7 +101,7 @@ function MobileNav({
           <Link
             key={entry.key}
             href={entry.href}
-            prefetch
+            prefetch={false}
             onClick={onNavigate}
             aria-current={isActive ? 'page' : undefined}
             className={cn(
@@ -134,6 +134,7 @@ function UpdaterChip({
   return (
     <Link
       href="/dashboard/update"
+      prefetch={false}
       title={label}
       aria-label={label}
       className={cn(
@@ -269,6 +270,7 @@ function CommandBar({
           <header className="pointer-events-auto flex h-13 w-full max-w-5xl items-center gap-1.5 rounded-2xl border border-border bg-card/90 px-2.5 shadow-lg shadow-black/20 backdrop-blur">
             <Link
               href="/dashboard"
+              prefetch={false}
               className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-2"
               title="Rembric — go to the overview"
             >
@@ -287,7 +289,7 @@ function CommandBar({
                   <Link
                     key={entry.key}
                     href={entry.href}
-                    prefetch
+                    prefetch={false}
                     aria-current={isActive ? 'page' : undefined}
                     className={cn(
                       'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors',

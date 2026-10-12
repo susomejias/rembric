@@ -31,8 +31,16 @@ export function buildDashboardServices(handle: DbHandle): Record<string, unknown
 export function installViewMocks(pathname = '/dashboard'): void {
   currentPathname = pathname;
   vi.mock('next/link', () => ({
-    default: ({ href, children, ...rest }: { href?: string; children?: unknown }) =>
-      createElement('a', { href, ...rest }, children as never),
+    default: ({
+      href,
+      children,
+      prefetch: _prefetch,
+      ...rest
+    }: {
+      href?: string;
+      children?: unknown;
+      prefetch?: boolean | null;
+    }) => createElement('a', { href, ...rest }, children as never),
   }));
   vi.mock('next/navigation', () => ({
     usePathname: () => currentPathname,
