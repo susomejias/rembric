@@ -27,7 +27,6 @@ import {
   StatGrid,
   TableEmpty,
   Time,
-  ViewHead,
 } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -119,12 +118,7 @@ export default async function MaintenancePage({
 
   return (
     <Page>
-      <ViewHead
-        num="08"
-        title="Rembric Maintenance."
-        hl="Rembric"
-        meta={[{ k: 'ADMIN ONLY', v: '*' }]}
-      />
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground">Maintenance</h1>
 
       {purgedSessions !== '' ? (
         <div className="mt-6">

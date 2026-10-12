@@ -35,7 +35,6 @@ import {
   StatGrid,
   TableEmpty,
   Time,
-  ViewHead,
 } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -183,12 +182,7 @@ export default async function ConsolidationPage({
 
   return (
     <Page>
-      <ViewHead
-        num="05"
-        title="Rembric Consolidation."
-        hl="Rembric"
-        meta={[{ k: 'TOTAL', v: total }]}
-      />
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground">Consolidation</h1>
 
       {undone !== '' ? (
         <div className="mt-6">
