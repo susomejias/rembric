@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.29.2](https://github.com/susomejias/rembric/compare/server-v0.29.1...server-v0.29.2) (2026-10-12)
+
+
+### Features
+
+* **dashboard:** add manual overview refresh ([28d3a4e](https://github.com/susomejias/rembric/commit/28d3a4e7dd91a0e2265bcc23763c76a730bba0f2))
+
+
+### Bug Fixes
+
+* **dashboard:** disable eager navigation prefetch ([4fa00fa](https://github.com/susomejias/rembric/commit/4fa00fae8fce8f4894cb8e649af97b727c6d9666))
+* **dashboard:** key external table toolbar controls ([e738ed6](https://github.com/susomejias/rembric/commit/e738ed616d17d6c2f421fe634008249ea7b7d1d0))
+* **dashboard:** show consolidation and maintenance headings ([4bad315](https://github.com/susomejias/rembric/commit/4bad315fb2b50c030199b500fdcff87132abf3f9))
+
 ## [0.29.1](https://github.com/susomejias/rembric/compare/server-v0.29.0...server-v0.29.1) (2026-10-11)
 
 
