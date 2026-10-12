@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.4](https://github.com/susomejias/rembric/compare/server-v0.29.3...server-v0.29.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* **dashboard:** show real project names in Wrapped ([b6d367d](https://github.com/susomejias/rembric/commit/b6d367d844ae6472edbb33c0d71dde236091988d))
+
 ## [0.29.3](https://github.com/susomejias/rembric/compare/server-v0.29.2...server-v0.29.3) (2026-10-12)
 
 
