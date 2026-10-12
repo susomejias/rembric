@@ -829,6 +829,10 @@
 .wrapped-project-deck {
   margin-top: 16px;
 }
+.wrapped-project-deck .wrapped-type-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .wrapped-project-deck .wrapped-type-file {
   min-height: 64px;
   padding: 8px 20px;

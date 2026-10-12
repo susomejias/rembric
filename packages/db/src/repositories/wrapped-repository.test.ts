@@ -259,7 +259,7 @@ describe('WrappedRepository', () => {
     expect(repo.adminYears(now)).toEqual([2026, 2025]);
   });
 
-  it('never returns content, identifiers, names, source metadata or raw custom agents', () => {
+  it('only permits project display names, never content, identifiers, source metadata or raw custom agents', () => {
     seed();
     t.handle.db
       .insert(memory)
@@ -272,7 +272,9 @@ describe('WrappedRepository', () => {
         createdAt: at(0, 1),
       })
       .run();
-    const payload = JSON.stringify(repo.adminYear(2026, now));
+    const { projectMemories, ...rest } = repo.adminYear(2026, now);
+    expect(projectMemories.top).toEqual([{ name: 'secret-company', n: 2 }]);
+    const payload = JSON.stringify(rest);
     for (const secret of [
       'private',
       'secret',
@@ -387,7 +389,7 @@ describe('WrappedRepository', () => {
         { kind: 'url', n: 1 },
       ],
     });
-    expect(JSON.stringify(data)).not.toMatch(/secret|private|e1|e2/);
+    expect(JSON.stringify(data.entities)).not.toMatch(/secret|private|e1|e2/);
     expect(repo.adminYear(2025, now).entities).toMatchObject({
       total: 2,
       recurring: 0,
@@ -420,7 +422,7 @@ describe('WrappedRepository', () => {
     });
   });
 
-  it('returns only ranked project memory counts and Other, excluding global and future saves', () => {
+  it('ranks project names with slug fallback, keeping duplicate names separate and excluding global and future saves', () => {
     seed();
     t.handle.db
       .insert(projects)
@@ -428,6 +430,7 @@ describe('WrappedRepository', () => {
         Array.from({ length: 6 }, (_, i) => ({
           id: `secret-rank-${i}`,
           slug: `secret-rank-${i}`,
+          displayName: i >= 4 ? 'Shared name' : null,
           createdAt: at(0, 1),
         })),
       )
@@ -450,8 +453,17 @@ describe('WrappedRepository', () => {
     }
     const data = repo.adminYear(2026, now);
     expect(data.projects).toBe(8);
-    expect(data.projectMemories).toEqual({ top: [6, 5, 4, 3], other: 5 });
-    expect(JSON.stringify(data)).not.toMatch(/private|secret/);
+    expect(data.projectMemories).toEqual({
+      top: [
+        { name: 'Shared name', n: 6 },
+        { name: 'Shared name', n: 5 },
+        { name: 'secret-rank-3', n: 4 },
+        { name: 'secret-rank-2', n: 3 },
+      ],
+      other: 5,
+    });
+    expect(JSON.stringify(data)).not.toContain('private');
+    expect(JSON.stringify(data.projectMemories)).not.toContain('secret-rank-5');
     expect(repo.adminYear(2024, now).projectMemories).toEqual({ top: [], other: 0 });
   });
 
@@ -459,7 +471,7 @@ describe('WrappedRepository', () => {
     seed();
     expect(repo.adminYear(2026, now)).toMatchObject({
       projects: 2,
-      projectMemories: { top: [2], other: 0 },
+      projectMemories: { top: [{ name: 'secret-company', n: 2 }], other: 0 },
     });
   });
 

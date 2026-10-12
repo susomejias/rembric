@@ -38,6 +38,18 @@ function evaluate(code) {
 function wait(ms) {
   browser('wait', String(ms));
 }
+function dismissUpdateNotice() {
+  browser('wait', '--load', 'networkidle');
+  if (
+    evaluate(
+      'Array.from(document.querySelectorAll("[role=dialog]")).some(el => el.textContent.includes("A newer Rembric is published"))',
+    )
+  ) {
+    browser('find', 'role', 'button', 'click', '--name', 'LATER', '--exact');
+    browser('wait', '--fn', '!document.querySelector(\'[data-slot="dialog-overlay"]\')');
+    evaluate('document.querySelector(".wrapped-content h1")?.focus(); true');
+  }
+}
 function screen() {
   return Number(
     evaluate('document.querySelector("[role=progressbar]")?.getAttribute("aria-valuenow")'),
@@ -62,6 +74,7 @@ try {
   browser('set', 'viewport', '390', '844');
   browser('open', url.href);
   browser('wait', '--text', 'Your year.');
+  dismissUpdateNotice();
   assert.equal(screen(), 1);
   button('Pause story');
   for (const [width, height] of [
@@ -277,6 +290,7 @@ try {
   browser('set', 'media', 'dark', 'reduced-motion');
   evaluate('location.reload(); true');
   browser('wait', '--text', 'Your year.');
+  dismissUpdateNotice();
   assert(
     evaluate('matchMedia("(prefers-reduced-motion: reduce)").matches'),
     'Browser must retain reduced-motion emulation',
@@ -371,6 +385,22 @@ try {
           'document.querySelectorAll(".wrapped-project-deck .wrapped-type-file").length <= 5',
         ),
         'Project cards remain bounded',
+      );
+      const expectedNames = evaluate(`(() => {
+        const el = document.querySelector('.wrapped-project-deck');
+        if (!el) return [];
+        let fiber = el[Object.keys(el).find(k => k.startsWith('__reactFiber$'))];
+        while (fiber && !fiber.memoizedProps?.data?.projectMemories) fiber = fiber.return;
+        if (!fiber) throw Error('Missing project scene props');
+        const { top, other } = fiber.memoizedProps.data.projectMemories;
+        return [...top.map(row => row.name), ...(other > 0 ? ['Other'] : [])];
+      })()`);
+      assert.deepEqual(
+        evaluate(
+          'Array.from(document.querySelectorAll(".wrapped-project-deck .wrapped-type-name"), el => el.textContent)',
+        ),
+        expectedNames,
+        'Project cards show real project names rather than anonymous ranks',
       );
     }
     if (i < 10) browser('press', 'ArrowRight');

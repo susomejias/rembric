@@ -4,6 +4,7 @@ import type { Db } from '../client.js';
 import { ENTITY_KINDS, type EntityKind } from '../schema/entities.js';
 import { RELATION_VALUES, type RelationKind } from '../schema/memory-relations.js';
 import { MEMORY_TYPES, type MemoryType } from '../schema/memory.js';
+import type { Project } from '../schema/projects.js';
 
 export const WRAPPED_AGENTS = [
   'Claude Code',
@@ -22,7 +23,7 @@ export type WrappedStats = {
   judgments: number;
   judgmentTypes: Record<RelationKind, number>;
   projects: number;
-  projectMemories: { top: number[]; other: number };
+  projectMemories: { top: { name: Project['slug']; n: number }[]; other: number };
   entities: {
     total: number;
     recurring: number;
@@ -103,13 +104,17 @@ export class WrappedRepository {
       )
     `)?.n ?? 0;
 
-    const projectCounts = this.db.all<{ n: number }>(sql`
-      SELECT count(*) AS n FROM memory
-      WHERE created_at >= ${start} AND created_at < ${end} AND project_id IS NOT NULL
-      GROUP BY project_id ORDER BY n DESC, project_id
+    const projectCounts = this.db.all<WrappedStats['projectMemories']['top'][number]>(sql`
+      SELECT coalesce(p.display_name, p.slug) AS name, counts.n
+      FROM (
+        SELECT project_id, count(*) AS n FROM memory
+        WHERE created_at >= ${start} AND created_at < ${end} AND project_id IS NOT NULL
+        GROUP BY project_id
+      ) counts JOIN projects p ON p.id = counts.project_id
+      ORDER BY counts.n DESC, counts.project_id
     `);
     const projectMemories = {
-      top: projectCounts.slice(0, 4).map((row) => row.n),
+      top: projectCounts.slice(0, 4),
       other: projectCounts.slice(4).reduce((sum, row) => sum + row.n, 0),
     };
     const entityKinds = this.db.all<{ kind: EntityKind; n: number; recurring: number }>(sql`

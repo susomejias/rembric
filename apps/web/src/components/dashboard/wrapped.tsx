@@ -670,7 +670,7 @@ function EntityScene({ data }: { data: WrappedStats }) {
 }
 
 function ProjectScene({ data }: { data: WrappedStats }) {
-  const rows = data.projectMemories.top.map((n, i) => ({ label: `Project ${i + 1}`, n }));
+  const rows = data.projectMemories.top.map(({ name, n }) => ({ label: name, n }));
   if (data.projectMemories.other > 0) rows.push({ label: 'Other', n: data.projectMemories.other });
   const total = rows.reduce((sum, row) => sum + row.n, 0);
   return (
@@ -681,10 +681,12 @@ function ProjectScene({ data }: { data: WrappedStats }) {
       {total > 0 ? (
         <>
           <ul className="wrapped-type-deck wrapped-project-deck">
-            {rows.map((row) => (
-              <li key={row.label} className="wrapped-type-file">
+            {rows.map((row, rank) => (
+              <li key={rank} className="wrapped-type-file">
                 <div className="wrapped-file-tab" aria-hidden="true" />
-                <span className="wrapped-type-name">{row.label}</span>
+                <span className="wrapped-type-name line-clamp-2" title={row.label}>
+                  {row.label}
+                </span>
                 <Metric value={row.n} label={row.n === 1 ? 'memory' : 'memories'} />
               </li>
             ))}
@@ -697,9 +699,8 @@ function ProjectScene({ data }: { data: WrappedStats }) {
             of your project-linked memories.
           </p>
           <p className="sr-only">
-            Anonymous ranks by memory saves, not stable project aliases. Global memories are
-            excluded from this distribution. Projects with sessions but no saves still count as
-            active.
+            Projects ranked by memory saves. Global memories are excluded from this distribution.
+            Projects with sessions but no saves still count as active.
           </p>
         </>
       ) : (

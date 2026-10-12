@@ -29,6 +29,14 @@ it.each(['square', 'story'] as const)(
       };
       data.agents = [{ agent: 'Pi', n: 6 }];
       data.sessions = 6;
+      data.projects = 2;
+      data.projectMemories = {
+        top: [
+          { name: 'Confidential workspace', n: 10 },
+          { name: 'confidential-slug', n: 2 },
+        ],
+        other: 0,
+      };
       const text: string[] = [];
       const textBaselines: number[] = [];
       const context = {
@@ -71,6 +79,7 @@ it.each(['square', 'story'] as const)(
       expect((await createWrappedImage(data, format)).type).toBe('image/png');
       expect(canvas).toMatchObject(WRAPPED_IMAGE_SIZES[format]);
       expect(text).toContain('6 sessions');
+      expect(text.join(' ')).not.toMatch(/Confidential workspace|confidential-slug|Project [1-4]/);
       expect(canvas.height - Math.max(...textBaselines)).toBeGreaterThanOrEqual(
         format === 'story' ? 80 : 40,
       );
