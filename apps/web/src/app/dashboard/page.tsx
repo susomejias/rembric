@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { ActivityChart } from '@/components/dashboard/activity-chart';
+import { OverviewRefreshButton } from '@/components/dashboard/overview-refresh-button';
 import { RowTooltip } from '@/components/dashboard/row-tooltip';
 import { formatBytes, relativeTime, truncate } from '@/components/dashboard/support';
 import { WrappedEntry } from '@/components/dashboard/wrapped-entry';
@@ -100,8 +101,9 @@ export default function DashboardOverviewPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="flex flex-col gap-4">
+      <section className="flex items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">Overview</h1>
+        <OverviewRefreshButton />
       </section>
 
       {getWrappedSeason(nowMs).visible && <WrappedEntry />}
