@@ -99,6 +99,7 @@ let cwd: string;
 const LEAKED_CHILD_MARKERS = [
   'REMBRIC_SUBAGENT',
   'GENTLE_PI_AGENTS_CHILD',
+  'PI_SUBAGENT_CHILD',
   'REMBRIC_TRACK_SESSION',
 ] as const;
 const savedChildMarkers: Record<string, string | undefined> = {};
@@ -1194,14 +1195,16 @@ describe('the shutdown reason decides whether the session is ended', () => {
 });
 
 describe('child and programmatic pi processes are never persisted as sessions', () => {
-  async function runLifecycle(
-    sessionId: string,
-    opts: { env?: Record<string, string>; mode?: string } = {},
-  ): Promise<void> {
+  type LifecycleOpts = { env?: Record<string, string>; mode?: string; systemPrompt?: string };
+
+  async function runLifecycle(sessionId: string, opts: LifecycleOpts = {}): Promise<void> {
     for (const [key, value] of Object.entries(opts.env ?? {})) vi.stubEnv(key, value);
     try {
       const harness = await startedHarness(sessionId, undefined, opts.mode);
-      await harness.fire('before_agent_start', { prompt: `delegated task under ${sessionId}` });
+      await harness.fire('before_agent_start', {
+        prompt: `delegated task under ${sessionId}`,
+        ...(opts.systemPrompt === undefined ? {} : { systemPrompt: opts.systemPrompt }),
+      });
       await harness.fire('message_end', {
         message: { role: 'assistant', content: [{ type: 'text', text: 'child reply' }] },
       });
@@ -1214,7 +1217,7 @@ describe('child and programmatic pi processes are never persisted as sessions', 
 
   async function suppressedLifecycleCalls(
     sessionId: string,
-    opts: { env?: Record<string, string>; mode?: string },
+    opts: LifecycleOpts,
   ): Promise<string[]> {
     const calls: string[] = [];
     const realFetch = globalThis.fetch;
@@ -1254,6 +1257,36 @@ describe('child and programmatic pi processes are never persisted as sessions', 
     });
     expect(calls).toEqual([]);
     expect(sessions.getById('pi-subagent-declared')).toBeUndefined();
+  });
+
+  it('the pi-subagents runner marker suppresses a print-mode background child', async () => {
+    const calls = await suppressedLifecycleCalls('pi-subagent-runner', {
+      env: { PI_SUBAGENT_CHILD: '1' },
+      mode: 'print',
+    });
+    expect(calls).toEqual([]);
+    expect(sessions.getById('pi-subagent-runner')).toBeUndefined();
+  });
+
+  it('a pi-subagents active_agent tag suppresses a print-mode foreground child', async () => {
+    const calls = await suppressedLifecycleCalls('pi-subagent-foreground', {
+      mode: 'print',
+      systemPrompt: 'Base prompt.\n\n<active_agent name="memprobe"/>\n\nYou are a probe agent.',
+    });
+    expect(calls).toEqual([]);
+    expect(sessions.getById('pi-subagent-foreground')).toBeUndefined();
+  });
+
+  it('the control — a print-mode run with no child signal registers and ends the row', async () => {
+    await runLifecycle('pi-print-control', {
+      mode: 'print',
+      systemPrompt: 'Base prompt mentioning active_agent without the tag.',
+    });
+
+    const row = sessions.getById('pi-print-control');
+    expect(row?.agent).toBe('pi');
+    expect(row?.status).toBe('ended');
+    expect(row?.summary).toContain('delegated task under pi-print-control');
   });
 
   it('an RPC-driven process suppresses the whole lifecycle without any marker', async () => {

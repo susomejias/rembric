@@ -14,13 +14,21 @@ flush, the recall request and the close for that session — when ANY of the fol
 holds:
 
 - The host declares the process programmatically driven: pi's `ctx.mode` is `"rpc"`,
-  the mode every orchestrator runtime (gentle-pi, pi-subagents, IDE integrations,
-  scripts) uses when it spawns `pi --mode rpc` children. This signal is intrinsic to
-  the child and requires no cooperation from the spawner.
+  the mode orchestrator runtimes (gentle-pi, IDE integrations, scripts) use when they
+  spawn `pi --mode rpc` children. This signal is intrinsic to the child and requires no
+  cooperation from the spawner.
 - The spawner declares the child with `REMBRIC_SUBAGENT=1` — the generic contract for
   any orchestrator whose children are not pi RPC processes (SDK runners, plugins).
 - The spawner sets gentle-pi's `GENTLE_PI_AGENTS_CHILD=1`, honoured as a legacy alias
   for the installed base.
+- The process is a pi-subagents child host: pi-subagents sets `PI_SUBAGENT_CHILD=1` in
+  the detached runner process that hosts background children. Those children are
+  in-process SDK sessions bound with `mode: "print"`, so `ctx.mode` cannot identify them.
+- The session's system prompt carries pi-subagents' `<active_agent name=` tag. A
+  foreground pi-subagents child is an in-process session inside the parent pi process,
+  so it has neither a child-only environment nor a distinguishing `ctx.mode`; the tag
+  pi-subagents prepends or appends to every child agent's system prompt is the only
+  per-session signal. The parent conversation's prompt never carries it.
 
 `REMBRIC_TRACK_SESSION=1` SHALL override all of the above and force the session to
 register: an explicit operator opt-in tracks a process that would otherwise be
@@ -56,6 +64,31 @@ otherwise — so no child write ever mints a row.
 - **GIVEN** a pi process started with `GENTLE_PI_AGENTS_CHILD=1`
 - **WHEN** `before_agent_start` fires
 - **THEN** no `POST /api/<slug>/sessions` is issued for the process's session id
+
+#### Scenario: A pi-subagents background child creates no session row
+
+- **GIVEN** a pi process started with `PI_SUBAGENT_CHILD=1` whose host context reports
+  `ctx.mode === "print"`
+- **WHEN** the full lifecycle fires
+- **THEN** no session call (`POST /api/<slug>/sessions`, turn report, summary, end or
+  `memory.session_resume`) is issued for the session id
+- **AND** no session row exists for that id
+
+#### Scenario: A pi-subagents foreground child creates no session row
+
+- **GIVEN** a session whose host context reports `ctx.mode === "print"`, started with
+  none of the markers above, whose `before_agent_start` system prompt contains
+  `<active_agent name="memprobe"/>`
+- **WHEN** the full lifecycle fires
+- **THEN** no session call is issued for the session id
+- **AND** no session row exists for that id
+
+#### Scenario: A print-mode run without a child signal keeps its row
+
+- **GIVEN** a session whose host context reports `ctx.mode === "print"`, started with
+  none of the markers above, whose system prompt does not contain the tag
+- **WHEN** the full lifecycle fires
+- **THEN** the session row is created, summarised and ended
 
 #### Scenario: An explicit tracking override wins
 

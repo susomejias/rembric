@@ -78,6 +78,7 @@ const PROTOCOL_VERSION = '2025-06-18';
 const DISCOVERY_TIMEOUT_MS = 10_000;
 
 const CLOSING_SHUTDOWN_REASONS = new Set(['quit', 'new', 'resume', 'fork']);
+const PI_SUBAGENTS_CHILD_TAG = '<active_agent name=';
 
 function discoveryDeadline(): AbortSignal {
   return AbortSignal.timeout(
@@ -288,7 +289,9 @@ export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
   const declaredChild =
-    process.env.REMBRIC_SUBAGENT === '1' || process.env.GENTLE_PI_AGENTS_CHILD === '1';
+    process.env.REMBRIC_SUBAGENT === '1' ||
+    process.env.GENTLE_PI_AGENTS_CHILD === '1' ||
+    process.env.PI_SUBAGENT_CHILD === '1';
   const trackForced = process.env.REMBRIC_TRACK_SESSION === '1';
   let boundKey: string | null = null;
   let lastBindAttemptKey: string | null = null;
@@ -370,7 +373,11 @@ export default function rembric(pi: ExtensionApi): void {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     const prompt = event.prompt ?? '';
-    const suppress = !trackForced && (declaredChild || ctx.mode === 'rpc');
+    const suppress =
+      !trackForced &&
+      (declaredChild ||
+        ctx.mode === 'rpc' ||
+        (event.systemPrompt ?? '').includes(PI_SUBAGENTS_CHILD_TAG));
     if (suppress) core.markSubAgent(sessionId);
     core.beginTurn(sessionId);
     await core.ensureSession(sessionId);

@@ -131,6 +131,20 @@ Print mode is the exception, and this one is read from Pi's source rather than m
 
 **Ctrl-D remains the simplest exit** — one keystroke, no timing window, and it does not depend on how you have bound your keys.
 
+## Subagents
+
+A delegated child is not a conversation of its own, so it never registers a session row. Rembric tools stay available inside it, and its `memory_save` calls still reach the server. A child is recognised by any of:
+
+| Signal                                     | Set by                                                                |
+| ------------------------------------------ | --------------------------------------------------------------------- |
+| `ctx.mode` is `rpc`                        | any runtime that spawns `pi --mode rpc` children (gentle-pi, scripts) |
+| `GENTLE_PI_AGENTS_CHILD=1`                 | gentle-pi                                                             |
+| `PI_SUBAGENT_CHILD=1`                      | pi-subagents, in the runner process that hosts background children    |
+| `<active_agent name=` in the system prompt | pi-subagents, on every child agent, including foreground ones         |
+| `REMBRIC_SUBAGENT=1`                       | any other spawner that declares its children                          |
+
+`REMBRIC_TRACK_SESSION=1` overrides all of them and tracks the process as a normal session.
+
 ## Source
 
 Developed in the Rembric monorepo at [`apps/plugin/.pi-plugin/`](https://github.com/susomejias/rembric/tree/main/apps/plugin/.pi-plugin). Issues and pull requests: [susomejias/rembric](https://github.com/susomejias/rembric).
