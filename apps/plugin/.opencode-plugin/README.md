@@ -6,6 +6,19 @@ This plugin shares the same HTTP API and MCP bridge as the Claude Code, Codex CL
 
 **Scope**: the plugin handles session lifecycle and compaction signals via the `event` dispatcher (`session.created`, `session.deleted`, `session.compacted`, `server.instance.disposed`), accumulates transcripts via `chat.message` and `message.updated`, flushes summaries on `session.idle` (per-turn debounced) and `session.compacted` (compaction milestone), and injects post-compaction guidance via `experimental.session.compacting`. The `chat.message` handler also appends a recall nudge to `output.parts` when the user prompt matches the cross-client recall regex (`remember|recall|acuérdate|qué hicimos|what did we do`), for paridad with the Claude Code / Codex CLI `UserPromptSubmit` hook.
 
+## opencode 1.x and 2.x
+
+The module carries two entry points and they serve different opencode majors.
+
+`RembricPlugin` is the **named** export and serves **1.x**, which resolves a plugin by calling each named export as a function with `{ project, client, $, directory, worktree }` and subscribing to the handlers it returns.
+
+The **default** export is an opencode **2.x** plugin: an object `{ id: 'rembric.lifecycle', setup }` that the host drives through its `ctx` domains. 2.x does not read the V1 shape, so without it a 2.x host registers nothing and silently captures no sessions. The V2 entry point is deliberately not a named export — 1.x would otherwise try to run it as a plugin and it would dereference `ctx.location`, which does not exist in a 1.x context.
+
+Both are built on the same shared core and the same `.rembric` slug convention, so a project configured for one works for the other. Two behaviours differ by necessity:
+
+- **Nudges ride the system context.** 2.x has no user-message part array to append to, so recall and session-opening nudges are pushed as transient system text. They never enter the persisted turn.
+- **The injected block is cached per session.** A 2.x system part lives for one model request, so the block is re-pushed on every request, rebuilt from the server if the cache is empty, and dropped when the session is compacted.
+
 ## Install
 
 Use the **TUI installer** — the single recommended path. It runs both manual steps below for you (and handles update/uninstall):
