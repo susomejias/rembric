@@ -27,7 +27,7 @@ class SystemPromptBlockTest(unittest.TestCase):
             "memory.get_batch(creation)", "memory.session_get_batch(activity)",
             "ids OR from/to", "full current data/errors", "limit≤20",
             "offset=nextOffset until null", "all failed=isError",
-            "Know your sessionId? Pass it; never guess.",
+            "Pass known sessionId; never guess.",
             "topic_key?", "memory.judge_batch({judgments:[…]})", "memory.about",
         ):
             self.assertIn(clause, block)
@@ -51,15 +51,17 @@ class SystemPromptBlockTest(unittest.TestCase):
     def test_includes_the_proactive_recall_wording(self) -> None:
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
-        self.assertIn(
-            "RECALL: memory.context/memory.search if you lack prior detail.",
-            block,
-        )
+        line = next(line for line in block.splitlines() if line.startswith("RECALL:"))
+        self.assertIn("memory.context/memory.search", line)
+        self.assertIn("if you lack prior detail", line)
+        for trigger in ("new-area", "diagnosis", "recall"):
+            with self.subTest(trigger=trigger):
+                self.assertIn(trigger, line)
 
     def test_includes_proactive_save_flow(self) -> None:
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
-        self.assertIn("memory.save(title≤100, content, tags)", block)
+        self.assertIn("memory.save(title≤100,content,tags)", block)
         self.assertIn("normally 1–5 useful reusable lowercase ASCII kebab-case", block)
         for example in ("dashboard", "sqlite", "bug-fix"):
             self.assertIn(example, block)

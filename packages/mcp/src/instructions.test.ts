@@ -88,9 +88,7 @@ describe('MCP initialize instructions', () => {
       buildInstructions({ requestedSlug: null }),
       buildInstructions({ requestedSlug: 'rembric' }),
     ]) {
-      expect(text).toContain(
-        'SAVE: fix/decision/discovery/config/pattern/preference → memory.save',
-      );
+      expect(text).toContain('SAVE: fix/decision/discovery/config/pattern/preference→memory.save');
     }
   });
 
@@ -104,6 +102,20 @@ describe('MCP initialize instructions', () => {
       expect(text).toContain('memory.search');
     }
   });
+
+  it.each(['new-area', 'diagnosis', 'recall'])(
+    'preserves the %s recall trigger without making recall unconditional',
+    (trigger) => {
+      for (const requestedSlug of [null, 'rembric', 'x'.repeat(63), 'x'.repeat(64)]) {
+        const line = buildInstructions({ requestedSlug })
+          .split('\n')
+          .find((value) => value.startsWith('RECALL:'));
+        expect(line).toContain('memory.context/memory.search');
+        expect(line).toContain('if you lack prior detail');
+        expect(line).toContain(trigger);
+      }
+    },
+  );
 
   it('independently teaches the SUMMARIZE component in both variants', () => {
     for (const text of [
@@ -120,7 +132,7 @@ describe('MCP initialize instructions', () => {
       buildInstructions({ requestedSlug: null }),
       buildInstructions({ requestedSlug: 'rembric' }),
     ]) {
-      expect(text).toContain('Know your sessionId? Pass it; never guess.');
+      expect(text).toContain('Pass known sessionId; never guess.');
     }
   });
 
