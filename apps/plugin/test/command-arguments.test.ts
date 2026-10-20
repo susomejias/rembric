@@ -46,7 +46,7 @@ const EXPECTED: Record<string, { tool: string; keys: string[] }[]> = {
     { tool: 'session_get_batch', keys: ['from', 'to', 'limit', 'offset'] },
   ],
   'recall.md': [{ tool: 'search', keys: ['query', 'limit'] }],
-  'remember.md': [{ tool: 'save', keys: ['type', 'title', 'content'] }],
+  'remember.md': [{ tool: 'save', keys: ['type', 'title', 'content', 'tags'] }],
   'summary.md': [{ tool: 'session_summary', keys: ['title', 'summary'] }],
 };
 
@@ -75,6 +75,15 @@ describe('command bodies name only arguments their tool accepts', () => {
     expect(callSites('memory.confirm_batch({ ids: [first, second], verdict: "affirm" })')).toEqual([
       { tool: 'confirm_batch', keys: ['ids', 'verdict'] },
     ]);
+  });
+
+  it('remember derives required reusable tags without another call', () => {
+    const body = parse('remember.md').body;
+    expect(body).toContain('1–64');
+    expect(body).toContain('normally 1–5 useful reusable lowercase Unicode kebab-case');
+    expect(body).toContain('derived from the text');
+    for (const example of ['dashboard', 'sqlite', 'bug-fix']) expect(body).toContain(example);
+    expect(objectCallCount(body)).toBe(1);
   });
 
   it('ships exactly four commands', () => {

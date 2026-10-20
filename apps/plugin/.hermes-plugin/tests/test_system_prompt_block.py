@@ -23,6 +23,14 @@ class SystemPromptBlockTest(unittest.TestCase):
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
         self.assertIn("memory.session_summary", block)
+        for clause in (
+            "memory.get_batch(creation)", "memory.session_get_batch(activity)",
+            "ids OR from/to", "full current data/errors", "limit≤20",
+            "offset=nextOffset until null", "all failed=isError",
+            "Know your sessionId? Pass it; never guess.",
+            "topic_key?", "memory.judge_batch({judgments:[…]})", "memory.about",
+        ):
+            self.assertIn(clause, block)
         self.assertIn("title", block)
         headings = [
             "## Goal",
@@ -44,17 +52,17 @@ class SystemPromptBlockTest(unittest.TestCase):
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
         self.assertIn(
-            "RECALL: before work in an area untouched this session, before diagnosing "
-            "a possibly-known error, before building something that may already exist "
-            "— or asked to recall: call memory.context (memory.search for keywords) "
-            "if you lack prior detail.",
+            "RECALL: memory.context/memory.search if you lack prior detail.",
             block,
         )
 
     def test_includes_proactive_save_flow(self) -> None:
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
-        self.assertIn("memory.save", block)
+        self.assertIn("memory.save(title≤100, content, tags)", block)
+        self.assertIn("normally 1–5 useful reusable lowercase Unicode kebab-case", block)
+        for example in ("dashboard", "sqlite", "bug-fix"):
+            self.assertIn(example, block)
 
     def test_session_summary_trigger_is_not_bound_to_the_word_done(self) -> None:
         provider = self.mod.RembricMemoryProvider()

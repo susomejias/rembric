@@ -461,7 +461,7 @@ describe('error messages name only reachable remedies', () => {
 });
 
 const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
-  'memory.save': { type: 'user', title: 't', content: 'c' },
+  'memory.save': { type: 'user', title: 't', content: 'c', tags: ['mcp'] },
   'memory.search': {},
   'memory.get_batch': { ids: ['placeholder'] },
   'memory.confirm_batch': { ids: ['placeholder'] },
@@ -473,7 +473,7 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.context': {},
   'memory.session_get_batch': { ids: ['placeholder'] },
   'memory.timeline': { memoryId: 'placeholder' },
-  'memory.capture_passive': { text: '## Key Learnings\n\n1. one learning' },
+  'memory.capture_passive': { text: '## Key Learnings\n\n1. one learning', tags: ['mcp'] },
   'memory.save_prompt': { content: 'c', title: 't' },
   'memory.search_prompts': {},
   'memory.doctor': {},

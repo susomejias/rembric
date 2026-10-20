@@ -216,6 +216,143 @@ describe('memory.save', () => {
   });
 });
 
+describe('memory tag normalization', () => {
+  it('canonicalizes syntax, deduplicates in first order, and is idempotent without semantic merging', () => {
+    const scope = projectScope(projectId);
+    const tags = [
+      ' Dashboard ',
+      'Deploy / Docker',
+      'deploy_docker',
+      'dashboard',
+      'bug-fix',
+      'fix-bug',
+    ];
+    const expected = ['dashboard', 'deploy-docker', 'bug-fix', 'fix-bug'];
+    const saved = memory.save({ type: 'project', title: 'Tags', content: 'control', tags }, scope);
+    expect(saved.tags).toEqual(expected);
+    expect(memory.getMany([saved.id], scope)[0]?.tags).toEqual(expected);
+    expect(
+      memory.save({ type: 'project', title: 'Again', content: 'control', tags: expected }, scope)
+        .tags,
+    ).toEqual(expected);
+  });
+
+  it('preserves Unicode letters, numbers and combining marks with NFKC equivalence', () => {
+    const tags = [
+      'autenticación',
+      'autenticacio\u0301n',
+      '部署 / 数据库',
+      'Ｄａｓｈｂｏａｒｄ',
+      'İ',
+      'किताब １２٣',
+    ];
+    const saved = memory.save(
+      { type: 'project', title: 'Unicode', content: 'control', tags },
+      projectScope(projectId),
+    );
+    expect(saved.tags).toEqual([
+      'autenticación',
+      '部署-数据库',
+      'dashboard',
+      'i\u0307',
+      'किताब-12٣',
+    ]);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['whitespace', ' \t\n'],
+    ['punctuation', '_ / -- !'],
+    ['emoji', '😀🚀'],
+    ['standalone combining mark', '\u0301'],
+    ['NUL', 'ba\0d'],
+  ])('rejects %s tags before any transaction or topic mutation', (_label, invalid) => {
+    const scope = projectScope(projectId);
+    const input = {
+      type: 'project' as const,
+      title: 'Topic',
+      content: 'control',
+      topicKey: 'tags/topic',
+    };
+    memory.save({ ...input, tags: ['valid'] }, scope);
+    const predecessor = memory.save({ ...input, tags: ['valid'] }, scope);
+    const rows = () => ({
+      memories: db.handle.raw.prepare('SELECT * FROM memory ORDER BY id').all(),
+      relations: db.handle.raw.prepare('SELECT * FROM memory_relations ORDER BY id').all(),
+    });
+    const before = rows();
+    let transactions = 0;
+    const guarded = new MemoryService(
+      createRepositories(db.handle.db),
+      {
+        transaction: () => {
+          transactions++;
+          throw new Error('invalid tags reached a transaction');
+        },
+      },
+      clock.now,
+    );
+    const rejected = () => guarded.saveWithTopicKey({ ...input, tags: ['valid', invalid] }, scope);
+    let error: unknown;
+    try {
+      rejected();
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(DomainError);
+    expect(error).toMatchObject({ code: 'invalid_input' });
+    expect(error instanceof Error ? error.message : '').toContain('tags');
+    expect(transactions).toBe(0);
+    expect(rows()).toEqual(before);
+    expect(memory.unsafeGetById(predecessor.id)?.status).toBe('active');
+
+    const successor = memory.saveWithTopicKey({ ...input, tags: [' Valid / Tag '] }, scope);
+    expect(successor.memory.tags).toEqual(['valid-tag']);
+    expect(successor.supersededByTopicKey?.id).toBe(predecessor.id);
+    expect(successor.memory.replaces).toEqual([predecessor.id]);
+    expect(memory.unsafeGetById(predecessor.id)?.status).toBe('superseded');
+    expect(rows().memories).toHaveLength(before.memories.length + 1);
+    expect(rows().relations).toHaveLength(before.relations.length + 1);
+    expect(
+      db.handle.raw
+        .prepare('SELECT source_id, target_id, relation FROM memory_relations WHERE source_id = ?')
+        .get(successor.memory.id),
+    ).toEqual({
+      source_id: successor.memory.id,
+      target_id: predecessor.id,
+      relation: 'supersedes',
+    });
+  });
+
+  it('retains omitted and empty internal tags and reads historical tags unchanged', async () => {
+    const scope = projectScope(projectId);
+    const repos = createRepositories(db.handle.db);
+    const omitted = memory.save({ type: 'project', title: 'Omitted', content: 'control' }, scope);
+    const empty = memory.save(
+      { type: 'project', title: 'Empty', content: 'control', tags: [] },
+      scope,
+    );
+    expect(omitted.tags).toEqual([]);
+    expect(empty.tags).toEqual([]);
+    const tags = [' Dashboard ', 'deploy_docker', ' Dashboard '];
+    const historical = repos.memory.insert({ ...omitted, id: 'historical-tags', tags });
+    expect(historical).toBeDefined();
+    const cases = [
+      [omitted.id, []],
+      [empty.id, []],
+      ['historical-tags', tags],
+    ] as const;
+    for (const [id, expected] of cases) {
+      expect(memory.get(id, scope)?.memory.tags).toEqual(expected);
+      expect(memory.getMany([id], scope)[0]?.tags).toEqual(expected);
+      expect(
+        (await memory.search({ limit: 20 }, scope)).find((row) => row.id === id)?.tags,
+      ).toEqual(expected);
+    }
+    expect(repos.memory.unsafeGetById('historical-tags')?.tags).toEqual(tags);
+  });
+});
+
 describe('memory.search', () => {
   it('FTS5 keyword match within scope', async () => {
     memory.save(

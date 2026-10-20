@@ -441,24 +441,24 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
-            "Rembric — persistent memory. Use tools "
-            "proactively.\n\n"
-            "SAVE: On each real fix/decision/discovery/config/pattern/preference, "
-            "call memory.save(title≤100, content); evolving topic: topic_key, "
-            "candidates[]→memory.judge_batch.\n"
-            "RECALL: before work in an area untouched this session, before diagnosing "
-            "a possibly-known error, before building something that may already exist "
-            "— or asked to recall: call memory.context (memory.search for keywords) "
-            "if you lack prior detail.\n"
-            "SUMMARIZE: Before ending each working turn with real work, MUST call "
-            "memory.session_summary({title≤100, summary≤10000}) — The `##` "
+            "SAVE: fix/decision/discovery/config/pattern/preference → "
+            "memory.save(title≤100, content, tags); topic_key?, "
+            "candidates[]→memory.judge_batch({judgments:[…]}).\n"
+            "Tags required, normally 1–5 useful reusable lowercase Unicode kebab-case: "
+            "dashboard/sqlite/bug-fix.\n"
+            "Know your sessionId? Pass it; never guess.\n"
+            "RECALL: memory.context/memory.search if you lack prior detail.\n"
+            "READ: memory.get_batch(creation) / memory.session_get_batch(activity): "
+            "ids OR from/to; full current data/errors, limit≤20, "
+            "offset=nextOffset until null; all failed=isError.\n"
+            "SUMMARIZE: Before ending each working turn: "
+            "memory.session_summary(title≤100, summary≤10000). The `##` "
             "sections you send REPLACE; the ones you omit STAY. Current state "
             "first: Use exactly these six Markdown level-2 headings, in this "
             "order, each on its own line (never one flat paragraph):\n## Goal\n"
             "## Accomplished\n## Decisions+why\n## Verified+how\n"
             "## Unfinished+why\n## Files\n"
-            "Know your sessionId? Pass it; never guess.\n"
-            "Update: memory.about."
+            "memory.about."
         )
 
     def on_turn_start(self, turn_number: int, message: Any, **kwargs: Any) -> None:

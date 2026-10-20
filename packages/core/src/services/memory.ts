@@ -146,7 +146,7 @@ export class MemoryService {
       );
     }
     assertNoNul('memory.save', 'title', title);
-    for (const tag of input.tags ?? []) assertNoNul('memory.save', 'tags', tag);
+    const tags = this.normalizeTags(input.tags ?? []);
     const topicKey = normalizeTopicKey(input.topicKey);
 
     const ts = this.now();
@@ -178,7 +178,7 @@ export class MemoryService {
         type: input.type,
         title,
         content: input.content,
-        tags: input.tags ?? [],
+        tags,
         status: 'active',
         replaces: replacesPrefix,
         createdAt: ts,
@@ -212,6 +212,29 @@ export class MemoryService {
 
       return { memory: inserted, supersededByTopicKey };
     });
+  }
+
+  private normalizeTags(tags: readonly string[]): string[] {
+    return [
+      ...new Set(
+        tags.map((tag) => {
+          assertNoNul('memory.save', 'tags', tag);
+          const normalized = (
+            tag
+              .normalize('NFKC')
+              .toLowerCase()
+              .match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu) ?? []
+          ).join('-');
+          if (normalized.length === 0) {
+            throw new DomainError(
+              'invalid_input',
+              'memory.save: tags must contain letters or numbers',
+            );
+          }
+          return normalized;
+        }),
+      ),
+    ];
   }
 
   get(id: string, scope: Scope): MemoryWithHistory | null {
