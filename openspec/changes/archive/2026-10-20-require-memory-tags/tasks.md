@@ -34,4 +34,6 @@ Section 4 evidence: `pnpm run typecheck`, `pnpm run lint`, the production web bu
 
 ## 5. Artifact validation
 
+Archive preparation: the pre-existing canonical strict-validation baseline passed for memory, mcp-api, and hermes-agent-plugin, but failed Claude requirements 0/5/6 on the first-body SHALL/MUST check. The command delta fixes 0; two format-only full MODIFIED deltas move the existing normative paragraph first for 5/6, preserving all paragraph/scenario text. Task completion remains 15/15.
+
 - [x] 5.1 Recheck deltas against authoritative requirements: full modified save/curation/initialize/remember blocks, dedicated precedence for abbreviated research/Hermes guidance, optional topic key, and no response-field regressions. Run `openspec validate require-memory-tags --strict` successfully before marking implementation complete.

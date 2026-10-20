@@ -36,11 +36,11 @@ Distribution and configuration of Rembric's Claude Code plugin. Defines the mani
 
 ### Requirement: Each `/rembric:*` command body MUST name only arguments its tool's schema accepts
 
-The four commands under `apps/plugin/commands/*.md` are agent-facing instructions: the model reads the body and issues the call verbatim. A command naming a parameter its tool does not accept produces a zod rejection at runtime, and a spec that documents such a call teaches the wrong shape to every reader.
+The four commands under `apps/plugin/commands/*.md` SHALL name only arguments accepted by their tools' schemas. They are agent-facing instructions: the model reads the body and issues the call verbatim. A command naming a parameter its tool does not accept produces a zod rejection at runtime, and a spec that documents such a call teaches the wrong shape to every reader.
 
 The plugin SHALL ship exactly four commands under `/rembric:*`, auto-discovered from `apps/plugin/commands/*.md` (there is no `commands` field in `.claude-plugin/plugin.json`):
 
-- `remember <text>` → `memory.save({type: 'project', title: <concise ≤100-char headline>, content: '$ARGUMENTS'})`. The `title` is required by `memory.save`, so the command directs the agent to supply a short headline derived from the text.
+- `remember <text>` → `memory.save({type: 'project', title: <concise ≤100-char headline>, content: '$ARGUMENTS', tags: <useful reusable labels derived from the text>})`. The command SHALL direct the agent to supply the required headline and 1–64 tags, normally 1–5 lowercase kebab-case labels such as `dashboard`, `sqlite`, or `bug-fix`. `topic_key` remains optional. It SHALL NOT require an extra tool call to choose labels.
 - `recall <topic>` → `memory.search({query: '$ARGUMENTS', limit: 5})`, rendered compactly. The parameter is `query`; `memorySearchSchema` has no `q`.
 - `context` → `memory.context()`, rendered compactly. `contextSchema` accepts `sessions`, `prompts`, `memories`, `includeArchived` and `focus`; it has no `limit`.
 - `summary` → `memory.session_summary({title, summary})`. `sessionSummarySchema` is `{sessionId?, summary (REQUIRED), title?}`; it has no `auto`, and a call omitting `summary` is rejected.
@@ -66,6 +66,12 @@ Each command's frontmatter `description` SHALL be ≤20 tokens; the four descrip
 - **WHEN** each command's frontmatter `description` is measured in UTF-8 bytes
 - **THEN** each SHALL be ≤80 bytes (≤20 tokens)
 - **AND** the sum of `/rembric:<name> <description>` across all four SHALL be ≤320 bytes (≤80 tokens)
+
+#### Scenario: Remember supplies required tags without another call
+
+- **WHEN** the remember command is rendered for an agent
+- **THEN** its save example SHALL include `tags` and teach normally 1–5 useful reusable lowercase kebab-case labels
+- **AND** it SHALL stay within the existing command budgets and SHALL NOT introduce an extra tool call
 
 ### Requirement: The token budget MUST be stated per firing turn and amortised over the cadence window, in a pinned unit, and asserted in the shared fixtures
 
@@ -347,9 +353,9 @@ The plugin's hook catalog (`apps/plugin/hooks/hooks.json`) SHALL declare a match
 
 ### Requirement: The first prompt of a session MUST receive a relevance instruction
 
-The recall hook fires a keyword-gated instruction only when the user's prompt matches a recall-intent keyword list. Without a second trigger, every other session would begin with no relevance signal at all, so whether the agent goes looking for prior knowledge would depend on the user's phrasing rather than on whether prior knowledge exists.
-
 On the first user prompt of a session the plugin SHALL therefore emit a bounded, fixed instruction directing the model to call `memory.context` with `focus` set to that prompt before responding. The trigger SHALL fire at most once per session, tracked by its own per-session counter distinct from the per-turn nudge counter. The existing keyword trigger SHALL be retained for explicit recall requests at any point in the session, and both MAY fire on the same turn.
+
+The recall hook fires a keyword-gated instruction only when the user's prompt matches a recall-intent keyword list. Without a second trigger, every other session would begin with no relevance signal at all, so whether the agent goes looking for prior knowledge would depend on the user's phrasing rather than on whether prior knowledge exists.
 
 This is an **instruction to the model, not a server-side prefetch**. The hook SHALL make no HTTP request: the emitted text is fixed and byte-identical whether or not the scope contains any relevant memory, and the plugin performs no relevance query of its own. The consequence SHALL be recorded rather than implied — relevance injection depends on the model acting on the instruction, which a prefetch would not. A prefetch was considered and rejected FOR THIS HOOK: it would put an HTTP call on the first prompt of every session, on the latency-critical path, implemented in bash, to replace an instruction that works. Because this hook makes no request, there is no unreachable-server failure mode on this path.
 
@@ -394,9 +400,9 @@ The emitted line SHALL be represented in the shared nudge fixtures with a byte b
 
 ### Requirement: All agent-facing text MUST be English and lock-step tested
 
-Agent-facing instruction text is a protocol surface, not user copy. It fires at the moment of highest consequence — for the post-compaction block, the model has just lost its context and this text is the only instruction telling it what to persist before continuing. A mid-conversation language switch degrades instruction-following and reliably causes the model to continue answering in that language, which is user-visible.
-
 Every string emitted to a model by the plugin SHALL be English. Each such string SHALL be represented in the shared nudge fixtures and asserted in lock-step against the equivalent string in every other client that emits it, **with its own individual byte budget** taken from the token-budget requirement's per-line table. One aggregate assertion SHALL NOT stand in for the individual ones: a single loose aggregate is how a 138-token block passed CI against a published `≤120` cap for its entire lifetime.
+
+Agent-facing instruction text is a protocol surface, not user copy. It fires at the moment of highest consequence — for the post-compaction block, the model has just lost its context and this text is the only instruction telling it what to persist before continuing. A mid-conversation language switch degrades instruction-following and reliably causes the model to continue answering in that language, which is user-visible.
 
 #### Scenario: The post-compaction block is English
 
