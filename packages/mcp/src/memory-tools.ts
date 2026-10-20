@@ -91,7 +91,13 @@ export const memorySaveSchema = {
   type: z.enum(MEMORY_TYPES),
   title: z.string().min(1).max(100),
   content: z.string().min(1),
-  tags: z.array(z.string()).max(64).optional(),
+  tags: z
+    .array(z.string())
+    .min(1)
+    .max(64)
+    .describe(
+      'Required: 1–64 useful reusable lowercase Unicode kebab-case labels, normally 1–5; e.g. dashboard, sqlite, bug-fix.',
+    ),
   topic_key: z.string().min(1).max(128).optional(),
   sessionId: z
     .string()

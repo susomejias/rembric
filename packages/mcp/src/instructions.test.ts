@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { SUMMARY_MAX_CHARS } from '@rembric/core';
 import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
 import { describe, expect, it } from 'vitest';
@@ -5,6 +7,35 @@ import { describe, expect, it } from 'vitest';
 import { buildInstructions, INSTRUCTIONS_MAX_LENGTH } from '@rembric/mcp';
 
 describe('MCP initialize instructions', () => {
+  it('teaches required useful tags within budget and matches Hermes BASE exactly', () => {
+    for (const requestedSlug of [null, 'x'.repeat(63), 'x'.repeat(64)]) {
+      const text = buildInstructions({ requestedSlug });
+      expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
+      expect(text).toMatch(/memory\.save\(title≤100,\s*content,\s*tags\)/);
+      expect(text).toContain(
+        'Tags required, normally 1–5 useful reusable lowercase Unicode kebab-case',
+      );
+      expect(text).toContain('topic_key?');
+      for (const example of ['dashboard', 'sqlite', 'bug-fix']) expect(text).toContain(example);
+    }
+    const hermes = execFileSync(
+      'python3',
+      [
+        '-B',
+        '-c',
+        [
+          'import ast, pathlib',
+          'source = pathlib.Path("../../apps/plugin/.hermes-plugin/__init__.py").read_text()',
+          'tree = ast.parse(source)',
+          'provider = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "RembricMemoryProvider")',
+          'method = next(n for n in provider.body if isinstance(n, ast.FunctionDef) and n.name == "system_prompt_block")',
+          'print(ast.literal_eval(method.body[0].value), end="")',
+        ].join('\n'),
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(buildInstructions({ requestedSlug: 'demo' }).split('\n\n')[0]).toBe(hermes);
+  });
   it('emits ≤ 1000 characters for the unscoped variant', () => {
     const text = buildInstructions({ requestedSlug: null });
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);

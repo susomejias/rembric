@@ -18,7 +18,12 @@ import {
   resolveSessionId,
 } from './_shared.js';
 import { errToMcp, type ErrorReportingDeps } from './errors.js';
-import { candidate, saveMemoryWithCandidates, type SaveTimeCandidateView } from './memory-tools.js';
+import {
+  candidate,
+  memorySaveSchema,
+  saveMemoryWithCandidates,
+  type SaveTimeCandidateView,
+} from './memory-tools.js';
 import { ok } from './result.js';
 
 export { parseRunSummary } from '@rembric/core';
@@ -26,6 +31,7 @@ export type { DoctorReport, DoctorRunSummary as ConsolidationRunSummary } from '
 
 export const capturePassiveSchema = {
   text: z.string().min(1).max(50_000),
+  tags: memorySaveSchema.tags,
   sessionId: z
     .string()
     .min(1)
@@ -128,7 +134,7 @@ export function parseKeyLearnings(text: string): string[] {
 
 async function handleCapturePassive(
   deps: ObservabilityToolDeps,
-  args: { text: string; sessionId?: string },
+  args: { text: string; tags?: string[]; sessionId?: string },
 ) {
   const ctx = getRequestContext();
   let scope: Scope;
@@ -159,21 +165,26 @@ async function handleCapturePassive(
   const ids: string[] = [];
   const candidates: SaveTimeCandidateView[] = [];
   let candidatesDetected = 0;
-  for (const content of items) {
-    const saved = await saveMemoryWithCandidates(
-      deps,
-      {
-        type: 'reference',
-        title: deriveTitle(content),
-        content,
-        source: { tokenName: ctx.token.name, agent: 'passive' },
-        sessionId: explicitSession,
-      },
-      scope,
-    );
-    ids.push(saved.memory.id);
-    candidates.push(...saved.candidates);
-    candidatesDetected += saved.candidatesDetected;
+  try {
+    for (const content of items) {
+      const saved = await saveMemoryWithCandidates(
+        deps,
+        {
+          type: 'reference',
+          title: deriveTitle(content),
+          content,
+          tags: args.tags,
+          source: { tokenName: ctx.token.name, agent: 'passive' },
+          sessionId: explicitSession,
+        },
+        scope,
+      );
+      ids.push(saved.memory.id);
+      candidates.push(...saved.candidates);
+      candidatesDetected += saved.candidatesDetected;
+    }
+  } catch (err) {
+    return errToMcp(err, deps.logInternalError);
   }
   return ok({
     saved: ids.length,

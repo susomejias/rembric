@@ -524,6 +524,7 @@ describe('proxied calls reach the database', () => {
       type: 'project',
       title: 'pi proxy round trip',
       content: 'saved through the extension’s own tools/call',
+      tags: ['pi'],
     });
     expect(save.refused).toBe(false);
     const id = savedId(save.text);
@@ -675,6 +676,7 @@ describe('argument validation against the server’s own schema', () => {
     type: 'project',
     title: 'validation control',
     content: 'this payload must pass',
+    tags: ['pi'],
   };
 
   beforeAll(async () => {
@@ -706,6 +708,7 @@ describe('argument validation against the server’s own schema', () => {
     const result = await callThroughExtension(toolNamed(harness, 'memory.save'), {
       type: 'project',
       content: 'no title',
+      tags: ['pi'],
     });
     expect(result.refused).toBe(true);
   });
@@ -770,6 +773,7 @@ describe('session registration and nudges', () => {
       type: 'project',
       title: 'Pi recall handoff',
       content: 'The implementation lives in src/pi-recall-merge.ts.',
+      tags: ['pi'],
     });
     expect(saved.refused).toBe(false);
 
@@ -1343,6 +1347,7 @@ describe('the successor session attributes its memories', () => {
         type: 'project',
         title: `attribution after ${reason}`,
         content: 'saved without naming a sessionId',
+        tags: ['pi'],
       });
       expect(save.refused).toBe(false);
 
@@ -1822,11 +1827,13 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
       type: 'project',
       title: 'saved by conversation A',
       content: 'saved by conversation A',
+      tags: ['pi'],
     });
     const saveB = await callThroughExtension(toolNamed(b, 'memory.save'), {
       type: 'project',
       title: 'saved by conversation B',
       content: 'saved by conversation B',
+      tags: ['pi'],
     });
 
     expect(saveA.refused).toBe(false);

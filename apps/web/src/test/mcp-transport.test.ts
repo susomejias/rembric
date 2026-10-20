@@ -138,6 +138,119 @@ describe('MCP protocol conformance', () => {
     return client;
   }
 
+  it('memory tags: tools/list advertises required reusable labels for both writes', async () => {
+    const client = await connect();
+    try {
+      const tools = (await client.listTools()).tools;
+      for (const name of ['memory.save', 'memory.capture_passive']) {
+        const tool = tools.find((t) => t.name === name)!;
+        expect(tool.inputSchema.required).toContain('tags');
+        expect(tool.inputSchema.properties?.['tags']).toMatchObject({
+          type: 'array',
+          minItems: 1,
+          maxItems: 64,
+          items: { type: 'string' },
+        });
+        const description = JSON.stringify(tool.inputSchema.properties?.['tags']);
+        for (const word of [
+          'reusable',
+          'lowercase',
+          'kebab-case',
+          'dashboard',
+          'sqlite',
+          'bug-fix',
+        ]) {
+          expect(description).toContain(word);
+        }
+        expect(tool.description).toMatch(/required.*tags/i);
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('memory tags: wire rejects malformed arrays with successful boundary controls', async () => {
+    const client = await connect();
+    try {
+      const scope = projectScope(defaultProject(services.db).id);
+      for (const [name, input] of [
+        ['memory.save', { type: 'reference', title: 'Tag control', content: 'tag boundary' }],
+        ['memory.capture_passive', { text: '## Key Learnings\n- tag boundary' }],
+        ['memory.capture_passive', { text: 'No learnings here' }],
+      ] as const) {
+        for (const tags of [undefined, [], Array(65).fill('sqlite'), 'sqlite', [7]]) {
+          const repos = createRepositories(services.db.db);
+          const before = repos.memory.countByStatusAndTypeInScope(scope.projectId);
+          const relations = repos.relations.countPendingInScope(scope);
+          const result = await client.callTool({
+            name,
+            arguments: { ...input, ...(tags === undefined ? {} : { tags }) },
+          });
+          expect(result.isError, `${name}: ${JSON.stringify(tags)}`).toBe(true);
+          expect(repos.memory.countByStatusAndTypeInScope(scope.projectId)).toEqual(before);
+          expect(repos.relations.countPendingInScope(scope)).toBe(relations);
+        }
+        for (const tags of [['sqlite'], Array.from({ length: 64 }, (_, i) => `tag-${i}`)]) {
+          const result = await client.callTool({ name, arguments: { ...input, tags } });
+          expect(result.isError).not.toBe(true);
+        }
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('memory tags: semantic rejection precedes writes and capture propagates canonical batch labels', async () => {
+    const client = await connect();
+    try {
+      const scope = projectScope(defaultProject(services.db).id);
+      const repos = createRepositories(services.db.db);
+      const text = '## Key Learnings\n- first tagged learning\n- second tagged learning';
+      for (const [name, input] of [
+        ['memory.save', { type: 'reference', title: 'Invalid tags', content: 'must not persist' }],
+        ['memory.capture_passive', { text }],
+      ] as const) {
+        for (const tag of ['', '   ', '---', '😀', 'bad\u0000tag']) {
+          const before = repos.memory.countByStatusAndTypeInScope(scope.projectId);
+          const relations = repos.relations.countPendingInScope(scope);
+          const result = await client.callTool({
+            name,
+            arguments: { ...input, tags: ['sqlite', tag] },
+          });
+          expect(result.isError, `${name}: ${JSON.stringify(tag)}`).toBe(true);
+          expect(readJson(result as ToolResult)).toMatchObject({ code: 'invalid_input' });
+          expect(JSON.stringify(readJson(result as ToolResult))).toContain('tags');
+          expect(repos.memory.countByStatusAndTypeInScope(scope.projectId)).toEqual(before);
+          expect(repos.relations.countPendingInScope(scope)).toBe(relations);
+        }
+        const result = await client.callTool({
+          name,
+          arguments: {
+            ...input,
+            tags: [' Dashboard ', 'Deploy / Docker', 'deploy_docker', 'autenticación', '部署'],
+          },
+        });
+        expect(result.isError).not.toBe(true);
+        const saved = readJson(result as ToolResult) as {
+          id?: string;
+          ids?: string[];
+          saved?: number;
+        };
+        if (name === 'memory.capture_passive') expect(saved.saved).toBe(2);
+        for (const id of saved.ids ?? [saved.id!]) {
+          expect(services.memory.get(id, scope)?.memory.tags).toEqual([
+            'dashboard',
+            'deploy-docker',
+            'autenticación',
+            '部署',
+          ]);
+        }
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
   it('explicit batches: discovers only canonical replacements with strict one-item controls', async () => {
     const client = await connect();
     try {
@@ -179,7 +292,12 @@ describe('MCP protocol conformance', () => {
       }
       const saved = await client.callTool({
         name: 'memory.save',
-        arguments: { type: 'reference', title: 'batch control', content: 'complete content' },
+        arguments: {
+          type: 'reference',
+          title: 'batch control',
+          content: 'complete content',
+          tags: ['mcp'],
+        },
       });
       const id = (readJson(saved as ToolResult) as { id: string }).id;
       expect(id).toBeTruthy();
@@ -1167,6 +1285,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'project',
         title: 'relations_limit over-ask probe',
+        tags: ['mcp'],
         content: 'relations-limit-over-ask-probe',
       },
     })) as ToolResult;
@@ -1209,6 +1328,7 @@ describe('MCP protocol conformance', () => {
           type: 'procedural',
           title,
           content: `batch-parity ${title}`,
+          tags: ['mcp'],
           topic_key: topicKey,
         },
       })) as ToolResult;
@@ -1293,7 +1413,7 @@ describe('MCP protocol conformance', () => {
     const save = async (client: Client, title: string, content: string) => {
       const r = (await client.callTool({
         name: 'memory.save',
-        arguments: { type: 'project', title, content },
+        arguments: { type: 'project', title, content, tags: ['mcp'] },
       })) as ToolResult;
       expect(r.isError).toBeFalsy();
     };
@@ -1385,7 +1505,12 @@ describe('MCP protocol conformance', () => {
     await client.listTools();
     const saved = (await client.callTool({
       name: 'memory.save',
-      arguments: { type: 'project', title: 'Cinnabar rota', content: 'cinnabar rota kestrel' },
+      arguments: {
+        type: 'project',
+        title: 'Cinnabar rota',
+        content: 'cinnabar rota kestrel',
+        tags: ['mcp'],
+      },
     })) as ToolResult;
     expect(saved.isError).toBeFalsy();
 
@@ -1468,7 +1593,7 @@ describe('MCP protocol conformance', () => {
       ['memory.session_start', 977],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1555],
+      ['memory.save', 1656],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
@@ -1676,7 +1801,7 @@ describe('MCP protocol conformance', () => {
     const save = async (title: string, content: string): Promise<string> => {
       const res = (await client.callTool({
         name: 'memory.save',
-        arguments: { type: 'feedback', title, content },
+        arguments: { type: 'feedback', title, content, tags: ['mcp'] },
       })) as ToolResult;
       const body = readJson(res) as { id: string; candidates?: unknown[] };
       expect(body.candidates ?? [], `${title} detected candidates`).toEqual([]);
@@ -1811,6 +1936,7 @@ describe('MCP protocol conformance', () => {
       const saved = await callWith(client, 'memory.save', {
         type: 'project',
         title: 'timeline window probe',
+        tags: ['mcp'],
         content: 'timeline-window-probe',
       });
       const { id } = readJson(saved) as { id: string };
@@ -1916,7 +2042,10 @@ describe('MCP protocol conformance', () => {
 
     const capture = await client.callTool({
       name: 'memory.capture_passive',
-      arguments: { text: '## Key Learnings:\n- first learning\n- second learning\n' },
+      arguments: {
+        text: '## Key Learnings:\n- first learning\n- second learning\n',
+        tags: ['mcp'],
+      },
     });
     expect(capture.structuredContent).toBeDefined();
 
@@ -1987,6 +2116,7 @@ describe('MCP protocol conformance', () => {
         arguments: {
           type: 'reference',
           title: 'default project marker row',
+          tags: ['mcp'],
           content: 'defaultprojectmarkerbbb row',
         },
       })) as ToolResult,
@@ -2081,6 +2211,7 @@ describe('MCP protocol conformance', () => {
           arguments: {
             type: 'reference',
             title: `closed scope ${marker}`,
+            tags: ['mcp'],
             content: `closedscopeprobe ${marker} touches ${ENTITY} once`,
           },
         })) as ToolResult,
@@ -2279,6 +2410,7 @@ describe('MCP protocol conformance', () => {
         scope: 'global',
         type: 'reference',
         title: 'sent a retired argument',
+        tags: ['mcp'],
         content: 'sentaretiredargumentaaa',
       },
     })) as ToolResult;
@@ -2293,6 +2425,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'reference',
         title: 'sent no retired argument',
+        tags: ['mcp'],
         content: 'sentnoretiredargumentaaa',
       },
     })) as ToolResult;
@@ -2448,14 +2581,15 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('a path-less memory.save with only type, title and content lands in the default project', async () => {
+  it('a path-less memory.save with required arguments lands in the default project', async () => {
     const dflt = defaultProject(services.db);
     const client = await connect();
     const result = (await client.callTool({
       name: 'memory.save',
       arguments: {
         type: 'reference',
-        title: 'no arguments beyond the required three',
+        title: 'no arguments beyond the required fields',
+        tags: ['mcp'],
         content: 'norequiredargumentsbeyondaaa',
       },
     })) as ToolResult;
@@ -2561,6 +2695,7 @@ describe('MCP protocol conformance', () => {
     await record('unresolvable slug / save', unresolvable, 'memory.save', {
       type: 'reference',
       title: 'refusal enumeration',
+      tags: ['mcp'],
       content: 'refusal enumeration content',
     });
     await record('unresolvable slug / search', unresolvable, 'memory.search', { query: 'x' });
@@ -2658,6 +2793,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'lifecycle saved row',
+        tags: ['mcp'],
         content: 'lifecycle-saved-row',
       },
     })) as ToolResult;
@@ -2727,6 +2863,7 @@ describe('MCP protocol conformance', () => {
         arguments: {
           type: 'project',
           title: `ctx default cap marker ${i}`,
+          tags: ['mcp'],
           content: `ctx-default-cap-marker-${i}`,
         },
       });
@@ -2750,6 +2887,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'backfill useful row',
+        tags: ['mcp'],
         content: 'backfill-useful-row',
       },
     });
@@ -2853,6 +2991,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'anchor row, no session summary',
+        tags: ['mcp'],
         content: 'anchor row, no session summary',
       },
     })) as ToolResult;
@@ -2914,6 +3053,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'anchor row, placeholder title',
+        tags: ['mcp'],
         content: 'anchor row, placeholder title',
       },
     });
@@ -2946,6 +3086,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'anchor row, raw summary',
+        tags: ['mcp'],
         content: 'anchor row, raw summary',
       },
     });
@@ -3132,7 +3273,12 @@ describe('MCP protocol conformance', () => {
 
     const first = (await client.callTool({
       name: 'memory.save',
-      arguments: { type: 'feedback', title: 'before the end', content: 'resume-thread-first' },
+      arguments: {
+        type: 'feedback',
+        title: 'before the end',
+        content: 'resume-thread-first',
+        tags: ['mcp'],
+      },
     })) as ToolResult;
     const firstSaved = readJson(first) as { id: string };
 
@@ -3150,7 +3296,12 @@ describe('MCP protocol conformance', () => {
 
     const orphan = (await client.callTool({
       name: 'memory.save',
-      arguments: { type: 'feedback', title: 'between stints', content: 'resume-thread-orphan' },
+      arguments: {
+        type: 'feedback',
+        title: 'between stints',
+        content: 'resume-thread-orphan',
+        tags: ['mcp'],
+      },
     })) as ToolResult;
     const orphanSaved = readJson(orphan) as { id: string };
     const orphanTl = (await client.callTool({
@@ -3177,7 +3328,12 @@ describe('MCP protocol conformance', () => {
 
     const second = (await client.callTool({
       name: 'memory.save',
-      arguments: { type: 'feedback', title: 'after the resume', content: 'resume-thread-second' },
+      arguments: {
+        type: 'feedback',
+        title: 'after the resume',
+        content: 'resume-thread-second',
+        tags: ['mcp'],
+      },
     })) as ToolResult;
     const secondSaved = readJson(second) as { id: string };
 
@@ -3207,6 +3363,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'project',
         title: 'auth model: JWT',
+        tags: ['mcp'],
         content: 'auth model: JWT',
         topic_key: 'decision/auth-model',
       },
@@ -3219,6 +3376,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'project',
         title: 'auth model: opaque tokens',
+        tags: ['mcp'],
         content: 'auth model: opaque tokens',
         topic_key: 'decision/auth-model',
       },
@@ -3270,6 +3428,7 @@ describe('MCP protocol conformance', () => {
         arguments: {
           type: 'feedback',
           title: 'fruitcake bicycle aluminum',
+          tags: ['mcp'],
           content: 'fruitcake bicycle aluminum windowpane horizon',
         },
       });
@@ -3279,6 +3438,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'fruitcake bicycle aluminum',
+        tags: ['mcp'],
         content: 'fruitcake bicycle aluminum windowpane horizon',
       },
     })) as ToolResult;
@@ -3323,6 +3483,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'compare test aaa',
+        tags: ['mcp'],
         content: 'compare-test-aaa',
       },
     })) as ToolResult;
@@ -3331,6 +3492,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'compare test bbb',
+        tags: ['mcp'],
         content: 'compare-test-bbb',
       },
     })) as ToolResult;
@@ -3418,6 +3580,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'doctor after archive',
+        tags: ['mcp'],
         content: 'doctor-after-archive-marker',
       },
     })) as ToolResult;
@@ -3454,6 +3617,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'no session row marker',
+        tags: ['mcp'],
         content: 'no-session-row-marker',
       },
     })) as ToolResult;
@@ -3497,6 +3661,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'pending source marker',
+        tags: ['mcp'],
         content: 'pending-source-marker',
       },
     })) as ToolResult;
@@ -3505,6 +3670,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'pending target marker',
+        tags: ['mcp'],
         content: 'pending-target-marker',
       },
     })) as ToolResult;
@@ -3587,6 +3753,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'project',
         title: 'needs review marker goal',
+        tags: ['mcp'],
         content: 'needsreviewmarkeraaa goal',
       },
     })) as ToolResult;
@@ -3666,6 +3833,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'stats totals source marker',
+        tags: ['mcp'],
         content: 'stats-totals-source-marker',
       },
     })) as ToolResult;
@@ -3674,6 +3842,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'stats totals target marker',
+        tags: ['mcp'],
         content: 'stats-totals-target-marker',
       },
     })) as ToolResult;
@@ -3740,7 +3909,7 @@ describe('MCP protocol conformance', () => {
     const save = async (client: Client, title: string): Promise<string> => {
       const r = (await client.callTool({
         name: 'memory.save',
-        arguments: { type: 'feedback', title, content: `${title} body` },
+        arguments: { type: 'feedback', title, content: `${title} body`, tags: ['mcp'] },
       })) as ToolResult;
       expect(r.isError, `memory.save ${title}`).toBeFalsy();
       return (readJson(r) as { id: string }).id;
@@ -3771,6 +3940,7 @@ describe('MCP protocol conformance', () => {
       arguments: {
         type: 'feedback',
         title: 'active count default project row',
+        tags: ['mcp'],
         content: 'active-count-default-project-row',
       },
     })) as ToolResult;
@@ -3829,7 +3999,10 @@ describe('MCP protocol conformance', () => {
     const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
     const result = (await client.callTool({
       name: 'memory.capture_passive',
-      arguments: { text: '## Key Learnings:\n- captured against the default project\n' },
+      arguments: {
+        text: '## Key Learnings:\n- captured against the default project\n',
+        tags: ['mcp'],
+      },
     })) as ToolResult;
     expect(result.isError).toBeFalsy();
     const saved = readJson(result) as { saved: number; ids: string[] };
