@@ -4,6 +4,24 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.35.0](https://github.com/susomejias/rembric/compare/plugin-v0.34.1...plugin-v0.35.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** new memory tags use ASCII transliteration; labels that produce an empty slug are rejected before any save transaction.
+* **mcp:** memory.save and memory.capture_passive now require 1-64 tag strings. Stored memories and internal seed/evaluation inputs remain unchanged.
+
+### Features
+
+* **core:** reuse slugify for canonical memory tags ([2dde5c4](https://github.com/susomejias/rembric/commit/2dde5c4885f2b8a4885d27bebc0bd3ecf4b88613))
+* **mcp:** require canonical tags for memory writes ([1629694](https://github.com/susomejias/rembric/commit/1629694dafb6dd2da2d75d72256775329dd82916))
+
+
+### Bug Fixes
+
+* **mcp:** preserve recall triggers within instruction budget ([6b2383b](https://github.com/susomejias/rembric/commit/6b2383b87fe019805f201ad5261010e42a4b28c0))
+
 ## [0.34.1](https://github.com/susomejias/rembric/compare/plugin-v0.34.0...plugin-v0.34.1) (2026-10-16)
 
 
