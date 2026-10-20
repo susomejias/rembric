@@ -63,7 +63,7 @@ Neither variant SHALL name `global`, `include_global` or user-wide memory (see "
 
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
-1. **A proactive save flow** — directing the agent to call `memory.save` (with the required short `title` headline plus the `content`) the moment something noteworthy happens (bug fix · decision · discovery · config change · pattern · preference) rather than batching to session end, and naming the `topic_key` supersede path and the `candidates[]` → `memory.judge` conflict-resolution path. Mechanical detail (error codes, scope semantics) MAY be deferred to the tool's own `description`.
+1. **A proactive save flow** — directing the agent to call `memory.save` (with the required short `title` headline, `content`, and `tags`) the moment something noteworthy happens (bug fix · decision · discovery · config change · pattern · preference) rather than batching to session end, and naming the optional `topic_key` supersede path and the `candidates[]` → `memory.judge` conflict-resolution path. Tag guidance SHALL teach normally 1–5 useful reusable lowercase kebab-case labels such as `dashboard`, `sqlite`, and `bug-fix`; selecting tags SHALL NOT require another tool call. The existing explicit-batch-tool requirements continue to govern operational judgment calls. Mechanical detail (error codes, scope semantics, the hard 1–64 tag bound) MAY be deferred to the tool's own `description` and schema.
 2. **A recall flow** — directing the agent to call `memory.context` (or `memory.search` for keyword lookup) BEFORE acting, but ONLY when it lacks the prior detail it needs. The trigger list SHALL name proactive moments — before starting work in an area untouched this session, before diagnosing a possibly-known error, before building something that may already exist — AND SHALL keep a reactive trigger for an explicit request to recall. Naming both categories is the obligation; the specific illustrations of each are wording, not contract. The phrasing SHALL keep recall on-demand — it MUST NOT direct an unconditional `memory.context` load at session start.
 3. **A session-close flow** — directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn, and SHALL NOT be evadable by avoiding the literal word "done". The flow SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (the canonical section list defined in `sessions`, carried from its single source rather than restated), AND the summary length cap (currently ≤10000 chars, derived from `SUMMARY_MAX_CHARS`). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 1000-character ceiling.
 4. **The update-guidance pointer** — a short clause naming `memory.about` as the tool to call when the operator asks how to update or upgrade Rembric (server or plugins).
@@ -144,6 +144,12 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **WHEN** a change raises `INSTRUCTIONS_MAX_LENGTH` above 1000
 - **THEN** the new cap SHALL remain below the verified client truncation ceiling for `instructions` (2048 characters in Claude Code 2.1.220)
 - **AND** the change SHALL record the ceiling it re-verified, so the cap is never raised past a limit nobody checked
+
+#### Scenario: SAVE guidance teaches required useful tags
+
+- **WHEN** either instructions variant is built
+- **THEN** its SAVE clause SHALL include required `tags` and normally 1–5 useful reusable lowercase kebab-case labels, with examples `dashboard`, `sqlite`, and `bug-fix`
+- **AND** `topic_key` SHALL remain optional and no extra tag-selection call SHALL be introduced
 
 ## ADDED Requirements
 
