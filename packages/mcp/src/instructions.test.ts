@@ -13,7 +13,7 @@ describe('MCP initialize instructions', () => {
       expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
       expect(text).toMatch(/memory\.save\(title≤100,\s*content,\s*tags\)/);
       expect(text).toContain(
-        'Tags required, normally 1–5 useful reusable lowercase Unicode kebab-case',
+        'Tags required, normally 1–5 useful reusable lowercase ASCII kebab-case',
       );
       expect(text).toContain('topic_key?');
       for (const example of ['dashboard', 'sqlite', 'bug-fix']) expect(text).toContain(example);

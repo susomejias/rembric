@@ -96,7 +96,7 @@ export const memorySaveSchema = {
     .min(1)
     .max(64)
     .describe(
-      'Required: 1–64 useful reusable lowercase Unicode kebab-case labels, normally 1–5; e.g. dashboard, sqlite, bug-fix.',
+      'Required: 1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5; e.g. dashboard, sqlite, bug-fix.',
     ),
   topic_key: z.string().min(1).max(128).optional(),
   sessionId: z

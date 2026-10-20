@@ -5,10 +5,10 @@ Operational memory writes can omit tags or store spelling variants that fragment
 ## What Changes
 
 - **BREAKING**: require `tags` containing 1–64 strings on `memory.save` and `memory.capture_passive`; capture applies its batch-level tags to every extracted learning.
-- Normalize supplied memory tags with NFKC, lowercase, Unicode word runs joined by hyphens, and first-occurrence deduplication. Reject NUL and tags that normalize to empty before any write or topic supersession.
+- Normalize supplied memory tags with NFKC, the existing topic-suggestion separator prepass, lowercase strict `slugify` ASCII transliteration, and first-occurrence deduplication. Reject NUL and tags that normalize to empty, including unsupported-script-only labels, before any write or topic supersession.
 - Keep internal `SaveMemoryInput.tags` optional, including empty arrays for seeds/evaluation fixtures. Keep `topic_key` optional and historical reads unchanged.
 - Advertise the bound and guidance in existing schemas/instructions: normally 1–5 useful reusable lowercase kebab-case labels such as `dashboard`, `sqlite`, and `bug-fix`.
-- Preserve prompt tags, existing tools/call flows, and `memory.context` shape and size. No catalogs, aliases, semantic merging, dependencies, migrations, or backfill.
+- Preserve prompt tags, existing tools/call flows, and `memory.context` shape and size. No catalogs, aliases, semantic merging, new dependency versions, migrations, or backfill.
 
 ## Capabilities
 
@@ -27,4 +27,4 @@ None.
 
 Planned implementation surfaces: `packages/core/src/services/memory.ts` and `memory.test.ts`; `packages/mcp/src/memory-tools.ts`, `observability-tools.ts`, `instructions.ts`, and their co-located tests; `apps/plugin/commands/remember.md`; `apps/plugin/.hermes-plugin/__init__.py` and `tests/test_system_prompt_block.py`, plus existing guidance parity tests. Only transport fixtures invoking the changed schemas need required-tag updates; internal tagless fixtures remain valid. Confirm exact existing test/provider filenames before implementation.
 
-Append-only lifecycle, service-layer scope resolution, topic-key transactional supersession, and save-time candidate/judgment behavior remain intact. No new application tools, extra calls, package edits, release/installer documentation changes, or database changes are planned. This change itself writes OpenSpec artifacts only.
+Append-only lifecycle, service-layer scope resolution, topic-key transactional supersession, and save-time candidate/judgment behavior remain intact. Core declares `slugify` directly at the same `^1.6.9` range and locked `1.6.9` version already used by MCP; no new package version, transitive dependency, or lifecycle allowance is introduced. No new application tools, extra calls, release/installer documentation changes, or database changes are planned.

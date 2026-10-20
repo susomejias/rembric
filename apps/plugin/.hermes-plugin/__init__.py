@@ -444,7 +444,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "SAVE: fix/decision/discovery/config/pattern/preference → "
             "memory.save(title≤100, content, tags); topic_key?, "
             "candidates[]→memory.judge_batch({judgments:[…]}).\n"
-            "Tags required, normally 1–5 useful reusable lowercase Unicode kebab-case: "
+            "Tags required, normally 1–5 useful reusable lowercase ASCII kebab-case: "
             "dashboard/sqlite/bug-fix.\n"
             "Know your sessionId? Pass it; never guess.\n"
             "RECALL: memory.context/memory.search if you lack prior detail.\n"

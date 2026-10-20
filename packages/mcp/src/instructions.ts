@@ -7,7 +7,7 @@ export interface InstructionsContext {
 }
 
 const BASE = `SAVE: fix/decision/discovery/config/pattern/preference → memory.save(title≤100, content, tags); topic_key?, candidates[]→memory.judge_batch({judgments:[…]}).
-Tags required, normally 1–5 useful reusable lowercase Unicode kebab-case: dashboard/sqlite/bug-fix.
+Tags required, normally 1–5 useful reusable lowercase ASCII kebab-case: dashboard/sqlite/bug-fix.
 Know your sessionId? Pass it; never guess.
 RECALL: memory.context/memory.search if you lack prior detail.
 READ: memory.get_batch(creation) / memory.session_get_batch(activity): ids OR from/to; full current data/errors, limit≤20, offset=nextOffset until null; all failed=isError.
