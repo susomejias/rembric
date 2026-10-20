@@ -79,6 +79,37 @@ function relationChipClass(html: string, label: string): string {
   return match[1]!;
 }
 
+describe('judgment detail composition', () => {
+  it('keeps both titled primary panels and posts the opaque judgment identifier, not the route id', async () => {
+    const html = await renderJudgmentDetail('REL-MALFORMED');
+    expect(html).toContain('detail-layout');
+    expect(html.match(/<h1\b/g)).toHaveLength(1);
+    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium">widget RS<\/h2>/);
+    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium">widget RT<\/h2>/);
+    expect(html).toContain('href="/dashboard/memories/RS"');
+    expect(html).toContain('href="/dashboard/memories/RT"');
+    expect(html).toContain('name="judgmentId" value="J-MALFORMED"');
+    expect(html).not.toContain('name="judgmentId" value="REL-MALFORMED"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html.indexOf('Judgment id')).toBeLessThan(html.indexOf('Copy source'));
+    expect(html.indexOf('Copy target')).toBeLessThan(html.indexOf('Reason</summary>'));
+  });
+
+  it.each(['judged', 'orphaned'] as const)(
+    'keeps the %s explanation and no orphan action',
+    async (status) => {
+      t.handle.raw
+        .prepare('UPDATE memory_relations SET status = ?, reason = ? WHERE id = ?')
+        .run(status, '<b>plain reason</b>', 'REL-MALFORMED');
+      const html = await renderJudgmentDetail('REL-MALFORMED');
+      expect(html).toContain('this judgment is closed');
+      expect(html).not.toContain('name="judgmentId"');
+      expect(html).toContain('&lt;b&gt;plain reason&lt;/b&gt;');
+      expect(html).not.toContain('<b>plain reason</b>');
+    },
+  );
+});
+
 describe('judgment evidence fallback', () => {
   it('renders a malformed stored evidence value escaped instead of throwing', async () => {
     const html = await renderJudgmentDetail('REL-MALFORMED');

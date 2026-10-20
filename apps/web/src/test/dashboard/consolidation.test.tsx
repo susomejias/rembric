@@ -2,6 +2,7 @@ import { createRepositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTestDb, type TestDb } from '../db';
+import { seedProject } from '../default-project';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
 
@@ -43,6 +44,75 @@ async function renderConsolidation(): Promise<string> {
   const page = (await import('../../app/dashboard/consolidation/page')).default;
   return renderToHtml(await page({ searchParams: Promise.resolve({}) }));
 }
+
+describe('consolidation detail composition', () => {
+  it('keeps summary and operations primary, with undo attached only to actionable operations', async () => {
+    const repos = createRepositories(t.handle.db);
+    for (const [id, opType, revertedAt] of [
+      ['OP-ACTIVE', 'decay', null],
+      ['OP-TERMINAL', 'session_purge', null],
+      ['OP-REVERTED', 'decay', new Date(3_000)],
+    ] as const) {
+      repos.consolidation.insertOp({
+        id,
+        runId: 'RUN-STRUCTURED',
+        opType,
+        revertedAt,
+        affectedIds: ['MEM-A'],
+        createdId: 'MEM-B',
+        reasoning: '<b>reason</b>',
+        appliedAt: new Date(2_000),
+      });
+    }
+    const html = await renderRunDetail('RUN-STRUCTURED');
+    expect(html).toContain('detail-layout');
+    const article = html.slice(html.indexOf('<article'), html.indexOf('</article>'));
+    expect(article).toContain('2 archived · 1 orphaned');
+    expect(article).toContain('name="opId" value="OP-ACTIVE"');
+    expect(article).not.toContain('name="opId" value="OP-TERMINAL"');
+    expect(article).not.toContain('name="opId" value="OP-REVERTED"');
+    expect(article).toContain('terminal (not undoable)');
+    expect(article).toContain('reverted');
+    expect(article).toContain('href="/dashboard/memories/MEM-A"');
+    expect(article).toContain('href="/dashboard/memories/MEM-B"');
+    expect(article).toContain('&lt;b&gt;reason&lt;/b&gt;');
+    expect(article).not.toContain('<details');
+    expect(html).toContain('name="runId" value="RUN-STRUCTURED"');
+    expect(html.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
+    expect(html.match(/name="csrf"/g)).toHaveLength(2);
+  });
+
+  it('omits undo for an entirely reverted run and preserves resolved scope with raw fallback', async () => {
+    const repos = createRepositories(t.handle.db);
+    seedProject(t.handle, 'p0', 'project-zero');
+    for (const [id, scope] of [
+      ['RESOLVED', 'project:p0'],
+      ['MISSING', 'project:gone'],
+    ] as const) {
+      repos.consolidation.insertRun({ id, scope, startedAt: new Date(1_000) });
+      repos.consolidation.insertOp({
+        id: `OP-${id}`,
+        runId: id,
+        opType: 'decay',
+        affectedIds: [],
+        appliedAt: new Date(1_000),
+        revertedAt: new Date(2_000),
+      });
+      const html = await renderRunDetail(id);
+      expect(html).toContain(id === 'RESOLVED' ? 'project-zero' : 'project:gone');
+      expect(html).toContain('all ops reverted');
+      expect(html).not.toContain('name="runId"');
+      expect(html).not.toContain('name="opId"');
+    }
+  });
+
+  it('keeps empty operations visible and omits run undo when no active operation exists', async () => {
+    const html = await renderRunDetail('RUN-MALFORMED');
+    expect(html).toContain('NO OPERATION WAS RECORDED FOR THIS RUN');
+    expect(html).toContain('all ops reverted');
+    expect(html).not.toContain('name="runId"');
+  });
+});
 
 describe('consolidation run summary fallback', () => {
   it('renders a malformed stored summary escaped instead of throwing', async () => {

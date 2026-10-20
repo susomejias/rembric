@@ -122,6 +122,117 @@
   --sidebar-ring: var(--ring);
 }
 
+.detail-layout {
+  overflow-wrap: anywhere;
+}
+.detail-layout .text-muted-foreground {
+  color: var(--chart-2);
+}
+.detail-grid {
+  display: grid;
+  gap: 12px;
+}
+.detail-grid > * {
+  min-width: 0;
+}
+.detail-metadata,
+.detail-secondary {
+  display: grid;
+  gap: 12px;
+}
+.detail-disclosure {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+}
+.detail-disclosure > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-geist-mono);
+  color: var(--chart-2);
+}
+.detail-layout summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+.detail-fields {
+  display: grid;
+  gap: 16px;
+  padding-top: 16px;
+}
+.detail-fields dd {
+  overflow-wrap: anywhere;
+}
+.detail-markdown > div:first-child {
+  padding: 16px 0;
+}
+.detail-markdown > div:last-child {
+  padding: 16px 0 24px;
+  font-size: 16px;
+}
+.detail-content {
+  font-size: 16px;
+}
+.detail-layout pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.detail-content img {
+  max-width: 100%;
+  height: auto;
+}
+.detail-secondary-body {
+  min-width: 0;
+  overflow-x: auto;
+}
+.detail-actions > summary {
+  list-style: none;
+}
+.detail-actions > summary::-webkit-details-marker {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .detail-grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas:
+      'content metadata'
+      'content secondary';
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    column-gap: 40px;
+  }
+  .detail-content {
+    grid-area: content;
+    max-width: 76ch;
+  }
+  .detail-metadata {
+    grid-area: metadata;
+  }
+  .detail-secondary {
+    grid-area: secondary;
+  }
+  .detail-inspector::details-content {
+    content-visibility: visible;
+    display: block;
+  }
+  .detail-inspector > :not(summary) {
+    display: block;
+  }
+  .detail-inspector > summary {
+    list-style: none;
+  }
+  .detail-inspector > summary::-webkit-details-marker {
+    display: none;
+  }
+  .detail-secondary-body {
+    max-height: 24rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

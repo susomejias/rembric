@@ -11,29 +11,10 @@ import { notFound, redirect } from 'next/navigation';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId, singleParam, truncate } from '@/components/dashboard/support';
-import {
-  BackLink,
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  Flash,
-  MetaGrid,
-  MetaRow,
-  Page,
-  Pill,
-  ReviewPill,
-  SectionBar,
-  StatCard,
-  StatusPill,
-  TableEmpty,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { MetaRow, ReviewPill, StatusPill, Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -163,212 +144,196 @@ export default async function MemoryDetailPage({
   );
 
   return (
-    <Page>
-      <ViewHead
-        num="02"
-        title={row.title}
-        meta={[
-          { k: 'ID', v: shortId(row.id) },
-          { k: 'STATUS', v: row.status.toUpperCase() },
-          { k: 'PROJECT', v: projectLabel },
-        ]}
-        titleVisible
-      />
-
-      <div className="mt-4 mb-5">
-        <BackLink href="/dashboard/memories" label="BACK TO MEMORIES" />
-      </div>
-
-      {justConfirmed ? (
-        <Flash tone="lime" label="CONFIRMED">
-          Review affirmed just now.
-        </Flash>
-      ) : null}
-
-      {reviewState === 'needs_review' ? (
-        <Flash tone="amber" label="NEEDS REVIEW">
-          Not re-affirmed since <Time value={reviewAfter} />. Re-affirming it with{' '}
-          <code className="font-mono">memory.confirm</code> moves it back to fresh.
-          <div className="mt-3">{confirmForm}</div>
-        </Flash>
-      ) : null}
-
-      <MetaGrid>
-        <MetaRow k="Status" v={<StatusPill status={row.status} />} />
-        <MetaRow k="Project" v={projectLabel} />
-        <MetaRow k="Type" v={row.type} />
-        <MetaRow k="Confirms" v={confirmCount} />
-        <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
-        <MetaRow k="Last seen" v={<Time value={row.lastSeenAt} />} mono />
-        <MetaRow k="Scope" v={row.scope} mono />
-        <MetaRow k="Topic key" v={row.topicKey ?? '—'} mono />
-        <MetaRow k="Source" v={row.source?.agent ?? '—'} mono />
-        {successor ? (
-          <MetaRow
-            k="Superseded by"
-            v={
+    <DetailLayout
+      title={row.title}
+      backHref="/dashboard/memories"
+      backLabel="BACK TO MEMORIES"
+      contentLabel="Memory content"
+      badges={
+        <>
+          <StatusPill status={row.status} />
+          {reviewState === 'needs_review' ? <ReviewPill /> : null}
+          <span className="text-sm text-muted-foreground">
+            {row.type} · {projectLabel}
+          </span>
+        </>
+      }
+      actionsLabel="Memory actions"
+      actions={
+        <>
+          {row.status === 'active' ? archiveForm : null}
+          {reviewState !== 'needs_review' ? confirmForm : null}
+        </>
+      }
+      notices={
+        <>
+          {justConfirmed ? (
+            <p role="status" className="mb-4 text-sm text-primary">
+              CONFIRMED · Review affirmed just now.
+            </p>
+          ) : null}
+          {reviewState === 'needs_review' ? (
+            <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-warn/30 bg-card px-4 py-3 text-sm">
+              <p className="flex-1 text-warn">
+                NEEDS REVIEW · Not re-affirmed since <Time value={reviewAfter} />.
+              </p>
+              {confirmForm}
+            </div>
+          ) : null}
+          {successor ? (
+            <p className="mb-4 rounded-xl border border-warn/30 bg-card px-4 py-3 text-sm">
+              Superseded by{' '}
               <Link
                 href={`/dashboard/memories/${successor.id}`}
                 className="text-primary hover:underline"
               >
-                {shortId(successor.id)}
+                {successor.title} · {shortId(successor.id)}
               </Link>
-            }
-            mono
-          />
-        ) : null}
-        {reviewState !== null && reviewAfter !== null ? (
-          <>
-            <MetaRow
-              k="Review"
-              v={reviewState === 'needs_review' ? <ReviewPill /> : 'fresh'}
-              tone={reviewState === 'needs_review' ? 'amber' : 'lime'}
-            />
-            <MetaRow k="Review after" v={<Time value={reviewAfter} />} mono />
-          </>
-        ) : null}
-      </MetaGrid>
-
-      <MarkdownPanel eyebrow="Memory content" title="Durable context" markdown={markdown} />
-
-      <SectionBar name="TAGS" />
-      <div className="mb-6 flex flex-wrap gap-2">
-        {row.tags.length === 0 ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          row.tags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex w-fit items-center rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground"
-            >
-              {tag}
-            </span>
-          ))
-        )}
-      </div>
-
-      <SectionBar name="REPLACES" />
-      <div className="mb-6 flex flex-wrap gap-3 font-mono text-xs">
-        {row.replaces.length === 0 ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          row.replaces.map((rid) => (
-            <Link
-              key={rid}
-              href={`/dashboard/memories/${rid}`}
-              className="text-primary hover:underline"
-            >
-              {rid}
-            </Link>
-          ))
-        )}
-      </div>
-
-      <SectionBar name={`PREDECESSORS (${predecessors.length})`} />
-      {predecessors.length === 0 ? (
-        <TableEmpty>NO PREDECESSORS</TableEmpty>
-      ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>status</DataTh>
-            <DataTh>title</DataTh>
-            <DataTh>content</DataTh>
-            <DataTh>created</DataTh>
-          </DataHead>
-          <DataBody>
-            {predecessors.map((predecessor) => (
-              <DataTr key={predecessor.id}>
-                <DataTd>
-                  <StatusPill status={predecessor.status} />
-                </DataTd>
-                <DataTd>
+            </p>
+          ) : null}
+        </>
+      }
+      metadata={
+        <>
+          <DetailDisclosure title="Details and tags" inspector>
+            <dl className="detail-fields">
+              <MetaRow k="ID" v={row.id} mono />
+              <MetaRow k="Status" v={<StatusPill status={row.status} />} />
+              <MetaRow k="Project" v={projectLabel} />
+              <MetaRow k="Type" v={row.type} />
+              <MetaRow k="Confirms" v={confirmCount} />
+              <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
+              <MetaRow k="Last seen" v={<Time value={row.lastSeenAt} />} mono />
+              <MetaRow k="Scope" v={row.scope} mono />
+              <MetaRow k="Topic key" v={row.topicKey ?? '—'} mono />
+              <MetaRow k="Source" v={row.source?.agent ?? '—'} mono />
+            </dl>
+            <section aria-label="Tags" className="pt-4">
+              <h2 className="mb-2 font-mono text-xs text-muted-foreground">Tags</h2>
+              <div className="flex flex-wrap gap-2">
+                {row.tags.length === 0 ? (
+                  <span className="text-muted-foreground">—</span>
+                ) : (
+                  row.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full border border-border px-2.5 py-1 font-mono text-xs text-muted-foreground"
+                    >
+                      {tag}
+                    </span>
+                  ))
+                )}
+              </div>
+            </section>
+          </DetailDisclosure>
+        </>
+      }
+      secondary={
+        <>
+          {reviewState !== null && reviewAfter !== null ? (
+            <DetailDisclosure title="Review" inspector>
+              <dl className="detail-fields">
+                <MetaRow
+                  k="Review"
+                  v={reviewState === 'needs_review' ? <ReviewPill /> : 'fresh'}
+                  tone={reviewState === 'needs_review' ? 'amber' : 'lime'}
+                />
+                <MetaRow k="Review after" v={<Time value={reviewAfter} />} mono />
+                <MetaRow k="Confirmations" v={confirmCount} />
+              </dl>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Re-affirm with <code>memory.confirm</code> to refresh review.
+              </p>
+            </DetailDisclosure>
+          ) : null}
+          <DetailDisclosure title={`PREDECESSORS (${predecessors.length})`}>
+            <h2 className="mb-2 font-mono text-xs text-muted-foreground">REPLACES</h2>
+            <div className="mb-4 flex flex-wrap gap-2 font-mono text-xs">
+              {row.replaces.length === 0 ? (
+                <span className="text-muted-foreground">—</span>
+              ) : (
+                row.replaces.map((rid) => (
                   <Link
-                    href={`/dashboard/memories/${predecessor.id}`}
-                    className="transition-colors hover:text-primary"
+                    key={rid}
+                    href={`/dashboard/memories/${rid}`}
+                    className="text-primary hover:underline"
                   >
-                    {truncate(predecessor.title, 120)}
+                    {rid}
                   </Link>
-                </DataTd>
-                <DataTd className="max-w-[420px] truncate text-muted-foreground">
-                  {truncate(predecessor.content, 160)}
-                </DataTd>
-                <DataTd className="font-mono text-xs text-muted-foreground">
-                  <Time value={predecessor.createdAt} />
-                </DataTd>
-              </DataTr>
-            ))}
-          </DataBody>
-        </DataTable>
-      )}
-
-      <div className="mt-6">
-        <SectionBar name={`JUDGMENTS (${touching.length})`} />
-      </div>
-      {touching.length === 0 ? (
-        <TableEmpty>NO JUDGMENTS TOUCH THIS MEMORY</TableEmpty>
-      ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>kind</DataTh>
-            <DataTh>status</DataTh>
-            <DataTh>counterpart</DataTh>
-            <DataTh>timestamp</DataTh>
-          </DataHead>
-          <DataBody>
-            {touching.map(({ relation, kind }) => {
-              const isSource = relation.sourceId === row.id;
-              const counterpartId = isSource ? relation.targetId : relation.sourceId;
-              const counterpartTitle = isSource ? relation.targetTitle : relation.sourceTitle;
-              return (
-                <DataTr key={relation.id}>
-                  <DataTd>
-                    <Pill tone={kind === 'pending_conflict' ? 'amber' : 'lime'}>{kind}</Pill>
-                  </DataTd>
-                  <DataTd>
-                    <StatusPill status={relation.status} />
-                  </DataTd>
-                  <DataTd>
+                ))
+              )}
+            </div>
+            {predecessors.length === 0 ? (
+              <p className="text-xs text-muted-foreground">NO PREDECESSORS</p>
+            ) : (
+              <ul className="space-y-4">
+                {predecessors.map((predecessor) => (
+                  <li key={predecessor.id} className="space-y-2 border-t border-border pt-3">
                     <Link
-                      href={`/dashboard/memories/${counterpartId}`}
-                      className="transition-colors hover:text-primary"
+                      href={`/dashboard/memories/${predecessor.id}`}
+                      className="text-sm font-medium hover:text-primary"
                     >
-                      {truncate(counterpartTitle, 80)}
+                      {predecessor.title}
                     </Link>
-                  </DataTd>
-                  <DataTd className="text-muted-foreground">
-                    <Link
-                      href={`/dashboard/judgments/${relation.id}`}
-                      className="hover:text-primary"
-                    >
-                      <Time value={relation.judgedAt ?? relation.createdAt} />
-                    </Link>
-                  </DataTd>
-                </DataTr>
-              );
-            })}
-          </DataBody>
-        </DataTable>
-      )}
-
-      <div className="mt-6">
-        <SectionBar name="ACTIONS" />
-      </div>
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        {row.status === 'active' ? archiveForm : null}
-        {reviewState !== 'needs_review' ? confirmForm : null}
-      </div>
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard k="CONFIRMATIONS" v={confirmCount} sub={<span>memory.confirm</span>} />
-        <StatCard k="JUDGMENTS" v={touching.length} sub={<span>TOUCHING THIS ROW</span>} />
-        <StatCard k="PREDECESSORS" v={predecessors.length} sub={<span>REPLACED</span>} />
-        <StatCard
-          k="STATE"
-          v={reviewState === 'needs_review' ? 'REVIEW' : 'FRESH'}
-          tone={reviewState === 'needs_review' ? 'amber' : 'lime'}
-          sub={<span>{row.status.toUpperCase()}</span>}
-        />
-      </div>
-    </Page>
+                    <div>
+                      <StatusPill status={predecessor.status} />
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {truncate(predecessor.content, 160)}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      <Time value={predecessor.createdAt} />
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DetailDisclosure>
+          <DetailDisclosure title={`JUDGMENTS (${touching.length})`}>
+            {touching.length === 0 ? (
+              <p className="text-xs text-muted-foreground">NO JUDGMENTS TOUCH THIS MEMORY</p>
+            ) : (
+              <ul className="space-y-4">
+                {touching.map(({ relation, kind }) => {
+                  const isSource = relation.sourceId === row.id;
+                  const counterpartId = isSource ? relation.targetId : relation.sourceId;
+                  const counterpartTitle = isSource ? relation.targetTitle : relation.sourceTitle;
+                  return (
+                    <li key={relation.id} className="space-y-2 border-t border-border pt-3">
+                      <Link
+                        href={`/dashboard/memories/${counterpartId}`}
+                        className="text-sm font-medium hover:text-primary"
+                      >
+                        {counterpartTitle}
+                      </Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{kind}</span>
+                        <StatusPill status={relation.status} />
+                      </div>
+                      <Link
+                        href={`/dashboard/judgments/${relation.id}`}
+                        className="block font-mono text-xs text-muted-foreground hover:text-primary"
+                      >
+                        <Time value={relation.judgedAt ?? relation.createdAt} />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </DetailDisclosure>
+        </>
+      }
+    >
+      <MarkdownPanel
+        presentation="reading"
+        hideTitle
+        eyebrow="Memory content"
+        title="Durable context"
+        markdown={row.content}
+        copyMarkdown={markdown}
+        copyLabel="Copy"
+      />
+    </DetailLayout>
   );
 }

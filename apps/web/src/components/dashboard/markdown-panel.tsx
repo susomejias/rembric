@@ -10,19 +10,25 @@ export function MarkdownPanel({
   eyebrow,
   title,
   markdown,
+  copyMarkdown = markdown,
   copyLabel = 'Copy markdown',
   action,
+  presentation = 'panel',
+  hideTitle = false,
 }: {
   eyebrow: string;
   title: string;
   markdown: string;
+  copyMarkdown?: string;
   copyLabel?: string;
   action?: ReactNode;
+  presentation?: 'panel' | 'reading';
+  hideTitle?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
   const copy = (): void => {
-    void navigator.clipboard.writeText(markdown).then(() => {
+    void navigator.clipboard.writeText(copyMarkdown).then(() => {
       setCopied(true);
       window.setTimeout(() => {
         setCopied(false);
@@ -31,7 +37,13 @@ export function MarkdownPanel({
   };
 
   return (
-    <section className="mb-5 rounded-2xl border border-border bg-card">
+    <section
+      className={
+        presentation === 'reading'
+          ? 'detail-markdown'
+          : 'mb-5 rounded-2xl border border-border bg-card'
+      }
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
         <div>
           <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
@@ -41,7 +53,7 @@ export function MarkdownPanel({
             />
             {eyebrow}
           </p>
-          <h2 className="mt-1 text-base font-medium">{title}</h2>
+          <h2 className={hideTitle ? 'sr-only' : 'mt-1 text-base font-medium'}>{title}</h2>
         </div>
         <div className="flex items-center gap-2">
           {action}

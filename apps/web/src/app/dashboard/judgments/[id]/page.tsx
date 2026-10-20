@@ -4,19 +4,10 @@ import { notFound, redirect } from 'next/navigation';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId } from '@/components/dashboard/support';
-import {
-  BackLink,
-  MetaGrid,
-  MetaRow,
-  Page,
-  Pill,
-  SectionBar,
-  StatusPill,
-  Time,
-  ViewHead,
-} from '@/components/dashboard/ui';
+import { MetaRow, Pill, StatusPill, Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -63,29 +54,78 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
   const evidence = evidencePretty(row.evidence);
 
   return (
-    <Page>
-      <ViewHead title={`Rembric Judgment ${shortId(row.id)}.`} hl="Rembric" />
-
-      <div className="mt-4 mb-5">
-        <BackLink href="/dashboard/judgments" label="BACK TO JUDGMENTS" />
-      </div>
-
-      <MetaGrid className="xl:grid-cols-6">
-        <MetaRow k="Status" v={<StatusPill status={row.status} />} />
-        <MetaRow
-          k="Verdict"
-          v={<Pill tone={row.relation === null ? 'dim' : 'lime'}>{row.relation ?? 'pending'}</Pill>}
-        />
-        <MetaRow k="Confidence" v={row.confidence !== null ? row.confidence.toFixed(2) : '—'} />
-        <MetaRow
-          k="Marked by"
-          v={`${row.markedByKind ?? '—'}${row.markedByActor ? ` · ${row.markedByActor}` : ''}`}
-        />
-        <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
-        <MetaRow k="Judged" v={<Time value={row.judgedAt} />} mono />
-      </MetaGrid>
-
+    <DetailLayout
+      title={`Judgment ${shortId(row.id)}`}
+      backHref="/dashboard/judgments"
+      backLabel="BACK TO JUDGMENTS"
+      contentLabel="Compared memories"
+      badges={<StatusPill status={row.status} />}
+      metadata={
+        <DetailDisclosure title="Details" inspector>
+          <dl className="detail-fields">
+            <MetaRow k="Judgment id" v={row.judgmentId} mono />
+            <MetaRow k="Status" v={<StatusPill status={row.status} />} />
+            <MetaRow
+              k="Verdict"
+              v={
+                <Pill tone={row.relation === null ? 'dim' : 'lime'}>
+                  {row.relation ?? 'pending'}
+                </Pill>
+              }
+            />
+            <MetaRow k="Confidence" v={row.confidence !== null ? row.confidence.toFixed(2) : '—'} />
+            <MetaRow
+              k="Marked by"
+              v={`${row.markedByKind ?? '—'}${row.markedByActor ? ` · ${row.markedByActor}` : ''}`}
+            />
+            <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
+            <MetaRow k="Judged" v={<Time value={row.judgedAt} />} mono />
+          </dl>
+        </DetailDisclosure>
+      }
+      secondary={
+        <>
+          <DetailDisclosure title="Reason">
+            <p className="text-base text-muted-foreground">{row.reason ?? '—'}</p>
+          </DetailDisclosure>
+          <DetailDisclosure title="Evidence">
+            {evidence !== null ? (
+              <pre className="font-mono text-sm leading-6 text-muted-foreground">{evidence}</pre>
+            ) : (
+              <p className="text-muted-foreground">—</p>
+            )}
+          </DetailDisclosure>
+        </>
+      }
+      actionsLabel="Judgment actions"
+      actions={
+        row.status === 'pending' ? (
+          <ActionForm action={orphanJudgment}>
+            <CsrfField form={ORPHAN_FORM} />
+            <input type="hidden" name="judgmentId" value={row.judgmentId} />
+            <ConfirmSubmit
+              tone="danger"
+              title="Mark this judgment as orphaned?"
+              description="It will be removed from the pending queue and won't be re-judged automatically."
+              confirmLabel="MARK ORPHANED"
+            >
+              <Button type="button" variant="destructive" size="sm">
+                MARK ORPHANED
+              </Button>
+            </ConfirmSubmit>
+          </ActionForm>
+        ) : null
+      }
+      notices={
+        row.status !== 'pending' ? (
+          <p className="mb-4 text-sm text-muted-foreground">
+            No actions available — this judgment is closed.
+          </p>
+        ) : null
+      }
+    >
       <MarkdownPanel
+        presentation="reading"
         eyebrow="Source"
         title={row.sourceTitle}
         markdown={row.sourceContent}
@@ -101,6 +141,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
       />
 
       <MarkdownPanel
+        presentation="reading"
         eyebrow="Target"
         title={row.targetTitle}
         markdown={row.targetContent}
@@ -114,41 +155,6 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
           </Link>
         }
       />
-
-      <SectionBar name="Reason" />
-      <p className="mb-6 text-sm text-muted-foreground">{row.reason ?? '—'}</p>
-
-      <SectionBar name="Evidence" />
-      {evidence !== null ? (
-        <pre className="mb-6 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-muted-foreground">
-          {evidence}
-        </pre>
-      ) : (
-        <p className="mb-6 text-muted-foreground">—</p>
-      )}
-
-      <SectionBar name="Judgment id" />
-      <p className="mb-6 font-mono text-xs">{row.judgmentId}</p>
-
-      <SectionBar name="Actions" />
-      {row.status === 'pending' ? (
-        <ActionForm action={orphanJudgment}>
-          <CsrfField form={ORPHAN_FORM} />
-          <input type="hidden" name="judgmentId" value={row.judgmentId} />
-          <ConfirmSubmit
-            tone="danger"
-            title="Mark this judgment as orphaned?"
-            description="It will be removed from the pending queue and won't be re-judged automatically."
-            confirmLabel="MARK ORPHANED"
-          >
-            <Button type="button" variant="destructive" size="sm">
-              MARK ORPHANED
-            </Button>
-          </ConfirmSubmit>
-        </ActionForm>
-      ) : (
-        <p className="text-muted-foreground">No actions available — this judgment is closed.</p>
-      )}
-    </Page>
+    </DetailLayout>
   );
 }

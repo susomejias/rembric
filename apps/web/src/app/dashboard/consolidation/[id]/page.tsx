@@ -12,23 +12,20 @@ import { notFound, redirect } from 'next/navigation';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { shortId } from '@/components/dashboard/support';
 import {
-  BackLink,
   DataBody,
   DataHead,
   DataTable,
   DataTd,
   DataTh,
   DataTr,
-  MetaGrid,
   MetaRow,
-  Page,
   Pill,
   SectionBar,
   TableEmpty,
   Time,
-  ViewHead,
 } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -145,22 +142,48 @@ export default async function ConsolidationRunPage({
   const hasAnyActiveOps = ops.some((op) => op.revertedAt === null);
 
   return (
-    <Page>
-      <ViewHead title={`Rembric Run ${shortId(run.id)}.`} hl="Rembric" />
-
-      <div className="mt-4 mb-5">
-        <BackLink href="/dashboard/consolidation" label="BACK TO CONSOLIDATION" />
-      </div>
-
-      <MetaGrid className="lg:grid-cols-4">
-        <MetaRow k="Started" v={<Time value={run.startedAt} />} mono />
-        <MetaRow k="Finished" v={<Time value={run.finishedAt} />} mono />
-        <MetaRow k="Scope" v={scopeLabel(repos, run.scope)} />
-        <MetaRow k="Ops" v={ops.length} />
-      </MetaGrid>
-
+    <DetailLayout
+      title={`Consolidation run ${shortId(run.id)}`}
+      backHref="/dashboard/consolidation"
+      backLabel="BACK TO CONSOLIDATION"
+      contentLabel="Run summary and operations"
+      metadata={
+        <DetailDisclosure title="Details" inspector>
+          <dl className="detail-fields">
+            <MetaRow k="Started" v={<Time value={run.startedAt} />} mono />
+            <MetaRow k="Finished" v={<Time value={run.finishedAt} />} mono />
+            <MetaRow k="Scope" v={scopeLabel(repos, run.scope)} />
+            <MetaRow k="Ops" v={ops.length} />
+          </dl>
+        </DetailDisclosure>
+      }
+      actionsLabel="Run actions"
+      actions={
+        hasAnyActiveOps ? (
+          <ActionForm action={undoRun}>
+            <CsrfField form={RUN_UNDO_FORM} />
+            <input type="hidden" name="runId" value={run.id} />
+            <ConfirmSubmit
+              tone="danger"
+              title="Revert every op in this run?"
+              description="All affected memories will return to their pre-run status."
+              confirmLabel="UNDO ENTIRE RUN"
+            >
+              <Button type="button" variant="destructive" size="sm">
+                UNDO ENTIRE RUN
+              </Button>
+            </ConfirmSubmit>
+          </ActionForm>
+        ) : null
+      }
+      notices={
+        !hasAnyActiveOps ? (
+          <p className="mb-4 font-mono text-xs text-muted-foreground">all ops reverted</p>
+        ) : null
+      }
+    >
       <SectionBar name="Summary" />
-      <pre className="mb-6 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-muted-foreground">
+      <pre className="mb-6 rounded-2xl border border-border bg-card p-4 font-mono text-base leading-7 text-muted-foreground">
         {formatRunSummary(run.summary)}
       </pre>
 
@@ -245,28 +268,6 @@ export default async function ConsolidationRunPage({
           </DataBody>
         </DataTable>
       )}
-
-      <SectionBar name="Run actions" />
-      {hasAnyActiveOps ? (
-        <ActionForm action={undoRun}>
-          <CsrfField form={RUN_UNDO_FORM} />
-          <input type="hidden" name="runId" value={run.id} />
-          <ConfirmSubmit
-            tone="danger"
-            title="Revert every op in this run?"
-            description="All affected memories will return to their pre-run status."
-            confirmLabel="UNDO ENTIRE RUN"
-          >
-            <Button type="button" variant="destructive" size="sm">
-              UNDO ENTIRE RUN
-            </Button>
-          </ConfirmSubmit>
-        </ActionForm>
-      ) : (
-        <p className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
-          all ops reverted
-        </p>
-      )}
-    </Page>
+    </DetailLayout>
   );
 }

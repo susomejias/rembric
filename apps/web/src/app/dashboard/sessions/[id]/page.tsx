@@ -5,10 +5,10 @@ import { notFound, redirect } from 'next/navigation';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
-import { durationBetween, shortId, truncate } from '@/components/dashboard/support';
+import { durationBetween, truncate } from '@/components/dashboard/support';
 import {
-  BackLink,
   DataBody,
   DataHead,
   DataTable,
@@ -16,15 +16,12 @@ import {
   DataTh,
   DataTr,
   Flash,
-  MetaGrid,
   MetaRow,
-  Page,
   Pill,
   SectionBar,
   StatusPill,
   TableEmpty,
   Time,
-  ViewHead,
 } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -112,188 +109,197 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
     .filter((part) => part !== '')
     .join('\n');
 
+  const prose = [
+    row.description && row.description !== title ? row.description : '',
+    summary && row.summaryFinal ? `## Summary\n\n${summary}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
   return (
-    <Page>
-      <ViewHead
-        num="03"
-        title={title}
-        meta={[
-          { k: 'ID', v: shortId(row.id) },
-          { k: 'STATUS', v: row.status.toUpperCase() },
-          { k: 'AGENT', v: row.agent },
-        ]}
-        titleVisible
-      />
-
-      <div className="mt-4 mb-5">
-        <BackLink href="/dashboard/sessions" label="BACK TO SESSIONS" />
-      </div>
-
-      {row.deletedAt ? (
-        <Flash tone="danger" label="SOFT-DELETED">
-          Removed from the active list on <Time value={row.deletedAt} />. Memories that reference it
-          keep their <code className="font-mono">session_id</code> pointer intact.
-        </Flash>
-      ) : null}
-
-      <MetaGrid>
-        <MetaRow k="Status" v={<StatusPill status={row.status} />} />
-        <MetaRow k="Agent" v={row.agent} />
-        <MetaRow k="Project" v={row.projectSlug ?? '—'} />
-        <MetaRow
-          k="Token"
-          v={row.tokenName ? `${row.tokenName}${row.tokenRevokedAt ? ' (revoked)' : ''}` : '—'}
-          mono
-        />
-        <MetaRow k="Started" v={<Time value={row.startedAt} />} mono />
-        <MetaRow k="Ended" v={<Time value={row.endedAt} />} mono />
-        <MetaRow
-          k={row.endedAt ? 'Duration' : 'Running for'}
-          v={durationBetween(row.startedAt, row.endedAt, nowMs)}
-          mono
-        />
-        <MetaRow k="Memories" v={memories.length} />
-        <MetaRow k="Prompts" v={prompts.length} />
-      </MetaGrid>
-
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        {row.deletedAt ? (
-          <ActionForm action={undeleteSession}>
-            <CsrfField form={UNDELETE_FORM} />
-            <input type="hidden" name="id" value={row.id} />
-            <Button type="submit">Undelete</Button>
-          </ActionForm>
-        ) : (
-          <>
-            {row.status === 'active' ? (
-              <ActionForm action={abandonSession}>
-                <CsrfField form={ABANDON_FORM} />
+    <DetailLayout
+      title={title}
+      backHref="/dashboard/sessions"
+      backLabel="BACK TO SESSIONS"
+      contentLabel="Session content"
+      badges={<StatusPill status={row.status} />}
+      actionsLabel="Session actions"
+      notices={
+        row.deletedAt ? (
+          <Flash tone="danger" label="SOFT-DELETED">
+            Removed from the active list on <Time value={row.deletedAt} />. Memories that reference
+            it keep their <code className="font-mono">session_id</code> pointer intact.
+          </Flash>
+        ) : null
+      }
+      metadata={
+        <DetailDisclosure title="Details" inspector>
+          <dl className="detail-fields">
+            <MetaRow k="ID" v={row.id} mono />
+            <MetaRow k="Status" v={<StatusPill status={row.status} />} />
+            <MetaRow k="Agent" v={row.agent} />
+            <MetaRow k="Project" v={row.projectSlug ?? '—'} />
+            <MetaRow
+              k="Token"
+              v={row.tokenName ? `${row.tokenName}${row.tokenRevokedAt ? ' (revoked)' : ''}` : '—'}
+              mono
+            />
+            <MetaRow k="Started" v={<Time value={row.startedAt} />} mono />
+            <MetaRow k="Ended" v={<Time value={row.endedAt} />} mono />
+            <MetaRow
+              k={row.endedAt ? 'Duration' : 'Running for'}
+              v={durationBetween(row.startedAt, row.endedAt, nowMs)}
+              mono
+            />
+            <MetaRow k="Memories" v={memories.length} />
+            <MetaRow k="Prompts" v={prompts.length} />
+          </dl>
+        </DetailDisclosure>
+      }
+      actions={
+        <>
+          {row.deletedAt ? (
+            <ActionForm action={undeleteSession}>
+              <CsrfField form={UNDELETE_FORM} />
+              <input type="hidden" name="id" value={row.id} />
+              <Button type="submit">Undelete</Button>
+            </ActionForm>
+          ) : (
+            <>
+              {row.status === 'active' ? (
+                <ActionForm action={abandonSession}>
+                  <CsrfField form={ABANDON_FORM} />
+                  <input type="hidden" name="id" value={row.id} />
+                  <ConfirmSubmit
+                    tone="warn"
+                    title="Mark this session as abandoned?"
+                    description={`Its ${memories.length} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard.`}
+                    confirmLabel="ABANDON SESSION"
+                  >
+                    <Button type="button" variant="outline" size="sm">
+                      Abandon
+                    </Button>
+                  </ConfirmSubmit>
+                </ActionForm>
+              ) : null}
+              <ActionForm action={deleteSession}>
+                <CsrfField form={DELETE_FORM} />
                 <input type="hidden" name="id" value={row.id} />
                 <ConfirmSubmit
-                  tone="warn"
-                  title="Mark this session as abandoned?"
-                  description={`Its ${memories.length} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard.`}
-                  confirmLabel="ABANDON SESSION"
+                  tone="danger"
+                  title="Soft-delete this session?"
+                  description="Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
+                  confirmLabel="DELETE SESSION"
                 >
-                  <Button type="button" variant="outline" size="sm">
-                    Abandon
+                  <Button type="button" variant="destructive" size="sm">
+                    Delete
                   </Button>
                 </ConfirmSubmit>
               </ActionForm>
-            ) : null}
-            <ActionForm action={deleteSession}>
-              <CsrfField form={DELETE_FORM} />
-              <input type="hidden" name="id" value={row.id} />
-              <ConfirmSubmit
-                tone="danger"
-                title="Soft-delete this session?"
-                description="Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
-                confirmLabel="DELETE SESSION"
-              >
-                <Button type="button" variant="destructive" size="sm">
-                  Delete
-                </Button>
-              </ConfirmSubmit>
-            </ActionForm>
-          </>
-        )}
-      </div>
-
+            </>
+          )}
+        </>
+      }
+      secondary={
+        <>
+          <DetailDisclosure title={`MEMORIES (${memories.length})`}>
+            {memories.length === 0 ? (
+              <TableEmpty>NO MEMORY WAS WRITTEN DURING THIS RUN</TableEmpty>
+            ) : (
+              <DataTable>
+                <DataHead>
+                  <DataTh>type</DataTh>
+                  <DataTh>title</DataTh>
+                  <DataTh>status</DataTh>
+                  <DataTh>created</DataTh>
+                </DataHead>
+                <DataBody>
+                  {memories.map((memory) => (
+                    <DataTr key={memory.id}>
+                      <DataTd>{memory.type}</DataTd>
+                      <DataTd className="max-w-[420px] truncate">
+                        <Link
+                          href={`/dashboard/memories/${memory.id}`}
+                          className="transition-colors hover:text-primary"
+                        >
+                          {memory.title}
+                        </Link>
+                      </DataTd>
+                      <DataTd>
+                        <StatusPill status={memory.status} />
+                      </DataTd>
+                      <DataTd className="font-mono text-xs text-muted-foreground">
+                        <Time value={memory.createdAt} />
+                      </DataTd>
+                    </DataTr>
+                  ))}
+                </DataBody>
+              </DataTable>
+            )}
+          </DetailDisclosure>
+          <DetailDisclosure title={`PROMPTS (${prompts.length})`}>
+            {prompts.length === 0 ? (
+              <TableEmpty>NO PROMPT WAS CAPTURED</TableEmpty>
+            ) : (
+              <DataTable>
+                <DataHead>
+                  <DataTh>title</DataTh>
+                  <DataTh>content</DataTh>
+                  <DataTh>tags</DataTh>
+                  <DataTh>created</DataTh>
+                </DataHead>
+                <DataBody>
+                  {prompts.map((prompt) => (
+                    <DataTr key={prompt.id} className={prompt.deletedAt ? 'opacity-60' : undefined}>
+                      <DataTd>{truncate(prompt.title, 60)}</DataTd>
+                      <DataTd className="max-w-[420px] truncate text-muted-foreground">
+                        {truncate(prompt.content, 160)}
+                      </DataTd>
+                      <DataTd>
+                        <div className="flex flex-wrap gap-1">
+                          {(prompt.tags ?? []).length === 0 ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            (prompt.tags ?? []).map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex w-fit items-center rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground"
+                              >
+                                {tag}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </DataTd>
+                      <DataTd className="font-mono text-xs text-muted-foreground">
+                        <Time value={prompt.createdAt} />
+                      </DataTd>
+                    </DataTr>
+                  ))}
+                </DataBody>
+              </DataTable>
+            )}
+          </DetailDisclosure>
+        </>
+      }
+    >
+      <MarkdownPanel
+        presentation="reading"
+        hideTitle
+        eyebrow="Session log"
+        title="What happened in this run"
+        markdown={prose || (summary ? '' : 'No summary has been recorded for this session.')}
+        copyMarkdown={markdown}
+        copyLabel="Copy markdown"
+      />
       {summary && !row.summaryFinal ? (
         <>
           <SectionBar name="Summary" more={<Pill tone="dim">RAW</Pill>} />
-          <pre className="mb-5 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs leading-5 text-foreground">
+          <pre className="mb-5 overflow-x-auto rounded-2xl border border-border bg-card p-4 font-mono text-base leading-7 text-foreground">
             {summary}
           </pre>
         </>
       ) : null}
-
-      <MarkdownPanel
-        eyebrow="Session log"
-        title="What happened in this run"
-        markdown={markdown}
-        copyLabel="Copy markdown"
-      />
-
-      <SectionBar name={`MEMORIES (${memories.length})`} />
-      {memories.length === 0 ? (
-        <TableEmpty>NO MEMORY WAS WRITTEN DURING THIS RUN</TableEmpty>
-      ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>type</DataTh>
-            <DataTh>title</DataTh>
-            <DataTh>status</DataTh>
-            <DataTh>created</DataTh>
-          </DataHead>
-          <DataBody>
-            {memories.map((memory) => (
-              <DataTr key={memory.id}>
-                <DataTd>{memory.type}</DataTd>
-                <DataTd className="max-w-[420px] truncate">
-                  <Link
-                    href={`/dashboard/memories/${memory.id}`}
-                    className="transition-colors hover:text-primary"
-                  >
-                    {memory.title}
-                  </Link>
-                </DataTd>
-                <DataTd>
-                  <StatusPill status={memory.status} />
-                </DataTd>
-                <DataTd className="font-mono text-xs text-muted-foreground">
-                  <Time value={memory.createdAt} />
-                </DataTd>
-              </DataTr>
-            ))}
-          </DataBody>
-        </DataTable>
-      )}
-
-      <div className="mt-8">
-        <SectionBar name={`PROMPTS (${prompts.length})`} />
-      </div>
-      {prompts.length === 0 ? (
-        <TableEmpty>NO PROMPT WAS CAPTURED</TableEmpty>
-      ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>title</DataTh>
-            <DataTh>content</DataTh>
-            <DataTh>tags</DataTh>
-            <DataTh>created</DataTh>
-          </DataHead>
-          <DataBody>
-            {prompts.map((prompt) => (
-              <DataTr key={prompt.id} className={prompt.deletedAt ? 'opacity-60' : undefined}>
-                <DataTd>{truncate(prompt.title, 60)}</DataTd>
-                <DataTd className="max-w-[420px] truncate text-muted-foreground">
-                  {truncate(prompt.content, 160)}
-                </DataTd>
-                <DataTd>
-                  <div className="flex flex-wrap gap-1">
-                    {(prompt.tags ?? []).length === 0 ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      (prompt.tags ?? []).map((tag) => (
-                        <span
-                          key={tag}
-                          className="inline-flex w-fit items-center rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground"
-                        >
-                          {tag}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </DataTd>
-                <DataTd className="font-mono text-xs text-muted-foreground">
-                  <Time value={prompt.createdAt} />
-                </DataTd>
-              </DataTr>
-            ))}
-          </DataBody>
-        </DataTable>
-      )}
-    </Page>
+    </DetailLayout>
   );
 }
