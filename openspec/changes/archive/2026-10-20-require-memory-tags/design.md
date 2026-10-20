@@ -22,6 +22,10 @@ The operational MCP schemas and internal save API serve different callers. MCP a
 
 5. **Scoped spec deltas, not unrelated rewrites.** Fully replace directly contradictory save and initialize requirements and the remember command requirement. Add dedicated capture-tag and Hermes tag-guidance requirements that explicitly govern abbreviated older descriptions; the dedicated operational-tag requirement explicitly supersedes the abbreviated capture signature in the large research-tools requirement without copying its unrelated context/timeline scenarios. The smaller shared-curation requirement is updated in full to require batch tags and propagation. Existing response refinements elsewhere (candidate counts, entity channels, explicit batch judgment tools) continue to apply; tag changes do not roll them back. Topic-key examples in the memory spec are illustrative partial inputs, not a waiver of the operational schema.
 
+## Archive validation baseline
+
+Before sync, strict validation passed for `memory`, `mcp-api`, and `hermes-agent-plugin`, but `claude-code-plugin` failed the first-body SHALL/MUST check for requirements 0, 5, and 6. The pending command delta already fixes requirement 0. Two additional full MODIFIED requirements only move their existing normative paragraph before the introductory paragraph, preserving every paragraph and scenario verbatim. These format-only changes provide delta provenance without changing protocol behavior.
+
 ## Risks / Trade-offs
 
 - [Risk] Older callers omit tags and receive schema errors → Mitigation: advertise the required field in `tools/list`, update actual wire fixtures and remember/SAVE guidance, and verify both tools through MCP transport.
