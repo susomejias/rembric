@@ -86,6 +86,7 @@ describe('content-first memory detail', () => {
     expect(html).toContain('aria-label="Memory actions"');
     expect(html).toContain('aria-label="Copy"');
     expect(html).not.toContain('Copy markdown');
+    expect(html).not.toMatch(/<p[^>]*>[\s\S]*?Memory content<\/p>/);
     expect(html).toMatch(/<h1[^>]*text-2xl[^>]*sm:text-3xl[^>]*>/);
     expect(html.match(/<form /g)).toHaveLength(2);
     expect(html.match(/>CONFIRM<\/button>/g)).toHaveLength(1);

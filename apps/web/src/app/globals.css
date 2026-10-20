@@ -187,12 +187,6 @@
   min-width: 0;
   overflow-x: auto;
 }
-.detail-actions > summary {
-  list-style: none;
-}
-.detail-actions > summary::-webkit-details-marker {
-  display: none;
-}
 @media (min-width: 1024px) {
   .detail-grid {
     grid-template-columns: minmax(0, 1fr) 320px;

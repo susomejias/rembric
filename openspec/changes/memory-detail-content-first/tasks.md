@@ -30,6 +30,21 @@ Post-extraction browser checks passed on all four routes at both widths. The ses
 
 Axe found no violations within `.detail-layout` after the table focus fix. Contrast checks for clipped content and the non-text ellipsis remained incomplete. A separate whole-page scan reported contrast violations in the unchanged global navigation and footer, outside this change. The table focus regression went from one failure and ten passes to seventeen passes across session and consolidation tests.
 
+## Requested navigation and interaction followups
+
+- [x] Add a shared-layout prompt detail route with full safe content, metadata, exact clipboard payload and the existing guarded lifecycle actions.
+- [x] Link prompt titles from the main list and session table; make View details target the prompt itself, including unlinked/deleted prompts.
+- [x] Remove redundant Memory content and Session log eyebrows without removing copy buttons or useful Source/Target labels.
+- [x] Add an accessible action disclosure with outside-pointer and Escape dismissal while keeping its forms mounted.
+- [x] Run prompt/list/session regressions, including full titles, null metadata, unsafe content, deleted and missing states.
+- [x] Verify final menu dismissal, trigger focus and confirmation cancellation in the running application.
+- [x] Verify prompt detail navigation from both tables, responsive rendering, scoped accessibility and exact clipboard contents.
+- [x] Run typecheck, lint, the web suite, strict OpenSpec validation and whitespace checks after the followups.
+
+Prompt navigation tests were captured red before implementation (seven failures and twenty passes), then green (twenty-eight passes). Removing the memory eyebrow was red with one failure and six passes, then green with seven passes. The original ellipsis was reproduced red in Chrome because clicking the page heading left it open. The final implementation reuses installed Radix Popover, keeps forms mounted with forceMount, and hides only its closed panel. Confirmation-count tests target actual alert-dialog triggers rather than every dialog-like popover.
+
+Final browser checks passed outside click, Escape, trigger focus, CSRF/id form association and confirmation cancellation. Prompt links from both session and main list reached the complete detail. At 320px and 1440px there was no page overflow and scoped axe found no violations; native clipboard writing preserved the full original prompt. Redundant visible labels were absent. The checker used its own visible window because headless cancellation could retain a closed animation node; the user's original browser was not resized or navigated. Typecheck, lint, 1262 passing web tests (6 skipped), strict OpenSpec validation and whitespace checks passed.
+
 ## Prior memory-only parent verification (before shared extraction)
 
 - [x] Verify desktop metadata/review visibility, collapsed secondary panels, bounded expanded bodies and normal mobile disclosure flow at 320px and wider viewports.

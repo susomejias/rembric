@@ -251,7 +251,14 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
                 <DataBody>
                   {prompts.map((prompt) => (
                     <DataTr key={prompt.id} className={prompt.deletedAt ? 'opacity-60' : undefined}>
-                      <DataTd>{truncate(prompt.title, 60)}</DataTd>
+                      <DataTd>
+                        <Link
+                          href={`/dashboard/prompts/${prompt.id}`}
+                          className="transition-colors hover:text-primary"
+                        >
+                          {prompt.title}
+                        </Link>
+                      </DataTd>
                       <DataTd className="max-w-[420px] truncate text-muted-foreground">
                         {truncate(prompt.content, 160)}
                       </DataTd>
@@ -286,7 +293,6 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
       <MarkdownPanel
         presentation="reading"
         hideTitle
-        eyebrow="Session log"
         title="What happened in this run"
         markdown={prose || (summary ? '' : 'No summary has been recorded for this session.')}
         copyMarkdown={markdown}

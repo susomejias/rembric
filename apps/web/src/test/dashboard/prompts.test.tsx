@@ -104,6 +104,24 @@ describe('prompts list (client data-table)', () => {
     expect(html).toContain('Actions for prompt prompt G0');
   });
 
+  it('links prompt titles to their own detail pages with or without a session', async () => {
+    t.handle.db
+      .insert(prompts)
+      .values(
+        prompt({
+          id: 'UNLINKED',
+          content: 'Standalone request',
+          createdAt: new Date(2_000),
+        }),
+      )
+      .run();
+    const html = await renderPrompts();
+    expect(html).toMatch(/<a[^>]*href="\/dashboard\/prompts\/G0"[^>]*>prompt G0<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/dashboard\/prompts\/UNLINKED"[^>]*>prompt UNLINKED<\/a>/);
+    const deleted = await renderPrompts({ include_deleted: '1' });
+    expect(deleted).toMatch(/<a[^>]*href="\/dashboard\/prompts\/D1"[^>]*>prompt D1<\/a>/);
+  });
+
   it('links a prompt to its session when the row carries one', async () => {
     const html = await renderPrompts();
     expect(html).toContain('href="/dashboard/sessions/S1"');

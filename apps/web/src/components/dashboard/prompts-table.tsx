@@ -81,7 +81,12 @@ export function PromptsTable({
       value: (row) => row.title,
       cell: (row) => (
         <div className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium text-foreground">{row.title}</span>
+          <Link
+            href={`/dashboard/prompts/${row.id}`}
+            className="truncate text-sm font-medium text-foreground hover:text-primary"
+          >
+            {row.title}
+          </Link>
           <span className="truncate font-mono text-[11px] text-muted-foreground">
             {row.project} · <Time value={row.createdAt} />
           </span>
@@ -192,6 +197,14 @@ function PromptRowMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44 border-border bg-popover">
+        <DropdownMenuItem asChild>
+          <Link
+            href={`/dashboard/prompts/${row.id}`}
+            className={cn(MENU_ITEM_ROOT, 'cursor-pointer')}
+          >
+            View details
+          </Link>
+        </DropdownMenuItem>
         {row.deleted ? (
           <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}>
             <ActionForm action={actions.restore} className={MENU_ITEM_ROOT}>
@@ -204,16 +217,6 @@ function PromptRowMenu({
           </DropdownMenuItem>
         ) : (
           <>
-            {row.sessionId ? (
-              <DropdownMenuItem asChild>
-                <Link
-                  href={`/dashboard/sessions/${row.sessionId}`}
-                  className={cn(MENU_ITEM_ROOT, 'cursor-pointer')}
-                >
-                  View details
-                </Link>
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuSeparator className="bg-border" />
             <DropdownMenuItem
               asChild

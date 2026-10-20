@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { DetailActions } from './detail-actions';
 import { BackLink, Page } from './ui';
 
 export function DetailLayout({
@@ -35,19 +36,7 @@ export function DetailLayout({
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
           {badges ? <div className="mt-3 flex flex-wrap items-center gap-2">{badges}</div> : null}
         </div>
-        {actions ? (
-          <details className="detail-actions relative shrink-0">
-            <summary
-              aria-label={actionsLabel}
-              className="cursor-pointer rounded-lg border border-border px-3 py-1 text-xl hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
-            >
-              <span aria-hidden="true">⋯</span>
-            </summary>
-            <div className="absolute right-0 z-10 mt-2 min-w-44 space-y-2 rounded-xl border border-border bg-popover p-3 shadow-lg shadow-black/30">
-              {actions}
-            </div>
-          </details>
-        ) : null}
+        {actions ? <DetailActions label={actionsLabel}>{actions}</DetailActions> : null}
       </header>
       {notices}
       <div className="detail-grid">

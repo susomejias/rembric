@@ -78,7 +78,7 @@ describe('consolidation detail composition', () => {
     expect(article).toContain('&lt;b&gt;reason&lt;/b&gt;');
     expect(article).not.toContain('<details');
     expect(html).toContain('name="runId" value="RUN-STRUCTURED"');
-    expect(html.match(/aria-haspopup="dialog"/g)).toHaveLength(2);
+    expect(html.match(/data-slot="alert-dialog-trigger"/g)).toHaveLength(2);
     expect(html.match(/name="csrf"/g)).toHaveLength(2);
   });
 

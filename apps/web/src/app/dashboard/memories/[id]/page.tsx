@@ -328,7 +328,6 @@ export default async function MemoryDetailPage({
       <MarkdownPanel
         presentation="reading"
         hideTitle
-        eyebrow="Memory content"
         title="Durable context"
         markdown={row.content}
         copyMarkdown={markdown}

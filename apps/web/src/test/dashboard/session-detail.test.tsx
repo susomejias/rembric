@@ -68,6 +68,9 @@ describe('session detail curation-state rendering', () => {
     expect(html.indexOf('Accomplished')).toBeLessThan(html.indexOf('MEMORIES (0)'));
     expect(html.indexOf('MEMORIES (0)')).toBeLessThan(html.indexOf('PROMPTS (0)'));
     expect(html).toContain('aria-label="Session actions"');
+    expect(html).toContain('aria-label="Session content"');
+    expect(html).not.toMatch(/<p[^>]*>Session log<\/p>/);
+    expect(html).toContain('aria-label="Copy markdown"');
   });
   it('renders a curated summary as Markdown with no RAW chip', async () => {
     const html = await renderSessionDetail('S-CURATED');
@@ -129,10 +132,29 @@ describe('session detail curation-state rendering', () => {
     expect(html.includes('SOFT-DELETED')).toBe(deleted);
     const ids = [...html.matchAll(/<form id="([^"]+)"/g)].map((match) => match[1]);
     expect(new Set(ids).size).toBe(labels.length);
-    expect((html.match(/aria-haspopup="dialog"/g) ?? []).length).toBe(deleted ? 0 : labels.length);
+    expect((html.match(/data-slot="alert-dialog-trigger"/g) ?? []).length).toBe(
+      deleted ? 0 : labels.length,
+    );
   });
 
-  it('retains semantic memories then prompts tables and revoked-token metadata without prompt links', async () => {
+  it('links the full untruncated prompt title to its exact id', async () => {
+    const title = 'Complete captured request '.repeat(4);
+    t.handle.db
+      .insert(prompts)
+      .values({
+        id: 'LONG-PROMPT',
+        sessionId: 'S-CURATED',
+        title,
+        content: 'Body',
+        createdAt: new Date(1_000),
+      })
+      .run();
+    const html = await renderSessionDetail('S-CURATED');
+    expect(html).toContain(`>${title}</a>`);
+    expect(html).toContain('href="/dashboard/prompts/LONG-PROMPT"');
+  });
+
+  it('retains semantic tables, prompt detail links and revoked-token metadata', async () => {
     t.handle.raw.prepare('UPDATE tokens SET revoked_at = ? WHERE id = ?').run(2_000, 'tk1');
     t.handle.db
       .insert(memory)
@@ -172,7 +194,7 @@ describe('session detail curation-state rendering', () => {
     );
     expect(html.indexOf('Saved memory')).toBeLessThan(html.indexOf('Captured prompt'));
     expect(html).toContain('href="/dashboard/memories/SESSION-MEM"');
-    expect(html).not.toContain('href="/dashboard/prompts/');
+    expect(html).toContain('href="/dashboard/prompts/SESSION-PROMPT"');
     expect(html).toContain('test (revoked)');
     expect(html).not.toContain('Prompts captured');
   });

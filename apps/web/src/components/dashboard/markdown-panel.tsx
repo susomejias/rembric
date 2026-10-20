@@ -16,7 +16,7 @@ export function MarkdownPanel({
   presentation = 'panel',
   hideTitle = false,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   markdown: string;
   copyMarkdown?: string;
@@ -46,13 +46,15 @@ export function MarkdownPanel({
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
         <div>
-          <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
-            <span
-              aria-hidden="true"
-              className="inline-block size-[0.55em] shrink-0 rounded-full bg-primary"
-            />
-            {eyebrow}
-          </p>
+          {eyebrow ? (
+            <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
+              <span
+                aria-hidden="true"
+                className="inline-block size-[0.55em] shrink-0 rounded-full bg-primary"
+              />
+              {eyebrow}
+            </p>
+          ) : null}
           <h2 className={hideTitle ? 'sr-only' : 'mt-1 text-base font-medium'}>{title}</h2>
         </div>
         <div className="flex items-center gap-2">
