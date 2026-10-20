@@ -11,6 +11,7 @@ import {
   type SearchScope,
   type TransactionRunner,
 } from '@rembric/db';
+import slugify from 'slugify';
 import { ulid } from 'ulid';
 
 import { DomainError } from './errors.js';
@@ -219,12 +220,10 @@ export class MemoryService {
       ...new Set(
         tags.map((tag) => {
           assertNoNul('memory.save', 'tags', tag);
-          const normalized = (
-            tag
-              .normalize('NFKC')
-              .toLowerCase()
-              .match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu) ?? []
-          ).join('-');
+          const normalized = slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), {
+            lower: true,
+            strict: true,
+          });
           if (normalized.length === 0) {
             throw new DomainError(
               'invalid_input',

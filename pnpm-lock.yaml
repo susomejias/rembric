@@ -165,6 +165,9 @@ importers:
       '@rembric/db':
         specifier: workspace:*
         version: link:../db
+      slugify:
+        specifier: ^1.6.9
+        version: 1.6.9
       ulid:
         specifier: ^2.3.0
         version: 2.4.0

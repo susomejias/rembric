@@ -223,6 +223,8 @@ describe('memory tag normalization', () => {
       ' Dashboard ',
       'Deploy / Docker',
       'deploy_docker',
+      'deploy.docker',
+      'deploy\\docker',
       'dashboard',
       'bug-fix',
       'fix-bug',
@@ -237,26 +239,28 @@ describe('memory tag normalization', () => {
     ).toEqual(expected);
   });
 
-  it('preserves Unicode letters, numbers and combining marks with NFKC equivalence', () => {
+  it('transliterates accents and combining equivalents to ASCII with NFKC compatibility', () => {
     const tags = [
       'autenticación',
       'autenticacio\u0301n',
-      '部署 / 数据库',
+      'Caché',
+      'Cache\u0301',
       'Ｄａｓｈｂｏａｒｄ',
       'İ',
-      'किताब １２٣',
+      'C++',
     ];
+    const scope = projectScope(projectId);
     const saved = memory.save(
       { type: 'project', title: 'Unicode', content: 'control', tags },
-      projectScope(projectId),
+      scope,
     );
-    expect(saved.tags).toEqual([
-      'autenticación',
-      '部署-数据库',
-      'dashboard',
-      'i\u0307',
-      'किताब-12٣',
-    ]);
+    const expected = ['autenticacion', 'cache', 'dashboard', 'i', 'c'];
+    expect(saved.tags).toEqual(expected);
+    expect(memory.getMany([saved.id], scope)[0]?.tags).toEqual(expected);
+    expect(
+      memory.save({ type: 'project', title: 'Again', content: 'control', tags: expected }, scope)
+        .tags,
+    ).toEqual(expected);
   });
 
   it.each([
@@ -266,6 +270,8 @@ describe('memory tag normalization', () => {
     ['emoji', '😀🚀'],
     ['standalone combining mark', '\u0301'],
     ['NUL', 'ba\0d'],
+    ['unsupported script', '数据库'],
+    ['unsupported scripts with separators', '部署 / 数据库'],
   ])('rejects %s tags before any transaction or topic mutation', (_label, invalid) => {
     const scope = projectScope(projectId);
     const input = {

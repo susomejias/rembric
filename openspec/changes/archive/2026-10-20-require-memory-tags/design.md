@@ -6,15 +6,17 @@ The operational MCP schemas and internal save API serve different callers. MCP a
 
 **Goals:** require 1–64 tags on both operational memory-write tools, canonicalize supplied tags once before persistence, and teach useful reusable labels without more calls.
 
-**Non-Goals:** taxonomy enforcement, catalogs, aliases, semantic merging, transliteration, new tools, larger `memory.context` payloads, prompt-tag changes, dependencies, migrations, backfill, or installer/release documentation.
+**Non-Goals:** taxonomy enforcement, catalogs, aliases, semantic merging, new tools, larger `memory.context` payloads, prompt-tag changes, new dependency versions, migrations, backfill, or installer/release documentation.
 
 ## Decisions
 
 1. **Schema presence, service normalization.** Make `memorySaveSchema.tags` a required array with `.min(1).max(64)` and a concise description. Reuse that exact field in `capturePassiveSchema` in `observability-tools.ts`; no new schema module and no Zod transforms. `tools/list` must expose `required`, `minItems: 1`, `maxItems: 64`, and the label guidance. Keep `SaveMemoryInput.tags` optional internally. Requiring tags on the internal type instead would force unrelated seed/evaluation changes; schema transforms would duplicate the service policy and complicate MCP schema emission.
 
-2. **One private normalizer in `MemoryService.saveWithTopicKey`, before any transaction.** For each supplied string: reject NUL first; apply NFKC then locale-independent lowercase; take word runs starting with a Unicode letter or number and continuing with letters, numbers, or combining marks (`[\p{L}\p{N}][\p{L}\p{N}\p{M}]*` with Unicode/global matching); join runs with `-`; reject an empty result with `invalid_input` naming `tags`. Deduplicate normalized values preserving first occurrence. Normalize the whole array before any insert, relation write, or predecessor status change. Omitted and empty internal arrays retain their existing tagless semantics. Repository normalization would be too late to protect topic supersession; per-handler normalizers would duplicate logic. ASCII slug libraries would lose accents and CJK unnecessarily.
+2. **One private normalizer in `MemoryService.saveWithTopicKey`, before any transaction.** For each supplied string: reject NUL first; apply NFKC; replace separator runs with spaces using the same `[._/\\]+` prepass as topic suggestions; call the installed `slugify` with `{ lower: true, strict: true }`; reject an empty result with `invalid_input` naming `tags`. Deduplicate normalized values preserving first occurrence. Normalize the whole array before any insert, relation write, or predecessor status change. Omitted and empty internal arrays retain their existing tagless semantics. Repository normalization would be too late to protect topic supersession; per-handler normalizers would duplicate logic.
 
-   Examples: `Dashboard` → `dashboard`; `Deploy / Docker` and `deploy_docker` → `deploy-docker`; `autenticación` → `autenticación`; `部署 / 数据库` → `部署-数据库`; `Ｄａｓｈｂｏａｒｄ` → `dashboard`. Canonically equivalent accented input converges through NFKC. Already-normalized input is unchanged. `bug-fix` and `fix-bug` remain distinct: this is syntax normalization, not semantic merging.
+   The owner chose existing-library ASCII transliteration instead of maintaining a Unicode word-run parser. Core declares `slugify` directly with the existing MCP range `^1.6.9`, reusing locked `1.6.9`, its integrity hash, and dependency-free snapshot. Importing MCP would create a core-to-MCP cycle and apply unrelated topic-key policy. No version upgrade, new transitive dependency, lifecycle allowance, stopword filtering, truncation, or topic-key behavior change is needed.
+
+   Examples: `Dashboard` → `dashboard`; `Deploy / Docker` and `deploy_docker` → `deploy-docker`; `autenticación` → `autenticacion`; `Caché` → `cache`; `Ｄａｓｈｂｏａｒｄ` → `dashboard`; `C++` → `c`. Unsupported-script-only labels such as `数据库` and `部署 / 数据库` yield empty output and are rejected before any write. Composed and decomposed accented input converges through NFKC and transliteration. Already-normalized input is unchanged. `bug-fix` and `fix-bug` remain distinct: this is syntax normalization, not semantic merging.
 
 3. **Capture carries one batch label set.** Add `tags` to the existing handler's arguments and pass it unchanged into every extracted learning's shared save pipeline. The service performs normalization. Extraction, scope/session handling, candidate aggregation, and empty-extraction behavior remain unchanged for valid tagged requests. No tag inference call or per-learning schema is introduced. Invalid supplied tags on a batch that would save learnings fail before its first write; this design does not introduce general batch atomicity.
 
@@ -31,6 +33,7 @@ Before sync, strict validation passed for `memory`, `mcp-api`, and `hermes-agent
 - [Risk] Older callers omit tags and receive schema errors → Mitigation: advertise the required field in `tools/list`, update actual wire fixtures and remember/SAVE guidance, and verify both tools through MCP transport.
 - [Risk] Bad tags could retire a valid topic predecessor → Mitigation: normalize and validate every supplied tag before opening the existing transaction; assert unchanged memories and relations after rejection.
 - [Trade-off] Syntactic deduplication leaves semantic synonyms separate → Accepted because semantic merging requires a taxonomy or extra reasoning outside this scope.
+- [Trade-off] Accents transliterate and unsupported-script-only labels are rejected → Accepted explicitly by the owner; preserve the pre-transaction invalid-input boundary.
 - [Trade-off] Historical spellings remain inconsistent → Accepted because append-only historical reads stay unchanged; no migration or backfill is needed.
 - [Risk] Blanket fixture updates conceal internal compatibility or expand review size → Mitigation: update only calls crossing changed MCP schemas; retain tagless internal tests and keep each behavior work unit targeted below 400 changed lines, splitting further if needed.
 
@@ -40,4 +43,4 @@ Implement service normalization, then required schemas/capture propagation, then
 
 ## Open Questions
 
-None: mandatory operational tags, optional internal tags, Unicode normalization, and exclusions are approved. Exact affected test fixtures are identified during implementation without broad fixture rewrites.
+None: mandatory operational tags, optional internal tags, existing-library ASCII normalization, unsupported-script rejection, and exclusions are approved. Exact affected test fixtures are identified during implementation without broad fixture rewrites.

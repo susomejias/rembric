@@ -60,7 +60,7 @@ class SystemPromptBlockTest(unittest.TestCase):
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
         self.assertIn("memory.save(title≤100, content, tags)", block)
-        self.assertIn("normally 1–5 useful reusable lowercase Unicode kebab-case", block)
+        self.assertIn("normally 1–5 useful reusable lowercase ASCII kebab-case", block)
         for example in ("dashboard", "sqlite", "bug-fix"):
             self.assertIn(example, block)
 

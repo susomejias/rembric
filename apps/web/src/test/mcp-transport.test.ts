@@ -154,8 +154,7 @@ describe('MCP protocol conformance', () => {
         const description = JSON.stringify(tool.inputSchema.properties?.['tags']);
         for (const word of [
           'reusable',
-          'lowercase',
-          'kebab-case',
+          'lowercase ASCII kebab-case',
           'dashboard',
           'sqlite',
           'bug-fix',
@@ -163,6 +162,8 @@ describe('MCP protocol conformance', () => {
           expect(description).toContain(word);
         }
         expect(tool.description).toMatch(/required.*tags/i);
+        expect(tool.description).toContain('lowercase ASCII kebab-case');
+        expect(tool.description!.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
       }
     } finally {
       await client.close();
@@ -210,7 +211,7 @@ describe('MCP protocol conformance', () => {
         ['memory.save', { type: 'reference', title: 'Invalid tags', content: 'must not persist' }],
         ['memory.capture_passive', { text }],
       ] as const) {
-        for (const tag of ['', '   ', '---', '😀', 'bad\u0000tag']) {
+        for (const tag of ['', '   ', '---', '😀', 'bad\u0000tag', '数据库', '部署 / 数据库']) {
           const before = repos.memory.countByStatusAndTypeInScope(scope.projectId);
           const relations = repos.relations.countPendingInScope(scope);
           const result = await client.callTool({
@@ -227,7 +228,14 @@ describe('MCP protocol conformance', () => {
           name,
           arguments: {
             ...input,
-            tags: [' Dashboard ', 'Deploy / Docker', 'deploy_docker', 'autenticación', '部署'],
+            tags: [
+              ' Dashboard ',
+              'Deploy / Docker',
+              'deploy_docker',
+              'autenticación',
+              'autenticacio\u0301n',
+              'Ｄａｓｈｂｏａｒｄ',
+            ],
           },
         });
         expect(result.isError).not.toBe(true);
@@ -241,8 +249,7 @@ describe('MCP protocol conformance', () => {
           expect(services.memory.get(id, scope)?.memory.tags).toEqual([
             'dashboard',
             'deploy-docker',
-            'autenticación',
-            '部署',
+            'autenticacion',
           ]);
         }
       }
@@ -1593,7 +1600,7 @@ describe('MCP protocol conformance', () => {
       ['memory.session_start', 977],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1656],
+      ['memory.save', 1654],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
