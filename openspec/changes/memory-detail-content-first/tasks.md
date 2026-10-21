@@ -73,3 +73,9 @@ The user authorized implementation after mockup selection. This unit implements 
 - [x] Run applicable guard mutation checks and production build: 23 mutations caught and restored, build 5/5 successful.
 - [x] Finish final global typecheck, lint and regression sweep after the last controls.
 - [x] Inspect native authority and assess the final delivery candidate: medium, self-verification required, reviewDue false (under_budget); no new native review or approval is claimed.
+
+## Remaining Ficha units, delivered separately
+
+- [ ] Prompts: Ficha header/properties, sole exact Copy, primary agent Badge, tags and shared local PNG export; validate missing/deleted metadata, unsafe content, actions, clipboard and responsive UI before commit/push.
+- [ ] Judgments: Ficha with primary Source/Target panels and exact independent copies; preserve reason/evidence, pending-only opaque-id orphan action; no Share.
+- [ ] Consolidation: Ficha with primary summary/operations; preserve scope, timestamps, all links, per-op/run undo guards and error behavior; no Share.

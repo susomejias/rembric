@@ -113,6 +113,9 @@ const MARKDOWN_COMPONENTS: Components = {
       {children}
     </li>
   ),
+  input: ({ node: _node, ...attributes }) => (
+    <input {...attributes} aria-label={attributes.checked ? 'Completed task' : 'Incomplete task'} />
+  ),
   strong: ({ children }) => <strong className="font-medium text-primary">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   a: ({ children, href, node: _node, ...attributes }) => {

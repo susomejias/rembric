@@ -159,6 +159,16 @@ describe('DetailShare', () => {
     const radios = nodes.filter((node) => node.type === 'input' && node.props.type === 'radio');
     expect(radios).toHaveLength(0);
   });
+  it('uses 10px action and close controls inside the share dialog', async () => {
+    open();
+    await settle();
+    const controls = nodes.filter((node) => node.type === 'a' || node.type === 'button');
+    expect(controls).toHaveLength(2);
+    for (const control of controls) {
+      expect(control.props.className).toContain('rounded-[10px]');
+      expect(control.props.className).not.toContain('rounded-lg');
+    }
+  });
   it('prepares only when open and previews the actual PNG with measured dimensions and download fallback', async () => {
     expect(generate).not.toHaveBeenCalled();
     open();

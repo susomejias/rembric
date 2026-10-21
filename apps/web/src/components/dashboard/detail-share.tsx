@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/dialog';
 
 const buttonClass =
-  'inline-flex min-h-11 items-center justify-center rounded-lg border border-border px-4 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50';
+  'inline-flex min-h-11 items-center justify-center rounded-[10px] border border-border px-4 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50';
 type Prepared = DetailImage & {
   url: string;
   file: File;
@@ -259,7 +259,7 @@ export function DetailShare({ data }: { data: DetailShareData }) {
           <button
             type="button"
             aria-label="Close share dialog"
-            className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-lg border border-border bg-card focus-visible:outline-2 focus-visible:outline-primary"
+            className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-[10px] border border-border bg-card focus-visible:outline-2 focus-visible:outline-primary"
           >
             ×
           </button>

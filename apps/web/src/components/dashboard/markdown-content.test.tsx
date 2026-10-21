@@ -75,6 +75,26 @@ describe('MarkdownContent', () => {
     expect(view).toContain('uppercase');
     expect(view).toContain('hover:underline');
   });
+  it('labels both task states accessibly in views and image exports without changing their text', () => {
+    for (const imageExport of [false, true]) {
+      const html = renderToStaticMarkup(
+        <MarkdownContent
+          markdown={'- [x] Keep exact whitespace\n- [ ] Keep every link'}
+          imageExport={imageExport}
+        />,
+      );
+      const inputs = html.match(/<input\b[^>]*>/g);
+      expect(inputs).toHaveLength(2);
+      expect(inputs?.[0]).toContain('aria-label="Completed task"');
+      expect(inputs?.[0]).toContain('checked=""');
+      expect(inputs?.[1]).toContain('aria-label="Incomplete task"');
+      expect(inputs?.[1]).not.toContain('checked=""');
+      expect(inputs?.every((input) => input.includes('disabled=""'))).toBe(true);
+      expect(html).toContain('Keep exact whitespace');
+      expect(html).toContain('Keep every link');
+    }
+  });
+
   it('preserves one page h1 and the existing Markdown heading remapping', () => {
     const html = renderToStaticMarkup(
       <>
