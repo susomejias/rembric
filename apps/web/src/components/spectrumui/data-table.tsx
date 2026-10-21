@@ -1888,7 +1888,7 @@ export function DataTable<T>({
                         onClick={() => void copySelection()}
                         aria-label={`Copy ${selected.length} rows as markdown to the clipboard`}
                         className={cn(
-                          'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-current focus-visible:outline-hidden dark:hover:bg-black/10',
+                          'flex items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 text-sm font-medium hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-current focus-visible:outline-hidden dark:hover:bg-black/10',
                           PRESS,
                         )}
                       >
@@ -1939,7 +1939,7 @@ export function DataTable<T>({
                       onClick={() => setSelected([])}
                       aria-label="Clear selection"
                       className={cn(
-                        'grid size-7 place-items-center rounded-full opacity-60 hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-current',
+                        'grid size-7 place-items-center rounded-[10px] opacity-60 hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-current',
                         PRESS,
                       )}
                     >

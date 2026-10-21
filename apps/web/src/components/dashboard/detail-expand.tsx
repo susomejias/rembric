@@ -5,11 +5,13 @@ import { useId, useState, type ReactNode } from 'react';
 export function DetailExpand({
   label,
   accessibleLabel = label,
+  collapsedContent,
   children,
   className = '',
 }: {
   label: string;
   accessibleLabel?: string;
+  collapsedContent?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
@@ -29,6 +31,7 @@ export function DetailExpand({
           {label}
         </button>
       ) : null}
+      {!open ? collapsedContent : null}
       <div id={id} hidden={!open} className={className}>
         {children}
       </div>

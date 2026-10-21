@@ -11,6 +11,30 @@ vi.mock('react', async (original) => ({
   useState: () => [state.open, state.set],
 }));
 describe('DetailExpand', () => {
+  it('shows compact milestones only while collapsed and retains the complete expandable sequence', () => {
+    state.open = false;
+    const props = {
+      label: 'Show 97 more events',
+      collapsedContent: <span>Compact milestones</span>,
+      children: (
+        <ol>
+          <li>Started</li>
+          <li>Middle capture</li>
+          <li>Ended</li>
+        </ol>
+      ),
+    };
+    const closed = renderToStaticMarkup(DetailExpand(props));
+    expect(closed).toContain('Compact milestones');
+    expect(closed).toContain('Middle capture');
+    expect(closed).toContain('hidden=""');
+    state.open = true;
+    const expanded = renderToStaticMarkup(DetailExpand(props));
+    expect(expanded).not.toContain('Compact milestones');
+    expect(expanded).not.toContain('hidden=""');
+    expect(expanded).not.toContain('<button');
+    expect(expanded).toContain('Middle capture');
+  });
   it('keeps complete data mounted but hidden until expansion, with an accessible button', () => {
     state.open = false;
     const node = DetailExpand({
