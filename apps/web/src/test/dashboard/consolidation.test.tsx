@@ -65,9 +65,22 @@ describe('consolidation detail composition', () => {
       });
     }
     const html = await renderRunDetail('RUN-STRUCTURED');
-    expect(html).toContain('detail-layout');
+    expect(html).toContain('detail-layout detail-ficha');
+    expect(html).toContain('>Consolidation</a>');
+    expect(html).not.toContain('detail-actions-panel');
+    expect(html).not.toContain('>Share</button>');
+    expect(html).not.toContain('aria-label="Copy');
+    expect(html).toMatch(/<details[^>]*aria-label="Properties"/);
+    expect(html).not.toMatch(/<details[^>]*\bopen/);
     const article = html.slice(html.indexOf('<article'), html.indexOf('</article>'));
     expect(article).toContain('2 archived · 1 orphaned');
+    expect(article).toContain('aria-label="Operations"');
+    expect(article).toContain('aria-label="Operation OP-ACTIVE"');
+    expect(article).toContain('aria-label="Operation OP-TERMINAL"');
+    expect(article).toContain('aria-label="Operation OP-REVERTED"');
+    expect(article).not.toContain('<table');
+    expect(article).not.toContain('truncate');
+    expect(article).toContain('[&amp;_dt]:text-[var(--chart-2)]');
     expect(article).toContain('name="opId" value="OP-ACTIVE"');
     expect(article).not.toContain('name="opId" value="OP-TERMINAL"');
     expect(article).not.toContain('name="opId" value="OP-REVERTED"');
@@ -103,6 +116,7 @@ describe('consolidation detail composition', () => {
       expect(html).toContain('all ops reverted');
       expect(html).not.toContain('name="runId"');
       expect(html).not.toContain('name="opId"');
+      expect(html).not.toContain('ficha-actions');
     }
   });
 
@@ -111,6 +125,22 @@ describe('consolidation detail composition', () => {
     expect(html).toContain('NO OPERATION WAS RECORDED FOR THIS RUN');
     expect(html).toContain('all ops reverted');
     expect(html).not.toContain('name="runId"');
+    expect(html).not.toContain('ficha-actions');
+  });
+
+  it('retains whole-run eligibility for unreverted terminal operations without offering per-op undo', async () => {
+    createRepositories(t.handle.db).consolidation.insertOp({
+      id: 'TERMINAL-ONLY',
+      runId: 'RUN-STRUCTURED',
+      opType: 'prompt_purge',
+      affectedIds: [],
+      appliedAt: new Date(2_000),
+    });
+    const html = await renderRunDetail('RUN-STRUCTURED');
+    expect(html).toContain('name="runId" value="RUN-STRUCTURED"');
+    expect(html).not.toContain('name="opId"');
+    expect(html).toContain('terminal (not undoable)');
+    expect(html.match(/data-slot="alert-dialog-trigger"/g)).toHaveLength(1);
   });
 });
 
@@ -118,6 +148,8 @@ describe('consolidation run summary fallback', () => {
   it('renders a malformed stored summary escaped instead of throwing', async () => {
     const html = await renderRunDetail('RUN-MALFORMED');
     expect(html).toContain('{not json &lt;b&gt;raw&lt;/b&gt;');
+    expect(html).toMatch(/<pre tabindex="0"[^>]*whitespace-pre-wrap!/);
+    expect(html).toContain('wrap-anywhere!');
     expect(html).not.toContain('<b>raw</b>');
   });
 

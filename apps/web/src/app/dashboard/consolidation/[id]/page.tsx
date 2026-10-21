@@ -14,19 +14,7 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { shortId } from '@/components/dashboard/support';
-import {
-  DataBody,
-  DataHead,
-  DataTable,
-  DataTd,
-  DataTh,
-  DataTr,
-  MetaRow,
-  Pill,
-  SectionBar,
-  TableEmpty,
-  Time,
-} from '@/components/dashboard/ui';
+import { Pill, TableEmpty, Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -140,25 +128,43 @@ export default async function ConsolidationRunPage({
 
   const ops = repos.consolidation.adminListOps(id);
   const hasAnyActiveOps = ops.some((op) => op.revertedAt === null);
+  const scope = scopeLabel(repos, run.scope);
 
   return (
     <DetailLayout
+      presentation="ficha"
       title={`Consolidation run ${shortId(run.id)}`}
       backHref="/dashboard/consolidation"
-      backLabel="BACK TO CONSOLIDATION"
+      backLabel="Consolidation"
       contentLabel="Run summary and operations"
+      badges={
+        <>
+          <Pill tone="dim">{ops.length} operations</Pill>
+          <span className="ficha-byline">
+            in <b>{scope}</b>, started <Time value={run.startedAt} />
+          </span>
+        </>
+      }
       metadata={
-        <DetailDisclosure title="Details" inspector>
-          <dl className="detail-fields">
-            <MetaRow k="Started" v={<Time value={run.startedAt} />} mono />
-            <MetaRow k="Finished" v={<Time value={run.finishedAt} />} mono />
-            <MetaRow k="Scope" v={scopeLabel(repos, run.scope)} />
-            <MetaRow k="Ops" v={ops.length} />
+        <DetailDisclosure presentation="ficha" title="Properties">
+          <dl>
+            <dt>Started</dt>
+            <dd>
+              <Time value={run.startedAt} />
+            </dd>
+            <dt>Finished</dt>
+            <dd>
+              <Time value={run.finishedAt} />
+            </dd>
+            <dt>Scope</dt>
+            <dd>{scope}</dd>
+            <dt>Ops</dt>
+            <dd>{ops.length}</dd>
           </dl>
         </DetailDisclosure>
       }
       actionsLabel="Run actions"
-      actions={
+      primaryActions={
         hasAnyActiveOps ? (
           <ActionForm action={undoRun}>
             <CsrfField form={RUN_UNDO_FORM} />
@@ -170,7 +176,7 @@ export default async function ConsolidationRunPage({
               confirmLabel="UNDO ENTIRE RUN"
             >
               <Button type="button" variant="destructive" size="sm">
-                UNDO ENTIRE RUN
+                Undo entire run
               </Button>
             </ConfirmSubmit>
           </ActionForm>
@@ -182,92 +188,97 @@ export default async function ConsolidationRunPage({
         ) : null
       }
     >
-      <SectionBar name="Summary" />
-      <pre className="mb-6 rounded-2xl border border-border bg-card p-4 font-mono text-base leading-7 text-muted-foreground">
-        {formatRunSummary(run.summary)}
-      </pre>
-
-      <SectionBar name="Ops" />
-      {ops.length === 0 ? (
-        <TableEmpty>NO OPERATION WAS RECORDED FOR THIS RUN</TableEmpty>
-      ) : (
-        <DataTable>
-          <DataHead>
-            <DataTh>type</DataTh>
-            <DataTh>affected</DataTh>
-            <DataTh>created</DataTh>
-            <DataTh>reasoning</DataTh>
-            <DataTh>applied</DataTh>
-            <DataTh>action</DataTh>
-          </DataHead>
-          <DataBody>
-            {ops.map((op) => (
-              <DataTr key={op.id}>
-                <DataTd>
-                  <Pill tone={TERMINAL_OP_TYPES.has(op.opType) ? 'dim' : 'lime'}>{op.opType}</Pill>
-                </DataTd>
-                <DataTd className="font-mono text-xs">
-                  {op.affectedIds.length === 0
-                    ? '—'
-                    : op.affectedIds.map((memoryId) => (
+      <div className="space-y-8">
+        <section aria-label="Summary">
+          <h2 className="mb-4 text-xl font-semibold">Summary</h2>
+          <pre
+            tabIndex={0}
+            className="rounded-[16px] border border-border bg-card p-4 font-mono text-base leading-7 whitespace-pre-wrap! wrap-anywhere! text-muted-foreground"
+          >
+            {formatRunSummary(run.summary)}
+          </pre>
+        </section>
+        <section aria-label="Operations">
+          <h2 className="mb-4 text-xl font-semibold">Operations</h2>
+          {ops.length === 0 ? (
+            <TableEmpty>NO OPERATION WAS RECORDED FOR THIS RUN</TableEmpty>
+          ) : (
+            <ol className="space-y-4">
+              {ops.map((op) => (
+                <li
+                  key={op.id}
+                  aria-label={`Operation ${op.id}`}
+                  className="min-w-0 rounded-[16px] border border-border bg-card p-4 sm:p-5"
+                >
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <Pill tone={TERMINAL_OP_TYPES.has(op.opType) ? 'dim' : 'lime'}>
+                      {op.opType}
+                    </Pill>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      <Time value={op.appliedAt} />
+                    </span>
+                  </div>
+                  <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm [&_dt]:text-[var(--chart-2)] [&_dd]:min-w-0 [&_dd]:wrap-anywhere">
+                    <dt>Affected</dt>
+                    <dd className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs">
+                      {op.affectedIds.length === 0
+                        ? '—'
+                        : op.affectedIds.map((memoryId) => (
+                            <Link
+                              key={memoryId}
+                              href={`/dashboard/memories/${memoryId}`}
+                              className="text-primary underline-offset-4 hover:underline"
+                            >
+                              {shortId(memoryId)}
+                            </Link>
+                          ))}
+                    </dd>
+                    <dt>Created</dt>
+                    <dd className="font-mono text-xs">
+                      {op.createdId ? (
                         <Link
-                          key={memoryId}
-                          href={`/dashboard/memories/${memoryId}`}
-                          className="mr-2 text-primary hover:underline"
+                          href={`/dashboard/memories/${op.createdId}`}
+                          className="text-primary underline-offset-4 hover:underline"
                         >
-                          {shortId(memoryId)}
+                          {shortId(op.createdId)}
                         </Link>
-                      ))}
-                </DataTd>
-                <DataTd className="font-mono text-xs">
-                  {op.createdId ? (
-                    <Link
-                      href={`/dashboard/memories/${op.createdId}`}
-                      className="text-primary hover:underline"
-                    >
-                      {shortId(op.createdId)}
-                    </Link>
-                  ) : (
-                    '—'
-                  )}
-                </DataTd>
-                <DataTd className="max-w-[420px] truncate text-muted-foreground">
-                  {op.reasoning ?? '—'}
-                </DataTd>
-                <DataTd className="font-mono text-xs text-muted-foreground">
-                  <Time value={op.appliedAt} />
-                </DataTd>
-                <DataTd>
-                  {op.revertedAt !== null ? (
-                    <span className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
-                      reverted
-                    </span>
-                  ) : TERMINAL_OP_TYPES.has(op.opType) ? (
-                    <span className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
-                      terminal (not undoable)
-                    </span>
-                  ) : (
-                    <ActionForm action={undoOp}>
-                      <CsrfField form={OP_UNDO_FORM} />
-                      <input type="hidden" name="opId" value={op.id} />
-                      <ConfirmSubmit
-                        tone="warn"
-                        title="Revert this consolidation op?"
-                        description="Affected memories will return to their pre-op status. This is journaled and itself reversible."
-                        confirmLabel="UNDO OP"
-                      >
-                        <Button type="button" variant="outline" size="sm">
-                          UNDO OP
-                        </Button>
-                      </ConfirmSubmit>
-                    </ActionForm>
-                  )}
-                </DataTd>
-              </DataTr>
-            ))}
-          </DataBody>
-        </DataTable>
-      )}
+                      ) : (
+                        '—'
+                      )}
+                    </dd>
+                  </dl>
+                  <h3 className="mt-5 mb-2 text-sm font-medium">Reasoning</h3>
+                  <p className="text-base leading-7 whitespace-pre-wrap wrap-anywhere text-muted-foreground">
+                    {op.reasoning ?? '—'}
+                  </p>
+                  <div className="mt-4 border-t border-border pt-4">
+                    {op.revertedAt !== null ? (
+                      <span className="text-sm text-muted-foreground">reverted</span>
+                    ) : TERMINAL_OP_TYPES.has(op.opType) ? (
+                      <span className="text-sm text-muted-foreground">terminal (not undoable)</span>
+                    ) : (
+                      <ActionForm action={undoOp}>
+                        <CsrfField form={OP_UNDO_FORM} />
+                        <input type="hidden" name="opId" value={op.id} />
+                        <ConfirmSubmit
+                          tone="warn"
+                          title="Revert this consolidation op?"
+                          description="Affected memories will return to their pre-op status. This is journaled and itself reversible."
+                          confirmLabel="UNDO OP"
+                        >
+                          <Button type="button" variant="outline" size="sm">
+                            Undo op
+                          </Button>
+                        </ConfirmSubmit>
+                      </ActionForm>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      </div>
     </DetailLayout>
   );
 }
