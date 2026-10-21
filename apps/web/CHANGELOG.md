@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.30.1](https://github.com/susomejias/rembric/compare/server-v0.30.0...server-v0.30.1) (2026-10-21)
+
+
+### Features
+
+* **dashboard:** add compact Ficha session history and sharing ([50b3c64](https://github.com/susomejias/rembric/commit/50b3c64c240ada4ecae3fbf9b1e1d89079bfc042))
+* **dashboard:** add Ficha memory details and PNG sharing ([831e588](https://github.com/susomejias/rembric/commit/831e588612c9b3bdd3095eebfeee0eb13f444fe0))
+* **dashboard:** link prompt details and dismiss action menus ([59e587d](https://github.com/susomejias/rembric/commit/59e587da9a5123e0abd899791c5d5c00ecb066f8))
+* **dashboard:** unify content-first detail layouts ([0260725](https://github.com/susomejias/rembric/commit/0260725d600e5319857298b5de0eece5a8cc58d6))
+
+
+### Bug Fixes
+
+* **dashboard:** align shared detail controls ([f14dce0](https://github.com/susomejias/rembric/commit/f14dce03ff96290b0b43bb40e90af5624a44ef53))
+
 ## [0.30.0](https://github.com/susomejias/rembric/compare/server-v0.29.4...server-v0.30.0) (2026-10-20)
 
 
