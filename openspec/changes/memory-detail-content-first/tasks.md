@@ -53,3 +53,19 @@ Final browser checks passed outside click, Escape, trigger focus, CSRF/id form a
 - [x] Exercise clipboard, ellipsis disclosure, confirm and archive dialog in the isolated visual environment.
 
 Browser checks at 320px and 1440px passed. Five judgments start collapsed; their expanded desktop body measures 384px with 615px of scrollable content and all five entries retained. Mobile uses document flow. Axe reported zero violations in the memory detail at both widths; contrast checks for clipped rows and the non-text ellipsis remained incomplete. Copy preserved the title, archive cancellation preserved active status, and confirmation incremented the count.
+
+## Approved Ficha and Constelación redesign
+
+The user authorized implementation after mockup selection. This unit implements memory and the shared renderer first. The operator later authorized committing the verified unit on main without push, then applying the same layout and operations to the remaining details. Share stays limited to memories, sessions and prompts; the later views are not part of this first commit.
+
+- [x] Capture failing regression tests for memory header actions, tags, review states and in-place history/judgment expansion.
+- [x] Implement memory Ficha with shared composition, exact copying, preserved metadata and guarded actions.
+- [x] Implement a real local Constelación PNG export and accessible dialog, with full-content sizing, privacy control, supported native share/download/image clipboard and honest errors.
+- [x] Reuse ReactMarkdown with GFM and DOM-to-PNG capture; keep PNG styling in component-local Tailwind utilities.
+- [x] Verify tables, nested lists, task lists, strike, footnotes, code, links and Unicode in real PNG files, with explicit HTML/image/size-limit errors.
+- [x] Keep Judgments and Properties initially collapsed and expose active-only Archive directly beside the other header actions.
+- [x] Verify memory desktop/mobile, clipboard/confirmation behavior and actual PNG files in the isolated browser.
+- [ ] Capture session regressions and implement Ficha with safe curated/RAW content and existing semantic tables.
+- [ ] Connect session share with independently toggleable Summary, Project name and Stats.
+- [ ] Verify session desktop/mobile and actual PNG contents with Stats on/off.
+- [ ] Run focused tests, applicable guard mutation checks, typecheck, lint, full web regression, build and native review.

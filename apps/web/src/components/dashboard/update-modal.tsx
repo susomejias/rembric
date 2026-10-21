@@ -4,11 +4,10 @@ import type { UpdateInfo } from '@rembric/core';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 
 import { ActionForm, type FormAction } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
-import { MARKDOWN_COMPONENTS } from '@/components/dashboard/markdown-panel';
+import { MarkdownContent } from '@/components/dashboard/markdown-content';
 import { Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import {
@@ -112,7 +111,7 @@ export function UpdateModal({
           </div>
           <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground [&_a]:break-all">
             {info.changelog.trim().length > 0 ? (
-              <ReactMarkdown components={MARKDOWN_COMPONENTS}>{info.changelog}</ReactMarkdown>
+              <MarkdownContent markdown={info.changelog} />
             ) : (
               <p>(no changelog provided)</p>
             )}

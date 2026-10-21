@@ -20,3 +20,9 @@ The approved memory detail establishes a readable content-first layout. Sessions
 ## Impact
 
 Five detail pages, one shared layout, dismissible actions, opt-in Markdown presentation, scoped CSS and focused regression tests. Existing queries, ordering, server actions, authorization, CSRF guards, confirmation tones and redirect behavior remain unchanged. No backend, authentication, package or dependency changes.
+
+## Approved redesign follow-up
+
+The selected Ficha mockups now supersede the prior presentation for memory and session only: identifying metadata and actions in the header, prominent memory tags, normal-flow context rail and a mobile bottom action bar. Existing tables, data, exact clipboard payloads and mutation safeguards remain. Prompt, judgment and consolidation are not redesigned in this unit.
+
+Both details gain real client-side PNG sharing using the chosen Constelación composition. Images use one format, 1080 pixels wide with a minimum height of 1080, and grow to fit complete content without a format selector. Memory tags sit above content; session statistics can be hidden independently. The preview shows the generated PNG, not a simulated export. Reuse the shared ReactMarkdown renderer for views and PNG cards. The operator approved remark-gfm and html-to-image to support GFM and DOM-to-PNG capture instead of duplicating Markdown layout. Preserve the approved image styling; no new backend endpoint or upload is planned.

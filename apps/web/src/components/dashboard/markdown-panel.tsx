@@ -1,9 +1,9 @@
 'use client';
 
-import { Check, Copy } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
+import type { ReactNode } from 'react';
 
+import { DetailCopy } from './detail-copy';
+import { MarkdownContent } from './markdown-content';
 import { LABEL } from './ui';
 
 export function MarkdownPanel({
@@ -15,6 +15,7 @@ export function MarkdownPanel({
   action,
   presentation = 'panel',
   hideTitle = false,
+  hideToolbar = false,
 }: {
   eyebrow?: string;
   title: string;
@@ -24,18 +25,8 @@ export function MarkdownPanel({
   action?: ReactNode;
   presentation?: 'panel' | 'reading';
   hideTitle?: boolean;
+  hideToolbar?: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = (): void => {
-    void navigator.clipboard.writeText(copyMarkdown).then(() => {
-      setCopied(true);
-      window.setTimeout(() => {
-        setCopied(false);
-      }, 1600);
-    });
-  };
-
   return (
     <section
       className={
@@ -44,86 +35,31 @@ export function MarkdownPanel({
           : 'mb-5 rounded-2xl border border-border bg-card'
       }
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
-        <div>
-          {eyebrow ? (
-            <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
-              <span
-                aria-hidden="true"
-                className="inline-block size-[0.55em] shrink-0 rounded-full bg-primary"
-              />
-              {eyebrow}
-            </p>
-          ) : null}
-          <h2 className={hideTitle ? 'sr-only' : 'mt-1 text-base font-medium'}>{title}</h2>
+      {!hideToolbar ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
+          <div>
+            {eyebrow ? (
+              <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
+                <span
+                  aria-hidden="true"
+                  className="inline-block size-[0.55em] shrink-0 rounded-full bg-primary"
+                />
+                {eyebrow}
+              </p>
+            ) : null}
+            <h2 className={hideTitle ? 'sr-only' : 'mt-1 text-base font-medium'}>{title}</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            {action}
+            <DetailCopy text={copyMarkdown} label={copyLabel} />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {action}
-          <button
-            type="button"
-            onClick={copy}
-            aria-label={copyLabel}
-            className={`flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary ${LABEL}`}
-          >
-            {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
-            {copied ? 'Copied' : copyLabel}
-          </button>
-        </div>
-      </div>
+      ) : (
+        <h2 className="sr-only">{title}</h2>
+      )}
       <div className="px-5 py-5 text-sm leading-7 text-foreground md:px-6">
-        <ReactMarkdown components={MARKDOWN_COMPONENTS}>{markdown}</ReactMarkdown>
+        <MarkdownContent markdown={markdown} />
       </div>
     </section>
   );
 }
-
-export const MARKDOWN_COMPONENTS = {
-  h1: ({ children }: { children?: ReactNode }) => (
-    <h3 className="mb-3 text-lg font-medium tracking-[-.03em] text-foreground">{children}</h3>
-  ),
-  h2: ({ children }: { children?: ReactNode }) => (
-    <h3 className={`mt-5 mb-3 text-primary ${LABEL}`}>{children}</h3>
-  ),
-  h3: ({ children }: { children?: ReactNode }) => (
-    <h4 className="mt-4 mb-2 text-sm font-medium text-foreground">{children}</h4>
-  ),
-  p: ({ children }: { children?: ReactNode }) => (
-    <p className="mb-3 leading-7 last:mb-0">{children}</p>
-  ),
-  ul: ({ children }: { children?: ReactNode }) => (
-    <ul className="mb-3 ml-5 list-disc space-y-1">{children}</ul>
-  ),
-  ol: ({ children }: { children?: ReactNode }) => (
-    <ol className="mb-3 ml-5 list-decimal space-y-1">{children}</ol>
-  ),
-  li: ({ children }: { children?: ReactNode }) => <li className="leading-6">{children}</li>,
-  strong: ({ children }: { children?: ReactNode }) => (
-    <strong className="font-medium text-primary">{children}</strong>
-  ),
-  em: ({ children }: { children?: ReactNode }) => <em className="italic">{children}</em>,
-  a: ({ children, href }: { children?: ReactNode; href?: string }) => (
-    <a
-      href={href}
-      className="text-primary underline-offset-4 hover:underline"
-      rel="noreferrer noopener"
-    >
-      {children}
-    </a>
-  ),
-  code: ({ children }: { children?: ReactNode }) => (
-    <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[.8em] text-foreground">
-      {children}
-    </code>
-  ),
-  pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="mb-3 overflow-x-auto rounded-xl border border-border bg-muted p-3 font-mono text-xs leading-5">
-      {children}
-    </pre>
-  ),
-  hr: () => <hr className="my-4 border-border" />,
-  blockquote: ({ children }: { children?: ReactNode }) => (
-    <blockquote className="mb-3 border-l-2 border-primary/30 pl-4 text-foreground">
-      {children}
-    </blockquote>
-  ),
-};

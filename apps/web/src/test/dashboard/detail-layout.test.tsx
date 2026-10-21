@@ -4,6 +4,33 @@ import { describe, expect, it } from 'vitest';
 import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 
 describe('shared detail layout', () => {
+  it('opts into Ficha with compositional header slots and a single action region', () => {
+    const html = renderToStaticMarkup(
+      <DetailLayout
+        presentation="ficha"
+        title="Record"
+        backHref="/dashboard/memories"
+        backLabel="Memories"
+        topic="topic/key"
+        badges={<span>Byline</span>}
+        tags={<span>Tags slot</span>}
+        primaryActions={<button>Copy</button>}
+        actions={<button>Archive</button>}
+        actionsLabel="Record actions"
+        metadata={<p>Properties slot</p>}
+        secondary={<p>History slot</p>}
+      >
+        <p>Document</p>
+      </DetailLayout>,
+    );
+    expect(html).toContain('detail-ficha');
+    expect(html).toContain('topic/key');
+    expect(html.indexOf('Byline')).toBeLessThan(html.indexOf('Tags slot'));
+    expect(html.indexOf('Document')).toBeLessThan(html.indexOf('History slot'));
+    expect(html.indexOf('History slot')).toBeLessThan(html.indexOf('Properties slot'));
+    expect(html.match(/>Copy</g)).toHaveLength(1);
+    expect(html.match(/>Archive</g)).toHaveLength(1);
+  });
   it('renders one header, notices, inspector before prose and secondary disclosures afterward', () => {
     const html = renderToStaticMarkup(
       <DetailLayout

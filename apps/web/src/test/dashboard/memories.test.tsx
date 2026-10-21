@@ -282,13 +282,13 @@ describe('memory detail hub', () => {
     expect(after(await renderMemoryDetail(withoutSource.id), 'Source', 200)).toContain('—');
   });
 
-  it('shows last_seen_at in the metadata block', async () => {
+  it('shows last_seen_at as the last recalled timestamp', async () => {
     const row = services.memory.save(
       { type: 'feedback', title: 'last-seen-marker', content: 'last-seen-marker' },
       defaultProjectScope(t.handle),
     );
     const html = await renderMemoryDetail(row.id);
-    expect(html).toMatch(/Last seen[\s\S]{0,200}data-rembric-ts/);
+    expect(html).toMatch(/Last recalled[\s\S]{0,200}data-rembric-ts/);
   });
 
   it('renders replaces ids as links to their memory detail pages', async () => {
@@ -317,11 +317,11 @@ describe('memory detail hub', () => {
     );
 
     const supersededHtml = await renderMemoryDetail(predecessor.id);
-    expect(supersededHtml).toContain('Superseded by');
+    expect(supersededHtml).toContain('Replaced on');
     expect(supersededHtml).toContain(`href="/dashboard/memories/${successor.id}"`);
 
     const activeHtml = await renderMemoryDetail(successor.id);
-    expect(activeHtml).not.toContain('Superseded by');
+    expect(activeHtml).not.toContain('Replaced on');
   });
 
   it('orders the predecessors table chronologically regardless of replaces order', async () => {
@@ -371,8 +371,8 @@ describe('memory detail hub', () => {
     );
 
     const empty = await renderMemoryDetail(hub.id);
-    expect(empty).toContain('JUDGMENTS (0)');
-    expect(empty).toContain('NO JUDGMENTS TOUCH THIS MEMORY');
+    expect(empty).toMatch(/aria-label="Judgments"[^>]*><summary[^>]*>Judgments\s*<span>0<\/span>/);
+    expect(empty).toContain('No judgments touch this memory.');
 
     const relation = relations.compare({
       sourceId: hub.id,
@@ -384,7 +384,7 @@ describe('memory detail hub', () => {
     });
 
     const html = await renderMemoryDetail(hub.id);
-    expect(html).toContain('JUDGMENTS (1)');
+    expect(html).toMatch(/aria-label="Judgments"[^>]*><summary[^>]*>Judgments\s*<span>1<\/span>/);
     expect(judgmentLinkOrder(html)).toContain(relation.id);
     expect(html).toContain(`href="/dashboard/memories/${target.id}"`);
     expect(html).toContain('supersedes');
@@ -393,7 +393,7 @@ describe('memory detail hub', () => {
     expect(fromTarget).toContain('superseded_by');
   });
 
-  it('a stale row renders the NEEDS REVIEW flash and pill', async () => {
+  it('a stale row renders the overdue review notice with the sole Confirm action', async () => {
     const DAY = 24 * 60 * 60 * 1000;
     const stale = new MemoryService(repos, t.handle.db, () => new Date(Date.now() - 120 * DAY));
     const row = stale.save(
@@ -402,8 +402,9 @@ describe('memory detail hub', () => {
     );
 
     const html = await renderMemoryDetail(row.id);
-    expect(html).toContain('NEEDS REVIEW');
-    expect(html).toContain('>needs review<');
+    expect(html).toContain('Not re-affirmed since');
+    expect(html).toContain('Overdue by');
+    expect(html.match(/>Confirm<\/button>/g)).toHaveLength(1);
     expect(html).not.toContain('>CONFIRMED<');
   });
 });
