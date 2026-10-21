@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.30.2](https://github.com/susomejias/rembric/compare/server-v0.30.1...server-v0.30.2) (2026-10-21)
+
+
+### Features
+
+* **dashboard:** add Ficha prompt details and sharing ([2d1c749](https://github.com/susomejias/rembric/commit/2d1c749cbbabf01c3315758d0120e7bc4b5ada8d))
+* **dashboard:** apply Ficha to judgment comparisons ([ac46afd](https://github.com/susomejias/rembric/commit/ac46afdf0d23304c32a96e265543b5c68d96be3b))
+* **dashboard:** present consolidation runs as Ficha operation cards ([b040e1e](https://github.com/susomejias/rembric/commit/b040e1efa40bce7ab3d204950ab3f6b5fc335f08))
+* **dashboard:** redesign judgment detail as a visual comparison ([8515703](https://github.com/susomejias/rembric/commit/8515703f6be69e560fd3bceae4ee050ba2af503b))
+
 ## [0.30.1](https://github.com/susomejias/rembric/compare/server-v0.30.0...server-v0.30.1) (2026-10-21)
 
 
