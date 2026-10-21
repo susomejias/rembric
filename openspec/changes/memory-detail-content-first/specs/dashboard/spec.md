@@ -43,7 +43,7 @@ Status, agent, project, revoked-token suffix, timestamps, duration and counts SH
 
 ### Requirement: Judgment detail SHALL keep both compared memories primary
 
-Source and Target SHALL remain two primary sections, each with a visible memory title, Markdown content, its own copy control and memory link. Status, verdict, confidence, actor, timestamps and the opaque judgmentId SHALL remain in the inspector. Reason SHALL remain escaped plain text; evidence SHALL remain escaped pretty JSON with malformed-value fallback, and both MAY use secondary disclosures. Pending-only orphan actions SHALL retain danger confirmation and guarded submission of row.judgmentId even though the route uses row.id. Closed judgments SHALL retain their nonactionable explanation.
+Source and Target SHALL remain two primary sections, each with a visible memory title, Markdown content, its own copy control and memory link. Status, verdict, confidence, actor, timestamps and the opaque judgmentId SHALL remain available in initially collapsed Ficha Properties. Reason and Evidence SHALL precede Properties in the rail, expand in normal flow and wrap long literal values without page overflow. Pending orphan control SHALL be direct; closed details SHALL NOT render an empty floating action bar. Judgment details SHALL NOT offer Share. Reason SHALL remain escaped plain text; evidence SHALL remain escaped pretty JSON with malformed-value fallback, and both MAY use secondary disclosures. Pending-only orphan actions SHALL retain danger confirmation and guarded submission of row.judgmentId even though the route uses row.id. Closed judgments SHALL retain their nonactionable explanation.
 
 #### Scenario: Reviewing a pending comparison
 

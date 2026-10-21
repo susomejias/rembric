@@ -39,7 +39,9 @@ export function MarkdownPanel({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-5 py-4 md:px-6">
           <div>
             {eyebrow ? (
-              <p className={`flex items-center gap-2 text-primary ${LABEL}`}>
+              <p
+                className={`flex items-center gap-2 text-primary ${LABEL} in-[.detail-ficha]:font-sans in-[.detail-ficha]:text-sm in-[.detail-ficha]:normal-case in-[.detail-ficha]:tracking-normal`}
+              >
                 <span
                   aria-hidden="true"
                   className="inline-block size-[0.55em] shrink-0 rounded-full bg-primary"
@@ -47,7 +49,15 @@ export function MarkdownPanel({
                 {eyebrow}
               </p>
             ) : null}
-            <h2 className={hideTitle ? 'sr-only' : 'mt-1 text-base font-medium'}>{title}</h2>
+            <h2
+              className={
+                hideTitle
+                  ? 'sr-only'
+                  : 'mt-1 text-base font-medium in-[.detail-ficha]:text-xl in-[.detail-ficha]:font-semibold'
+              }
+            >
+              {title}
+            </h2>
           </div>
           <div className="flex items-center gap-2">
             {action}

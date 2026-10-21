@@ -31,6 +31,45 @@ describe('shared detail layout', () => {
     expect(html.match(/>Copy</g)).toHaveLength(1);
     expect(html.match(/>Archive</g)).toHaveLength(1);
   });
+  it.each(['primary', 'overflow'] as const)(
+    'keeps a Ficha action region with only %s controls',
+    (kind) => {
+      const control = <button>Applicable action</button>;
+      const html = renderToStaticMarkup(
+        <DetailLayout
+          presentation="ficha"
+          title="Record"
+          backHref="/dashboard/judgments"
+          backLabel="Judgments"
+          actionsLabel="Record actions"
+          metadata={<p>Properties</p>}
+          primaryActions={kind === 'primary' ? control : undefined}
+          actions={kind === 'overflow' ? control : undefined}
+        >
+          <p>Compared content</p>
+        </DetailLayout>,
+      );
+      expect(html).toContain('role="group" aria-label="Record actions"');
+      expect(html.match(/>Applicable action<\/button>/g)).toHaveLength(1);
+    },
+  );
+  it('omits an empty Ficha action bar when there are no applicable controls', () => {
+    const html = renderToStaticMarkup(
+      <DetailLayout
+        presentation="ficha"
+        title="Closed record"
+        backHref="/dashboard/judgments"
+        backLabel="Judgments"
+        actionsLabel="Judgment actions"
+        metadata={<p>Properties</p>}
+      >
+        <p>Compared content remains available</p>
+      </DetailLayout>,
+    );
+    expect(html).toContain('Compared content remains available');
+    expect(html).not.toContain('ficha-actions');
+    expect(html).not.toContain('aria-label="Judgment actions"');
+  });
   it('renders one header, notices, inspector before prose and secondary disclosures afterward', () => {
     const html = renderToStaticMarkup(
       <DetailLayout

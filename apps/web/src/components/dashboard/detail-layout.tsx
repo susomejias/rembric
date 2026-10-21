@@ -65,14 +65,16 @@ export function DetailLayout({
             {metadata}
           </aside>
         </div>
-        <div
-          className="ficha-actions gap-2 max-[760px]:gap-1 max-[760px]:[&_button]:px-2"
-          role="group"
-          aria-label={actionsLabel}
-        >
-          {primaryActions}
-          {actions ? <DetailActions label={actionsLabel}>{actions}</DetailActions> : null}
-        </div>
+        {primaryActions || actions ? (
+          <div
+            className="ficha-actions gap-2 max-[760px]:gap-1 max-[760px]:[&_button]:px-2"
+            role="group"
+            aria-label={actionsLabel}
+          >
+            {primaryActions}
+            {actions ? <DetailActions label={actionsLabel}>{actions}</DetailActions> : null}
+          </div>
+        ) : null}
       </Page>
     );
   }

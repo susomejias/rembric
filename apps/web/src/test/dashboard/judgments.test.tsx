@@ -1,5 +1,12 @@
 import { deriveTitle, RelationsService } from '@rembric/core';
 import { createRepositories, memory, memoryRelations, type NewMemory } from '@rembric/db';
+import {
+  Children,
+  isValidElement,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTestDb, type TestDb } from '../db';
@@ -7,6 +14,8 @@ import { seedProject } from '../default-project';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
 
+import type { DetailLayout } from '@/components/dashboard/detail-layout';
+import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { PAGE_SIZE } from '@/components/dashboard/support';
 import type { Services } from '@/lib/services';
 
@@ -80,18 +89,50 @@ function relationChipClass(html: string, label: string): string {
 }
 
 describe('judgment detail composition', () => {
+  it('keeps both independent original copy payloads including whitespace', async () => {
+    const source = '  # Source body\n\nKeep source spacing.\n';
+    const target = '\n# Target body\n\nKeep target spacing.  ';
+    t.handle.raw.prepare('UPDATE memory SET content = ? WHERE id = ?').run(source, 'RS');
+    t.handle.raw.prepare('UPDATE memory SET content = ? WHERE id = ?').run(target, 'RT');
+    const page = (await import('../../app/dashboard/judgments/[id]/page')).default;
+    const element: ReactElement<ComponentProps<typeof DetailLayout>> = await page({
+      params: Promise.resolve({ id: 'REL-MALFORMED' }),
+    });
+    const content = element.props.children;
+    if (!isValidElement<{ children: ReactNode }>(content)) throw new Error('Missing comparison');
+    const panels = Children.toArray(content.props.children).filter(
+      (child) =>
+        isValidElement<ComponentProps<typeof MarkdownPanel>>(child) && child.type === MarkdownPanel,
+    );
+    expect(panels).toHaveLength(2);
+    for (const [index, panel] of panels.entries()) {
+      if (!isValidElement<ComponentProps<typeof MarkdownPanel>>(panel))
+        throw new Error('Missing panel');
+      expect(panel.props.markdown).toBe(index === 0 ? source : target);
+      expect(panel.props.copyMarkdown ?? panel.props.markdown).toBe(index === 0 ? source : target);
+      expect(panel.props.copyLabel).toBe(index === 0 ? 'Copy source' : 'Copy target');
+    }
+  });
+
   it('keeps both titled primary panels and posts the opaque judgment identifier, not the route id', async () => {
     const html = await renderJudgmentDetail('REL-MALFORMED');
-    expect(html).toContain('detail-layout');
+    expect(html).toContain('detail-layout detail-ficha');
+    expect(html).toContain('>Judgments</a>');
+    expect(html).not.toContain('detail-actions-panel');
+    expect(html).not.toContain('>Share</button>');
+    expect(html).toContain('>Mark orphaned</button>');
+    for (const title of ['Reason', 'Evidence', 'Properties'])
+      expect(html).toMatch(new RegExp(`<details[^>]*aria-label="${title}"`));
+    expect(html).not.toMatch(/<details[^>]*\bopen/);
     expect(html.match(/<h1\b/g)).toHaveLength(1);
-    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium">widget RS<\/h2>/);
-    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium">widget RT<\/h2>/);
+    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium[^"]*">widget RS<\/h2>/);
+    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium[^"]*">widget RT<\/h2>/);
     expect(html).toContain('href="/dashboard/memories/RS"');
     expect(html).toContain('href="/dashboard/memories/RT"');
     expect(html).toContain('name="judgmentId" value="J-MALFORMED"');
     expect(html).not.toContain('name="judgmentId" value="REL-MALFORMED"');
     expect(html).toContain('aria-haspopup="dialog"');
-    expect(html.indexOf('Judgment id')).toBeLessThan(html.indexOf('Copy source'));
+    expect(html.indexOf('Copy source')).toBeLessThan(html.indexOf('Judgment id'));
     expect(html.indexOf('Copy target')).toBeLessThan(html.indexOf('Reason</summary>'));
   });
 
@@ -104,6 +145,7 @@ describe('judgment detail composition', () => {
       const html = await renderJudgmentDetail('REL-MALFORMED');
       expect(html).toContain('this judgment is closed');
       expect(html).not.toContain('name="judgmentId"');
+      expect(html).not.toContain('ficha-actions');
       expect(html).toContain('&lt;b&gt;plain reason&lt;/b&gt;');
       expect(html).not.toContain('<b>plain reason</b>');
     },
@@ -114,6 +156,8 @@ describe('judgment evidence fallback', () => {
   it('renders a malformed stored evidence value escaped instead of throwing', async () => {
     const html = await renderJudgmentDetail('REL-MALFORMED');
     expect(html).toContain('{not json &lt;b&gt;raw&lt;/b&gt;');
+    expect(html).toMatch(/<pre tabindex="0"[^>]*whitespace-pre-wrap!/);
+    expect(html).toContain('wrap-anywhere!');
     expect(html).not.toContain('<b>raw</b>');
   });
 

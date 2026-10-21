@@ -7,7 +7,7 @@ import { CsrfField } from '@/components/dashboard/csrf-field';
 import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId } from '@/components/dashboard/support';
-import { MetaRow, Pill, StatusPill, Time } from '@/components/dashboard/ui';
+import { Pill, StatusPill, Time } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -55,42 +55,63 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
 
   return (
     <DetailLayout
+      presentation="ficha"
       title={`Judgment ${shortId(row.id)}`}
       backHref="/dashboard/judgments"
-      backLabel="BACK TO JUDGMENTS"
+      backLabel="Judgments"
       contentLabel="Compared memories"
-      badges={<StatusPill status={row.status} />}
+      badges={
+        <>
+          <StatusPill status={row.status} />
+          {row.relation !== null ? <Pill tone="lime">{row.relation}</Pill> : null}
+          <span className="ficha-byline">
+            Created <Time value={row.createdAt} />
+          </span>
+        </>
+      }
       metadata={
-        <DetailDisclosure title="Details" inspector>
-          <dl className="detail-fields">
-            <MetaRow k="Judgment id" v={row.judgmentId} mono />
-            <MetaRow k="Status" v={<StatusPill status={row.status} />} />
-            <MetaRow
-              k="Verdict"
-              v={
-                <Pill tone={row.relation === null ? 'dim' : 'lime'}>
-                  {row.relation ?? 'pending'}
-                </Pill>
-              }
-            />
-            <MetaRow k="Confidence" v={row.confidence !== null ? row.confidence.toFixed(2) : '—'} />
-            <MetaRow
-              k="Marked by"
-              v={`${row.markedByKind ?? '—'}${row.markedByActor ? ` · ${row.markedByActor}` : ''}`}
-            />
-            <MetaRow k="Created" v={<Time value={row.createdAt} />} mono />
-            <MetaRow k="Judged" v={<Time value={row.judgedAt} />} mono />
+        <DetailDisclosure presentation="ficha" title="Properties">
+          <dl>
+            <dt>Judgment id</dt>
+            <dd>{row.judgmentId}</dd>
+            <dt>Status</dt>
+            <dd>
+              <StatusPill status={row.status} />
+            </dd>
+            <dt>Verdict</dt>
+            <dd>
+              <Pill tone={row.relation === null ? 'dim' : 'lime'}>{row.relation ?? 'pending'}</Pill>
+            </dd>
+            <dt>Confidence</dt>
+            <dd>{row.confidence !== null ? row.confidence.toFixed(2) : '—'}</dd>
+            <dt>Marked by</dt>
+            <dd>{`${row.markedByKind ?? '—'}${row.markedByActor ? ` · ${row.markedByActor}` : ''}`}</dd>
+            <dt>Created</dt>
+            <dd>
+              <Time value={row.createdAt} />
+            </dd>
+            <dt>Judged</dt>
+            <dd>
+              <Time value={row.judgedAt} />
+            </dd>
           </dl>
         </DetailDisclosure>
       }
       secondary={
         <>
-          <DetailDisclosure title="Reason">
-            <p className="text-base text-muted-foreground">{row.reason ?? '—'}</p>
+          <DetailDisclosure presentation="ficha" title="Reason">
+            <p className="text-base whitespace-pre-wrap wrap-anywhere text-muted-foreground">
+              {row.reason ?? '—'}
+            </p>
           </DetailDisclosure>
-          <DetailDisclosure title="Evidence">
+          <DetailDisclosure presentation="ficha" title="Evidence">
             {evidence !== null ? (
-              <pre className="font-mono text-sm leading-6 text-muted-foreground">{evidence}</pre>
+              <pre
+                tabIndex={0}
+                className="font-mono text-sm leading-6 whitespace-pre-wrap! wrap-anywhere! text-muted-foreground"
+              >
+                {evidence}
+              </pre>
             ) : (
               <p className="text-muted-foreground">—</p>
             )}
@@ -98,7 +119,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
         </>
       }
       actionsLabel="Judgment actions"
-      actions={
+      primaryActions={
         row.status === 'pending' ? (
           <ActionForm action={orphanJudgment}>
             <CsrfField form={ORPHAN_FORM} />
@@ -110,7 +131,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
               confirmLabel="MARK ORPHANED"
             >
               <Button type="button" variant="destructive" size="sm">
-                MARK ORPHANED
+                Mark orphaned
               </Button>
             </ConfirmSubmit>
           </ActionForm>
@@ -124,37 +145,39 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
         ) : null
       }
     >
-      <MarkdownPanel
-        presentation="reading"
-        eyebrow="Source"
-        title={row.sourceTitle}
-        markdown={row.sourceContent}
-        copyLabel="Copy source"
-        action={
-          <Link
-            href={`/dashboard/memories/${row.sourceId}`}
-            className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
-          >
-            {shortId(row.sourceId)} →
-          </Link>
-        }
-      />
+      <div className="space-y-8">
+        <MarkdownPanel
+          presentation="reading"
+          eyebrow="Source"
+          title={row.sourceTitle}
+          markdown={row.sourceContent}
+          copyLabel="Copy source"
+          action={
+            <Link
+              href={`/dashboard/memories/${row.sourceId}`}
+              className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
+            >
+              {shortId(row.sourceId)} →
+            </Link>
+          }
+        />
 
-      <MarkdownPanel
-        presentation="reading"
-        eyebrow="Target"
-        title={row.targetTitle}
-        markdown={row.targetContent}
-        copyLabel="Copy target"
-        action={
-          <Link
-            href={`/dashboard/memories/${row.targetId}`}
-            className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
-          >
-            {shortId(row.targetId)} →
-          </Link>
-        }
-      />
+        <MarkdownPanel
+          presentation="reading"
+          eyebrow="Target"
+          title={row.targetTitle}
+          markdown={row.targetContent}
+          copyLabel="Copy target"
+          action={
+            <Link
+              href={`/dashboard/memories/${row.targetId}`}
+              className="font-mono text-[11px] uppercase tracking-[.14em] text-primary hover:underline"
+            >
+              {shortId(row.targetId)} →
+            </Link>
+          }
+        />
+      </div>
     </DetailLayout>
   );
 }

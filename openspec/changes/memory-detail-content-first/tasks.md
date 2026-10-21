@@ -76,6 +76,6 @@ The user authorized implementation after mockup selection. This unit implements 
 
 ## Remaining Ficha units, delivered separately
 
-- [ ] Prompts: Ficha header/properties, sole exact Copy, primary agent Badge, tags and shared local PNG export; validate missing/deleted metadata, unsafe content, actions, clipboard and responsive UI before commit/push.
+- [x] Prompts: Ficha header/properties, sole exact Copy, primary agent Badge, tags and shared local PNG export; validated and published as 2d1c749c with hooks.
 - [ ] Judgments: Ficha with primary Source/Target panels and exact independent copies; preserve reason/evidence, pending-only opaque-id orphan action; no Share.
 - [ ] Consolidation: Ficha with primary summary/operations; preserve scope, timestamps, all links, per-op/run undo guards and error behavior; no Share.
