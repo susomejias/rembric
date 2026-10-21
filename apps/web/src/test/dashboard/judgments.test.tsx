@@ -1,5 +1,11 @@
 import { deriveTitle, RelationsService } from '@rembric/core';
-import { createRepositories, memory, memoryRelations, type NewMemory } from '@rembric/db';
+import {
+  createRepositories,
+  memory,
+  memoryRelations,
+  RELATION_VALUES,
+  type NewMemory,
+} from '@rembric/db';
 import {
   Children,
   isValidElement,
@@ -14,8 +20,8 @@ import { seedProject } from '../default-project';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
 
-import type { DetailLayout } from '@/components/dashboard/detail-layout';
-import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
+import { DetailCopy } from '@/components/dashboard/detail-copy';
+import { MarkdownContent } from '@/components/dashboard/markdown-content';
 import { PAGE_SIZE } from '@/components/dashboard/support';
 import type { Services } from '@/lib/services';
 
@@ -88,6 +94,14 @@ function relationChipClass(html: string, label: string): string {
   return match[1]!;
 }
 
+function descendants(node: ReactNode): ReactElement<{ children?: ReactNode }>[] {
+  return Children.toArray(node).flatMap((child) =>
+    isValidElement<{ children?: ReactNode }>(child)
+      ? [child, ...descendants(child.props.children)]
+      : [],
+  );
+}
+
 describe('judgment detail composition', () => {
   it('keeps both independent original copy payloads including whitespace', async () => {
     const source = '  # Source body\n\nKeep source spacing.\n';
@@ -95,45 +109,61 @@ describe('judgment detail composition', () => {
     t.handle.raw.prepare('UPDATE memory SET content = ? WHERE id = ?').run(source, 'RS');
     t.handle.raw.prepare('UPDATE memory SET content = ? WHERE id = ?').run(target, 'RT');
     const page = (await import('../../app/dashboard/judgments/[id]/page')).default;
-    const element: ReactElement<ComponentProps<typeof DetailLayout>> = await page({
+    const element: ReactElement<{ children: ReactNode }> = await page({
       params: Promise.resolve({ id: 'REL-MALFORMED' }),
     });
-    const content = element.props.children;
-    if (!isValidElement<{ children: ReactNode }>(content)) throw new Error('Missing comparison');
-    const panels = Children.toArray(content.props.children).filter(
-      (child) =>
-        isValidElement<ComponentProps<typeof MarkdownPanel>>(child) && child.type === MarkdownPanel,
-    );
-    expect(panels).toHaveLength(2);
-    for (const [index, panel] of panels.entries()) {
-      if (!isValidElement<ComponentProps<typeof MarkdownPanel>>(panel))
-        throw new Error('Missing panel');
-      expect(panel.props.markdown).toBe(index === 0 ? source : target);
-      expect(panel.props.copyMarkdown ?? panel.props.markdown).toBe(index === 0 ? source : target);
-      expect(panel.props.copyLabel).toBe(index === 0 ? 'Copy source' : 'Copy target');
+    const nodes = descendants(element.props.children);
+    const copies = nodes.filter((node) => node.type === DetailCopy);
+    const bodies = nodes.filter((node) => node.type === MarkdownContent);
+    expect(copies).toHaveLength(2);
+    expect(bodies).toHaveLength(2);
+    for (const [index, copy] of copies.entries()) {
+      if (!isValidElement<ComponentProps<typeof DetailCopy>>(copy)) throw new Error('Missing copy');
+      const body = bodies[index];
+      if (!isValidElement<ComponentProps<typeof MarkdownContent>>(body))
+        throw new Error('Missing body');
+      expect(copy.props.text).toBe(index === 0 ? source : target);
+      expect(copy.props.label).toBe(index === 0 ? 'Copy source' : 'Copy target');
+      expect(body.props.markdown).toBe(copy.props.text);
     }
   });
 
   it('keeps both titled primary panels and posts the opaque judgment identifier, not the route id', async () => {
     const html = await renderJudgmentDetail('REL-MALFORMED');
-    expect(html).toContain('detail-layout detail-ficha');
-    expect(html).toContain('>Judgments</a>');
+    expect(html).toContain('detail-layout judgment-detail');
+    expect(html).toContain('Back to judgments');
     expect(html).not.toContain('detail-actions-panel');
     expect(html).not.toContain('>Share</button>');
     expect(html).toContain('>Mark orphaned</button>');
-    for (const title of ['Reason', 'Evidence', 'Properties'])
+    expect(html).toContain('>Compare memories</h1>');
+    expect(html).not.toContain('>Judgment REL-MALFORMED</h1>');
+    expect(html).not.toContain('class="ficha-rail"');
+    expect(html).toContain('aria-label="Verdict"');
+    expect(html).toContain('aria-label="Reason"');
+    expect(html).toContain('aria-label="Source memory"');
+    expect(html).toContain('aria-label="Target memory"');
+    expect(html).toContain('min-[900px]:grid-cols-[minmax(0,1fr)_56px_minmax(0,1fr)]');
+    for (const title of ['Evidence', 'Properties'])
       expect(html).toMatch(new RegExp(`<details[^>]*aria-label="${title}"`));
     expect(html).not.toMatch(/<details[^>]*\bopen/);
     expect(html.match(/<h1\b/g)).toHaveLength(1);
-    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium[^"]*">widget RS<\/h2>/);
-    expect(html).toMatch(/<h2 class="mt-1 text-base font-medium[^"]*">widget RT<\/h2>/);
+    expect(html).toMatch(/<h2\b[^>]*><a[^>]*>widget RS/);
+    expect(html).toMatch(/<h2\b[^>]*><a[^>]*>widget RT/);
     expect(html).toContain('href="/dashboard/memories/RS"');
     expect(html).toContain('href="/dashboard/memories/RT"');
     expect(html).toContain('name="judgmentId" value="J-MALFORMED"');
     expect(html).not.toContain('name="judgmentId" value="REL-MALFORMED"');
     expect(html).toContain('aria-haspopup="dialog"');
     expect(html.indexOf('Copy source')).toBeLessThan(html.indexOf('Judgment id'));
-    expect(html.indexOf('Copy target')).toBeLessThan(html.indexOf('Reason</summary>'));
+    expect(html.indexOf('aria-label="Verdict"')).toBeLessThan(
+      html.indexOf('aria-label="Source memory"'),
+    );
+    expect(html.indexOf('Evidence</summary>')).toBeLessThan(
+      html.indexOf('aria-label="Source memory"'),
+    );
+    expect(html.indexOf('Copy target')).toBeLessThan(html.indexOf('Properties</summary>'));
+    expect(html).not.toContain('bg-card px-6 py-[18px]');
+    expect(html).not.toContain('Reason</summary>');
   });
 
   it.each(['judged', 'orphaned'] as const)(
@@ -150,6 +180,86 @@ describe('judgment detail composition', () => {
       expect(html).not.toContain('<b>plain reason</b>');
     },
   );
+});
+
+describe('approved judgment verdicts', () => {
+  const labels = {
+    supersedes: 'Supersedes',
+    conflicts_with: 'Conflicts with',
+    related: 'Related',
+    compatible: 'Compatible',
+    scoped: 'Scoped',
+    not_conflict: 'Not a conflict',
+  };
+  it.each(RELATION_VALUES)(
+    'presents %s with its actual direction and without inventing a lifecycle',
+    async (relation) => {
+      t.handle.raw
+        .prepare(
+          'UPDATE memory_relations SET relation = ?, status = ?, confidence = ?, reason = ? WHERE id = ?',
+        )
+        .run(relation, 'judged', 0.91, 'Recorded plain reason', 'REL-MALFORMED');
+      const html = await renderJudgmentDetail('REL-MALFORMED');
+      expect(html).toContain(`>${labels[relation]}</h2>`);
+      const progress = html.match(/<div[^>]*role="progressbar"[^>]*>/)?.[0];
+      expect(progress).toContain('aria-label="Confidence"');
+      expect(progress).toContain('aria-valuenow="91"');
+      expect(html).toContain('style="transform:translateX(-9%)"');
+      expect(html).not.toContain('<meter');
+      expect(html).toContain('Recorded plain reason');
+      expect(html).not.toContain('Mark orphaned');
+      expect(html).not.toContain('now outdated');
+      expect(html).not.toContain('>Superseded</span>');
+      expect(html).not.toContain('project ·');
+      expect(html).not.toContain('Judged by agent');
+      if (relation === 'supersedes') expect(html).toContain('Source supersedes Target.');
+      if (relation === 'scoped') expect(html).toContain('Scoped relationship recorded');
+      if (relation === 'not_conflict') expect(html).toContain('judged not to conflict');
+    },
+  );
+  it.each([0, 1])(
+    'shows recorded boundary confidence %s rather than hiding it',
+    async (confidence) => {
+      t.handle.raw
+        .prepare('UPDATE memory_relations SET confidence = ? WHERE id = ?')
+        .run(confidence, 'REL-MALFORMED');
+      const html = await renderJudgmentDetail('REL-MALFORMED');
+      const progress = html.match(/<div[^>]*role="progressbar"[^>]*>/)?.[0];
+      expect(progress).toContain(`aria-valuenow="${confidence * 100}"`);
+      expect(html).toContain(`style="transform:translateX(-${100 - confidence * 100}%)"`);
+      expect(html).toContain(`>${confidence.toFixed(2)}</span>`);
+    },
+  );
+  it.each(['pending', 'judged', 'orphaned'] as const)(
+    'does not invent verdict, confidence or actor for a null %s row',
+    async (status) => {
+      t.handle.raw
+        .prepare('UPDATE memory_relations SET status = ? WHERE id = ?')
+        .run(status, 'REL-MALFORMED');
+      const html = await renderJudgmentDetail('REL-MALFORMED');
+      expect(html).toContain(
+        status === 'pending' ? '>Awaiting verdict</h2>' : '>No verdict recorded</h2>',
+      );
+      expect(html).not.toContain('<meter');
+      expect(html).not.toContain('role="progressbar"');
+      expect(html).not.toContain('Marked by agent');
+      expect(html).not.toContain('claude-code');
+      expect(html).not.toContain('>Compatible</h2>');
+      expect(html).toContain('No reason recorded.');
+    },
+  );
+  it('keeps recorded agent, creator kind, time and unsafe content literal', async () => {
+    t.handle.raw
+      .prepare(
+        'UPDATE memory_relations SET marked_by_kind = ?, marked_by_actor = ?, judged_at = ? WHERE id = ?',
+      )
+      .run('agent_topic_key', '<b>actor</b>', 2000, 'REL-MALFORMED');
+    const html = await renderJudgmentDetail('REL-MALFORMED');
+    expect(html).toContain('agent_topic_key');
+    expect(html).toContain('&lt;b&gt;actor&lt;/b&gt;');
+    expect(html).not.toContain('<b>actor</b>');
+    expect(html).toContain('1970-01-01T00:00:02.000Z');
+  });
 });
 
 describe('judgment evidence fallback', () => {

@@ -220,7 +220,7 @@ export function CommandFrame({
 
   return (
     <CommandBar totals={totals} version={version} account={account} updater={updater}>
-      <main className="mx-auto w-full max-w-6xl animate-in px-4 pt-28 pb-12 fade-in duration-300 motion-reduce:animate-none sm:px-6">
+      <main className="mx-auto w-full max-w-6xl animate-in px-4 pt-28 pb-12 fade-in duration-300 has-[>.judgment-detail]:pb-4 motion-reduce:animate-none sm:px-6">
         {children}
       </main>
       <footer className="mx-auto w-full max-w-6xl px-4 pb-8 sm:px-6">

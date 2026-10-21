@@ -79,3 +79,15 @@ The user authorized implementation after mockup selection. This unit implements 
 - [x] Prompts: Ficha header/properties, sole exact Copy, primary agent Badge, tags and shared local PNG export; validated and published as 2d1c749c with hooks.
 - [x] Judgments: Ficha with primary Source/Target panels and exact independent copies; reason/evidence and opaque-id orphan action verified, published as ac46afdf; no Share.
 - [ ] Consolidation: Ficha with primary summary/operations; preserve scope, timestamps, all links, per-op/run undo guards and error behavior; no Share.
+
+## Approved Judgment comparison iteration
+
+- [x] Obtain mockup approval before implementing the comparison, retaining the app identity.
+- [x] Cover all six stored verdicts and pending/judged/orphaned/null states with deterministic labels and truthful source-to-target wording.
+- [x] Keep reason visible, evidence initially collapsed in Verdict, and shared Properties below both memory cards without a surrounding card.
+- [x] Replace the native meter with official shadcn Radix Progress, using installed dependencies and preserving accessible zero/one/null values.
+- [x] Preserve exact Markdown/copy payloads, links, handler text, opaque judgmentId, CSRF and danger confirmation; add no query or invented endpoint metadata.
+- [x] Verify 36 browser views at 1440/820/390/320, plus long literal values, exact native clipboard and own-fixture cancel/orphan actions; axe0 and no overflow.
+- [x] Measure footer gap 68px before and 36px after; control memory page retains original 48px bottom padding.
+- [x] Complete 12 detected/restored mutations, global regression, typecheck/lint/OpenSpec and production-build gates (job129 exit0).
+- [ ] Commit/push main with hooks, await green CI, then release through release-please.
