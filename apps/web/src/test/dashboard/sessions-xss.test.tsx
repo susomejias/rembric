@@ -1,9 +1,20 @@
 import { agentSessions, prompts, projects, tokens } from '@rembric/db';
+import {
+  Children,
+  isValidElement,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createTestDb, type TestDb } from '../db';
 
 import { buildDashboardServices, installViewMocks, renderToHtml, servicesRef } from './harness';
+
+import type { DetailLayout } from '@/components/dashboard/detail-layout';
+import { RowTooltip } from '@/components/dashboard/row-tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 installViewMocks('/dashboard/sessions');
 
@@ -64,7 +75,9 @@ afterEach(() => t.cleanup());
 
 async function renderSessionDetail(id: string): Promise<string> {
   const page = (await import('../../app/dashboard/sessions/[id]/page')).default;
-  return renderToHtml(await page({ params: Promise.resolve({ id }) }));
+  return renderToHtml(
+    <TooltipProvider>{await page({ params: Promise.resolve({ id }) })}</TooltipProvider>,
+  );
 }
 
 async function renderSessionsList(): Promise<string> {
@@ -76,7 +89,29 @@ describe('dashboard sessions XSS regression (#252)', () => {
   it('escapes a malicious prompt tag on the session-detail page', async () => {
     const html = await renderSessionDetail('S1');
     expect(html).not.toContain(MALICIOUS_TAG);
-    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    const page = (await import('../../app/dashboard/sessions/[id]/page')).default;
+    const element: ReactElement<ComponentProps<typeof DetailLayout>> = await page({
+      params: Promise.resolve({ id: 'S1' }),
+    });
+    const details: ReactNode[] = [];
+    function visit(node: ReactNode) {
+      for (const child of Children.toArray(node)) {
+        if (!isValidElement<{ children?: ReactNode }>(child)) continue;
+        if (child.type === RowTooltip)
+          details.push((child.props as ComponentProps<typeof RowTooltip>).tooltip);
+        visit(child.props.children);
+      }
+    }
+    visit(element.props.secondary);
+    const tooltip = await renderToHtml(
+      <>
+        {details.map((detail, index) => (
+          <div key={index}>{detail}</div>
+        ))}
+      </>,
+    );
+    expect(tooltip).not.toContain(MALICIOUS_TAG);
+    expect(tooltip).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 
   it('escapes a legacy (pre-regex) project slug on the session-list page', async () => {
@@ -97,7 +132,9 @@ describe('dashboard sessions XSS regression (#252)', () => {
   it('escapes a raw (uncurated) summary inside the <pre> boundary', async () => {
     const html = await renderSessionDetail('S-RAW-XSS');
     expect(html).toContain('>RAW<');
-    expect(html).toMatch(/<pre[^>]*>[\s\S]*&lt;script&gt;alert\(1\)&lt;\/script&gt;[\s\S]*<\/pre>/);
+    expect(html).toMatch(
+      /<pre[^>]*tabindex="0"[^>]*>[\s\S]*&lt;script&gt;alert\(1\)&lt;\/script&gt;[\s\S]*<\/pre>/,
+    );
     expect(html).not.toContain(MALICIOUS_SCRIPT);
     expect(html).toContain('**Fixed it.**');
     expect(html).not.toContain('<strong>Fixed it.</strong>');

@@ -65,7 +65,11 @@ The user authorized implementation after mockup selection. This unit implements 
 - [x] Verify tables, nested lists, task lists, strike, footnotes, code, links and Unicode in real PNG files, with explicit HTML/image/size-limit errors.
 - [x] Keep Judgments and Properties initially collapsed and expose active-only Archive directly beside the other header actions.
 - [x] Verify memory desktop/mobile, clipboard/confirmation behavior and actual PNG files in the isolated browser.
-- [ ] Capture session regressions and implement Ficha with safe curated/RAW content and existing semantic tables.
-- [ ] Connect session share with independently toggleable Summary, Project name and Stats.
-- [ ] Verify session desktop/mobile and actual PNG contents with Stats on/off.
-- [ ] Run focused tests, applicable guard mutation checks, typecheck, lint, full web regression, build and native review.
+- [x] Capture session regressions and implement Ficha with safe curated/RAW content and one chronological History of prompts, memories and reliable stored milestones.
+- [x] Verify compact History at 100+ captures, first-two/last-three expansion, stable chronological ordering and direct guarded lifecycle actions.
+- [x] Connect session share with independently toggleable Summary, Project name and Stats.
+- [x] Verify session desktop/mobile and actual PNG contents with Stats on/off.
+- [x] Correct shared shadcn control radii without changing intentional pills, avatars or the approved PNG artwork.
+- [x] Run applicable guard mutation checks and production build: 23 mutations caught and restored, build 5/5 successful.
+- [x] Finish final global typecheck, lint and regression sweep after the last controls.
+- [x] Inspect native authority and assess the final delivery candidate: medium, self-verification required, reviewDue false (under_budget); no new native review or approval is claimed.
