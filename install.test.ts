@@ -908,9 +908,8 @@ describe('opencode installer verifications', () => {
     const installed = join(home, '.config', 'opencode', 'plugins', 'rembric.ts');
     const mod = (await import(installed)) as Record<string, unknown>;
     expect(typeof mod.RembricPlugin).toBe('function');
-    // opencode invokes EVERY named export with the plugin ctx, so a leaked helper
-    // crashes on load.
-    expect(Object.keys(mod)).toEqual(['RembricPlugin']);
+    expect(mod.default).toEqual({ id: 'rembric.lifecycle', setup: expect.any(Function) });
+    expect(Object.keys(mod)).toEqual(['RembricPlugin', 'default']);
   });
 
   it('every file the install copies is removed by the uninstall', () => {
