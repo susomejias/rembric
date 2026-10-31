@@ -1,6 +1,6 @@
 // x-release-please-start-version
-// @rembric-plugin-version 0.35.0
-const MCP_BRIDGE_VERSION = '0.35.0';
+// @rembric-plugin-version 0.36.0
+const MCP_BRIDGE_VERSION = '0.36.0';
 // x-release-please-end
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
