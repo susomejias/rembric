@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.3](https://github.com/susomejias/rembric/compare/server-v0.30.2...server-v0.30.3) (2026-10-31)
+
+
+### Features
+
+* **opencode-plugin:** load under opencode 2.x via a default V2 plugin export ([6078a6b](https://github.com/susomejias/rembric/commit/6078a6b768f9bc1656c1d32b456bb05422c2b7c2))
+
 ## [0.30.2](https://github.com/susomejias/rembric/compare/server-v0.30.1...server-v0.30.2) (2026-10-21)
 
 
