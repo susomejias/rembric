@@ -14,12 +14,13 @@ intentionally exposes no native tools so the surface cannot drift.
 
 Credentials live in ``${HERMES_HOME:-~/.hermes}/.env``, written by
 Hermes itself via the manifest's ``requires_env`` flow at install time.
-Hermes pre-loads that file into ``os.environ`` before the plugin module
-imports. The bridge receives the same values through its explicit
-``mcp_servers.rembric.env`` mapping.
+The provider resolves the active profile through ``agent.secret_scope.get_secret``
+during initialization and retains that binding on the instance. Missing scoped
+APIs require updating Hermes; there is no process-environment fallback. The bridge
+receives its values through its explicit ``mcp_servers.rembric.env`` mapping.
 
 Project slug cascade (first valid match wins): ``<cwd>/.rembric``
-``PROJECT_SLUG`` → ``REMBRIC_PROJECT_SLUG`` env → degraded silent skip.
+``PROJECT_SLUG`` → scoped ``REMBRIC_PROJECT_SLUG`` → diagnostic and skip.
 Failures degrade silently (single-line stderr diagnostic) and never abort
 the host session.
 """
@@ -32,10 +33,10 @@ import re
 import sys
 import threading
 from abc import ABC, abstractmethod
-from contextlib import suppress
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-from urllib.error import HTTPError, URLError
+from typing import Any, cast
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -189,10 +190,6 @@ def _valid_slug(candidate: str | None) -> str | None:
     return candidate if _SLUG_RE.match(candidate) else None
 
 
-def _slug_from_env() -> str | None:
-    return _valid_slug(os.environ.get("REMBRIC_PROJECT_SLUG"))
-
-
 def _slug_from_dotrembric(cwd: str) -> str | None:
     rembric_path = Path(cwd) / ".rembric"
     try:
@@ -204,16 +201,9 @@ def _slug_from_dotrembric(cwd: str) -> str | None:
     return _valid_slug(pairs.get("PROJECT_SLUG"))
 
 
-def _resolve_slug(cwd: str) -> str | None:
-    """Return the first valid slug from the local marker or environment."""
-    for source in (
-        lambda: _slug_from_dotrembric(cwd),
-        _slug_from_env,
-    ):
-        candidate = source()
-        if candidate:
-            return candidate
-    return None
+def _resolve_slug(cwd: str, profile_slug: str | None = None) -> str | None:
+    """Return the first valid slug from the local marker or scoped default."""
+    return _slug_from_dotrembric(cwd) or _valid_slug(profile_slug)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +213,25 @@ def _resolve_slug(cwd: str) -> str | None:
 
 def _stderr(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
+
+
+def _scoped_settings() -> tuple[str, str, str | None] | None:
+    try:
+        from agent.secret_scope import get_secret  # type: ignore[import-not-found]
+
+        base = get_secret("REMBRIC_SERVER_URL")
+        token = get_secret("REMBRIC_API_TOKEN")
+        slug = get_secret("REMBRIC_PROJECT_SLUG")
+    except ImportError:
+        _stderr("[rembric] scoped secrets API unavailable; update Hermes; skipping requests")
+        return None
+    except Exception:
+        _stderr("[rembric] profile secrets unavailable; skipping requests")
+        return None
+    if not base or not token:
+        _stderr("[rembric] missing profile REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping requests")
+        return None
+    return base, token, slug
 
 
 def _http_url(base: str, path: str) -> str | None:
@@ -235,12 +244,12 @@ def _api_request(
     slug: str,
     path: str,
     body: dict | None,
+    token: str | None,
     timeout: int = _API_TIMEOUT_SEC,
 ) -> dict | None:
     """POST JSON to ``${base}/api/<slug>${path}``, returning the parsed JSON
     response body on 2xx, or ``None`` on any failure (never raises — the
     provider must not crash the host session)."""
-    token = os.environ.get("REMBRIC_API_TOKEN")
     if not base or not token or not slug:
         _stderr(f"[rembric] missing base/token/slug; skipping POST {path}")
         return None
@@ -248,26 +257,20 @@ def _api_request(
     if url is None:
         _stderr("[rembric] server URL must use HTTP(S); skipping request")
         return None
-    data = json.dumps(body or {}).encode("utf-8")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    req = Request(url, data=data, headers=headers, method="POST")
     try:
+        data = json.dumps(body or {}).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        req = Request(url, data=data, headers=headers, method="POST")
         with urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
     except HTTPError as err:
-        detail = ""
-        with suppress(Exception):
-            detail = err.read().decode("utf-8", errors="replace")
-        _stderr(f"[rembric] POST {path} failed: {err} body={detail}")
+        _stderr(f"[rembric] POST failed: HTTP {err.code}")
         return None
-    except (URLError, TimeoutError) as err:
-        _stderr(f"[rembric] POST {path} failed: {err}")
-        return None
-    except Exception as err:  # noqa: BLE001 — provider must not crash the host
-        _stderr(f"[rembric] POST {path} failed: {err!r}")
+    except Exception:
+        _stderr("[rembric] POST failed; request skipped")
         return None
     # urlopen already raised on non-2xx; a non-JSON body still counts as success ({}).
     if not raw:
@@ -283,10 +286,11 @@ def _api_post(
     slug: str,
     path: str,
     body: dict | None,
+    token: str | None,
     timeout: int = _API_TIMEOUT_SEC,
 ) -> bool:
     """POST JSON to ``${base}/api/<slug>${path}``. Return True on 2xx."""
-    return _api_request(base, slug, path, body, timeout) is not None
+    return _api_request(base, slug, path, body, token, timeout) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -299,18 +303,18 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
 
     Sessions: initialize → POST /api/<slug>/sessions; on_pre_compress → POST
     /sessions/<id>/summary; on_session_end → POST /sessions/<id>/end.
-    Memory-touching lifecycle methods (``prefetch``, ``system_prompt_block``,
-    ``sync_turn``, ``on_memory_write``) are no-ops — the agent uses the
-    MCP bridge for memory tool access.
+    Recall and turn hooks use the HTTP API; agent-callable memory tools use
+    the separately configured MCP bridge.
 
-    Credentials come exclusively from ``os.environ``, which Hermes populates
-    from ``${HERMES_HOME:-~/.hermes}/.env`` before this module imports (via
-    the ``requires_env`` install flow). The provider does not manage
-    credential storage — no ``get_config_schema``, no ``save_config``.
+    Credentials resolve exclusively through Hermes' scoped ``get_secret`` API
+    at initialization and stay bound on this instance. The provider does not
+    manage credential storage or fall back to process environment.
     """
 
     def __init__(self) -> None:
         self._base: str | None = None
+        self._token: str | None = None
+        self._spawn_context_thread: Callable[..., threading.Thread] | None = None
         self._slug: str | None = None
         self._session_id: str | None = None
         self._cwd: str | None = None
@@ -347,29 +351,45 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         return "rembric"
 
     def is_available(self) -> bool:
-        base = os.environ.get("REMBRIC_SERVER_URL")
-        token = os.environ.get("REMBRIC_API_TOKEN")
+        settings = (self._base, self._token, self._slug) if self._initialized else _scoped_settings()
+        if settings is None:
+            return False
+        base, token, _ = settings
         if not base or not token:
             return False
         url = _http_url(base, "/healthz")
         if url is None:
             return False
-        req = Request(
-            url,
-            method="GET",
-            headers={"Authorization": f"Bearer {token}"},
-        )
         try:
+            req = Request(
+                url,
+                method="GET",
+                headers={"Authorization": f"Bearer {token}"},
+            )
             with urlopen(req, timeout=_HEALTHZ_TIMEOUT_SEC) as resp:
                 return 200 <= resp.status < 300
         except Exception:
             return False
 
     def initialize(self, session_id: str, **kwargs: Any) -> None:
-        self._base = os.environ.get("REMBRIC_SERVER_URL")
+        self._base = self._token = self._slug = None
+        self._initialized = False
+        settings = _scoped_settings()
+        if settings is None:
+            return
+        try:
+            from agent.memory_provider import spawn_context_thread  # type: ignore[import-not-found]
+
+            if not callable(spawn_context_thread):
+                raise ImportError
+        except Exception:
+            _stderr("[rembric] context thread API unavailable; update Hermes; skipping requests")
+            return
+        self._spawn_context_thread = cast(Callable[..., threading.Thread], spawn_context_thread)
+        self._base, self._token, profile_slug = settings
         cwd = kwargs.get("cwd") or os.getcwd()
         self._cwd = cwd
-        self._slug = _resolve_slug(cwd)
+        self._slug = _resolve_slug(cwd, profile_slug)
         self._session_id = session_id
         self._initialized = True
         # Only a primary context creates a session row, so subagent/cron runs
@@ -414,6 +434,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             slug,
             "/sessions",
             {"id": session_id, "cwd": cwd, "agent": "hermes"},
+            self._token,
         )
         created = response.get("created") if response is not None else None
         if first_ensure_of_process:
@@ -422,7 +443,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._process_resumed = isinstance(created, bool) and not created
         self._session_created[session_id] = isinstance(created, bool) and created
         if response is not None and first_ensure:
-            _api_post(base, slug, f"/sessions/{session_id}/resume", {})
+            _api_post(base, slug, f"/sessions/{session_id}/resume", {}, self._token)
 
     def get_tool_schemas(self) -> list[dict]:
         return []
@@ -555,6 +576,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._slug,
             "/memory/recall",
             {"query": query, "limit": _RECALL_LIMIT},
+            self._token,
         )
         if response is None:
             return None
@@ -585,7 +607,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
                 {"role": "assistant", "content": assistant},
             ]
         )
-        base, slug, session_id = self._base, self._slug, self._session_id
+        base, slug, session_id, token = self._base, self._slug, self._session_id, self._token
 
         def _sync() -> None:
             # Bounded so a hung POST can't wedge the lock forever.
@@ -607,17 +629,24 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
                         slug,
                         f"/sessions/{session_id}/summary",
                         body,
+                        token,
                     )
-                self._post_turn_report(base, slug, session_id, used_tools, messages)
+                self._post_turn_report(base, slug, session_id, used_tools, messages, token)
             finally:
                 if acquired:
                     self._sync_lock.release()
 
-        threading.Thread(target=_sync, daemon=True).start()
+        try:
+            if self._spawn_context_thread is None:
+                raise RuntimeError
+            self._spawn_context_thread(_sync, name="rembric-sync", daemon=True).start()
+        except Exception:
+            _stderr("[rembric] context worker unavailable; skipping turn sync")
         return None
 
     def _post_turn_report(
-        self, base: str, slug: str, session_id: str, used_tools: bool, messages: list
+        self, base: str, slug: str, session_id: str, used_tools: bool, messages: list,
+        token: str | None,
     ) -> None:
         turn_body: dict[str, Any] = {"usedTools": used_tools}
         if session_id not in self._turn_title_sent:
@@ -625,7 +654,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             if title:
                 turn_body["title"] = title
                 self._turn_title_sent.add(session_id)
-        response = _api_request(base, slug, f"/sessions/{session_id}/turn", turn_body)
+        response = _api_request(base, slug, f"/sessions/{session_id}/turn", turn_body, token)
         lines = response.get("lines") if response is not None else None
         if isinstance(lines, list):
             text_lines = [line for line in lines if isinstance(line, str)]
@@ -660,6 +689,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._slug,
             f"/sessions/{self._session_id}/summary",
             {"summary": transcript, "final": False},
+            self._token,
         )
         return ""
 
@@ -695,6 +725,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._slug,
             f"/sessions/{self._session_id}/end",
             body,
+            self._token,
         )
         self._forget_session_state(self._session_id)
         self._reset_turn_state()
@@ -764,6 +795,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
                 self._slug,
                 f"/sessions/{old_id}/end",
                 {},
+                self._token,
             )
         if old_id and old_id != new_session_id:
             self._forget_session_state(old_id)

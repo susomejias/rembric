@@ -66,7 +66,7 @@ class LifecycleTest(unittest.TestCase):
         target.write_text(json.dumps({"canary": "local-file"}))
         self.mod.os.environ["REMBRIC_SERVER_URL"] = base
         with patch.object(self.mod, "urlopen", wraps=self.mod.urlopen) as opened:
-            self.assertIsNone(self.mod._api_request(base, "myproj", "/sessions", {}))
+            self.assertIsNone(self.mod._api_request(base, "myproj", "/sessions", {}, "tok-XXXX"))
             self.assertFalse(self._provider().is_available())
             self.assertEqual(opened.call_count, 0)
 
@@ -392,7 +392,7 @@ class LifecycleTest(unittest.TestCase):
     def test_2xx_with_non_json_body_is_treated_as_success(self, mock_urlopen: MagicMock) -> None:
         mock_urlopen.return_value = _FakeResponse(b"OK")
         self.assertTrue(
-            self.mod._api_post("http://server.example.com:8787", "myproj", "/sessions", {"id": "x"})
+            self.mod._api_post("http://server.example.com:8787", "myproj", "/sessions", {"id": "x"}, "tok-XXXX")
         )
 
 

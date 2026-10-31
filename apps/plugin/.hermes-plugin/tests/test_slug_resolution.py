@@ -30,14 +30,14 @@ class SlugCascadeTest(unittest.TestCase):
     def test_dotrembric_wins_over_env(self) -> None:
         (self.tmp_path / "cwd" / ".rembric").write_text("PROJECT_SLUG=gamma\n")
         mod = self._plugin(REMBRIC_PROJECT_SLUG="alpha")
-        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "gamma")
+        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd"), "alpha"), "gamma")
 
     def test_env_wins_when_no_dotrembric(self) -> None:
         mod = self._plugin(
             REMBRIC_PROJECT_SLUG="alpha",
             REMBRIC_SERVER_URL="https://memory.example.com/mcp/delta",
         )
-        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "alpha")
+        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd"), "alpha"), "alpha")
 
     def test_dotrembric_wins_over_url(self) -> None:
         (self.tmp_path / "cwd" / ".rembric").write_text("PROJECT_SLUG=gamma\n")
@@ -57,7 +57,7 @@ class SlugCascadeTest(unittest.TestCase):
             "PROJECT_SLUG=Has_Underscores\n"  # invalid: caps + underscore
         )
         mod = self._plugin(REMBRIC_PROJECT_SLUG="gamma")
-        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd")), "gamma")
+        self.assertEqual(mod._resolve_slug(str(self.tmp_path / "cwd"), "gamma"), "gamma")
 
     def test_url_path_is_ignored_when_slug_is_invalid(self) -> None:
         mod = self._plugin(

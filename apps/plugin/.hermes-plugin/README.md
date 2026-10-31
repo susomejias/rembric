@@ -67,7 +67,7 @@ memory:
   provider: rembric
 ```
 
-The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes plugins install rembric`). Hermes loads that file for the provider; the explicit `env` map forwards the values to the MCP bridge. The bridge and provider resolve a per-directory `.rembric` file first, then `REMBRIC_PROJECT_SLUG`; if neither is valid, lifecycle POSTs are skipped and the bridge uses path-less `/mcp`.
+Configure these settings for each active Hermes profile. The provider resolves them through Hermes' `agent.secret_scope.get_secret` API; the explicit `env` map configures the separate MCP bridge. Both prefer a valid per-directory `.rembric` slug. Without a valid slug, the provider skips requests with a diagnostic; the bridge uses path-less `/mcp`.
 
 ## Environment variables
 
@@ -80,11 +80,11 @@ The three `${REMBRIC_*}` env vars come from `~/.hermes/.env` (written by `hermes
 
 ### Where credentials live
 
-All three vars live in **`${HERMES_HOME:-~/.hermes}/.env`** — single source of truth. The flow:
+Hermes owns credential storage, normally the active profile's `${HERMES_HOME}/.env`, populated by the manifest's `requires_env` prompts. The provider resolves `REMBRIC_SERVER_URL`, `REMBRIC_API_TOKEN` and the default slug through `agent.secret_scope.get_secret` during initialization, then retains the server, token and resolved slug on that provider instance. Later hooks and session switches do not re-read credentials. Background summary/turn requests capture the binding before dispatch through Hermes' `spawn_context_thread`, so another profile or an exited secret scope cannot redirect them. Identical slugs on different servers or with different tokens remain independent.
 
-1. `hermes plugins install rembric` reads the manifest's `requires_env:` list, prompts the user for each value not already set in the parent shell, and writes the answers via `save_env_value` to `~/.hermes/.env`.
-2. Subsequent Hermes launches read `~/.hermes/.env` into `os.environ` before plugins import. The provider sees the values via `os.environ.get(...)`.
-3. The `mcp_servers.rembric.env` map explicitly forwards those values to the bundled MCP bridge.
+**Compatibility change:** the provider never falls back to process environment or default-profile credentials. If the scoped secret API or context-thread API is unavailable, or scope resolution fails, it shows a safe diagnostic and skips requests without interrupting Hermes. Update Hermes if those APIs are unavailable. On supported single-profile Hermes, `get_secret` itself can resolve shell environment values natively; this is Hermes behavior, not a plugin fallback.
+
+The separate `mcp_servers.rembric.env` map forwards settings to the bundled MCP bridge; this provider change does not alter bridge configuration.
 
 To change a value after install:
 
@@ -98,7 +98,7 @@ The plugin **does not** read any plugin-private dotenv file (`~/.rembric/.env`, 
 Rembric scopes everything to a project slug. The provider and bridge use the same cascade — the **first valid match** wins:
 
 1. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>`.
-2. `REMBRIC_PROJECT_SLUG` from the environment (populated by Hermes from `~/.hermes/.env`).
+2. `REMBRIC_PROJECT_SLUG` from the active profile's `get_secret` result (the separate bridge reads its explicitly mapped environment).
 3. No valid slug → the provider skips lifecycle POSTs with one diagnostic, while the bridge uses path-less `/mcp`.
 
 Every candidate is validated against the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Non-matching values are discarded and the cascade continues. The server URL remains the bare deployment URL; a `/mcp/<slug>` suffix is not a fallback.
@@ -116,19 +116,21 @@ The resume runs once per session id per process, always straight after that id's
 
 `system_prompt_block()` returns the unified Rembric nudge — the same SAVE/RECALL/SUMMARIZE text the server hands MCP clients via the `initialize.instructions` block. Hermes does not consume that MCP block and exposes no per-turn hook, so this method is its only nudging surface; the text is kept byte-identical to the server's `buildInstructions()` BASE.
 
-The remaining `MemoryProvider` methods (`prefetch`, `sync_turn`, `on_memory_write`, `queue_prefetch`) are intentional no-ops — those operations live exclusively on the MCP surface, so the bridge (wired via `mcp_servers.rembric`) handles them when the agent calls `memory.search` / `memory.context` / `memory.save` directly.
+`queue_prefetch` warms a per-session recall cache, which `prefetch` returns with lifecycle hints. `sync_turn` sends the transcript summary and turn report on a context-preserving worker. These requests use the initialized profile binding. `on_memory_write` remains a no-op; agent-callable memory tools use the separate MCP bridge.
 
 ## Troubleshooting
 
-| Symptom                                                                              | Likely cause                                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hermes memory status` shows `rembric: Missing` after install                        | Plugin not enabled. Run `hermes plugins enable rembric` and restart Hermes.                                                                                                                                                                                           |
-| `hermes plugins install rembric` didn't prompt for the env vars                      | The three `REMBRIC_*` vars are already set in the parent shell, so Hermes skipped the prompts (this is by design). Verify via `env \| grep REMBRIC_`. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install. |
-| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes, or re-run `hermes plugins install rembric`.                                                             |
-| stderr shows `[rembric] POST /sessions failed: HTTPError 403`                        | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                                    |
-| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                        | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                                |
-| MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded OR the install never wrote credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then `cat ~/.hermes/.env \| grep REMBRIC_` to verify the three vars are present.                                                  |
-| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                 |
+`[rembric] scoped secrets API unavailable; update Hermes` or `context thread API unavailable; update Hermes` means the host is unsupported: update Hermes and restart the gateway. `profile secrets unavailable` means the active profile could not be resolved; fix the gateway/profile scope rather than exporting default-profile credentials. Missing profile URL/token diagnostics require configuring that profile. Error messages deliberately omit exception text and response bodies to avoid credential leaks.
+
+| Symptom                                                                              | Likely cause                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hermes memory status` shows `rembric: Missing` after install                        | Plugin not enabled. Run `hermes plugins enable rembric` and restart Hermes.                                                                                                                                                                                                                                         |
+| `hermes plugins install rembric` didn't prompt for the env vars                      | The three `REMBRIC_*` vars are already set in the parent shell, so Hermes skipped the prompts (this is by design). Check which settings Hermes reports as configured without printing their values. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install. |
+| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes, or re-run `hermes plugins install rembric`.                                                                                                           |
+| stderr shows `[rembric] POST failed: HTTP 403`                                       | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                                                                                  |
+| stderr shows `[rembric] POST failed: HTTP 404`                                       | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                                                                              |
+| MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded, scoped APIs are unavailable, or the active profile lacks credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then verify the three settings in the active profile without printing credentials.                                                               |
+| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                                               |
 
 For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Hermes's docs at <https://hermes-agent.nousresearch.com/docs>.
 
