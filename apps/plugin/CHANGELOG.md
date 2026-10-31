@@ -4,6 +4,17 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.37.0](https://github.com/susomejias/rembric/compare/plugin-v0.36.0...plugin-v0.37.0) (2026-10-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* **hermes:** Hermes must expose scoped-secret and context-thread APIs; the provider no longer falls back to process environment on API failure.
+
+### Bug Fixes
+
+* **hermes:** isolate credentials per profile ([2436600](https://github.com/susomejias/rembric/commit/243660056c8de8412dc5bbf977abd59cab32e8cf))
+
 ## [0.36.0](https://github.com/susomejias/rembric/compare/plugin-v0.35.0...plugin-v0.36.0) (2026-10-31)
 
 
