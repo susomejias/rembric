@@ -119,6 +119,13 @@ export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
             return;
           }
           statusMisses = 0;
+          if (status.phase === 'idle') {
+            verifying = true;
+            sawDown = true;
+            setSteps({ backup: 'done', pull: 'done', restart: 'active', verify: 'active' });
+            verifyTick();
+            return;
+          }
           if (status.phase === 'failed') {
             setSteps({ ...IDLE_STATES });
             setError(status.error ?? 'The update failed before it could hand off.');
