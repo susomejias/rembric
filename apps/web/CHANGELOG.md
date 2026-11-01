@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.5](https://github.com/susomejias/rembric/compare/server-v0.30.4...server-v0.30.5) (2026-11-01)
+
+
+### Bug Fixes
+
+* **web:** detect updater restart between status polls ([f83734b](https://github.com/susomejias/rembric/commit/f83734b3f6227f0229fca2311a5ccf210e67a8af))
+
 ## [0.30.4](https://github.com/susomejias/rembric/compare/server-v0.30.3...server-v0.30.4) (2026-11-01)
 
 
