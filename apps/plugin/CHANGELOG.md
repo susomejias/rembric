@@ -4,6 +4,22 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.38.0](https://github.com/susomejias/rembric/compare/plugin-v0.37.0...plugin-v0.38.0) (2026-11-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **hermes:** Hermes mutations reject local sources and explicit refs. Copied installations require an explicit backup and native reinstall.
+
+### Features
+
+* **hermes:** delegate distribution to native plugin manager ([c2a56f7](https://github.com/susomejias/rembric/commit/c2a56f7b2020f85ac6a84a03bc718427de659372))
+
+
+### Bug Fixes
+
+* **sessions:** nudge summaries for conversational activity ([c7d44bd](https://github.com/susomejias/rembric/commit/c7d44bd7defe456e7cb83e84ab28c3fc4daca64b))
+
 ## [0.37.0](https://github.com/susomejias/rembric/compare/plugin-v0.36.0...plugin-v0.37.0) (2026-10-31)
 
 
