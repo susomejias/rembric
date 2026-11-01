@@ -114,7 +114,7 @@ Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle
 curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh | sh
 ```
 
-Pick **Server → install**: it generates `REMBRIC_ADMIN_TOKEN` and, if Docker is present and you confirm, runs `docker compose up -d` for you. Then pick **Plugins** to install the plugin for your agent. Pin a release for reproducibility with `--ref=<tag>`.
+Pick **Server → install**: it generates `REMBRIC_ADMIN_TOKEN` and, if Docker is present and you confirm, runs `docker compose up -d` for you. Then pick **Plugins** to install the plugin for your agent. Pin a release for reproducibility with `--ref=<tag>` where the backend supports it. Hermes uses its native plugin manager and rejects explicit refs/local sources; [copied-install migration and native ownership](./apps/plugin/.hermes-plugin/README.md#transition-from-a-copied-installation) require explicit operator review.
 
 Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (2 GB recommended; the in-process embedder is why — see [docs/embeddings.md](./docs/embeddings.md)).
 

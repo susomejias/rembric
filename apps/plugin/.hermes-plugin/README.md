@@ -13,33 +13,27 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 
 ### Manual install
 
-Two commands, no `git clone` needed:
+Use Hermes's native plugin manager (verified with Hermes v0.22.5):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
-hermes plugins install rembric
-hermes plugins enable rembric
+hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable
 ```
 
-`hermes plugins install rembric` prompts for the three values the plugin needs (declared in `plugin.yaml::requires_env`) and writes them to `${HERMES_HOME:-~/.hermes}/.env`:
+Hermes records the repository/subdirectory source and installs under `${HERMES_HOME:-~/.hermes}/plugins/rembric`. `--enable` selects `memory.provider: rembric`, replacing any previous provider selection. This does not wire the separate MCP bridge.
+
+Native installation prompts for missing values declared in `plugin.yaml::requires_env` and stores them in `${HERMES_HOME:-~/.hermes}/.env`:
 
 - **`REMBRIC_SERVER_URL`** — base URL of your deployment, **without** the `/mcp` suffix. The bridge appends `/mcp/<slug>` itself when you wire it.
 - **`REMBRIC_API_TOKEN`** — Bearer token minted from the Rembric dashboard at `/dashboard/tokens` (plaintext shown exactly once). Marked `secret: true` in the manifest so the prompt hides the input.
 - **`REMBRIC_PROJECT_SLUG`** — default project slug for the provider and bridge.
 
-If the three vars are already exported in the shell that launches `hermes`, the install skips the corresponding prompts.
+The TUI prints native commands without executing them when Hermes is unavailable or a headless run lacks `--yes`. `--yes` authorizes invocation, not bypassing Hermes's dependency/security/capability consent.
 
-Inspect the install script first if you prefer:
+Hermes mutations support only the default unpinned source: `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` and explicit `--ref` (including `main`, tags and SHAs) are rejected before mutation. Other clients keep their own source/ref behavior.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | less
-```
+### Transition from a copied installation
 
-Developing against a local rembric clone? Same script, local source:
-
-```sh
-PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
-```
+The TUI refuses copied/untracked, linked, foreign-source, pinned or inconsistent targets rather than overwriting them. `hermes plugins adopt` cannot adopt a copied directory. Make a complete backup of the existing `plugins/rembric` directory **outside `plugins/`**, including unknown local files. Explicitly move the original directory outside plugin discovery, keep your credentials and MCP configuration, then run TUI **Plugins → hermes → install**. Keep the backup until you have verified the new install. Review existing native pins/source records separately; the TUI does not silently unpin or force-replace them.
 
 ## Configure
 
@@ -89,7 +83,7 @@ The separate `mcp_servers.rembric.env` map forwards settings to the bundled MCP 
 To change a value after install:
 
 - Edit `~/.hermes/.env` directly (it's a flat dotenv file), then restart Hermes.
-- Or re-run `hermes plugins install rembric` — it re-prompts for any var not already in the parent shell and rewrites the file via `save_env_value`.
+- Do not reinstall just to edit credentials: the TUI treats an existing native install as already installed; update it separately.
 
 The plugin **does not** read any plugin-private dotenv file (`~/.rembric/.env`, etc. are silently ignored). Earlier 0.3.x versions read `~/.rembric/.env` as a workaround; that mechanism was removed in 0.4.0 once `requires_env:` proved sufficient.
 
@@ -122,38 +116,43 @@ The resume runs once per session id per process, always straight after that id's
 
 `[rembric] scoped secrets API unavailable; update Hermes` or `context thread API unavailable; update Hermes` means the host is unsupported: update Hermes and restart the gateway. `profile secrets unavailable` means the active profile could not be resolved; fix the gateway/profile scope rather than exporting default-profile credentials. Missing profile URL/token diagnostics require configuring that profile. Error messages deliberately omit exception text and response bodies to avoid credential leaks.
 
-| Symptom                                                                              | Likely cause                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hermes memory status` shows `rembric: Missing` after install                        | Plugin not enabled. Run `hermes plugins enable rembric` and restart Hermes.                                                                                                                                                                                                                                         |
-| `hermes plugins install rembric` didn't prompt for the env vars                      | The three `REMBRIC_*` vars are already set in the parent shell, so Hermes skipped the prompts (this is by design). Check which settings Hermes reports as configured without printing their values. To force re-prompts: `unset REMBRIC_SERVER_URL REMBRIC_API_TOKEN REMBRIC_PROJECT_SLUG` then re-run the install. |
-| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes, or re-run `hermes plugins install rembric`.                                                                                                           |
-| stderr shows `[rembric] POST failed: HTTP 403`                                       | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                                                                                  |
-| stderr shows `[rembric] POST failed: HTTP 404`                                       | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                                                                              |
-| MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded, scoped APIs are unavailable, or the active profile lacks credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then verify the three settings in the active profile without printing credentials.                                                               |
-| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                                               |
+| Symptom                                                                              | Likely cause                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hermes memory status` shows `rembric: Missing` after install                        | Verify the native install succeeded and `memory.provider: rembric` is selected; use `hermes memory setup rembric` if necessary, then restart Hermes.                                                                                                  |
+| Native install didn't prompt for settings                                            | Hermes already has the required settings. Check the active profile without printing credentials; edit its settings and restart Hermes when necessary.                                                                                                 |
+| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes.                                                                                         |
+| stderr shows `[rembric] POST failed: HTTP 403`                                       | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                    |
+| stderr shows `[rembric] POST failed: HTTP 404`                                       | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                |
+| MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded, scoped APIs are unavailable, or the active profile lacks credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then verify the three settings in the active profile without printing credentials. |
+| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                 |
 
 For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Hermes's docs at <https://hermes-agent.nousresearch.com/docs>.
 
 ## Updating
 
-Use the TUI installer (`Plugins → hermes → update`). It refreshes the provider files and automatically migrates the documented legacy `mcp-remote` block, preserving `config.yaml.rembric-mcp-remote.bak`; custom blocks remain untouched and receive the exact fallback entry. No separate npm update is needed because the bridge is fetched by its exact npx pin.
+Use the TUI installer (`Plugins → hermes → update`, or `sh install.sh --agent=hermes --action=update --yes`). After successful native update it retains the recognized legacy MCP repair and backup behavior; complete current/custom blocks and their pins remain untouched. The bridge/config transport is unchanged.
 
-Manual fallback — re-run the installer; the script is idempotent (overwrites the three files):
+Manual fallback:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
+hermes plugins update rembric
+hermes gateway restart
 ```
 
-Then restart the gateway. If the installer reported that it could not recognize a custom MCP block, replace that entry with the exact fallback it printed. `hermes plugins update rembric` will **not** work because the plugin was not installed via `hermes plugins install owner/repo` (Hermes's installer doesn't accept monorepo subpaths today, verified against `hermes_cli/plugins_cmd.py::_resolve_git_url` at v0.4.x). The curl-installer is the canonical update path. Re-running `hermes plugins install rembric` after the file update re-runs the `requires_env` flow without overwriting existing values.
+The manual CLI does not run Rembric's legacy MCP repair. Use the TUI if that repair is needed.
+
+**Update-check limitation:** Hermes v0.22.5 reports a fresh native subdirectory install as provenance `drift` because its source metadata exists without a local `.git` directory. Explicit native update was verified to succeed with an already-current result; an actual version advance was not tested. The TUI therefore reports Hermes update status as unknown and skips it in update-all, rather than claiming current/outdated from a manifest comparison. Use the explicit update action for source-tracked installs; copied installs need the transition above.
 
 For a temporary rollback after a broken release, see the [emergency plugin rollback](../../../docs/agents.md#emergency-plugin-rollback) runbook.
 
 ## Uninstall
 
-Use the TUI installer (`Plugins → hermes → uninstall`). Manual fallback — run the uninstaller; it removes the three installed plugin files, disables the plugin, and is idempotent:
+Use the TUI installer (`Plugins → hermes → uninstall`). It delegates removal only for a matching native-managed install. An absent target and absent source record are a successful no-op; inconsistent or copied installs are refused.
+
+Manual fallback:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/uninstall.sh | sh
+hermes plugins remove rembric
 ```
 
-It **deliberately leaves** your credentials (`${HERMES_HOME:-~/.hermes}/.env`) and any `.rembric` project markers in place — it prints what it left so you can remove them by hand if you want. Honours `HERMES_HOME` like the installer.
+Hermes removes the **entire managed plugin directory**, clears its plugin selection/grants and resets `memory.provider` if it selected Rembric. Back up local data inside that directory first. Unrelated settings, MCP entries/bridge pins, credentials outside the plugin directory and `.rembric` markers remain in place. Native repeated remove returns an error; the TUI handles the already-absent case.

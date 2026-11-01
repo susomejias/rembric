@@ -9,6 +9,8 @@ import {
   mkdirSync,
   chmodSync,
   statSync,
+  symlinkSync,
+  renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -63,7 +65,7 @@ const CORE_PATH = '/usr/bin:/bin';
 // A stub client binary first on PATH, so the real one never runs from the suite
 // and installs into the developer's own configuration. The `RAN:` sentinel is
 // what distinguishes "executed" from "merely printed".
-function fakeClientBinDir(name: 'claude' | 'codex' | 'pi'): string {
+function fakeClientBinDir(name: 'claude' | 'codex' | 'pi' | 'hermes'): string {
   const d = mkdtempSync(join(tmpdir(), 'rembric-fakeclient-'));
   writeFileSync(join(d, name), `#!/bin/sh\necho "RAN:${name} $*"\n`);
   chmodSync(join(d, name), 0o755);
@@ -244,6 +246,276 @@ describe('server update', () => {
   });
 });
 
+function nativeFixture(version = '0.0.1'): void {
+  const plugins = join(home, '.hermes', 'plugins');
+  mkdirSync(join(plugins, 'rembric'), { recursive: true });
+  writeFileSync(join(plugins, 'rembric', 'plugin.yaml'), `name: rembric\nversion: ${version}\n`);
+  writeFileSync(
+    join(plugins, '.install-metadata.json'),
+    JSON.stringify({
+      rembric: {
+        source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
+        pinned: false,
+        revision: '2e8cca2dc3a2ed23ee193bf1cfeb68ea9b6b7590',
+      },
+    }),
+  );
+}
+
+function nativeRun(action: string, yes = true, failure = false, absent = false) {
+  const bin = join(home, 'bin');
+  mkdirSync(bin, { recursive: true });
+  if (!absent) {
+    writeFileSync(
+      join(bin, 'hermes'),
+      `#!/bin/sh\necho "RAN:hermes $*"\nexit ${failure ? 7 : 0}\n`,
+    );
+    chmodSync(join(bin, 'hermes'), 0o755);
+  }
+  writeFileSync(
+    join(bin, 'curl'),
+    `#!/bin/sh\nfor arg do case "$arg" in https://raw.githubusercontent.com/susomejias/rembric/main/*) rel="\u0024{arg#https://raw.githubusercontent.com/susomejias/rembric/main/}" ;; esac; done\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp '${REPO_ROOT}/'"$rel" "$2"; exit; fi; shift; done\nexit 91\n`,
+  );
+  chmodSync(join(bin, 'curl'), 0o755);
+  return run(['--agent=hermes', `--action=${action}`, ...(yes ? ['--yes'] : [])], {
+    home,
+    path: `${bin}:${absent ? CORE_PATH : process.env.PATH}`,
+    env: { REMBRIC_SRC: '' },
+  });
+}
+
+describe('hermes native distribution', () => {
+  it('prints without consent and executes native install only with --yes', () => {
+    const printed = nativeRun('install', false);
+    expect(printed.code).toBe(0);
+    expect(printed.out).toContain(
+      'hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
+    );
+    expect(printed.out).not.toContain('RAN:hermes');
+    expect(existsSync(join(home, '.hermes'))).toBe(false);
+    const executed = nativeRun('install');
+    expect(executed.code).toBe(0);
+    expect(executed.out).toContain(
+      'RAN:hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
+    );
+    expect(executed.out).not.toContain('--force');
+    expect(executed.out).not.toContain('--yes-deps');
+  });
+
+  it.each(['update', 'uninstall'])(
+    'executes the native %s verb for a source-tracked install',
+    (action) => {
+      nativeFixture();
+      const result = nativeRun(action);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain(
+        `RAN:hermes plugins ${action === 'uninstall' ? 'remove' : 'update'} rembric`,
+      );
+    },
+  );
+
+  it('propagates native failure without repair or restart claims', () => {
+    nativeFixture();
+    const config = join(home, '.hermes', 'config.yaml');
+    const incomplete =
+      "mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@0.29.1']\n";
+    writeFileSync(config, incomplete);
+    const result = nativeRun('update', true, true);
+    expect(readFileSync(config, 'utf8')).toBe(incomplete);
+    expect(existsSync(`${config}.rembric-mcp-env.bak`)).toBe(false);
+    expect(result.code).not.toBe(0);
+    expect(result.out).toContain('RAN:hermes plugins update rembric');
+    expect(result.out).not.toContain('gateway restart');
+    expect(result.out).not.toContain('migrated');
+  });
+
+  it('does not execute with an absent binary even under --yes', () => {
+    const inherited = join(home, 'inherited');
+    mkdirSync(inherited);
+    writeFileSync(join(inherited, 'hermes'), '#!/bin/sh\necho RAN:inherited-hermes\nexit 99\n');
+    chmodSync(join(inherited, 'hermes'), 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${inherited}:${previousPath}`;
+    try {
+      const result = nativeRun('install', true, false, true);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain(
+        'hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
+      );
+      expect(result.out).not.toContain('RAN:');
+      expect(existsSync(join(home, '.hermes'))).toBe(false);
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+
+  it('rejects copied and invalid metadata without touching unknown files', () => {
+    nativeFixture();
+    const plugins = join(home, '.hermes', 'plugins');
+    const unknown = join(plugins, 'rembric', 'operator-file');
+    writeFileSync(unknown, 'keep');
+    for (const metadata of [
+      '{}',
+      '{',
+      JSON.stringify({ rembric: { source: 'foreign', pinned: false, revision: 'a'.repeat(40) } }),
+      JSON.stringify({
+        rembric: {
+          source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
+          pinned: true,
+          revision: 'a'.repeat(40),
+        },
+      }),
+    ]) {
+      writeFileSync(join(plugins, '.install-metadata.json'), metadata);
+      for (const action of ACTIONS) {
+        const result = nativeRun(action);
+        expect(result.code).not.toBe(0);
+        expect(result.out).not.toContain('RAN:hermes');
+        expect(result.out).toContain('backup');
+        expect(readFileSync(unknown, 'utf8')).toBe('keep');
+        expect(readFileSync(join(plugins, '.install-metadata.json'), 'utf8')).toBe(metadata);
+      }
+    }
+  });
+
+  it.each([
+    {
+      source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
+      revision: 'short',
+      pinned: false,
+    },
+    {
+      source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
+      revision: 'a'.repeat(40),
+    },
+    {
+      source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
+      revision: 42,
+      pinned: false,
+    },
+    null,
+  ])('rejects incomplete metadata: %j', (record) => {
+    nativeFixture();
+    writeFileSync(
+      join(home, '.hermes', 'plugins', '.install-metadata.json'),
+      JSON.stringify({ rembric: record }),
+    );
+    const result = nativeRun('uninstall');
+    expect(result.code).not.toBe(0);
+    expect(result.out).not.toContain('RAN:hermes');
+  });
+
+  it.each([
+    'linked-target',
+    'linked-metadata',
+    'missing-target',
+    'missing-manifest',
+    'non-object-metadata',
+  ])('refuses %s without touching the existing installation', (state) => {
+    nativeFixture();
+    const plugins = join(home, '.hermes', 'plugins');
+    const target = join(plugins, 'rembric');
+    const metadata = join(plugins, '.install-metadata.json');
+    if (state === 'linked-target' || state === 'missing-target') {
+      renameSync(target, join(home, 'preserved'));
+      if (state === 'linked-target') symlinkSync(join(home, 'preserved'), target);
+    } else if (state === 'linked-metadata') {
+      renameSync(metadata, join(home, 'metadata'));
+      symlinkSync(join(home, 'metadata'), metadata);
+    } else if (state === 'missing-manifest') {
+      renameSync(join(target, 'plugin.yaml'), join(target, 'saved-manifest'));
+    } else writeFileSync(metadata, '[]');
+    const result = nativeRun('uninstall');
+    expect(result.code).not.toBe(0);
+    expect(result.out).not.toContain('RAN:hermes');
+    expect(
+      existsSync(
+        state === 'linked-target' || state === 'missing-target'
+          ? join(home, 'preserved', 'plugin.yaml')
+          : target,
+      ),
+    ).toBe(true);
+  });
+
+  it('a repeated install of a managed source is a no-op, never a force reinstall', () => {
+    nativeFixture();
+    const result = nativeRun('install');
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('already installed');
+    expect(result.out).not.toContain('RAN:hermes');
+  });
+
+  it('already-absent uninstall is a successful no-op', () => {
+    const result = nativeRun('uninstall');
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('already absent');
+    expect(result.out).not.toContain('RAN:hermes');
+  });
+
+  it.each([
+    { args: [], env: { REMBRIC_SRC: REPO_ROOT } },
+    { args: ['--ref=main'], env: { REMBRIC_SRC: '' } },
+    { args: [], env: { REMBRIC_SRC: '', REMBRIC_REF: 'main' } },
+    { args: [], env: { REMBRIC_SRC: '', PLUGIN_SRC: '/unused' } },
+  ])(
+    'rejects unsupported source overrides before mixed-operation mutation: %j',
+    ({ args, env }) => {
+      nativeRun('install', false);
+      const result = run(['--server', '--agent=opencode,hermes', '--action=install', ...args], {
+        home,
+        cwd: dir,
+        env,
+      });
+      expect(result.code).not.toBe(0);
+      expect(result.out).toContain('Hermes supports only the default native source');
+      expect(existsSync(join(dir, 'docker-compose.yml'))).toBe(false);
+      expect(existsSync(join(home, '.config'))).toBe(false);
+    },
+  );
+
+  it.each([
+    { args: ['--ref=main'], env: {} },
+    { args: [], env: { PLUGIN_SRC: '/unused' } },
+    { args: [], env: { REMBRIC_SRC: REPO_ROOT } },
+    { args: [], env: { REMBRIC_REF: 'main' } },
+  ])('direct native adapter rejects unsupported input: %j', ({ args, env }) => {
+    nativeRun('install', false);
+    const result = run(args, {
+      home,
+      script: join(REPO_ROOT, 'apps/plugin/.hermes-plugin/install.sh'),
+      path: `${home}/bin:${process.env.PATH}`,
+      env: { REMBRIC_SRC: '', ...env },
+    });
+    expect(result.code).toBe(2);
+    expect(result.out).toContain('default native source');
+    expect(result.out).not.toContain('RAN:hermes');
+    expect(existsSync(join(home, '.hermes'))).toBe(false);
+  });
+
+  it('reports update status unknown and skips native Hermes in update-all', () => {
+    nativeFixture();
+    const result = run(['--status', '--json'], { home, path: CORE_PATH });
+    const hermes = JSON.parse(result.out).agents.find(
+      (a: { agent: string }) => a.agent === 'hermes',
+    );
+    expect(hermes.present).toBe(false);
+    expect(hermes.installed).toBe('0.0.1');
+    expect(hermes.action).toBe('unknown');
+    nativeRun('install', false);
+    const detected = run(['--status', '--json'], { home, path: `${home}/bin:${process.env.PATH}` });
+    expect(
+      JSON.parse(detected.out).agents.find((a: { agent: string }) => a.agent === 'hermes').present,
+    ).toBe(true);
+    const updated = run(['--action=update', '--yes'], {
+      home,
+      path: `${home}/bin:${process.env.PATH}`,
+    });
+    expect(updated.code).toBe(0);
+    expect(updated.out).toContain('hermes: version unknown');
+    expect(updated.out).not.toContain('hermes (update)');
+  });
+});
+
 describe('agent routing', () => {
   it('codex install prints marketplace commands, copies nothing', () => {
     const { code, out } = run(['--agent=codex', '--action=install'], { home });
@@ -282,14 +554,17 @@ describe('agent routing', () => {
     const codex = run(['--agent=codex', '--action=install'], { home });
     expect(codex.out).not.toContain('plugin_hooks'); // flag removed upstream in codex-cli 0.142.3+
     expect(codex.out).toContain('/hooks');
-    const hermes = run(['--agent=hermes', '--action=install'], { home });
-    expect(hermes.out).toContain('hermes plugins install rembric'); // triggers requires_env prompts
-    expect(hermes.out).toContain('hermes plugins enable rembric');
+    const hermes = nativeRun('install', false);
+    expect(hermes.out).toContain(
+      'hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
+    );
+    expect(hermes.out).toContain('memory.provider');
+    expect(hermes.out).not.toContain('hermes plugins enable rembric');
     expect(hermes.out).toContain('hermes gateway restart');
   });
 
   it('hermes update explains the automatic legacy migration and exact fallback before restart', () => {
-    const { code, out } = run(['--agent=hermes', '--action=update'], { home });
+    const { code, out } = nativeRun('update', false);
     expect(code).toBe(0);
     expect(out).toContain(`args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']`);
     expect(out).toContain('REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}');
@@ -307,7 +582,8 @@ describe('agent routing', () => {
     const legacy = `mcp_servers:\n  rembric:\n    command: npx\n    args:\n      [\n        '-y',\n        'mcp-remote@latest',\n        '\${REMBRIC_SERVER_URL}/mcp/\${REMBRIC_PROJECT_SLUG}',\n        '--header',\n        'Authorization: Bearer \${REMBRIC_API_TOKEN}',\n        '--allow-http',\n      ]\n  other:\n    command: other-mcp\n`;
     writeFileSync(config, legacy);
 
-    const { code, out } = run(['--agent=hermes', '--action=update'], { home });
+    nativeFixture(PLUGIN_VERSION.hermes);
+    const { code, out } = nativeRun('update');
 
     expect(code).toBe(0);
     expect(readFileSync(join(hermesHome, 'config.yaml.rembric-mcp-remote.bak'), 'utf8')).toBe(
@@ -325,8 +601,8 @@ describe('agent routing', () => {
     const config = join(hermesHome, 'config.yaml');
     const incomplete = `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@0.29.1']\n`;
     writeFileSync(config, incomplete);
-
-    run(['--agent=hermes', '--action=update'], { home });
+    nativeFixture(PLUGIN_VERSION.hermes);
+    expect(nativeRun('update').code).toBe(0);
 
     expect(readFileSync(join(hermesHome, 'config.yaml.rembric-mcp-env.bak'), 'utf8')).toBe(
       incomplete,
@@ -341,8 +617,8 @@ describe('agent routing', () => {
     const config = join(hermesHome, 'config.yaml');
     const custom = `mcp_servers:\n  rembric:\n    command: wrapper\n    args: ['rembric']\n`;
     writeFileSync(config, custom);
-
-    run(['--agent=hermes', '--action=update'], { home });
+    nativeFixture(PLUGIN_VERSION.hermes);
+    expect(nativeRun('update').code).toBe(0);
 
     expect(readFileSync(config, 'utf8')).toBe(custom);
     expect(existsSync(join(hermesHome, 'config.yaml.rembric-mcp-env.bak'))).toBe(false);
@@ -461,10 +737,13 @@ describe('the client set has a single definition every surface agrees with', () 
   });
 
   it.each(CLIENTS)('--agent=%s is routed to a backend and has post-install steps', (client) => {
-    const { code, out } = run([`--agent=${client}`, '--action=install'], {
-      home,
-      path: `${PI_STUB_DIR}:${process.env.PATH ?? '/usr/bin:/bin'}`,
-    });
+    const { code, out } =
+      client === 'hermes'
+        ? nativeRun('install', false)
+        : run([`--agent=${client}`, '--action=install'], {
+            home,
+            path: `${PI_STUB_DIR}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+          });
     expect(code).toBe(0);
     expect(out).not.toContain('unknown agent');
     expect(out).toContain(`${client} (install)`);

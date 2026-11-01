@@ -32,6 +32,7 @@ set -eu
 # at REMBRIC_REF (default main); --ref overrides.
 REMBRIC_SRC="${REMBRIC_SRC:-}"
 REF="${REMBRIC_REF:-main}"
+EXPLICIT_REF="${REMBRIC_REF+x}"
 NONINTERACTIVE="${REMBRIC_NONINTERACTIVE:-0}"
 RAW_BASE="https://raw.githubusercontent.com/susomejias/rembric"
 
@@ -67,7 +68,7 @@ for arg in "$@"; do
       exit 2
     }
     ;;
-  --ref=*) REF="${arg#--ref=}" ;;
+  --ref=*) REF="${arg#--ref=}"; EXPLICIT_REF=1 ;;
   --up) ARG_UP=1 ;;
   --yes | -y) ARG_YES=1 ;;
   --status) ARG_STATUS=1 ;;
@@ -445,7 +446,7 @@ client_present() { # $1 client → 0 present, 1 absent
   codex) command -v codex >/dev/null 2>&1 ;;
   opencode) command -v opencode >/dev/null 2>&1 ;;
   pi) command -v pi >/dev/null 2>&1 ;;
-  hermes) [ -d "${HERMES_HOME:-${HOME}/.hermes}" ] ;;
+  hermes) command -v hermes >/dev/null 2>&1 ;;
   esac
 }
 
@@ -479,7 +480,9 @@ vercmp() {
 client_state() {
   CS_INSTALLED=$(installed_version "$1" 2>/dev/null || true)
   CS_AVAILABLE=$(available_version "$(component_key "$1")")
-  if [ "$CS_INSTALLED" = unknown ]; then
+  if [ "$1" = hermes ] && { [ -n "$CS_INSTALLED" ] || [ -e "${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric" ] || [ -L "${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric" ] || [ -e "${HERMES_HOME:-${HOME}/.hermes}/plugins/.install-metadata.json" ]; }; then
+    CS_STATE=unknown
+  elif [ "$CS_INSTALLED" = unknown ]; then
     CS_INSTALLED=''
     CS_STATE=unreadable
   else
@@ -528,6 +531,8 @@ print_table() {
     fi
     printf '  %-10s %s %-11s %-11s %s\n' "$c" "$detc" "${inst:--}" "${CS_AVAILABLE:--}" "$act"
   done
+  say "  Hermes update status is unknown (native subdirectory provenance may report drift)."
+  say "  Use explicit --agent=hermes --action=update for native installs; copied installs need a backup and native reinstall."
   hr
 }
 
@@ -870,7 +875,7 @@ run_client_script() { # $1 client, $2 install|uninstall
   *) return 1 ;;
   esac
   script="install.sh"
-  [ "$verb" = "uninstall" ] && script="uninstall.sh"
+  [ "$verb" = "uninstall" ] && [ "$c" != hermes ] && script="uninstall.sh"
   [ "$verb" = "uninstall" ] && [ "$has_uninstall" != "1" ] && {
     say "  no uninstaller for $c"
     return 1
@@ -883,8 +888,7 @@ run_client_script() { # $1 client, $2 install|uninstall
         MCP_BRIDGE_SRC="$REMBRIC_SRC/apps/plugin/mcp-bridge" \
         sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
     else
-      PLUGIN_SRC="$REMBRIC_SRC/apps/plugin/$dir" REMBRIC_ACTION="$verb" \
-        sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
+      REMBRIC_ACTION="$verb" sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
     fi
   else
     # Remote: fetch the script and point it at the same ref.
@@ -897,7 +901,9 @@ run_client_script() { # $1 client, $2 install|uninstall
     if [ "$c" = "opencode" ]; then
       PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" MCP_BRIDGE_SRC="$base/mcp-bridge" sh "$t"
     else
-      PLUGIN_SRC="$base/$dir" REMBRIC_ACTION="$verb" sh "$t"
+      if REMBRIC_ACTION="$verb" sh "$t"; then _client_rc=0; else _client_rc=$?; fi
+      rm -f "$t"
+      return "$_client_rc"
     fi
     rm -f "$t"
   fi
@@ -920,6 +926,13 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
     ins="codex plugin add rembric@rembric"
     upd="codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric"
     rem="codex plugin remove rembric@rembric"
+    ;;
+  hermes)
+    add=''
+    ins="hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable"
+    upd="hermes plugins update rembric"
+    rem="hermes plugins remove rembric"
+    say "  Native Hermes owns memory.provider and plugin selection/grants; removal deletes its entire managed plugin directory."
     ;;
   pi)
     # Unpinned in every action, because `pi update --extensions`/`--all` skips a
@@ -969,13 +982,13 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
   # and a piped/headless run only prints.
   if [ "$ARG_YES" = "1" ] && client_present "$c"; then
     [ -n "${add:-}" ] && eval "$add" || true
-    eval "$cmd" || true
+    if [ "$c" = hermes ]; then run_client_script hermes "$action" || return $?; else eval "$cmd" || true; fi
   elif [ "$NONINTERACTIVE" = "0" ] && [ "$HAVE_TTY" = "1" ] && client_present "$c"; then
     yn=$(ask "  Run these now? [y/N]")
     case "$yn" in
     y | Y)
       [ -n "${add:-}" ] && eval "$add" || true
-      eval "$cmd" || true
+      if [ "$c" = hermes ]; then run_client_script hermes "$action" || return $?; else eval "$cmd" || true; fi
       ;;
     esac
   fi
@@ -1039,9 +1052,8 @@ post_install_notes() { # $1 client, $2 action (install|update)
       say "  ${BOLD}Next:${RESET}"
       say "    1) add this MCP block to ${BOLD}${HERMES_HOME:-${HOME}/.hermes}/config.yaml${RESET}:"
       hermes_bridge_config
-      say "    2) ${BOLD}hermes plugins install rembric${RESET}  ${DIM}— prompts for SERVER_URL / API_TOKEN / PROJECT_SLUG → ~/.hermes/.env${RESET}"
-      say "    3) ${BOLD}hermes plugins enable rembric${RESET}"
-      say "    4) ${BOLD}hermes gateway restart${RESET}  ${DIM}— so the gateway loads the (new) plugin${RESET}"
+      say "    2) Native --enable selects memory.provider; Hermes prompts for missing required credentials."
+      say "    3) ${BOLD}hermes gateway restart${RESET}  ${DIM}— after running the native install${RESET}"
     fi
     ;;
   opencode)
@@ -1064,15 +1076,25 @@ post_install_notes() { # $1 client, $2 action (install|update)
   esac
 }
 
+hermes_source_ok() {
+  if [ -n "$REMBRIC_SRC${PLUGIN_SRC:-}$EXPLICIT_REF" ]; then
+    printf '[rembric] error: Hermes supports only the default native source; local sources and explicit refs are unsupported.\n' >&2
+    return 2
+  fi
+  return 0
+}
+
 do_client() { # $1 client, $2 action
   c="$1"
   action="$2"
+  if [ "$c" = hermes ]; then hermes_source_ok || return $?; fi
   say "${BOLD}${c} (${action})${RESET}"
   case "$c" in
-  opencode | hermes)
+  opencode)
     run_client_script "$c" "$action"
     if [ "$action" = "uninstall" ]; then say "  ${DIM}Left in place: operator config, credentials, and .rembric files.${RESET}"; fi
     ;;
+  hermes) client_cli_cmds "$c" "$action" ;;
   claude | codex | pi) client_cli_cmds "$c" "$action" ;;
   # An unmatched `case` exits 0, so a client with no backend would print its
   # "Next" steps having installed nothing.
@@ -1147,16 +1169,18 @@ Flags:
   --token=<tok>       admin token for --server (default: auto-generate)
   --port=<n>          REMBRIC_PORT for --server (default: 8787)
   --up                run 'docker compose pull && up -d' after --server (needs docker)
-  --yes, -y           run the client CLI commands (Claude/Codex marketplace, Pi
-                      registry) when the client binary is present (headless
+  --yes, -y           run the client CLI commands (marketplace, registry or
+                      Hermes native) when the client binary is present (headless
                       opt-in; does not start Docker — use --up)
-  --ref=<tag>         git ref to install from (default: main)
+  --ref=<tag>         git ref to install from (default: main); unsupported for Hermes
   -h, --help          this help
 
 Env: REMBRIC_NONINTERACTIVE=1 (force headless) · REMBRIC_SRC=<clone> (read from
      disk, no network) · REMBRIC_REF=<tag> · NO_COLOR · REMBRIC_NO_PULL=1
      (skip 'docker compose pull' on --up) · REMBRIC_UPDATE_CHECK=off (skip the
      GitHub release lookup in --status).
+Hermes mutations reject REMBRIC_SRC, PLUGIN_SRC, REMBRIC_REF and explicit --ref.
+Hermes update status is unknown; use explicit update for native-managed installs.
 EOF
 }
 
@@ -1214,6 +1238,10 @@ fi
 
 # Non-interactive / no-TTY → require explicit flags, never guess.
 if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
+  case ",$ARG_AGENTS," in
+  *,hermes,*) hermes_source_ok || exit $? ;;
+  *,all,*) if [ "$ARG_ACTION" != update ]; then hermes_source_ok || exit $?; fi ;;
+  esac
   banner
   did=0
   if [ "$ARG_SERVER" = "1" ]; then

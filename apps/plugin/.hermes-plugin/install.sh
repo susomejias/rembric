@@ -1,53 +1,81 @@
 #!/bin/sh
-# rembric Hermes plugin installer.
-#
-# Default: download plugin.yaml, __init__.py, README.md from the rembric
-# main branch into ${HERMES_HOME}/plugins/rembric/. Honour PLUGIN_SRC if
-# set: a local directory path is copied with cp, an http(s):// prefix is
-# fetched via curl.
-#
-# Usage (public repo):
-#   curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
-#
-# Usage (dev, local clone — no fetch):
-#   PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
-
 set -eu
-
-PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin}"
-HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
-TARGET="${HERMES_HOME}/plugins/rembric"
-
-if ! mkdir -p "$TARGET" 2>/dev/null; then
-    printf '[rembric] error: cannot create %s\n' "$TARGET" >&2
-    exit 1
+if [ "$#" -ne 0 ]; then
+    printf '[rembric] error: use the root TUI for flags; Hermes supports only the default native source.\n' >&2
+    exit 2
 fi
 
-fetch_file() {
-    src_path="$1"
-    dest_path="$2"
-    case "$PLUGIN_SRC" in
-    http://* | https://*)
-        if ! curl -fsSL "$src_path" -o "$dest_path"; then
-            printf '[rembric] error: failed to fetch %s\n' "$src_path" >&2
-            return 1
-        fi
-        ;;
-    *)
-        if [ -f "$src_path" ]; then
-            cp "$src_path" "$dest_path"
-        else
-            printf '[rembric] error: missing local file %s\n' "$src_path" >&2
-            return 1
-        fi
-        ;;
-    esac
-    return 0
+HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
+TARGET="${HERMES_HOME}/plugins/rembric"
+ACTION="${REMBRIC_ACTION:-install}"
+case "$ACTION" in install | update | uninstall) ;; *) exit 2 ;; esac
+if [ -n "${PLUGIN_SRC:-}${REMBRIC_SRC:-}${REMBRIC_REF:-}" ]; then
+    printf '[rembric] error: Hermes supports only the default native source; local sources and explicit refs are unsupported.\n' >&2
+    exit 2
+fi
+command -v python3 >/dev/null 2>&1 || {
+    printf '[rembric] error: Python 3 is required to validate Hermes source metadata.\n' >&2
+    exit 1
 }
+STATE=$(python3 - "$HERMES_HOME" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
 
-for f in plugin.yaml __init__.py README.md; do
-    fetch_file "${PLUGIN_SRC}/${f}" "${TARGET}/${f}" || exit 1
-done
+home = Path(sys.argv[1])
+target = home / "plugins/rembric"
+metadata = home / "plugins/.install-metadata.json"
+try:
+    if metadata.is_symlink() or target.is_symlink():
+        raise ValueError()
+    records = json.loads(metadata.read_text()) if metadata.exists() else {}
+    if not isinstance(records, dict):
+        raise ValueError()
+    record = records.get("rembric")
+    if not target.exists() and "rembric" not in records:
+        print("absent")
+    elif (target.is_dir() and (target / "plugin.yaml").is_file()
+          and isinstance(record, dict)
+          and record.get("source") == "https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin"
+          and record.get("pinned") is False
+          and isinstance(record.get("revision"), str)
+          and re.fullmatch(r"[0-9a-f]{40}", record["revision"])):
+        print("native")
+    else:
+        raise ValueError()
+except (OSError, ValueError, TypeError):
+    print("unsupported")
+PY
+)
+if [ "$STATE" = unsupported ]; then
+    printf '[rembric] error: copied, linked, pinned, foreign or inconsistent Hermes install; no files changed.\n' >&2
+    printf '  Make a complete backup outside plugins/, move the old directory aside explicitly, then use the root TUI to install natively. Preserve credentials and MCP settings; review native pins/source metadata separately.\n' >&2
+    exit 1
+fi
+if [ "$STATE" = absent ] && [ "$ACTION" = uninstall ]; then
+    printf '[rembric] Hermes plugin already absent.\n'
+    exit 0
+fi
+if [ "$STATE" = absent ] && [ "$ACTION" = update ]; then
+    printf '[rembric] error: Hermes plugin absent; use --agent=hermes --action=install.\n' >&2
+    exit 1
+fi
+command -v hermes >/dev/null 2>&1 || {
+    printf '[rembric] error: hermes binary unavailable; use the root TUI for printed commands.\n' >&2
+    exit 1
+}
+case "$ACTION" in
+install)
+    if [ "$STATE" = native ]; then
+        printf '[rembric] Hermes plugin already installed; use --action=update.\n'
+        exit 0
+    fi
+    hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable
+    ;;
+update) hermes plugins update rembric ;;
+uninstall) exec hermes plugins remove rembric ;;
+esac
 
 migrate_legacy_mcp_config() {
     config="${HERMES_HOME}/config.yaml"
@@ -119,9 +147,6 @@ for start, line in enumerate(lines):
 PY
 }
 
-if [ "${REMBRIC_ACTION:-install}" = "update" ]; then
+if [ "$ACTION" = update ]; then
     migrate_legacy_mcp_config
 fi
-
-printf '✓ rembric installed at %s\n' "$TARGET"
-printf '  enable: hermes plugins enable rembric\n'
