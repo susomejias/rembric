@@ -1,6 +1,14 @@
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: The session-summary reminder MUST be gated on the server by three timestamps, never by a turn counter
+
+**Reason**: The tool-work prerequisite and its conversation-exclusion scenarios are intentionally retired. Completed conversational activity now participates in reminder eligibility; retaining the old scenarios would contradict that approved behavior change.
+
+**Migration**: Replace this requirement with the completed-activity gate below. Preserve the existing timestamps, strict summary comparison, minimum interval, RAW precedence and no-self-reminder controls; do not backfill rows or fabricate tool use.
+
+## ADDED Requirements
+
+### Requirement: The session-summary reminder MUST use completed activity and a minimum interval, never a turn counter
 
 The server SHALL evaluate reminder eligibility on each completed-turn report for an active session, including `usedTools:false` conversational reports. Clients SHALL NOT decide cadence or memorability. A row without an incoming completed report SHALL NOT independently cause emission.
 
@@ -70,7 +78,7 @@ An absent summary timestamp SHALL mean no known curated write; an absent tool-wo
 - **WHEN** its first completed report arrives after the floor without a known curated timestamp
 - **THEN** it SHALL be eligible using `started_at`, without rewriting historical summary content
 
-#### Scenario: A final false write does not count as a curated summary
+#### Scenario: A `final: false` write does not count as a summary
 
 - **GIVEN** an active session past the floor
 - **WHEN** a RAW transcript is stored with `final:false` and its completed report arrives
