@@ -132,7 +132,7 @@ export class TokensService {
   }
 
   list(): Token[] {
-    return this.repos.tokens.listAll();
+    return this.repos.tokens.listAll().filter((row) => row.deletedAt === null);
   }
 
   findByName(name: string): Token | undefined {
@@ -150,6 +150,22 @@ export class TokensService {
         'token_not_found',
         `tokens.revoke: '${name}' not found or already revoked`,
       );
+    }
+  }
+
+  deleteRevoked(id: string): void {
+    if (id.trim().length === 0) {
+      throw new DomainError('invalid_input', 'tokens.delete: id must be non-empty');
+    }
+    const row = this.findById(id);
+    if (!row) {
+      throw new DomainError('token_not_found', 'tokens.delete: token not found or already deleted');
+    }
+    if (row.revokedAt === null) {
+      throw new DomainError('invalid_input', 'tokens.delete: revoke the token before deleting it');
+    }
+    if (this.repos.tokens.deleteRevoked(id, this.now()) === 0) {
+      throw new DomainError('token_not_found', 'tokens.delete: token not found or already deleted');
     }
   }
 

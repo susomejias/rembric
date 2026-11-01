@@ -269,6 +269,7 @@ const EXPECTED_COLUMNS: Record<
     { name: 'created_at', type: 'INTEGER', notnull: 1, pk: 0 },
     { name: 'revoked_at', type: 'INTEGER', notnull: 0, pk: 0 },
     { name: 'expires_at', type: 'INTEGER', notnull: 0, pk: 0 },
+    { name: 'deleted_at', type: 'INTEGER', notnull: 0, pk: 0 },
   ],
   sessions: [
     { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },

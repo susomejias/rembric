@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.6](https://github.com/susomejias/rembric/compare/server-v0.30.5...server-v0.30.6) (2026-11-01)
+
+
+### Features
+
+* **tokens:** allow confirmed deletion of revoked tokens ([512ca79](https://github.com/susomejias/rembric/commit/512ca79ce52f92c971143883987428647847ddbe))
+
 ## [0.30.5](https://github.com/susomejias/rembric/compare/server-v0.30.4...server-v0.30.5) (2026-11-01)
 
 

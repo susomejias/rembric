@@ -162,6 +162,7 @@ function fakeContext(): RequestContext {
     createdAt: new Date(),
     expiresAt: null,
     revokedAt: null,
+    deletedAt: null,
   };
   return {
     token,

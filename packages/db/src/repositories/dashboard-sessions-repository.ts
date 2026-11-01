@@ -1,4 +1,4 @@
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -26,7 +26,13 @@ export class DashboardSessionsRepository {
       .select({ session: dashboardSessions, tokenScope: tokens.scope })
       .from(dashboardSessions)
       .innerJoin(tokens, eq(tokens.id, dashboardSessions.tokenId))
-      .where(and(gt(dashboardSessions.expiresAt, now), eq(dashboardSessions.id, sessionId)))
+      .where(
+        and(
+          gt(dashboardSessions.expiresAt, now),
+          eq(dashboardSessions.id, sessionId),
+          isNull(tokens.deletedAt),
+        ),
+      )
       .get();
     return row ?? undefined;
   }

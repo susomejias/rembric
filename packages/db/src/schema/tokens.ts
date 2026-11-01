@@ -15,6 +15,7 @@ export const tokens = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
     revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
+    deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     nameUnique: uniqueIndex('tokens_name_unique').on(table.name),

@@ -184,7 +184,7 @@ RUN set -eux; cd /runtime/node_modules/onnxruntime-node; \
 # Each gate protects a failure that is otherwise silent at runtime: a missing
 # `next-server.js` (the renamed generated server) or launcher is an image that
 # cannot start; a missing migrations directory
-# throws when the migration runner reads the mounted volume (38 is the full
+# throws when the migration runner reads the mounted volume (39 is the full
 # set — the count is the gate); a native module that does not resolve throws at
 # boot, after the process looks healthy enough to accept traffic; a missing
 # baked model turns the embedder into a runtime download. The native modules
@@ -210,8 +210,8 @@ RUN set -eux; \
     }; \
     [ -d /runtime/packages/db/dist/migrations ]; \
     migrations=$(find /runtime/packages/db/dist/migrations -maxdepth 1 -name '*.sql' -type f | wc -l); \
-    [ "$migrations" -eq 38 ] || { \
-      echo "expected 38 migrations in the runtime tree, found $migrations" >&2; \
+    [ "$migrations" -eq 39 ] || { \
+      echo "expected 39 migrations in the runtime tree, found $migrations" >&2; \
       find /runtime -name '*.sql' | head -50 >&2; \
       exit 1; \
     }; \

@@ -46,6 +46,7 @@ function fakeContext(project: Project | null): RequestContext {
     createdAt: new Date(),
     expiresAt: null,
     revokedAt: null,
+    deletedAt: null,
   };
   return {
     token,
@@ -1189,6 +1190,7 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
       createdAt: new Date(),
       expiresAt: null,
       revokedAt: null,
+      deletedAt: null,
     };
     return {
       token,
@@ -1288,6 +1290,7 @@ describe('memory.save — eager roots discovery race (option B fix)', () => {
       createdAt: new Date(),
       expiresAt: null,
       revokedAt: null,
+      deletedAt: null,
     };
     return {
       token,
@@ -1641,6 +1644,7 @@ describe('memory.search — no argument widens the resolved scope', () => {
       createdAt: new Date(),
       expiresAt: null,
       revokedAt: null,
+      deletedAt: null,
     };
     return {
       token,
@@ -1730,6 +1734,7 @@ describe('an unresolvable path slug establishes no scope', () => {
       createdAt: new Date(),
       expiresAt: null,
       revokedAt: null,
+      deletedAt: null,
     };
     const ctx: RequestContext = {
       token,
