@@ -33,7 +33,13 @@ Hermes mutations support only the default unpinned source: `REMBRIC_SRC`, `PLUGI
 
 ### Transition from a copied installation
 
-The TUI refuses copied/untracked, linked, foreign-source, pinned or inconsistent targets rather than overwriting them. `hermes plugins adopt` cannot adopt a copied directory. Make a complete backup of the existing `plugins/rembric` directory **outside `plugins/`**, including unknown local files. Explicitly move the original directory outside plugin discovery, keep your credentials and MCP configuration, then run TUI **Plugins → hermes → install**. Keep the backup until you have verified the new install. Review existing native pins/source records separately; the TUI does not silently unpin or force-replace them.
+Choose **Plugins → hermes → update**. A native installation uses `hermes plugins update rembric`; a recognized old Rembric copy offers a one-time migration.
+
+Stop Hermes CLI/Desktop/gateway processes and automatic restarts first. The TUI checks for running Hermes processes, then requires typing `MIGRATE`; ordinary `--yes` cannot authorize this transition. Keep Hermes stopped until completion. The adapter verifies a private `rembric-backup-*` directory outside `plugins/`, preserving the whole old plugin, configuration, credentials and source metadata, then installs natively. Unknown local files stay in the backup rather than being copied over the new provider.
+
+On an ordinary failed install, the adapter restores and verifies the old plugin/configuration. If native publication is pending, dependency state changed or activity is detected during recovery, it leaves the backup and `.rembric-migration.lock` for manual recovery instead of risking a destructive rollback. **Keep Hermes stopped and retain the printed backup in that case; do not blindly remove the lock or restore over a native journal.** A process check cannot prevent a later launch, so the maintenance window is an operator responsibility.
+
+Unrecognized, linked, foreign-source, pinned or inconsistent installs remain refused. No `adopt`, `--force`, automatic stop/restart, or alternate copy installer is used.
 
 ## Configure
 

@@ -22,3 +22,10 @@
 - [x] 3.4 PARENT-OWNED: run local and pty installer layers in isolated state, and real native Hermes install/update/remove acceptance with unchanged MCP settings/credentials. Keep pending any unavailable real-host/provider acceptance; mocks are not e2e evidence.
 - [x] 3.5 PARENT-OWNED: weaken each new safety guard separately using `scripts/mutate.mjs`, capture named test failures and byte-verified restoration; writer supplies exact mutations after runtime handoff but does not run backup/deletion operations.
 - [x] 3.6 Re-run strict OpenSpec validation, inspect exact diff and report observed RED/GREEN, actual e2e evidence and pending acceptance. Preserve pre-existing summary work and leave staging/commit/push/release/deployment to the parent.
+
+## 4. Assisted legacy transition
+
+- [x] 4.1 Amend the approved contract for explicit stopped-host migration, separate consent, private verified backup and recovery.
+- [x] 4.2 Add boundary RED/GREEN tests and implement the minimal transition in the existing adapter; keep native update unchanged.
+- [x] 4.3 Verify refusals, backup, failed-install recovery, shell syntax, headless/local/PTY layers and isolated native acceptance; run guard mutations.
+- [x] 4.4 Update affected guidance and record exact evidence, limits and strict/freshness/sections/crossrefs results.

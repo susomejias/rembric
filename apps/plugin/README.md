@@ -10,7 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 less rembric-install.sh && sh rembric-install.sh
 ```
 
-It is an orchestrator — opencode uses its scripts, Claude/Codex their marketplace CLIs, Pi its registry CLI, and Hermes its native Git-subdirectory plugin manager. Hermes mutations reject explicit refs and local-source overrides; copied installations require an explicit backup outside plugin discovery and native reinstall, not forced replacement. Hermes owns provider/plugin selection and grants, and removal deletes its entire managed directory while preserving unrelated settings, MCP pins and external credentials. [Hermes transition and update-check limitations](./.hermes-plugin/README.md#transition-from-a-copied-installation).
+It is an orchestrator — opencode uses its scripts, Claude/Codex their marketplace CLIs, Pi its registry CLI, and Hermes its native Git-subdirectory plugin manager. Hermes mutations reject explicit refs and local-source overrides; explicit TUI update offers recognized legacy copies a separately confirmed stopped-host migration with verified backup and native reinstall, never forced replacement. Hermes owns provider/plugin selection and grants, and removal deletes its entire managed directory while preserving unrelated settings, MCP pins and external credentials. [Hermes transition and update-check limitations](./.hermes-plugin/README.md#transition-from-a-copied-installation).
 
 | Client           | Manifest dir        | Docs                                                                       |
 | ---------------- | ------------------- | -------------------------------------------------------------------------- |

@@ -20,6 +20,7 @@ cd "$REPO/apps/web" && pnpm vitest run --root ../.. ../../install.test.ts
 cd "$REPO"
 sh -n install.sh
 sh -n apps/plugin/install.sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s apps/plugin/.hermes-plugin/tests -p test_migrate.py
 for f in apps/plugin/.*/install.sh apps/plugin/.*/uninstall.sh; do [ -f "$f" ] && sh -n "$f"; done
 ```
 

@@ -76,13 +76,28 @@ Hermes installation SHALL delegate to `hermes plugins install susomejias/rembric
 
 ### Requirement: Copied installs require explicit operator transition
 
-Before replacing or updating an existing Hermes target, Rembric SHALL require native source metadata identifying the canonical Rembric repository and subdirectory, an unpinned install, and a non-linked target. An untracked/copied, linked, foreign-source, pinned, malformed or inconsistent installation SHALL be refused before mutation with actionable guidance. Rembric SHALL NOT move/delete unknown files or automatically force/adopt such an installation.
+Native update/removal SHALL require canonical unpinned source metadata and a non-linked target. Explicit update MAY instead migrate a recognized legacy Rembric copy after separate interactive confirmation that Hermes gateway/CLI sessions and automatic restarts are stopped. Ordinary `--yes` SHALL NOT grant migration consent. Recognition SHALL require the old regular manifest/provider/README files, Rembric manifest identity and provider class, with no source record or Git metadata. Unknown, linked, foreign-source, pinned, malformed or inconsistent targets SHALL remain refused. The adapter SHALL inspect processes conservatively and refuse activity or unavailable inspection; it SHALL NOT stop/restart Hermes. The operator SHALL keep Hermes stopped throughout migration. A verified private full backup outside plugin discovery SHALL precede moving the old directory aside. Native install SHALL own new files; old unknown files SHALL remain in backup, not be overlaid. Failed installation or verification SHALL restore the previous directory/configuration and retain evidence only when no native publication journal remains, dependency selection is unchanged and Hermes remains stopped. Otherwise it SHALL preserve the backup and migration lock, report manual recovery required, and never restore a tree that a pending native journal could subsequently delete. Concurrent migration SHALL be refused. No force/adopt or alternate copy-install backend SHALL be introduced.
 
 #### Scenario: Copied directory contains unknown local data
 
-- **WHEN** install or update encounters a copied Rembric directory containing an operator file and no native source record
-- **THEN** it SHALL refuse without changing that directory, config or credentials
-- **AND** it SHALL explain backing up the complete directory outside plugin discovery, moving the original aside explicitly, and rerunning the canonical native install
+- **WHEN** explicit update encounters a recognized legacy Rembric copy with an operator file and the stopped-host operator confirms migration
+- **THEN** it SHALL retain the entire old directory in a verified private backup outside plugins and delegate installation to Hermes
+- **AND** it SHALL verify native source metadata before success without overwriting the new provider with old files
+
+#### Scenario: Migration is not unattended
+
+- **WHEN** migration lacks its specific interactive confirmation, Hermes is active, inspection fails, or another migration holds the lock
+- **THEN** no plugin or configuration mutation SHALL occur, even with ordinary `--yes`
+
+#### Scenario: Native migration fails
+
+- **WHEN** native installation fails or returns success without valid canonical source metadata, with no pending publication, changed dependency selection or renewed activity
+- **THEN** the adapter SHALL return failure, restore the old directory and configuration, retain its backup, and omit success/restart claims
+
+#### Scenario: Native recovery remains pending
+
+- **WHEN** native publication remains pending, dependency selection changes or Hermes starts during failure recovery
+- **THEN** the adapter SHALL preserve the backup and lock, require manual recovery with Hermes stopped, and SHALL NOT restore over uncertain native state
 
 #### Scenario: Native pinned or foreign install
 

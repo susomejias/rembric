@@ -532,7 +532,7 @@ print_table() {
     printf '  %-10s %s %-11s %-11s %s\n' "$c" "$detc" "${inst:--}" "${CS_AVAILABLE:--}" "$act"
   done
   say "  Hermes update status is unknown (native subdirectory provenance may report drift)."
-  say "  Use explicit --agent=hermes --action=update for native installs; copied installs need a backup and native reinstall."
+  say "  Use explicit update for native installs; for old copies choose Plugins -> hermes -> update for assisted migration."
   hr
 }
 
@@ -901,7 +901,7 @@ run_client_script() { # $1 client, $2 install|uninstall
     if [ "$c" = "opencode" ]; then
       PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" MCP_BRIDGE_SRC="$base/mcp-bridge" sh "$t"
     else
-      if REMBRIC_ACTION="$verb" sh "$t"; then _client_rc=0; else _client_rc=$?; fi
+      if REMBRIC_ACTION="$verb" REMBRIC_NONINTERACTIVE="$NONINTERACTIVE" sh "$t"; then _client_rc=0; else _client_rc=$?; fi
       rm -f "$t"
       return "$_client_rc"
     fi
@@ -933,6 +933,7 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
     upd="hermes plugins update rembric"
     rem="hermes plugins remove rembric"
     say "  Native Hermes owns memory.provider and plugin selection/grants; removal deletes its entire managed plugin directory."
+    if [ "$action" = update ]; then say "  Recognized legacy copies require a separate, interactive stopped-host migration confirmation."; fi
     ;;
   pi)
     # Unpinned in every action, because `pi update --extensions`/`--all` skips a
