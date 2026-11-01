@@ -35,6 +35,7 @@ function fakeContext(scope: TokenScope): RequestContext {
     createdAt: new Date(),
     expiresAt: null,
     revokedAt: null,
+    deletedAt: null,
   };
   return {
     token,

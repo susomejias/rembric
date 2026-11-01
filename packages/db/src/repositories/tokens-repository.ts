@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { projects, type Project } from '../schema/projects.js';
@@ -26,6 +26,14 @@ export class TokensRepository {
 
   listAll(): Token[] {
     return this.db.select().from(tokens).all();
+  }
+
+  deleteRevoked(id: string, deletedAt: Date): number {
+    return this.db
+      .update(tokens)
+      .set({ deletedAt })
+      .where(and(eq(tokens.id, id), isNotNull(tokens.revokedAt), isNull(tokens.deletedAt)))
+      .run().changes;
   }
 
   findByName(name: string): Token | undefined {

@@ -38,6 +38,7 @@ function fakeContext(project: Project | null = null): RequestContext {
     createdAt: new Date(),
     expiresAt: null,
     revokedAt: null,
+    deletedAt: null,
   };
   return {
     token,

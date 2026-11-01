@@ -34,11 +34,13 @@ export interface TokenRowData {
 }
 
 export interface TokenServerActions {
+  delete: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   revoke: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   bulkRevoke: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
 }
 
 export interface TokenCsrfTokens {
+  readonly delete: string | null;
   readonly revoke: string | null;
   readonly bulkRevoke: string | null;
 }
@@ -169,10 +171,6 @@ function TokenRowMenu({
   actions: TokenServerActions;
   csrf: TokenCsrfTokens;
 }) {
-  if (row.revoked) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -191,17 +189,32 @@ function TokenRowMenu({
           onSelect={(event) => event.preventDefault()}
           className="text-destructive focus:text-destructive"
         >
-          <ActionForm action={actions.revoke} className={MENU_ITEM_ROOT}>
-            <input type="hidden" name="csrf" value={csrf.revoke ?? ''} />
-            <input type="hidden" name="name" value={row.name} />
+          <ActionForm
+            action={row.revoked ? actions.delete : actions.revoke}
+            className={MENU_ITEM_ROOT}
+          >
+            <input
+              type="hidden"
+              name="csrf"
+              value={(row.revoked ? csrf.delete : csrf.revoke) ?? ''}
+            />
+            <input
+              type="hidden"
+              name={row.revoked ? 'id' : 'name'}
+              value={row.revoked ? row.id : row.name}
+            />
             <ConfirmSubmit
               tone="danger"
-              title={`Revoke token "${row.name}"?`}
-              description="This is IRREVERSIBLE. Any agent using this token will lose access immediately."
-              confirmLabel="REVOKE TOKEN"
+              title={`${row.revoked ? 'Delete' : 'Revoke'} token "${row.name}"?`}
+              description={
+                row.revoked
+                  ? 'This token will be removed from the list. Session and memory history will be retained. This cannot be undone.'
+                  : 'This is IRREVERSIBLE. Any agent using this token will lose access immediately.'
+              }
+              confirmLabel={row.revoked ? 'Delete' : 'REVOKE TOKEN'}
             >
               <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
-                Revoke token
+                {row.revoked ? 'Delete' : 'Revoke token'}
               </Button>
             </ConfirmSubmit>
           </ActionForm>

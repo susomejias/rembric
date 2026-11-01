@@ -146,6 +146,7 @@ function syntheticOAuthToken(clientId: string, scope: TokenScope, projectId: str
     createdAt: new Date(0),
     expiresAt: null,
     revokedAt: null,
+    deletedAt: null,
   };
 }
 

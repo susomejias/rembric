@@ -20,6 +20,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 const CREATE_FORM = 'token.create';
 const REVOKE_FORM = 'token.revoke';
+const DELETE_FORM = 'token.delete';
 const BULK_REVOKE_FORM = 'token.bulk-revoke';
 
 async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -101,6 +102,20 @@ async function revokeToken(_prev: ActionState, formData: FormData): Promise<Acti
   redirect('/dashboard/tokens');
 }
 
+export async function deleteToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, DELETE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  try {
+    guard.services.tokens.deleteRevoked(readField(formData, 'id'));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  redirect('/dashboard/tokens');
+}
+
 async function bulkRevokeTokens(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, BULK_REVOKE_FORM);
@@ -140,6 +155,7 @@ export default async function TokensPage({
   const csrf = {
     create: await dashboardCsrfToken(CREATE_FORM),
     revoke: await dashboardCsrfToken(REVOKE_FORM),
+    delete: await dashboardCsrfToken(DELETE_FORM),
     bulkRevoke: await dashboardCsrfToken(BULK_REVOKE_FORM),
   };
 
@@ -260,7 +276,7 @@ export default async function TokensPage({
             stateTone: state.tone,
             revoked: token.revokedAt !== null,
           }))}
-          actions={{ revoke: revokeToken, bulkRevoke: bulkRevokeTokens }}
+          actions={{ revoke: revokeToken, bulkRevoke: bulkRevokeTokens, delete: deleteToken }}
           csrf={csrf}
           selectable
           toolbar={<TableSearch value={q} placeholder="Search tokens…" ariaLabel="Search tokens" />}

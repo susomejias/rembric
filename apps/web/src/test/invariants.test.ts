@@ -1410,6 +1410,7 @@ describe('server-context single-instance invariant', () => {
         createdAt: new Date(0),
         expiresAt: null,
         revokedAt: null,
+        deletedAt: null,
       },
       scope: '*',
       memberProjectIds: [],

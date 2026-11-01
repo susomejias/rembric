@@ -2,7 +2,10 @@ import { createRepositories, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DomainError,
   isAuthorized,
+  SessionsService,
+  ProjectsService,
   pinnedProjectId,
   TokensService,
   type CreateTokenInput,
@@ -22,6 +25,124 @@ beforeEach(() => {
 
 afterEach(() => {
   db.cleanup();
+});
+
+describe('TokensService.deleteRevoked', () => {
+  it('hides only the target, retains names and counts, and rejects warm and cold bearer access', async () => {
+    const target = tokens.create({ name: 'removed', scope: '*' });
+    const other = tokens.create({ name: 'kept', scope: '*' });
+    await tokens.authenticate(target.plaintext);
+    tokens.revoke(target.token.name);
+    tokens.deleteRevoked(target.token.id);
+    expect(tokens.list().map((row) => row.id)).toEqual([other.token.id]);
+    expect(tokens.findById(target.token.id)?.deletedAt).toBeInstanceOf(Date);
+    expect(tokens.findByName('removed')?.id).toBe(target.token.id);
+    expect(tokens.count()).toBe(2);
+    expect(() => tokens.create({ name: 'removed', scope: '*' })).toThrow(/already exists/);
+    await expect(tokens.authenticate(target.plaintext)).rejects.toMatchObject({
+      code: 'token_revoked',
+    });
+    const cold = new TokensService(createRepositories(db.handle.db), db.handle.db);
+    await expect(cold.authenticate(target.plaintext)).rejects.toMatchObject({
+      code: 'token_revoked',
+    });
+    await expect(tokens.authenticate(other.plaintext)).resolves.toMatchObject({
+      token: { id: other.token.id },
+    });
+  });
+
+  it('does not bootstrap after the last visible token is deleted', () => {
+    const target = tokens.create({ name: 'last', scope: '*' });
+    tokens.revoke('last');
+    tokens.deleteRevoked(target.token.id);
+    expect(tokens.list()).toEqual([]);
+    tokens.bootstrapAdmin('replacement-bootstrap-token');
+    expect(tokens.count()).toBe(1);
+    expect(tokens.findByName('admin')).toBeUndefined();
+  });
+
+  it('refuses empty, missing, and already deleted IDs', () => {
+    expect(() => tokens.deleteRevoked('   ')).toThrow(
+      new DomainError('invalid_input', 'tokens.delete: id must be non-empty'),
+    );
+    expect(() => tokens.deleteRevoked('missing')).toThrow(
+      new DomainError('token_not_found', 'tokens.delete: token not found or already deleted'),
+    );
+    const target = tokens.create({ name: 'repeat', scope: '*' });
+    tokens.revoke('repeat');
+    tokens.deleteRevoked(target.token.id);
+    const deletedAt = tokens.findById(target.token.id)?.deletedAt;
+    expect(() => tokens.deleteRevoked(target.token.id)).toThrow(
+      new DomainError('token_not_found', 'tokens.delete: token not found or already deleted'),
+    );
+    expect(tokens.findById(target.token.id)?.deletedAt).toEqual(deletedAt);
+  });
+
+  it.each([null, new Date(0)])('refuses unrevoked tokens regardless of expiry %s', (expiresAt) => {
+    const target = tokens.create({ name: 'unrevoked', scope: '*', expiresAt });
+    expect(() => tokens.deleteRevoked(target.token.id)).toThrow(
+      new DomainError('invalid_input', 'tokens.delete: revoke the token before deleting it'),
+    );
+    expect(tokens.list().map((row) => row.id)).toContain(target.token.id);
+    expect(tokens.findById(target.token.id)?.deletedAt).toBeNull();
+  });
+
+  it('conditionally updates only revoked, undeleted repository rows', () => {
+    const repo = createRepositories(db.handle.db).tokens;
+    const target = tokens.create({ name: 'conditional', scope: '*' });
+    const other = tokens.create({ name: 'conditional-control', scope: '*' });
+    tokens.revoke(other.token.name);
+    expect(repo.deleteRevoked(target.token.id, new Date())).toBe(0);
+    expect(repo.deleteRevoked('missing', new Date())).toBe(0);
+    tokens.revoke('conditional');
+    expect(repo.deleteRevoked(target.token.id, new Date(1000))).toBe(1);
+    expect(repo.deleteRevoked(target.token.id, new Date(2000))).toBe(0);
+    expect(tokens.findById(target.token.id)?.deletedAt).toEqual(new Date(1000));
+    expect(tokens.findById(other.token.id)?.deletedAt).toBeNull();
+  });
+
+  it('retains project memberships and agent session provenance', () => {
+    const repos = createRepositories(db.handle.db);
+    const projects = new ProjectsService(repos);
+    const first = projects.create({ slug: 'history-first' });
+    const second = projects.create({ slug: 'history-second' });
+    const target = tokens.create({ name: 'history', projects: [first, second], access: 'write' });
+    const session = repos.agentSessions.insert({
+      id: 'history-session',
+      tokenId: target.token.id,
+      projectId: first.id,
+      agent: 'test',
+      startedAt: new Date(),
+      summary: 'retained summary',
+      status: 'ended',
+    });
+    expect(session).toBeDefined();
+    const memberships = repos.tokens.listProjectIds(target.token.id);
+    expect(memberships).toHaveLength(2);
+    tokens.revoke('history');
+    tokens.deleteRevoked(target.token.id);
+    expect(repos.tokens.listProjectIds(target.token.id)).toEqual(memberships);
+    expect(repos.agentSessions.getById('history-session')).toEqual(session);
+    expect(tokens.findById(target.token.id)?.name).toBe('history');
+  });
+
+  it('invalidates every linked dashboard cookie while retaining unrelated access', () => {
+    const repos = createRepositories(db.handle.db);
+    const target = tokens.create({ name: 'cookie-target', scope: '*' });
+    const other = tokens.create({ name: 'cookie-other', scope: '*' });
+    const sessions = new SessionsService(repos, Buffer.alloc(32, 1));
+    const first = sessions.create(target.token.id);
+    const second = sessions.create(target.token.id);
+    const control = sessions.create(other.token.id);
+    expect(sessions.resolve(first.cookie)?.tokenId).toBe(target.token.id);
+    expect(sessions.resolve(second.cookie)?.tokenId).toBe(target.token.id);
+    tokens.revoke(target.token.name);
+    tokens.deleteRevoked(target.token.id);
+    expect(sessions.resolve(first.cookie)).toBeNull();
+    expect(sessions.resolve(second.cookie)).toBeNull();
+    expect(sessions.resolve(control.cookie)?.tokenId).toBe(other.token.id);
+    expect(tokens.findById(target.token.id)?.hash).toBe(target.token.hash);
+  });
 });
 
 describe('TokensService.create', () => {
