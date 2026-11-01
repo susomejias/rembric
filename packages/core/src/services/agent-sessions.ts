@@ -377,22 +377,20 @@ export class AgentSessionsService {
       return { session: updated ?? existing, lines: [] };
     }
 
+    const activityStartedAt = existing.lastTurnReportAt ?? existing.startedAt;
     const set: Partial<NewAgentSession> = {
       lastActivityAt: ts,
       lastTurnReportAt: ts,
       ...precedenceSet(existing, { title: input.title }, ts),
     };
     if (input.usedTools) {
-      set.lastWorkAt = laterOf(
-        existing.lastWorkAt,
-        existing.lastTurnReportAt ?? existing.startedAt,
-      );
+      set.lastWorkAt = laterOf(existing.lastWorkAt, activityStartedAt);
     }
     const row = this.updateActiveOrThrow(sessionId, set);
 
     const gateRow: SessionNudgeRow = {
       startedAt: row.startedAt,
-      lastWorkAt: row.lastWorkAt,
+      activityStartedAt,
       lastSummaryAt: row.lastSummaryAt,
       lastNudgeAt: row.lastNudgeAt,
       summary: row.summary,

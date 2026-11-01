@@ -14,7 +14,7 @@ const STARTED = new Date('2026-01-01T00:00:00.000Z');
 function row(overrides: Partial<SessionNudgeRow> = {}): SessionNudgeRow {
   return {
     startedAt: STARTED,
-    lastWorkAt: null,
+    activityStartedAt: null,
     lastSummaryAt: null,
     lastNudgeAt: null,
     summary: null,
@@ -28,43 +28,36 @@ function minutesAfter(base: Date, minutes: number): Date {
 }
 
 describe('evaluateSessionNudge — the gate', () => {
-  it('never fires with no work reported', () => {
-    const r = row({ lastWorkAt: null });
+  it('never fires without a completed report activity anchor', () => {
     expect(
-      evaluateSessionNudge(r, minutesAfter(STARTED, 60), FLOOR_MS, SUMMARY_MAX_CHARS),
+      evaluateSessionNudge(row(), minutesAfter(STARTED, 60), FLOOR_MS, SUMMARY_MAX_CHARS),
     ).toBeNull();
   });
 
-  it('fires when work followed a null summary, past the floor', () => {
-    const r = row({ lastWorkAt: minutesAfter(STARTED, 30) });
+  it('fires when activity followed a null summary, past the floor', () => {
+    const r = row({ activityStartedAt: minutesAfter(STARTED, 30) });
     expect(
       evaluateSessionNudge(r, minutesAfter(STARTED, 40), FLOOR_MS, SUMMARY_MAX_CHARS),
     ).not.toBeNull();
   });
 
-  it('does not fire when the summary is no older than the work', () => {
+  it('does not fire when the summary is no older than the activity', () => {
     const writtenAt = minutesAfter(STARTED, 30);
-    expect(
-      evaluateSessionNudge(
-        row({ lastWorkAt: writtenAt, lastSummaryAt: writtenAt }),
-        minutesAfter(STARTED, 60),
-        FLOOR_MS,
-        SUMMARY_MAX_CHARS,
-      ),
-    ).toBeNull();
-    expect(
-      evaluateSessionNudge(
-        row({ lastWorkAt: writtenAt, lastSummaryAt: minutesAfter(STARTED, 35) }),
-        minutesAfter(STARTED, 60),
-        FLOOR_MS,
-        SUMMARY_MAX_CHARS,
-      ),
-    ).toBeNull();
+    for (const lastSummaryAt of [writtenAt, minutesAfter(STARTED, 35)]) {
+      expect(
+        evaluateSessionNudge(
+          row({ activityStartedAt: writtenAt, lastSummaryAt }),
+          minutesAfter(STARTED, 60),
+          FLOOR_MS,
+          SUMMARY_MAX_CHARS,
+        ),
+      ).toBeNull();
+    }
   });
 
-  it('fires again once further work follows the summary write', () => {
+  it('fires again once further activity follows the summary write', () => {
     const r = row({
-      lastWorkAt: minutesAfter(STARTED, 60),
+      activityStartedAt: minutesAfter(STARTED, 60),
       lastSummaryAt: minutesAfter(STARTED, 35),
     });
     expect(
@@ -72,22 +65,34 @@ describe('evaluateSessionNudge — the gate', () => {
     ).not.toBeNull();
   });
 
-  it('does not fire before one floor has elapsed since started_at, with lastNudgeAt null', () => {
-    const r = row({ lastWorkAt: minutesAfter(STARTED, 1) });
-    const almostFloor = minutesAfter(STARTED, 24);
-    expect(evaluateSessionNudge(r, almostFloor, FLOOR_MS, SUMMARY_MAX_CHARS)).toBeNull();
-    const pastFloor = minutesAfter(STARTED, 26);
-    expect(evaluateSessionNudge(r, pastFloor, FLOOR_MS, SUMMARY_MAX_CHARS)).not.toBeNull();
+  it('fires exactly at the first floor, not one millisecond before', () => {
+    const r = row({ activityStartedAt: STARTED });
+    expect(
+      evaluateSessionNudge(
+        r,
+        new Date(STARTED.getTime() + FLOOR_MS - 1),
+        FLOOR_MS,
+        SUMMARY_MAX_CHARS,
+      ),
+    ).toBeNull();
+    expect(
+      evaluateSessionNudge(r, new Date(STARTED.getTime() + FLOOR_MS), FLOOR_MS, SUMMARY_MAX_CHARS),
+    ).not.toBeNull();
   });
 
   it('is not repeated inside the floor after a notice was emitted', () => {
     const nudgedAt = minutesAfter(STARTED, 30);
-    const r = row({ lastWorkAt: nudgedAt, lastNudgeAt: nudgedAt });
+    const r = row({ activityStartedAt: nudgedAt, lastNudgeAt: nudgedAt });
     expect(
-      evaluateSessionNudge(r, minutesAfter(nudgedAt, 10), FLOOR_MS, SUMMARY_MAX_CHARS),
+      evaluateSessionNudge(
+        r,
+        new Date(nudgedAt.getTime() + FLOOR_MS - 1),
+        FLOOR_MS,
+        SUMMARY_MAX_CHARS,
+      ),
     ).toBeNull();
     expect(
-      evaluateSessionNudge(r, minutesAfter(nudgedAt, 26), FLOOR_MS, SUMMARY_MAX_CHARS),
+      evaluateSessionNudge(r, new Date(nudgedAt.getTime() + FLOOR_MS), FLOOR_MS, SUMMARY_MAX_CHARS),
     ).not.toBeNull();
   });
 });

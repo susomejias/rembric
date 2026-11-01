@@ -5,7 +5,7 @@ import { parseSummarySections, type SummarySection } from './summary-sections.js
 
 export interface SessionNudgeRow {
   startedAt: Date;
-  lastWorkAt: Date | null;
+  activityStartedAt: Date | null;
   lastSummaryAt: Date | null;
   lastNudgeAt: Date | null;
   summary: string | null;
@@ -142,10 +142,10 @@ export function evaluateSessionNudge(
   floorMs: number,
   summaryMaxChars: number,
 ): string[] | null {
-  if (row.lastWorkAt === null) return null;
-  const workAfterSummary =
-    row.lastSummaryAt === null || row.lastWorkAt.getTime() > row.lastSummaryAt.getTime();
-  if (!workAfterSummary) return null;
+  if (row.activityStartedAt === null) return null;
+  const activityAfterSummary =
+    row.lastSummaryAt === null || row.activityStartedAt.getTime() > row.lastSummaryAt.getTime();
+  if (!activityAfterSummary) return null;
   const anchor = row.lastNudgeAt ?? row.startedAt;
   if (now.getTime() - anchor.getTime() < floorMs) return null;
   return [composeSessionNotice(row, summaryMaxChars)];

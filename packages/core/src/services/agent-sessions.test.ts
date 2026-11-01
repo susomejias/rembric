@@ -1716,19 +1716,18 @@ describe('AgentSessionsService', () => {
         expect(afterWork.lastActivityAt?.getTime()).toBe(clock.getTime());
       });
 
-      it('a summary written mid-turn suppresses that turn and the chat turn after it', () => {
+      it('a summary written mid-turn suppresses that turn and re-arms on later chat', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
-        // The curated write lands mid-turn, well past the floor…
         clock = minutesAfter(START, 30);
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
         clock = minutesAfter(START, 31);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
 
         clock = minutesAfter(START, 60);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines).toEqual([]);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines.length).toBeGreaterThan(0);
 
         clock = minutesAfter(START, 70);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
       });
 
       it('anchors the turn on the previous report, not on whatever last touched the row', () => {
@@ -1799,9 +1798,9 @@ describe('AgentSessionsService', () => {
 
       it('still suppresses the compliant turn after the clock stepped backwards', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
-        clock = minutesAfter(START, 100);
+        clock = minutesAfter(START, 20);
         svc.reportTurn(s.id, { tokenId, usedTools: false });
-        clock = minutesAfter(START, 30); // the step back
+        clock = minutesAfter(START, 10);
         svc.reportTurn(s.id, { tokenId, usedTools: false });
 
         clock = minutesAfter(START, 31);
@@ -1812,9 +1811,9 @@ describe('AgentSessionsService', () => {
 
       it('control: the same post-step-back timeline without the curated write does fire', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
-        clock = minutesAfter(START, 100);
+        clock = minutesAfter(START, 20);
         svc.reportTurn(s.id, { tokenId, usedTools: false });
-        clock = minutesAfter(START, 30);
+        clock = minutesAfter(START, 10);
         svc.reportTurn(s.id, { tokenId, usedTools: false });
 
         clock = minutesAfter(START, 32);
@@ -1879,14 +1878,14 @@ describe('AgentSessionsService', () => {
         expect(svc.getById(s.id)?.lastNudgeAt).toBeNull();
       });
 
-      it('a conversation-only session over three hours never returns notice lines', () => {
+      it('a conversation-only session over three hours earns notices only after the floor', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
-        for (let h = 0; h <= 180; h += 20) {
-          clock = minutesAfter(START, h);
+        for (let minute = 0; minute <= 180; minute += 5) {
+          clock = minutesAfter(START, minute);
           const { lines } = svc.reportTurn(s.id, { tokenId, usedTools: false });
-          expect(lines).toEqual([]);
+          expect(lines.length).toBe(minute > 0 && minute % 25 === 0 ? 1 : 0);
+          expect(svc.getById(s.id)?.lastWorkAt).toBeNull();
         }
-        expect(svc.getById(s.id)?.lastWorkAt).toBeNull();
       });
 
       it('writes the provisional title under final:false precedence, once', () => {
@@ -1915,7 +1914,7 @@ describe('AgentSessionsService', () => {
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
       });
 
-      it('a summary written after the work suppresses the notice until further work', () => {
+      it('a summary written after the work suppresses the notice until further activity', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         clock = minutesAfter(START, 5);
         svc.reportTurn(s.id, { tokenId, usedTools: true });
@@ -1924,7 +1923,7 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 40);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines).toEqual([]);
         clock = minutesAfter(START, 41);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines.length).toBeGreaterThan(0);
       });
 
       it('is not repeated inside the floor once emitted, even with continued work', () => {

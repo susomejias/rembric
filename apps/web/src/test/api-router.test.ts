@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { CreatedToken } from '@rembric/core';
+import { NUDGE_FLOOR_MS, type CreatedToken } from '@rembric/core';
 import type { Project } from '@rembric/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GET as fallbackGet, POST as fallbackPost } from '../app/api/[...path]/route';
 import { GET as countersGet, POST as countersPost } from '../app/api/[slug]/debug/counters/route';
@@ -433,6 +433,161 @@ describe('session routes: token binding and lifecycle', () => {
     expect(r.status).toBe(200);
     expect(r.json.ok).toBe(true);
     expect(Array.isArray(r.json.lines)).toBe(true);
+  });
+
+  describe('turn conversational policy', () => {
+    const start = new Date('2026-05-01T00:00:00.000Z');
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(start);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function report(id: string, usedTools = false, token = writer) {
+      return call(
+        turnPost,
+        request('POST', `/api/${project.slug}/sessions/${id}/turn`, {
+          token: token.plaintext,
+          body: { usedTools },
+        }),
+        sessionCtx(id),
+      );
+    }
+
+    it('turn chat earns notices at the floor without claiming tool work', async () => {
+      const id = 'sess-chat-floor';
+      await ensure(id);
+      vi.setSystemTime(start.getTime() + NUDGE_FLOOR_MS - 1);
+      expect((await report(id)).json).toEqual({ ok: true, sessionId: id, lines: [] });
+      vi.setSystemTime(start.getTime() + NUDGE_FLOOR_MS);
+      const firing = await report(id);
+      expect(firing.status).toBe(200);
+      expect(firing.json.lines).toEqual([expect.stringContaining('memory.session_summary')]);
+      const stored = getServices().agentSessions.getById(id)!;
+      expect(stored.lastWorkAt).toBeNull();
+      expect(stored.lastNudgeAt?.getTime()).toBe(start.getTime() + NUDGE_FLOOR_MS);
+      expect(stored.lastTurnReportAt?.getTime()).toBe(stored.lastNudgeAt?.getTime());
+
+      vi.setSystemTime(start.getTime() + 2 * NUDGE_FLOOR_MS - 1);
+      expect((await report(id)).json.lines).toEqual([]);
+      vi.setSystemTime(start.getTime() + 2 * NUDGE_FLOOR_MS);
+      expect((await report(id)).json.lines).toEqual(firing.json.lines);
+      expect(getServices().agentSessions.getById(id)?.lastWorkAt).toBeNull();
+    });
+
+    it('turn summary equality suppresses but later chat re-arms', async () => {
+      const id = 'sess-chat-equal';
+      await ensure(id);
+      const curated = await call(
+        summaryPost,
+        request('POST', `/api/${project.slug}/sessions/${id}/summary`, {
+          token: writer.plaintext,
+          body: { summary: '## Goal\nDiscuss design', final: true },
+        }),
+        sessionCtx(id),
+      );
+      expect(curated.status).toBe(200);
+      vi.setSystemTime(start.getTime() + NUDGE_FLOOR_MS);
+      expect((await report(id)).json.lines).toEqual([]);
+      vi.setSystemTime(start.getTime() + NUDGE_FLOOR_MS + 1);
+      expect((await report(id)).json.lines).toEqual([
+        expect.stringContaining('memory.session_summary'),
+      ]);
+    });
+
+    it.each([true, false])(
+      'turn mid-turn curated write=%s survives RAW sync and controls eligibility',
+      async (curated) => {
+        const id = 'sess-chat-midturn';
+        await ensure(id);
+        vi.setSystemTime(start.getTime() + 30 * 60_000);
+        if (curated) {
+          const saved = await call(
+            summaryPost,
+            request('POST', `/api/${project.slug}/sessions/${id}/summary`, {
+              token: writer.plaintext,
+              body: { summary: '## Goal\nDiscuss design', title: 'Design', final: true },
+            }),
+            sessionCtx(id),
+          );
+          expect(saved.status).toBe(200);
+        }
+        vi.setSystemTime(start.getTime() + 31 * 60_000);
+        const raw = await call(
+          summaryPost,
+          request('POST', `/api/${project.slug}/sessions/${id}/summary`, {
+            token: writer.plaintext,
+            body: { summary: 'user: hello\nassistant: hi', title: 'RAW', final: false },
+          }),
+          sessionCtx(id),
+        );
+        expect(raw.status).toBe(200);
+        vi.setSystemTime(start.getTime() + 32 * 60_000);
+        const result = await report(id, curated);
+        expect(result.status).toBe(200);
+        expect(result.json.lines).toEqual(
+          curated ? [] : [expect.stringContaining('memory.session_summary')],
+        );
+        const stored = getServices().agentSessions.getById(id)!;
+        expect(stored.summary).toBe(
+          curated ? '## Goal\nDiscuss design' : 'user: hello\nassistant: hi',
+        );
+        expect(stored.title).toBe(curated ? 'Design' : 'RAW');
+        expect(stored.summaryFinal).toBe(curated);
+        expect(stored.lastSummaryAt?.getTime() ?? null).toBe(
+          curated ? start.getTime() + 30 * 60_000 : null,
+        );
+      },
+    );
+
+    it('turn terminal reports stay silent and preserve gate timestamps', async () => {
+      const id = 'sess-chat-ended';
+      await ensure(id);
+      vi.setSystemTime(start.getTime() + NUDGE_FLOOR_MS);
+      expect((await report(id)).json.lines).toEqual([
+        expect.stringContaining('memory.session_summary'),
+      ]);
+      const ended = await call(
+        endPost,
+        request('POST', `/api/${project.slug}/sessions/${id}/end`, { token: writer.plaintext }),
+        sessionCtx(id),
+      );
+      expect(ended.status).toBe(200);
+      const before = getServices().agentSessions.getById(id)!;
+      vi.setSystemTime(start.getTime() + 2 * NUDGE_FLOOR_MS);
+      const result = await report(id);
+      expect(result.status).toBe(200);
+      expect(result.json.lines).toEqual([]);
+      expect(getServices().agentSessions.getById(id)).toMatchObject({
+        status: 'ended',
+        endedAt: before.endedAt,
+        lastTurnReportAt: before.lastTurnReportAt,
+        lastNudgeAt: before.lastNudgeAt,
+        lastWorkAt: null,
+      });
+    });
+
+    it('turn chat keeps foreign, deleted and archived refusals', async () => {
+      const id = 'sess-chat-guards';
+      await ensure(id);
+      vi.setSystemTime(start.getTime() + NUDGE_FLOOR_MS);
+      const foreign = await report(id, false, writerB);
+      expect(foreign.status).toBe(404);
+      expect(foreign.json.code).toBe('session_not_found');
+      getServices().agentSessions.softDelete(id, { tokenId: writer.token.id });
+      const deleted = await report(id);
+      expect(deleted.status).toBe(409);
+      expect(deleted.json.code).toBe('session_deleted');
+      expect(getServices().agentSessions.getById(id)?.lastNudgeAt).toBeNull();
+      getServices().projects.archive(project.id);
+      const archived = await report(id);
+      expect(archived.status).toBe(403);
+      expect(archived.json.code).toBe('project_archived');
+    });
   });
 
   it('turn 400 invalid_input when usedTools is missing, and writes no activity', async () => {

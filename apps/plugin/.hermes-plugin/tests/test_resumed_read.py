@@ -74,6 +74,17 @@ class ResumedReadTest(unittest.TestCase):
         # The session-opening line fires instead, since this session's own
         # ensure genuinely reported created:true.
         self.assertIn(self.mod._SESSION_OPENING_HINT, out)
+        session_hint = self.mod._SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", "01XYZ")
+        self.assertLess(out.index(session_hint), out.index(self.mod._SESSION_OPENING_HINT))
+        self.assertNotIn(self.mod._SESSION_OPENING_HINT, provider.prefetch("q", session_id="01XYZ"))
+
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": False})
+        recreated = self._provider()
+        recreated.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        recreated.on_turn_start(1, None)
+        resumed = recreated.prefetch("q", session_id="01XYZ")
+        self.assertIn(self.mod._RESUMED_READ_HINT, resumed)
+        self.assertNotIn(self.mod._SESSION_OPENING_HINT, resumed)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_never_fires_when_the_ensure_response_carries_no_created_field(

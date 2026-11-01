@@ -32,6 +32,7 @@ class _FakeJsonResponse:
 def _captured_post(mock_urlopen, idx: int = 0):
     request = mock_urlopen.call_args_list[idx].args[0]
     body = json.loads(request.data.decode("utf-8")) if request.data else None
+    assert isinstance(body, dict)
     return request.full_url, body
 
 
@@ -182,6 +183,69 @@ class PrefetchAndSyncTurnTest(unittest.TestCase):
         release.set()
         self.assertTrue(provider._sync_lock.acquire(timeout=5.0))
         provider._sync_lock.release()
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_late_chat_notice_survives_empty_report_and_is_consumed_once(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        mock_urlopen.reset_mock()
+        entered = threading.Event()
+        release = threading.Event()
+        workers = []
+        spawn = provider._spawn_context_thread
+        notice = "rembric: Refresh only changed summary sections."
+
+        def spawn_tracked(*args, **kwargs):
+            worker = spawn(*args, **kwargs)
+            workers.append(worker)
+            return worker
+
+        def respond(request, **_kwargs):
+            if request.full_url.endswith("/turn"):
+                if not entered.is_set():
+                    entered.set()
+                    release.wait(timeout=5.0)
+                    return _FakeJsonResponse({"lines": [notice]})
+                return _FakeJsonResponse({"lines": []})
+            return _FakeJsonResponse({"ok": True})
+
+        messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        mock_urlopen.side_effect = respond
+        with patch.object(provider, "_spawn_context_thread", side_effect=spawn_tracked):
+            try:
+                provider.sync_turn("hello", "hi", messages=messages)
+                self.assertTrue(entered.wait(timeout=5.0))
+                count = mock_urlopen.call_count
+                self.assertEqual(provider.prefetch("next", session_id="01XYZ"), "")
+                self.assertEqual(mock_urlopen.call_count, count)
+                release.set()
+                workers[0].join(timeout=5.0)
+                self.assertFalse(workers[0].is_alive())
+                self.assertEqual(_captured_post(mock_urlopen, 0)[1]["final"], False)
+                self.assertFalse(_captured_post(mock_urlopen, 1)[1]["usedTools"])
+
+                provider.sync_turn("hello", "hi", messages=messages)
+                workers[1].join(timeout=5.0)
+                self.assertFalse(workers[1].is_alive())
+                count = mock_urlopen.call_count
+                out = provider.prefetch("later", session_id="01XYZ")
+                self.assertEqual(
+                    out,
+                    self.mod._SESSION_ID_HINT_TEMPLATE.replace("{{SESSION_ID}}", "01XYZ")
+                    + "\n<memory-hint>" + notice + "</memory-hint>",
+                )
+                self.assertEqual(provider.prefetch("later", session_id="01XYZ"), "")
+                self.assertEqual(mock_urlopen.call_count, count)
+            finally:
+                release.set()
+                for worker in workers:
+                    worker.join(timeout=5.0)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_sync_turn_serializes_concurrent_calls_via_the_lock(
