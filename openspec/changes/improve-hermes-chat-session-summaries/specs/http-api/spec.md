@@ -34,14 +34,14 @@ A repeated report inside the floor after emission SHALL NOT emit another notice 
 - **THEN** the response SHALL be 200 with nonempty lines
 - **AND** activity, report and nudge timestamps SHALL advance while `last_work_at` remains unchanged
 
-#### Scenario: A conversation-only report below the floor returns an empty array
+#### Scenario: A conversation-only report returns an empty array, not a missing key
 
 - **GIVEN** a session just returned a notice
 - **WHEN** another conversational report arrives inside the floor
 - **THEN** the response SHALL contain `lines:[]`, not null or a missing key
 - **AND** activity and report timestamps SHALL update without changing work or nudge timestamps
 
-#### Scenario: A body without usedTools is refused rather than defaulted
+#### Scenario: A body without `usedTools` is refused rather than defaulted
 
 - **WHEN** the client POSTs `{}` or `{ title:'x' }`
 - **THEN** the server SHALL return 400 invalid_input naming the missing field

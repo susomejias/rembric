@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.4](https://github.com/susomejias/rembric/compare/server-v0.30.3...server-v0.30.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **sessions:** nudge summaries for conversational activity ([c7d44bd](https://github.com/susomejias/rembric/commit/c7d44bd7defe456e7cb83e84ab28c3fc4daca64b))
+
 ## [0.30.3](https://github.com/susomejias/rembric/compare/server-v0.30.2...server-v0.30.3) (2026-10-31)
 
 

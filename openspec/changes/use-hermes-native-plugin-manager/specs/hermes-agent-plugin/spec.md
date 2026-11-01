@@ -4,6 +4,13 @@
 
 The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling to the other client manifest directories. The directory SHALL contain `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh` and `README.md`, and MAY contain a nested Python `tests/` directory. Native Hermes SHALL own installation of this source subdirectory; Rembric SHALL NOT maintain a three-file copy whitelist or a second packaging path. Maintenance scripts SHALL delegate distribution to the native CLI while retaining recognized legacy MCP repair.
 
+#### Scenario: Plugin tree contains the five top-level files
+
+- **WHEN** the repository is at HEAD
+- **THEN** `apps/plugin/.hermes-plugin/` SHALL contain `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh`, and `README.md`
+- **AND** Python test sources MAY live in its nested `tests/` directory
+- **AND** native installation MAY ship that subtree without a Rembric file-copy whitelist
+
 #### Scenario: Plugin subtree is natively installable
 
 - **WHEN** Hermes installs `susomejias/rembric/apps/plugin/.hermes-plugin`
