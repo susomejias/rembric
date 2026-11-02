@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.7](https://github.com/susomejias/rembric/compare/server-v0.30.6...server-v0.30.7) (2026-11-02)
+
+
+### Features
+
+* **tokens:** explicit admin access, promotion and secure rotation ([e467089](https://github.com/susomejias/rembric/commit/e467089cd1d301cdf8e771bc22fdd5eabb64fc0e))
+
 ## [0.30.6](https://github.com/susomejias/rembric/compare/server-v0.30.5...server-v0.30.6) (2026-11-01)
 
 
