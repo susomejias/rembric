@@ -46,6 +46,24 @@ export class OAuthRepository {
       .run().changes;
   }
 
+  invalidateSubject(subject: OAuthToken['subject'], now: Date): void {
+    this.db
+      .update(oauthAuthorizationCodes)
+      .set({ consumedAt: now })
+      .where(
+        and(
+          eq(oauthAuthorizationCodes.subject, subject),
+          isNull(oauthAuthorizationCodes.consumedAt),
+        ),
+      )
+      .run();
+    this.db
+      .update(oauthTokens)
+      .set({ revokedAt: now })
+      .where(and(eq(oauthTokens.subject, subject), isNull(oauthTokens.revokedAt)))
+      .run();
+  }
+
   insertToken(values: NewOAuthToken): OAuthToken | undefined {
     return this.db.insert(oauthTokens).values(values).returning().get();
   }
@@ -63,7 +81,9 @@ export class OAuthRepository {
     return this.db
       .update(oauthTokens)
       .set({ rotatedAt })
-      .where(and(eq(oauthTokens.id, id), isNull(oauthTokens.rotatedAt)))
+      .where(
+        and(eq(oauthTokens.id, id), isNull(oauthTokens.rotatedAt), isNull(oauthTokens.revokedAt)),
+      )
       .run().changes;
   }
 

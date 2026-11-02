@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,10 +11,12 @@ import { NextRequest } from 'next/server';
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { POST as oauthPost } from '../app/(oauth)/[...path]/route';
 import { POST as loginPost } from '../app/dashboard/login/verify/route';
 import { DELETE, POST } from '../app/mcp/[[...path]]/route';
 import { resetMcpRateLimiterForTests } from '../lib/rate-limit';
 import { getServices } from '../lib/services';
+import { getSession } from '../lib/session';
 
 vi.mock('@/lib/auth', async () => await import('../lib/auth'));
 vi.mock('@/lib/http-redirect', async () => await import('../lib/http-redirect'));
@@ -360,6 +363,302 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       expect(blocked.headers.get('retry-after')).toMatch(/^[0-9]+$/);
     });
   });
+
+  it.each(['2025-03-26', '2025-06-18'])(
+    'applies promotion to the warmed same secret on the next MCP request and dashboard login (%s)',
+    async (protocolVersion) => {
+      const target = services.tokens.create({
+        name: `promotion-http-${protocolVersion}`,
+        scope: 'read:*',
+      });
+      const oauth = services.oauth;
+      if (!oauth) throw new Error('fixture: OAuth disabled');
+      const client = oauth.registerClient({ redirectUris: ['https://promotion.example/callback'] });
+      const code = oauth.issueCode({
+        clientId: client.clientId,
+        redirectUri: 'https://promotion.example/callback',
+        codeChallenge: 'challenge',
+        scope: 'read:*',
+        subject: target.token.id,
+      });
+      const pair = oauth.redeemCode({
+        code,
+        clientId: client.clientId,
+        redirectUri: 'https://promotion.example/callback',
+      });
+      const oauthBefore = services.db.raw
+        .prepare('SELECT * FROM oauth_tokens WHERE subject = ?')
+        .all(target.token.id);
+      expect(oauthBefore).toHaveLength(2);
+      const init = await POST(
+        mcpRequestForToken(target.plaintext, {
+          ...initializeBody,
+          params: { ...initializeBody.params, protocolVersion },
+        }),
+        ctx,
+      );
+      expect(init.status).toBe(200);
+      const sessionId = init.headers.get('mcp-session-id');
+      if (!sessionId) throw new Error('fixture: missing MCP session');
+      const headers = { 'mcp-session-id': sessionId, 'mcp-protocol-version': protocolVersion };
+      const selected = services.projects.create({ slug: `promotion-selected-${protocolVersion}` });
+      const pinned = await result(
+        await POST(
+          mcpRequestForToken(
+            target.plaintext,
+            {
+              jsonrpc: '2.0',
+              id: 3,
+              method: 'tools/call',
+              params: {
+                name: 'project.use',
+                arguments: { slug: selected.slug, confirmSwitch: true },
+              },
+            },
+            headers,
+          ),
+          ctx,
+        ),
+      );
+      expect(pinned.result.isError).not.toBe(true);
+      expect(JSON.parse(pinned.result.content[0]?.text ?? '')).toMatchObject({
+        projectId: selected.id,
+      });
+      const call = () =>
+        POST(
+          mcpRequestForToken(
+            target.plaintext,
+            {
+              jsonrpc: '2.0',
+              id: 2,
+              method: 'tools/call',
+              params: {
+                name: 'memory.save_prompt',
+                arguments: {
+                  title: 'Promotion HTTP control',
+                  content: 'The same secret can now write.',
+                  tags: ['promotion-test'],
+                },
+              },
+            },
+            headers,
+          ),
+          ctx,
+        );
+      async function result(response: Response) {
+        expect(response.status).toBe(200);
+        const text = await response.text();
+        const json =
+          text.startsWith('data:') || text.includes('\ndata:')
+            ? text
+                .split('\n')
+                .find((line) => line.startsWith('data:'))
+                ?.slice(5)
+                .trim()
+            : text;
+        return JSON.parse(json ?? '') as {
+          result: { isError?: boolean; content: { text: string }[] };
+        };
+      }
+      const denied = await result(await call());
+      expect(denied.result.isError).toBe(true);
+      expect(JSON.stringify(denied)).toContain('forbidden');
+      const loginDenied = await loginPost(loginRequest(target.plaintext));
+      expect(loginDenied.headers.get('set-cookie')).toBeNull();
+      expect(loginDenied.headers.get('location')).toContain('/dashboard/login');
+      services.tokens.promoteToAdmin(target.token.id);
+      const accepted = await result(await call());
+      expect(accepted.result.isError).not.toBe(true);
+      const saved: unknown = JSON.parse(accepted.result.content[0]?.text ?? '');
+      expect(saved).toMatchObject({ ok: true });
+      expect(saved).toHaveProperty('id', expect.any(String));
+      expect(saved).toHaveProperty('createdAt', expect.any(String));
+      const current = await result(
+        await POST(
+          mcpRequestForToken(
+            target.plaintext,
+            {
+              jsonrpc: '2.0',
+              id: 4,
+              method: 'tools/call',
+              params: { name: 'project.current', arguments: {} },
+            },
+            headers,
+          ),
+          ctx,
+        ),
+      );
+      expect(JSON.parse(current.result.content[0]?.text ?? '')).toMatchObject({
+        projectId: selected.id,
+        slug: selected.slug,
+      });
+      const loginAccepted = await loginPost(loginRequest(target.plaintext));
+      expect(new URL(loginAccepted.headers.get('location') ?? '').pathname).toBe('/dashboard');
+      expect(loginAccepted.headers.get('set-cookie')).toContain('rembric_session=');
+      expect(
+        services.db.raw
+          .prepare('SELECT * FROM oauth_tokens WHERE subject = ?')
+          .all(target.token.id),
+      ).toEqual(oauthBefore);
+      expect(oauth.authenticateAccessToken(pair.accessToken)?.scope).toBe('read:*');
+    },
+  );
+
+  it.each(['2025-03-26', '2025-06-18'])(
+    'rotation rejects old static/OAuth credentials and cookies, retaining new-secret MCP routing (%s)',
+    async (protocolVersion) => {
+      const target = services.tokens.create({
+        name: `rotation-http-${protocolVersion}`,
+        scope: '*',
+      });
+      const oauth = services.oauth;
+      if (!oauth) throw new Error('fixture: OAuth disabled');
+      const client = oauth.registerClient({ redirectUris: ['https://rotation.example/callback'] });
+      const code = oauth.issueCode({
+        clientId: client.clientId,
+        redirectUri: 'https://rotation.example/callback',
+        codeChallenge: 'challenge',
+        scope: 'mcp',
+        subject: target.token.id,
+      });
+      const pair = oauth.redeemCode({
+        code,
+        clientId: client.clientId,
+        redirectUri: 'https://rotation.example/callback',
+      });
+      const verifier = 'rotation-pkce-verifier-with-at-least-forty-three-characters';
+      const challenge = createHash('sha256').update(verifier).digest('base64url');
+      const issuePendingCode = (subject: string) =>
+        oauth.issueCode({
+          clientId: client.clientId,
+          redirectUri: 'https://rotation.example/callback',
+          codeChallenge: challenge,
+          scope: 'mcp',
+          subject,
+        });
+      const pendingCode = issuePendingCode(target.token.id);
+      const controlSubject = (await services.tokens.authenticate(adminToken)).token.id;
+      const controlCode = issuePendingCode(controlSubject);
+      const exchange = (fields: Record<string, string>) =>
+        oauthPost(
+          new Request(`${ORIGIN}/token`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ client_id: client.clientId, ...fields }),
+          }),
+          { params: Promise.resolve({ path: ['token'] }) },
+        );
+      const redemption = (code: string) =>
+        exchange({
+          grant_type: 'authorization_code',
+          code,
+          code_verifier: verifier,
+          redirect_uri: 'https://rotation.example/callback',
+        });
+      const refreshControl = await exchange({
+        grant_type: 'refresh_token',
+        refresh_token: pair.refreshToken,
+      });
+      expect(refreshControl.status).toBe(200);
+      const refreshed = (await refreshControl.json()) as {
+        access_token: string;
+        refresh_token: string;
+      };
+      const body = { ...initializeBody, params: { ...initializeBody.params, protocolVersion } };
+      const init = await POST(mcpRequestForToken(target.plaintext, body), ctx);
+      expect(init.status).toBe(200);
+      const sessionId = init.headers.get('mcp-session-id');
+      if (!sessionId) throw new Error('fixture: missing MCP session');
+      const headers = { 'mcp-session-id': sessionId, 'mcp-protocol-version': protocolVersion };
+      const selected = services.projects.create({ slug: `rotation-selected-${protocolVersion}` });
+      async function tool(secret: string, name: string, args: Record<string, unknown>) {
+        const response = await POST(
+          mcpRequestForToken(
+            secret,
+            {
+              jsonrpc: '2.0',
+              id: 9,
+              method: 'tools/call',
+              params: { name, arguments: args },
+            },
+            headers,
+          ),
+          ctx,
+        );
+        expect(response.status).toBe(200);
+        const text = await response.text();
+        const payload =
+          text
+            .split('\n')
+            .find((line) => line.startsWith('data:'))
+            ?.slice(5)
+            .trim() ?? text;
+        const result = JSON.parse(payload) as {
+          result: { isError?: boolean; content: { text: string }[] };
+        };
+        expect(result.result.isError).not.toBe(true);
+        return JSON.parse(result.result.content[0]?.text ?? '') as Record<string, unknown>;
+      }
+      expect(
+        await tool(target.plaintext, 'project.use', { slug: selected.slug, confirmSwitch: true }),
+      ).toMatchObject({ projectId: selected.id });
+      expect((await POST(mcpRequestForToken(pair.accessToken, body), ctx)).status).toBe(200);
+      function cookieSource(response: Response) {
+        const cookie = response.headers
+          .get('set-cookie')
+          ?.split(';')[0]
+          ?.split('=')
+          .slice(1)
+          .join('=');
+        if (!cookie) throw new Error('fixture: missing login cookie');
+        return { get: () => ({ value: decodeURIComponent(cookie) }) };
+      }
+      const oldCookie = cookieSource(await loginPost(loginRequest(target.plaintext)));
+      const controlCookie = cookieSource(await loginPost(loginRequest(adminToken)));
+      expect(getSession(oldCookie)).not.toBeNull();
+      expect(getSession(controlCookie)).not.toBeNull();
+
+      const rotated = services.tokens.rotate(target.token.id);
+      expect(rotated.token.id).toBe(target.token.id);
+      expect(
+        (
+          await POST(
+            mcpRequestForToken(
+              target.plaintext,
+              { jsonrpc: '2.0', id: 8, method: 'tools/list' },
+              headers,
+            ),
+            ctx,
+          )
+        ).status,
+      ).toBe(401);
+      expect((await POST(mcpRequestForToken(pair.accessToken, body), ctx)).status).toBe(401);
+      expect(
+        (await loginPost(loginRequest(target.plaintext))).headers.get('set-cookie'),
+      ).toBeNull();
+      expect(getSession(oldCookie)).toBeNull();
+      expect(getSession(controlCookie)).not.toBeNull();
+      expect((await POST(mcpRequestForToken(refreshed.access_token, body), ctx)).status).toBe(401);
+      const deniedCode = await redemption(pendingCode);
+      expect(deniedCode.status).toBe(400);
+      expect(await deniedCode.json()).toMatchObject({ error: 'invalid_grant' });
+      const deniedRefresh = await exchange({
+        grant_type: 'refresh_token',
+        refresh_token: refreshed.refresh_token,
+      });
+      expect(deniedRefresh.status).toBe(400);
+      expect(await deniedRefresh.json()).toMatchObject({ error: 'invalid_grant' });
+      expect((await redemption(controlCode)).status).toBe(200);
+      expect(
+        getSession(cookieSource(await loginPost(loginRequest(rotated.plaintext)))),
+      ).not.toBeNull();
+      expect(await tool(rotated.plaintext, 'project.current', {})).toMatchObject({
+        projectId: selected.id,
+        slug: selected.slug,
+      });
+      expect((await POST(mcpRequestForToken(adminToken, body), ctx)).status).toBe(200);
+    },
+  );
 
   it('sets Secure on the session cookie for an HTTPS deployment', async () => {
     const res = await loginPost(loginRequest(adminToken));

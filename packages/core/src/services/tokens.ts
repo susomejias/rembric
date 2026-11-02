@@ -62,11 +62,10 @@ export interface ResolvedToken extends TokenReach {
 }
 
 export class TokensService {
-  /** sha256(plaintext) hex → token id, for successfully scrypt-verified tokens. */
-  private readonly verifiedCache = new Map<string, string>();
+  private readonly verifiedCache = new Map<string, Pick<Token, 'id' | 'hash'>>();
 
   constructor(
-    private readonly repos: Pick<Repositories, 'tokens'>,
+    private readonly repos: Pick<Repositories, 'tokens' | 'dashboardSessions' | 'oauth'>,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
     /** Injectable for tests; production callers use the default bound. */
@@ -169,25 +168,79 @@ export class TokensService {
     }
   }
 
+  promoteToAdmin(id: Token['id']): void {
+    this.tx.transaction(() => {
+      const { row, now } = this.requireUsable('promote', id);
+      if (row.scope === '*') return;
+      if (this.repos.tokens.promoteToAdmin(id, now) === 0) {
+        throw new DomainError('invalid_input', 'tokens.promote: token is no longer active');
+      }
+      this.repos.tokens.deleteProjects(id);
+    });
+  }
+
+  rotate(id: Token['id']): CreatedToken {
+    return this.tx.transaction(() => {
+      const { row, now } = this.requireUsable('rotate', id);
+      const plaintext = generatePlaintextToken();
+      const hash = hashToken(plaintext);
+      if (this.repos.tokens.replaceHash(id, row.hash, hash, now) === 0) {
+        throw new DomainError('invalid_input', 'tokens.rotate: token is no longer active');
+      }
+      this.repos.dashboardSessions.deleteByTokenId(id);
+      this.repos.oauth.invalidateSubject(id, now);
+      return { plaintext, token: { ...row, hash } };
+    });
+  }
+
+  private requireUsable(verb: string, id: Token['id']): { row: Token; now: Date } {
+    if (id.trim().length === 0) {
+      throw new DomainError('invalid_input', `tokens.${verb}: id must be non-empty`);
+    }
+    const row = this.findById(id);
+    if (!row || row.deletedAt !== null) {
+      throw new DomainError('token_not_found', `tokens.${verb}: token not found or deleted`);
+    }
+    const now = this.now();
+    if (
+      row.revokedAt !== null ||
+      (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())
+    ) {
+      throw new DomainError('invalid_input', `tokens.${verb}: token must be active`);
+    }
+    const scope = row.scope as TokenScope;
+    if (pinnedProjectId(scope) !== null && row.projectId === null) {
+      throw new DomainError('invalid_input', `tokens.${verb}: unresolved project binding`);
+    }
+    if (isProjectSetScope(scope) && this.repos.tokens.listProjectIds(id).length === 0) {
+      throw new DomainError('invalid_input', `tokens.${verb}: token has no projects`);
+    }
+    return { row, now };
+  }
+
   async authenticate(plaintext: string): Promise<ResolvedToken> {
     const cacheKey = createHash('sha256').update(plaintext).digest('hex');
-    const cachedId = this.verifiedCache.get(cacheKey);
-    if (cachedId !== undefined) {
-      const row = this.repos.tokens.findById(cachedId);
-      if (row) return this.authorizeRow(row);
+    const cached = this.verifiedCache.get(cacheKey);
+    if (cached !== undefined) {
+      const row = this.repos.tokens.findById(cached.id);
+      if (row && row.hash === cached.hash) return this.authorizeRow(row);
+      this.verifiedCache.delete(cacheKey);
     }
     const all = this.repos.tokens.listAll();
     for (const row of all) {
       if (await verifyToken(plaintext, row.hash)) {
-        this.cacheVerified(cacheKey, row.id);
-        return this.authorizeRow(row);
+        const current = this.repos.tokens.findById(row.id);
+        if (!current || current.hash !== row.hash) continue;
+        const resolved = this.authorizeRow(current);
+        this.cacheVerified(cacheKey, current);
+        return resolved;
       }
     }
     throw new DomainError('token_not_found', 'token not recognized');
   }
 
   private authorizeRow(row: Token): ResolvedToken {
-    if (row.revokedAt) {
+    if (row.revokedAt || row.deletedAt) {
       throw new DomainError('token_revoked', 'token has been revoked');
     }
     if (row.expiresAt && row.expiresAt.getTime() <= this.now().getTime()) {
@@ -200,12 +253,12 @@ export class TokensService {
     };
   }
 
-  private cacheVerified(cacheKey: string, tokenId: string): void {
+  private cacheVerified(cacheKey: string, token: Token): void {
     if (this.verifiedCache.size >= this.verifiedCacheMax) {
       const oldest = this.verifiedCache.keys().next().value;
       if (oldest !== undefined) this.verifiedCache.delete(oldest);
     }
-    this.verifiedCache.set(cacheKey, tokenId);
+    this.verifiedCache.set(cacheKey, { id: token.id, hash: token.hash });
   }
 
   bootstrapAdmin(adminTokenPlaintext: string | null): void {

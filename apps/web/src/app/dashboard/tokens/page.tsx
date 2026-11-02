@@ -7,6 +7,7 @@ import type { ActionState } from '@/components/dashboard/action-form';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
+import type { RotationState } from '@/components/dashboard/token-rotation';
 import { CopyPlaintextButton, CreateTokenSheet } from '@/components/dashboard/tokens-sheet';
 import { TokensTable } from '@/components/dashboard/tokens-table';
 import { Page, SectionBar } from '@/components/dashboard/ui';
@@ -20,15 +21,18 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 const CREATE_FORM = 'token.create';
 const REVOKE_FORM = 'token.revoke';
+const ROTATE_FORM = 'token.rotate';
 const DELETE_FORM = 'token.delete';
+const PROMOTE_FORM = 'token.promote-admin';
 const BULK_REVOKE_FORM = 'token.bulk-revoke';
 
-async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
+export async function createToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, CREATE_FORM);
   if (!guard.ok) return guardFailure(guard);
 
   const name = readField(formData, 'name');
+  const tokenType = readField(formData, 'tokenType');
   const projectInputs = [
     ...new Set(
       formData
@@ -43,9 +47,8 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
   if (formData.has('scope')) {
     return {
       error:
-        "The 'scope' field was retired. Reach comes from 'project' (empty = every project) " +
-        "and the verb from 'access' ('write' or 'read'): scope=* is access=write, " +
-        'scope=read:* is access=read.',
+        "The 'scope' field was retired. Choose 'tokenType', 'project' and " +
+        "'access' ('write' or 'read') instead.",
     };
   }
 
@@ -55,6 +58,16 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
     return { error: "Access must be 'write' or 'read'." };
   }
   const access = accessInput;
+
+  if (tokenType !== 'projects' && tokenType !== 'admin') {
+    return { error: 'Token type must be Project access or Administrator. Reopen the form.' };
+  }
+  if (tokenType === 'admin' && (access !== 'write' || formData.has('project'))) {
+    return { error: 'Administrator tokens require write access and no projects.' };
+  }
+  if (tokenType === 'projects' && access === 'write' && projectInputs.length === 0) {
+    return { error: 'Write access requires at least one project.' };
+  }
 
   let expiresAt: Date | null = null;
   if (expiresInput) {
@@ -88,6 +101,21 @@ async function createToken(_prev: ActionState, formData: FormData): Promise<Acti
   redirect(`/dashboard/tokens?${query.toString()}`);
 }
 
+export async function rotateToken(_prev: ActionState, formData: FormData): Promise<RotationState> {
+  'use server';
+  const guard = await guardAction(formData, ROTATE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  const id = readField(formData, 'id');
+  try {
+    const { plaintext } = guard.services.tokens.rotate(id);
+    return { error: null, plaintext, reauthenticate: guard.session.tokenId === id };
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+}
+
 async function revokeToken(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, REVOKE_FORM);
@@ -99,6 +127,24 @@ async function revokeToken(_prev: ActionState, formData: FormData): Promise<Acti
     if (err instanceof DomainError) return { error: err.message };
     throw err;
   }
+  redirect('/dashboard/tokens');
+}
+
+export async function promoteTokenToAdmin(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  'use server';
+  const guard = await guardAction(formData, PROMOTE_FORM);
+  if (!guard.ok) return guardFailure(guard);
+
+  try {
+    guard.services.tokens.promoteToAdmin(readField(formData, 'id'));
+  } catch (err) {
+    if (err instanceof DomainError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath('/dashboard/tokens');
   redirect('/dashboard/tokens');
 }
 
@@ -155,7 +201,9 @@ export default async function TokensPage({
   const csrf = {
     create: await dashboardCsrfToken(CREATE_FORM),
     revoke: await dashboardCsrfToken(REVOKE_FORM),
+    rotate: await dashboardCsrfToken(ROTATE_FORM),
     delete: await dashboardCsrfToken(DELETE_FORM),
+    promote: await dashboardCsrfToken(PROMOTE_FORM),
     bulkRevoke: await dashboardCsrfToken(BULK_REVOKE_FORM),
   };
 
@@ -276,7 +324,13 @@ export default async function TokensPage({
             stateTone: state.tone,
             revoked: token.revokedAt !== null,
           }))}
-          actions={{ revoke: revokeToken, bulkRevoke: bulkRevokeTokens, delete: deleteToken }}
+          actions={{
+            revoke: revokeToken,
+            rotate: rotateToken,
+            bulkRevoke: bulkRevokeTokens,
+            delete: deleteToken,
+            promote: promoteTokenToAdmin,
+          }}
           csrf={csrf}
           selectable
           toolbar={<TableSearch value={q} placeholder="Search tokens…" ariaLabel="Search tokens" />}
@@ -306,7 +360,9 @@ function tokenState(
     return { label: 'expired', tone: 'amber' };
   }
   const pinned = pinnedProjectId(token.scope as TokenScope);
-  if (pinned !== null && !slugById.has(pinned)) return { label: 'inert', tone: 'amber' };
+  if (pinned !== null && (token.projectId === null || !slugById.has(pinned))) {
+    return { label: 'inert', tone: 'amber' };
+  }
   if (isProjectSetScope(token.scope as TokenScope) && memberCount === 0) {
     return { label: 'no projects', tone: 'dim' };
   }

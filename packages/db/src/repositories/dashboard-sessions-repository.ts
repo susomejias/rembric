@@ -45,6 +45,10 @@ export class DashboardSessionsRepository {
       .run();
   }
 
+  deleteByTokenId(tokenId: DashboardSession['tokenId']): void {
+    this.db.delete(dashboardSessions).where(eq(dashboardSessions.tokenId, tokenId)).run();
+  }
+
   deleteById(sessionId: string): void {
     this.db.delete(dashboardSessions).where(eq(dashboardSessions.id, sessionId)).run();
   }

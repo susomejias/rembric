@@ -189,30 +189,52 @@ The dashboard SHALL list consolidation runs at `/dashboard/consolidation` and SH
 
 ### Requirement: Tokens MUST be manageable from the dashboard
 
-The `/dashboard/tokens` view SHALL list existing tokens (name, scope, project, created_at, revoked_at, expires_at) and SHALL allow creating a new token (shown in plaintext exactly once) and revoking an existing token (setting `revoked_at`).
+The `/dashboard/tokens` view SHALL list existing tokens (name, scope, project, created_at, revoked_at, expires_at) and SHALL allow creating a new token (shown in plaintext exactly once) and revoking an existing token (setting `revoked_at`). An administrator with a valid form-specific CSRF token SHALL also be able to explicitly promote an existing active non-administrator static token by immutable ID. The row action SHALL require a danger confirmation naming the token and warning that every holder of its unchanged secret gains full read/write access to every project and server/dashboard administration. Cancel SHALL make no request. Ineligible and already-administrator rows SHALL NOT offer promotion; forged requests SHALL be validated by the server. After success the list SHALL show an Admin badge and the description All projects · Server administration, without redisplaying a secret. This presentation SHALL be based strictly on `scope='*'`, independently of lifecycle state; global read-only and project-set grants SHALL NOT be labeled Admin. Raw scope and project metadata SHALL remain visible for non-admin tokens. No generic grant editor, bulk promotion or demotion is introduced.
 
-**Reach and access SHALL compose.** The create form SHALL carry two independent controls: a `project` control that selects zero, one, or many projects (empty → all projects; otherwise the selected project slugs) and an `access` selector offering `write` and `read`, with `write` as the pre-selected option. Neither control SHALL void the other. `access` SHALL apply to the whole selection — the form SHALL NOT offer a per-project verb. The combinations SHALL map onto the arms of the token scope grammar exactly:
+**Rotation SHALL be explicit and admin-only.** Active rows, including administrators, SHALL offer Rotate token; inactive rows SHALL NOT. The action SHALL use immutable ID, an authenticated administrator session and rotation-specific CSRF. A danger confirmation SHALL name the target, warn that the old secret, linked dashboard sessions and OAuth authorizations will be invalidated, and require clients to authenticate again. Cancel SHALL send no mutation. The new secret SHALL appear only in the successful action response and transient client UI outside the menu, with copy and explicit dismissal; it SHALL NOT enter a URL, redirect, cookie, browser storage, log or persistent plaintext store. Closing or leaving this view SHALL discard the secret; refreshing SHALL NOT reveal it again. Pending submission SHALL prevent repeat clicks. Self-rotation SHALL allow copying the secret before navigation requires re-login. There SHALL be no reveal endpoint or bulk rotation.
 
-| `project` selection | `access` | minted scope        | `tokens.project_id` | `token_projects` rows     |
-| ------------------- | -------- | ------------------- | ------------------- | ------------------------- |
-| empty               | `write`  | `*`                 | `NULL`              | none                      |
-| empty               | `read`   | `read:*`            | `NULL`              | none                      |
-| exactly one slug    | `write`  | `project:<id>`      | `<id>`              | none                      |
-| exactly one slug    | `read`   | `read:project:<id>` | `<id>`              | none                      |
-| two or more slugs   | `write`  | `projects`          | `NULL`              | one row per selected slug |
-| two or more slugs   | `read`   | `read:projects`     | `NULL`              | one row per selected slug |
+#### Scenario: Administrator rotates a token
+
+- **WHEN** an administrator confirms rotation with valid form-specific CSRF
+- **THEN** the new secret SHALL be shown once with a warning to update clients and reauthenticate
+- **AND** the list SHALL retain the token identity, grant and expiration
+
+#### Scenario: Cancel, unauthorized or ineligible rotation
+
+- **WHEN** rotation is cancelled, lacks an admin session or valid CSRF, or names an ineligible token
+- **THEN** no secret or descendant credential SHALL change
+
+#### Scenario: Self-rotation does not lose the new secret
+
+- **WHEN** the operator rotates the token underlying their current dashboard session
+- **THEN** they SHALL be able to copy the response's new secret before leaving the one-time view
+- **AND** subsequent authenticated navigation SHALL require re-login with a valid administrator credential
+
+**Administrator access SHALL be explicit.** The create form SHALL require `tokenType` with choices Project access (`projects`) and Administrator (`admin`), defaulting to Project access. Administrator SHALL display a warning describing full read/write access to every project and dashboard administration, hide project/access controls, and submit `access=write` with no projects. The handler SHALL reject missing or unrecognized token types and contradictory administrator submissions (read access or any project selection), without creating a token.
+
+**Reach and access SHALL compose within Project access.** The `project` control SHALL select zero, one, or many projects and the `access` selector SHALL offer `write` and `read`, defaulting to `write`. Write access SHALL require at least one project; an empty selection SHALL NOT implicitly grant administrator access. Read access with no projects SHALL remain available, with guidance that it grants global read-only access without administration or dashboard login. `access` SHALL apply to the whole selection, not per project. All existing project-selection scenarios below use `tokenType=projects`. The combinations SHALL map onto the existing token scope grammar exactly:
+
+| `project` selection        | `access` | minted scope        | `tokens.project_id` | `token_projects` rows     |
+| -------------------------- | -------- | ------------------- | ------------------- | ------------------------- |
+| empty (Administrator only) | `write`  | `*`                 | `NULL`              | none                      |
+| empty (Project access)     | `write`  | refused             | no row              | none                      |
+| empty                      | `read`   | `read:*`            | `NULL`              | none                      |
+| exactly one slug           | `write`  | `project:<id>`      | `<id>`              | none                      |
+| exactly one slug           | `read`   | `read:project:<id>` | `<id>`              | none                      |
+| two or more slugs          | `write`  | `projects`          | `NULL`              | one row per selected slug |
+| two or more slugs          | `read`   | `read:projects`     | `NULL`              | one row per selected slug |
 
 A single-project selection SHALL continue to mint the single-project arm rather than a one-member set, so no existing token shape becomes unreachable from the form and the existing project binding stays FK-enforced for the common case.
 
-A project selection SHALL NOT be discarded under any combination, and every arm of the grammar — including `read:project:<id>`, `projects` and `read:projects` — SHALL be mintable from the form.
+Within Project access, a project selection SHALL NOT be discarded under any combination, and every arm of the grammar — including `read:project:<id>`, `projects` and `read:projects` — SHALL be mintable from the form.
 
 **An unrecognized scope field SHALL be rejected, not ignored.** A create request carrying the retired `scope` form field SHALL be refused with a flash error naming the `access` field, rather than minting a token whose reach differs from the request. Silently dropping a submitted field is the failure this requirement exists to remove.
 
-**An absent `access` SHALL be refused, not defaulted.** A create request whose `access` is missing, empty, or any value other than `write` or `read` SHALL be refused with a flash error and SHALL NOT create a token row. The `write` default is a property of the rendered form only; the handler SHALL NOT reinstate it, because defaulting an omitted `access` silently picks the more privileged verb, and with no project selected that verb is `*` — the only scope the dashboard login accepts.
+**An absent `access` SHALL be refused, not defaulted.** A create request whose `access` is missing, empty, or any value other than `write` or `read` SHALL be refused with a flash error and SHALL NOT create a token row. The `write` default is a property of the rendered form only; the handler SHALL NOT reinstate it, because defaulting an omitted `access` silently picks the more privileged verb, and privileged access must never be inferred from an omitted field.
 
 **The minted scope SHALL be stated back to the operator.** The one-time-view component SHALL render, alongside the plaintext secret, the scope that was actually persisted and every project it reaches (or that it is bound to no project). For a set-scoped token that means every member slug, not a count. The operator SHALL be able to see what they were handed without querying the database.
 
-**The list SHALL render the project as a slug.** The `project` column SHALL show the slug of the project named by `tokens.project_id`, resolved at render time, and SHALL NOT render a project id. For a set-scoped token the cell SHALL render the slug of **every** member project, in slug-ascending order, and SHALL NOT render a project id or a bare count. A token with no project binding and no membership rows SHALL render `—`. A project that has been archived SHALL still resolve to its slug.
+**The list SHALL render the project as a slug.** The `project` column SHALL show the slug of the project named by `tokens.project_id`, resolved at render time, and SHALL NOT render a project id. For a set-scoped token the cell SHALL render the slug of **every** member project, in slug-ascending order, and SHALL NOT render a project id or a bare count. A non-admin token with no project binding and no membership rows SHALL render `—`; administrator rows SHALL instead describe their all-projects and server-administration reach. A project that has been archived SHALL still resolve to its slug.
 
 **A token whose project binding does not resolve SHALL be marked distinctly.** A row whose scope names a project (`project:` or `read:project:`) that is not the id of an existing project authorizes nothing. Its state SHALL be rendered as its own value, distinct from both `active` and `revoked`, and its `project` cell SHALL render `—`.
 
@@ -223,6 +245,24 @@ State precedence SHALL be `revoked`, then `expired`, then unresolvable, then emp
 **Creating a project from this form is an operator action, not a token capability.** The form's handler runs under an admin dashboard session, so creating a project row here SHALL remain permitted. This does not grant the _minted_ token any authority to create projects; see `auth` — "A set-scoped token MUST NOT be able to create a project".
 
 Creating a token is not a destructive action and SHALL NOT require the confirmation modal; the existing revoke action SHALL keep its `data-confirm` danger-tone modal. This requirement introduces no new design tokens: the multi-selection control SHALL be styled with the existing `:root` token set only.
+
+#### Scenario: Confirmed promotion of an active token
+
+- **GIVEN** an active project-scoped token and an administrator session
+- **WHEN** the operator confirms the promotion action
+- **THEN** the existing token SHALL become administrator without changing its secret
+- **AND** its list row SHALL show an Admin badge and All projects · Server administration
+
+#### Scenario: Cancel or unauthorized promotion does not mutate
+
+- **WHEN** the operator cancels the dialog, or a promotion submission lacks an admin session or valid promotion-specific CSRF
+- **THEN** no grant SHALL change
+
+#### Scenario: Ineligible tokens do not expose promotion
+
+- **WHEN** the list contains revoked, expired, deleted, inert, memberless-set or already-administrator tokens
+- **THEN** none of those rows SHALL offer promotion
+- **AND** forged requests for inactive targets SHALL be refused without changes
 
 #### Scenario: Creating a token
 
@@ -254,11 +294,32 @@ Creating a token is not a destructive action and SHALL NOT require the confirmat
 - **THEN** the persisted scope SHALL name `alpha`
 - **AND** the returned plaintext SHALL be rejected against `never-selected`
 
-#### Scenario: No project selection mints a global token
+#### Scenario: Administrator issuance is explicit
 
-- **WHEN** the operator submits the form with an empty `project` and `access = write`
-- **THEN** the persisted row SHALL have `scope = '*'` and `project_id IS NULL`
-- **AND** submitting an empty `project` with `access = read` SHALL persist `scope = 'read:*'` and `project_id IS NULL`
+- **WHEN** the operator submits `tokenType=admin`, no projects and `access=write`
+- **THEN** the persisted row SHALL have `scope='*'` and `project_id IS NULL`
+
+#### Scenario: Project access never implicitly mints administrator
+
+- **WHEN** the operator submits `tokenType=projects`, no projects and `access=write`
+- **THEN** the handler SHALL return an error and SHALL NOT create a token
+
+#### Scenario: Global read-only access remains available
+
+- **WHEN** the operator submits `tokenType=projects`, no projects and `access=read`
+- **THEN** the persisted scope SHALL be `read:*` with no project binding
+- **AND** the form SHALL describe that combination as read-only, not administrator
+
+#### Scenario: Invalid or conflicting token types are refused
+
+- **WHEN** a submission omits `tokenType`, supplies an unknown type, or combines `admin` with projects or read access
+- **THEN** the handler SHALL return an error and SHALL NOT create a token
+
+#### Scenario: The form defaults to non-administrator access
+
+- **WHEN** the operator opens the new-token form
+- **THEN** Project access SHALL be selected by default
+- **AND** choosing Administrator SHALL show the warning before submission
 
 #### Scenario: Selecting several projects mints a set-scoped token
 
@@ -377,6 +438,8 @@ Creating a token is not a destructive action and SHALL NOT require the confirmat
 - **THEN** the server SHALL respond with a flash error
 - **AND** no token row SHALL be created
 - **AND** no `token_projects` row SHALL be created
+
+[1357 more lines in file. Use offset=380 to continue.]
 
 ### Requirement: Mutating dashboard requests MUST be CSRF-protected
 

@@ -104,6 +104,7 @@ function CreateTokenForm({
   onDone: () => void;
 }) {
   const { state, formAction, pending } = useSheetForm(action, onDone);
+  const [tokenType, setTokenType] = useState('projects');
 
   return (
     <form action={formAction} className={SHEET_BODY}>
@@ -122,47 +123,77 @@ function CreateTokenForm({
         />
       </div>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className={cn(LABEL, 'text-muted-foreground')}>Projects (optional)</legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-2">
-          {projects.map((project) => (
-            <div key={project.id} className="flex items-center gap-2">
-              <Checkbox
-                id={`token-create-project-${project.id}`}
-                name="project"
-                value={project.slug}
-              />
-              <Label
-                htmlFor={`token-create-project-${project.id}`}
-                className="font-mono text-xs font-normal"
-              >
-                {project.slug}
-              </Label>
-            </div>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          None selected: ADMIN, every project + dashboard login. One: that project only. Two or
-          more: exactly those, and still not admin.
-        </p>
-      </fieldset>
-
       <div className="flex flex-col gap-2">
-        <Label htmlFor="token-create-access" className={cn(LABEL, 'text-muted-foreground')}>
-          Access
+        <Label htmlFor="token-create-type" className={cn(LABEL, 'text-muted-foreground')}>
+          Token type
         </Label>
-        <Select name="access" defaultValue="write">
-          <SelectTrigger id="token-create-access" className="w-full">
-            <SelectValue placeholder="select access" />
+        <Select name="tokenType" value={tokenType} onValueChange={setTokenType}>
+          <SelectTrigger id="token-create-type" className="w-full">
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              <SelectItem value="write">write (read and write)</SelectItem>
-              <SelectItem value="read">read (read only)</SelectItem>
+              <SelectItem value="projects">Project access</SelectItem>
+              <SelectItem value="admin">Administrator</SelectItem>
             </SelectGroup>
           </SelectContent>
         </Select>
       </div>
+
+      {tokenType === 'admin' ? (
+        <>
+          <input type="hidden" name="access" value="write" />
+          <Flash tone="amber" label="ADMINISTRATOR">
+            Full read/write access to every project and full server and dashboard administration,
+            including dashboard login.
+          </Flash>
+        </>
+      ) : (
+        <>
+          <fieldset className="flex flex-col gap-2">
+            <legend className={cn(LABEL, 'text-muted-foreground')}>Projects</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {projects.map((project) => (
+                <div key={project.id} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`token-create-project-${project.id}`}
+                    name="project"
+                    value={project.slug}
+                  />
+                  <Label
+                    htmlFor={`token-create-project-${project.id}`}
+                    className="font-mono text-xs font-normal"
+                  >
+                    {project.slug}
+                  </Label>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Write access requires at least one project. Read access with none selected grants
+              global read-only access, without administration or dashboard login. Selected projects
+              grant access to exactly those projects, never administrator access.
+            </p>
+          </fieldset>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="token-create-access" className={cn(LABEL, 'text-muted-foreground')}>
+              Access
+            </Label>
+            <Select name="access" defaultValue="write">
+              <SelectTrigger id="token-create-access" className="w-full">
+                <SelectValue placeholder="select access" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="write">write (read and write)</SelectItem>
+                  <SelectItem value="read">read (read only)</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+        </>
+      )}
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="token-create-expires" className={cn(LABEL, 'text-muted-foreground')}>

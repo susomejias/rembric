@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DomainError,
+  OAuthService,
   isAuthorized,
   SessionsService,
   ProjectsService,
@@ -143,6 +144,468 @@ describe('TokensService.deleteRevoked', () => {
     expect(sessions.resolve(control.cookie)?.tokenId).toBe(other.token.id);
     expect(tokens.findById(target.token.id)?.hash).toBe(target.token.hash);
   });
+});
+
+describe('TokensService.promoteToAdmin', () => {
+  it.each(['read-all', 'single', 'read-single', 'set', 'read-set'] as const)(
+    'promotes %s with the warmed same secret, preserving identity, history and other tokens',
+    async (kind) => {
+      const repos = createRepositories(db.handle.db);
+      const service = new TokensService(repos, db.handle.db);
+      const projects = new ProjectsService(repos);
+      const first = projects.create({ slug: 'promotion-first' });
+      const second = projects.create({ slug: 'promotion-second' });
+      const grant: CreateTokenInput =
+        kind === 'read-all'
+          ? { name: 'promoted', scope: 'read:*' }
+          : {
+              name: 'promoted',
+              projects: kind.includes('set') ? [first, second] : [first],
+              access: kind.startsWith('read') ? 'read' : 'write',
+            };
+      const target = service.create({ ...grant, expiresAt: new Date('2099-01-01') });
+      const control = service.create({
+        name: 'untouched',
+        projects: [first, second],
+        access: 'read',
+      });
+      const controlMembers = repos.tokens.listProjectIds(control.token.id);
+      const session = repos.agentSessions.insert({
+        id: 'promotion-history',
+        tokenId: target.token.id,
+        projectId: first.id,
+        agent: 'test',
+        startedAt: new Date(),
+        summary: 'history',
+        status: 'ended',
+      });
+      const sessions = new SessionsService(repos, Buffer.alloc(32, 1));
+      const dashboard = sessions.create(target.token.id);
+      const dashboardBefore = db.handle.raw.prepare('SELECT * FROM dashboard_sessions').all();
+      expect(dashboard.cookie).toBeTruthy();
+      const before = await service.authenticate(target.plaintext);
+      expect(isAuthorized(before, 'write', { scope: 'project', projectId: 'outside' })).toBe(false);
+      const scans = vi.spyOn(repos.tokens, 'listAll');
+      service.promoteToAdmin(target.token.id);
+      const after = await service.authenticate(target.plaintext);
+      expect(scans).not.toHaveBeenCalled();
+      expect(after).toEqual({
+        token: { ...target.token, scope: '*', projectId: null },
+        scope: '*',
+        memberProjectIds: [],
+      });
+      expect(isAuthorized(after, 'write', { scope: 'project', projectId: 'outside' })).toBe(true);
+      expect(service.findById(control.token.id)).toEqual(control.token);
+      expect(repos.tokens.listProjectIds(control.token.id)).toEqual(controlMembers);
+      expect(repos.agentSessions.getById('promotion-history')).toEqual(session);
+      expect(db.handle.raw.prepare('SELECT * FROM dashboard_sessions').all()).toEqual(
+        dashboardBefore,
+      );
+    },
+  );
+
+  it.each([
+    'blank',
+    'missing',
+    'deleted',
+    'revoked',
+    'expired',
+    'at-now',
+    'inert',
+    'read-inert',
+    'empty-set',
+    'read-empty-set',
+  ])('refuses %s without changing any row or memberships', (kind) => {
+    const repos = createRepositories(db.handle.db);
+    const now = new Date(10000);
+    const service = new TokensService(repos, db.handle.db, () => now);
+    const project = new ProjectsService(repos).create({ slug: 'eligible-control' });
+    const control = service.create({ name: 'control', project, access: 'write' });
+    const target = service.create({
+      name: 'ineligible',
+      scope: 'read:*',
+      expiresAt: kind === 'expired' ? new Date(9999) : kind === 'at-now' ? now : null,
+    });
+    if (kind === 'revoked' || kind === 'deleted') service.revoke('ineligible');
+    if (kind === 'deleted') service.deleteRevoked(target.token.id);
+    if (kind.includes('inert') || kind.includes('empty-set')) {
+      const scope =
+        kind === 'inert'
+          ? 'project:missing'
+          : kind === 'read-inert'
+            ? 'read:project:missing'
+            : kind === 'empty-set'
+              ? 'projects'
+              : 'read:projects';
+      db.handle.raw.prepare('UPDATE tokens SET scope = ? WHERE id = ?').run(scope, target.token.id);
+    }
+    const before = repos.tokens.listAll();
+    const id = kind === 'blank' ? '   ' : kind === 'missing' ? 'missing' : target.token.id;
+    const message =
+      kind === 'blank'
+        ? 'id must be non-empty'
+        : kind === 'missing' || kind === 'deleted'
+          ? 'token not found or deleted'
+          : kind.includes('inert')
+            ? 'unresolved project binding'
+            : kind.includes('empty-set')
+              ? 'token has no projects'
+              : 'token must be active';
+    expect(() => service.promoteToAdmin(id)).toThrow(message);
+    expect(repos.tokens.listAll()).toEqual(before);
+    expect(repos.tokens.listProjectIds(target.token.id)).toEqual([]);
+    service.promoteToAdmin(control.token.id);
+    expect(service.findById(control.token.id)?.scope).toBe('*');
+  });
+
+  it('checks lifecycle before the administrator idempotent no-op', () => {
+    const target = tokens.create({ name: 'admin-noop', scope: '*' });
+    db.handle.raw.exec(
+      "CREATE TRIGGER refuse_admin_update BEFORE UPDATE OF scope ON tokens BEGIN SELECT RAISE(ABORT, 'admin must be a no-op'); END",
+    );
+    tokens.promoteToAdmin(target.token.id);
+    expect(tokens.findById(target.token.id)).toEqual(target.token);
+    tokens.revoke(target.token.name);
+    expect(() => tokens.promoteToAdmin(target.token.id)).toThrow(DomainError);
+  });
+
+  it('rolls back the grant and memberships when cleanup fails', () => {
+    const repos = createRepositories(db.handle.db);
+    const service = new TokensService(repos, db.handle.db);
+    const projects = new ProjectsService(repos);
+    const first = projects.create({ slug: 'rollback-first' });
+    const second = projects.create({ slug: 'rollback-second' });
+    const target = service.create({ name: 'rollback', projects: [first, second], access: 'write' });
+    const members = repos.tokens.listProjectIds(target.token.id);
+    db.handle.raw.exec(
+      "CREATE TRIGGER refuse_cleanup BEFORE DELETE ON token_projects BEGIN SELECT RAISE(ABORT, 'cleanup failed'); END",
+    );
+    expect(() => service.promoteToAdmin(target.token.id)).toThrow('cleanup failed');
+    expect(service.findById(target.token.id)).toEqual(target.token);
+    expect(repos.tokens.listProjectIds(target.token.id)).toEqual(members);
+  });
+
+  it('refuses a failed conditional update before attempting cleanup', () => {
+    const repos = createRepositories(db.handle.db);
+    const service = new TokensService(repos, db.handle.db);
+    const target = service.create({ name: 'failed-update', scope: 'read:*' });
+    db.handle.raw.exec(
+      'CREATE TRIGGER skip_promotion BEFORE UPDATE OF scope ON tokens BEGIN SELECT RAISE(IGNORE); END',
+    );
+    const cleanup = vi.spyOn(repos.tokens, 'deleteProjects');
+    expect(() => service.promoteToAdmin(target.token.id)).toThrow(DomainError);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(service.findById(target.token.id)).toEqual(target.token);
+  });
+
+  it.each(['missing', 'deleted', 'revoked', 'expired', 'at-now', 'live', 'no-expiry'])(
+    'repository conditional promotion handles %s independently',
+    (kind) => {
+      const repo = createRepositories(db.handle.db).tokens;
+      const now = new Date(10000);
+      const target = tokens.create({
+        name: 'conditional-promotion',
+        scope: 'read:*',
+        expiresAt:
+          kind === 'no-expiry'
+            ? null
+            : new Date(kind === 'expired' ? 9999 : kind === 'at-now' ? 10000 : 10001),
+      });
+      if (kind === 'revoked') tokens.revoke(target.token.name);
+      if (kind === 'deleted')
+        db.handle.raw
+          .prepare('UPDATE tokens SET deleted_at = ? WHERE id = ?')
+          .run(1, target.token.id);
+      const before = tokens.findById(target.token.id);
+      const eligible = kind === 'live' || kind === 'no-expiry';
+      expect(repo.promoteToAdmin(kind === 'missing' ? 'missing' : target.token.id, now)).toBe(
+        eligible ? 1 : 0,
+      );
+      expect(tokens.findById(target.token.id)).toEqual(
+        eligible ? { ...before, scope: '*', projectId: null } : before,
+      );
+    },
+  );
+});
+
+describe('TokensService.rotate', () => {
+  it.each(['*', 'read:*', 'single', 'set'] as const)(
+    'preserves %s identity and history while invalidating only linked credentials across instances',
+    async (grant) => {
+      const repos = createRepositories(db.handle.db);
+      const service = new TokensService(repos, db.handle.db);
+      const peer = new TokensService(repos, db.handle.db);
+      const projects = new ProjectsService(repos);
+      const first = projects.create({ slug: 'rotate-first' });
+      const second = projects.create({ slug: 'rotate-second' });
+      const target = service.create(
+        grant === 'single' || grant === 'set'
+          ? {
+              name: 'rotate',
+              projects: grant === 'set' ? [first, second] : [first],
+              access: 'read',
+              expiresAt: new Date('2099-01-01'),
+            }
+          : { name: 'rotate', scope: grant },
+      );
+      const other = service.create({ name: 'control', scope: '*' });
+      const memberships = repos.tokens.listProjectIds(target.token.id);
+      const history = repos.agentSessions.insert({
+        id: 'rotation-history',
+        tokenId: target.token.id,
+        projectId: first.id,
+        agent: 'test',
+        startedAt: new Date(),
+        status: 'ended',
+        summary: 'history',
+      });
+      const sessions = new SessionsService(repos, Buffer.alloc(32, 1));
+      const cookies = [sessions.create(target.token.id), sessions.create(target.token.id)];
+      const controlCookie = sessions.create(other.token.id);
+      const oauth = new OAuthService(repos, { accessTtlMs: 60000, refreshTtlMs: 120000 });
+      const client = oauth.registerClient({ redirectUris: ['https://example.com/cb'] });
+      const issue = (subject: string) =>
+        oauth.issueCode({
+          clientId: client.clientId,
+          redirectUri: 'https://example.com/cb',
+          codeChallenge: 'challenge',
+          scope: 'mcp',
+          subject,
+        });
+      const redeem = (code: string) =>
+        oauth.redeemCode({
+          code,
+          clientId: client.clientId,
+          redirectUri: 'https://example.com/cb',
+        });
+      const pair = redeem(issue(target.token.id));
+      const pending = issue(target.token.id);
+      const controlPair = redeem(issue(other.token.id));
+      expect(oauth.challengeForCode(pending)).toBe('challenge');
+      expect(oauth.authenticateAccessToken(pair.accessToken)).not.toBeNull();
+      await service.authenticate(target.plaintext);
+      await peer.authenticate(target.plaintext);
+      const rotated = service.rotate(target.token.id);
+      expect(rotated.plaintext).not.toBe(target.plaintext);
+      expect(rotated.token.hash).not.toContain(rotated.plaintext);
+      expect(rotated.token).toEqual({ ...target.token, hash: rotated.token.hash });
+      expect(rotated.token.hash).not.toBe(target.token.hash);
+      expect(repos.tokens.listProjectIds(target.token.id)).toEqual(memberships);
+      expect(repos.agentSessions.getById('rotation-history')).toEqual(history);
+      expect(service.findById(other.token.id)).toEqual(other.token);
+      for (const instance of [service, peer]) {
+        await expect(instance.authenticate(target.plaintext)).rejects.toThrow();
+        await expect(instance.authenticate(rotated.plaintext)).resolves.toMatchObject({
+          token: rotated.token,
+        });
+      }
+      for (const cookie of cookies) expect(sessions.resolve(cookie.cookie)).toBeNull();
+      expect(sessions.resolve(controlCookie.cookie)).not.toBeNull();
+      expect(() => oauth.challengeForCode(pending)).toThrow();
+      expect(() => redeem(pending)).toThrow();
+      expect(() =>
+        oauth.refresh({ refreshToken: pair.refreshToken, clientId: client.clientId }),
+      ).toThrow();
+      expect(oauth.authenticateAccessToken(pair.accessToken)).toBeNull();
+      expect(oauth.authenticateAccessToken(controlPair.accessToken)).not.toBeNull();
+      expect(
+        oauth.refresh({ refreshToken: controlPair.refreshToken, clientId: client.clientId })
+          .accessToken,
+      ).toBeTruthy();
+    },
+  );
+
+  it.each([
+    'blank',
+    'missing',
+    'deleted',
+    'revoked',
+    'expired',
+    'at-now',
+    'inert',
+    'read-inert',
+    'empty-set',
+    'read-empty-set',
+  ])('refuses %s rotation without mutation', (kind) => {
+    const repos = createRepositories(db.handle.db);
+    const now = new Date(10000);
+    const service = new TokensService(repos, db.handle.db, () => now);
+    const target = service.create({
+      name: 'ineligible',
+      scope: '*',
+      expiresAt: kind === 'expired' ? new Date(9999) : kind === 'at-now' ? now : null,
+    });
+    if (kind === 'revoked' || kind === 'deleted') service.revoke('ineligible');
+    if (kind === 'deleted') service.deleteRevoked(target.token.id);
+    if (kind.includes('inert') || kind.includes('empty-set')) {
+      const scope =
+        kind === 'inert'
+          ? 'project:missing'
+          : kind === 'read-inert'
+            ? 'read:project:missing'
+            : kind === 'empty-set'
+              ? 'projects'
+              : 'read:projects';
+      db.handle.raw.prepare('UPDATE tokens SET scope = ? WHERE id = ?').run(scope, target.token.id);
+    }
+    const before = repos.tokens.listAll();
+    const replace = vi.spyOn(repos.tokens, 'replaceHash');
+    const message =
+      kind === 'blank'
+        ? 'id must be non-empty'
+        : kind === 'missing' || kind === 'deleted'
+          ? 'token not found or deleted'
+          : kind.includes('inert')
+            ? 'unresolved project binding'
+            : kind.includes('empty-set')
+              ? 'token has no projects'
+              : 'token must be active';
+    expect(() =>
+      service.rotate(kind === 'blank' ? ' ' : kind === 'missing' ? 'missing' : target.token.id),
+    ).toThrow(message);
+    expect(replace).not.toHaveBeenCalled();
+    expect(repos.tokens.listAll()).toEqual(before);
+  });
+
+  it.each(['rotate', 'revoke', 'delete'] as const)(
+    'rejects cold authentication overlapping %s',
+    async (operation) => {
+      const target = tokens.create({ name: 'race', scope: '*' });
+      const pending = tokens.authenticate(target.plaintext);
+      if (operation === 'rotate') tokens.rotate(target.token.id);
+      else {
+        tokens.revoke(target.token.name);
+        if (operation === 'delete') tokens.deleteRevoked(target.token.id);
+      }
+      await expect(pending).rejects.toThrow();
+    },
+  );
+
+  it.each(['hash', 'sessions', 'codes', 'oauth'] as const)(
+    'rolls back all state when %s mutation fails',
+    (stage) => {
+      const repos = createRepositories(db.handle.db);
+      const service = new TokensService(repos, db.handle.db);
+      const target = service.create({ name: 'rollback-rotation', scope: '*' });
+      new SessionsService(repos, Buffer.alloc(32, 1)).create(target.token.id);
+      const oauth = new OAuthService(repos, { accessTtlMs: 60000, refreshTtlMs: 120000 });
+      const client = oauth.registerClient({ redirectUris: ['https://example.com/cb'] });
+      const issue = () =>
+        oauth.issueCode({
+          clientId: client.clientId,
+          redirectUri: 'https://example.com/cb',
+          codeChallenge: 'challenge',
+          scope: 'mcp',
+          subject: target.token.id,
+        });
+      oauth.redeemCode({
+        code: issue(),
+        clientId: client.clientId,
+        redirectUri: 'https://example.com/cb',
+      });
+      issue();
+      const snapshot = () =>
+        ['tokens', 'dashboard_sessions', 'oauth_authorization_codes', 'oauth_tokens'].map((table) =>
+          db.handle.raw.prepare(`SELECT * FROM ${table}`).all(),
+        );
+      const before = snapshot();
+      const trigger =
+        stage === 'hash'
+          ? 'UPDATE OF hash ON tokens'
+          : stage === 'sessions'
+            ? 'DELETE ON dashboard_sessions'
+            : stage === 'codes'
+              ? 'UPDATE ON oauth_authorization_codes'
+              : 'UPDATE ON oauth_tokens';
+      db.handle.raw.exec(
+        `CREATE TRIGGER fail_rotation BEFORE ${trigger} BEGIN SELECT RAISE(ABORT, 'rotation failed'); END`,
+      );
+      expect(() => service.rotate(target.token.id)).toThrow('rotation failed');
+      expect(snapshot()).toEqual(before);
+    },
+  );
+
+  it('does not mint descendants if rotation wins the refresh compare-and-set', () => {
+    const repos = createRepositories(db.handle.db);
+    const service = new TokensService(repos, db.handle.db);
+    const target = service.create({ name: 'refresh-race', scope: '*' });
+    const oauth = new OAuthService(repos, { accessTtlMs: 60000, refreshTtlMs: 120000 });
+    const client = oauth.registerClient({ redirectUris: ['https://example.com/cb'] });
+    const code = oauth.issueCode({
+      clientId: client.clientId,
+      redirectUri: 'https://example.com/cb',
+      codeChallenge: 'challenge',
+      scope: 'mcp',
+      subject: target.token.id,
+    });
+    const pair = oauth.redeemCode({
+      code,
+      clientId: client.clientId,
+      redirectUri: 'https://example.com/cb',
+    });
+    const mark = repos.oauth.markRefreshRotated.bind(repos.oauth);
+    vi.spyOn(repos.oauth, 'markRefreshRotated').mockImplementationOnce((id, now) => {
+      service.rotate(target.token.id);
+      return mark(id, now);
+    });
+    const insert = vi.spyOn(repos.oauth, 'insertToken');
+    expect(() =>
+      oauth.refresh({ refreshToken: pair.refreshToken, clientId: client.clientId }),
+    ).toThrow();
+    expect(insert).not.toHaveBeenCalled();
+    expect(oauth.authenticateAccessToken(pair.accessToken)).toBeNull();
+  });
+
+  it.each(['cold', 'warm'])(
+    'refuses independently deleted rows on %s authentication',
+    async (mode) => {
+      const target = tokens.create({ name: 'deleted-only', scope: '*' });
+      if (mode === 'warm') await tokens.authenticate(target.plaintext);
+      db.handle.raw.prepare('UPDATE tokens SET deleted_at = 1 WHERE id = ?').run(target.token.id);
+      await expect(tokens.authenticate(target.plaintext)).rejects.toThrow();
+    },
+  );
+
+  it('refuses a failed conditional hash update', () => {
+    const target = tokens.create({ name: 'skip-rotation', scope: '*' });
+    db.handle.raw.exec(
+      'CREATE TRIGGER skip_rotation BEFORE UPDATE OF hash ON tokens BEGIN SELECT RAISE(IGNORE); END',
+    );
+    expect(() => tokens.rotate(target.token.id)).toThrow();
+    expect(tokens.findById(target.token.id)).toEqual(target.token);
+  });
+
+  it.each(['missing', 'hash', 'deleted', 'revoked', 'expired', 'at-now', 'live', 'no-expiry'])(
+    'repository hash replacement checks %s independently',
+    (kind) => {
+      const repo = createRepositories(db.handle.db).tokens;
+      const now = new Date(10000);
+      const target = tokens.create({
+        name: 'conditional-rotate',
+        scope: '*',
+        expiresAt:
+          kind === 'no-expiry'
+            ? null
+            : new Date(kind === 'expired' ? 9999 : kind === 'at-now' ? 10000 : 10001),
+      });
+      if (kind === 'revoked') tokens.revoke(target.token.name);
+      if (kind === 'deleted')
+        db.handle.raw.prepare('UPDATE tokens SET deleted_at = 1 WHERE id = ?').run(target.token.id);
+      const before = tokens.findById(target.token.id);
+      const live = kind === 'live' || kind === 'no-expiry';
+      expect(
+        repo.replaceHash(
+          kind === 'missing' ? 'missing' : target.token.id,
+          kind === 'hash' ? 'wrong' : target.token.hash,
+          'replacement',
+          now,
+        ),
+      ).toBe(live ? 1 : 0);
+      expect(tokens.findById(target.token.id)).toEqual(
+        live ? { ...before, hash: 'replacement' } : before,
+      );
+    },
+  );
 });
 
 describe('TokensService.create', () => {

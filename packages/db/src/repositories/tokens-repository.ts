@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, gt, isNotNull, isNull, or } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import { projects, type Project } from '../schema/projects.js';
@@ -52,6 +52,46 @@ export class TokensRepository {
       .where(and(eq(tokens.name, name), isNull(tokens.revokedAt)))
       .run();
     return result.changes;
+  }
+
+  promoteToAdmin(id: Token['id'], now: Date): number {
+    return this.db
+      .update(tokens)
+      .set({ scope: '*', projectId: null })
+      .where(
+        and(
+          eq(tokens.id, id),
+          isNull(tokens.deletedAt),
+          isNull(tokens.revokedAt),
+          or(isNull(tokens.expiresAt), gt(tokens.expiresAt, now)),
+        ),
+      )
+      .run().changes;
+  }
+
+  replaceHash(
+    id: Token['id'],
+    expectedHash: Token['hash'],
+    hash: Token['hash'],
+    now: Date,
+  ): number {
+    return this.db
+      .update(tokens)
+      .set({ hash })
+      .where(
+        and(
+          eq(tokens.id, id),
+          eq(tokens.hash, expectedHash),
+          isNull(tokens.deletedAt),
+          isNull(tokens.revokedAt),
+          or(isNull(tokens.expiresAt), gt(tokens.expiresAt, now)),
+        ),
+      )
+      .run().changes;
+  }
+
+  deleteProjects(tokenId: Token['id']): void {
+    this.db.delete(tokenProjects).where(eq(tokenProjects.tokenId, tokenId)).run();
   }
 
   listProjectIds(tokenId: Token['id']): TokenProject['projectId'][] {
