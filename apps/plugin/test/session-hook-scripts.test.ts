@@ -78,6 +78,7 @@ async function runFull(
       REMBRIC_SERVER_URL: serverUrl,
       REMBRIC_API_TOKEN: 'test-token',
       REMBRIC_POST_MAX_TIME: '30',
+      TMPDIR: dir,
     },
   });
   child.child.stdin?.end(stdin);
@@ -300,6 +301,82 @@ describe(
     });
   },
 );
+
+describe('session-end.sh never replaces the first-prompt title with assistant narration', () => {
+  const narration = 'Leyendo los diseños archivados para darte el porqué exacto.';
+
+  function writeTranscript(): string {
+    const path = join(dir, 'claude.jsonl');
+    writeFileSync(
+      path,
+      [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'Fix the timeouts' } }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: narration } }),
+      ].join('\n') + '\n',
+    );
+    return path;
+  }
+
+  const prompt = (id: string) =>
+    run(
+      'prompt-nudge.sh',
+      JSON.stringify({ session_id: id, cwd: dir, prompt: 'Fix the timeouts' }),
+    );
+  const stop = (id: string) =>
+    run('stop-report.sh', JSON.stringify({ session_id: id, cwd: dir }), 'claude-code');
+  const end = (id: string) =>
+    run(
+      'session-end.sh',
+      JSON.stringify({ session_id: id, cwd: dir, transcript_path: writeTranscript() }),
+      'claude-code',
+    );
+  const bodyOf = (suffix: string) =>
+    JSON.parse(requests.find((r) => r.path.endsWith(suffix))!.body) as Record<string, unknown>;
+
+  it('omits the title once the turn report has delivered the first prompt', async () => {
+    writeRembricFile('demo');
+    await prompt('sess-title-1');
+    await stop('sess-title-1');
+    await end('sess-title-1');
+
+    expect(bodyOf('/turn').title).toBe('Fix the timeouts');
+    const endBody = bodyOf('/end');
+    expect(endBody.summary).toBeTruthy();
+    expect(endBody).not.toHaveProperty('title');
+  });
+
+  it('sends the recorded first prompt when no turn report delivered it', async () => {
+    writeRembricFile('demo');
+    await prompt('sess-title-2');
+    await end('sess-title-2');
+
+    expect(paths()).toEqual(['/api/demo/sessions/sess-title-2/end']);
+    expect(bodyOf('/end').title).toBe('Fix the timeouts');
+  });
+
+  it('pre-compact.sh also leaves the delivered first-prompt title alone', async () => {
+    writeRembricFile('demo');
+    await prompt('sess-title-4');
+    await stop('sess-title-4');
+    await run(
+      'pre-compact.sh',
+      JSON.stringify({ session_id: 'sess-title-4', cwd: dir, transcript_path: writeTranscript() }),
+      'claude-code',
+    );
+
+    expect(bodyOf('/turn').title).toBe('Fix the timeouts');
+    const summaryBody = bodyOf('/summary');
+    expect(summaryBody.summary).toBeTruthy();
+    expect(summaryBody).not.toHaveProperty('title');
+  });
+
+  it('control: falls back to the first assistant line when no prompt was ever recorded', async () => {
+    writeRembricFile('demo');
+    await end('sess-title-3');
+
+    expect(bodyOf('/end').title).toBe(narration);
+  });
+});
 
 describe('rembric_post honours REMBRIC_POST_MAX_TIME', () => {
   async function curlArgs(env: Record<string, string>): Promise<string[]> {

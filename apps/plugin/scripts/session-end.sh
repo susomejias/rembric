@@ -14,7 +14,8 @@
 #
 # This is the FALLBACK summary writer for the case where the agent did not
 # call memory.session_summary mid-session. We read the transcript JSONL,
-# format it, derive a title from the first assistant message, and POST
+# format it, take the title from the first user prompt (the first assistant
+# message only when no prompt was ever recorded), and POST
 # /end {summary, title, final:false}. The server's write-once-with-final
 # precedence preserves any model-authored summary (which would have arrived
 # with final:true) and only falls back to this raw transcript when no final
@@ -76,14 +77,7 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
         ;;
     esac
   fi
-  case "$AGENT" in
-    codex-cli)
-      TITLE="$(rembric_extract_first_assistant_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-      ;;
-    *)
-      TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-      ;;
-  esac
+  TITLE="$(rembric_fallback_title "$AGENT" "$TRANSCRIPT_PATH" "$SESSION_ID")"
 fi
 
 if [ -n "$SUMMARY" ]; then

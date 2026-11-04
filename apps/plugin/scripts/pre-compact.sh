@@ -50,13 +50,12 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   case "$AGENT" in
     codex-cli)
       SUMMARY="$(rembric_format_transcript_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-      TITLE="$(rembric_extract_first_assistant_codex_cli "$TRANSCRIPT_PATH" 2>/dev/null || true)"
       ;;
     *)
       SUMMARY="$(rembric_format_transcript_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
-      TITLE="$(rembric_extract_first_assistant_claude_code "$TRANSCRIPT_PATH" 2>/dev/null || true)"
       ;;
   esac
+  TITLE="$(rembric_fallback_title "$AGENT" "$TRANSCRIPT_PATH" "$SESSION_ID")"
 fi
 
 if [ -n "$SUMMARY" ]; then

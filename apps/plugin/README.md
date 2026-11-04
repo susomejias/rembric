@@ -56,7 +56,7 @@ Before rewriting a resumed summary, call `memory.session_get_batch({ ids: [sessi
   - `PreCompact` POSTs the live transcript to `/api/<slug>/sessions/<id>/summary` BEFORE compaction wipes context, so the snapshot survives independent of model cooperation.
   - `PostCompact` POSTs the model-authored `compaction_summary` (delivered on stdin) directly to `/api/<slug>/sessions/<id>/summary` — the highest-quality summary we can capture.
   - `Stop` (synchronous, side-effect only) reports the finished turn to `/api/<slug>/sessions/<id>/turn` — whether it invoked a tool, and the first prompt as a provisional title — and caches the reminder lines the server hands back for the next `UserPromptSubmit`. It emits nothing to the model.
-  - `SessionEnd` POSTs `/api/<slug>/sessions/<id>/end` when the session terminates, closing the row cleanly.
+  - `SessionEnd` POSTs `/api/<slug>/sessions/<id>/end` when the session terminates, closing the row cleanly. It and `PreCompact` keep the first-prompt title `Stop` already delivered; they fall back to the first assistant message only when no prompt was ever recorded.
 
 Proactive memory protocol ("save after decisions, fixes, conventions, preferences, discoveries") is delivered server-side via the Rembric MCP `initialize.instructions` handshake — it applies to every MCP client (Claude Code plugin, Codex CLI, Cursor, …) automatically, with no per-client skill needed.
 

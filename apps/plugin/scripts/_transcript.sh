@@ -139,6 +139,21 @@ rembric_format_transcript_claude_code() {
   _rembric_truncate_transcript "$out"
 }
 
+# Title for a final:false transcript write. /turn already sent the first
+# prompt under the same precedence, so a second title would replace it.
+rembric_fallback_title() {
+  local agent="${1:-}" transcript="${2:-}" session_id="${3:-}" title
+  title="$(rembric_first_prompt_take "$session_id")"
+  if [ -n "$title" ] || rembric_first_prompt_recorded "$session_id"; then
+    printf '%s' "$title"
+    return 0
+  fi
+  case "$agent" in
+    codex-cli) rembric_extract_first_assistant_codex_cli "$transcript" 2>/dev/null || true ;;
+    *) rembric_extract_first_assistant_claude_code "$transcript" 2>/dev/null || true ;;
+  esac
+}
+
 rembric_extract_first_assistant_claude_code() {
   local path="${1:-}"
   if [ -z "$path" ] || [ ! -f "$path" ] || [ ! -s "$path" ]; then
