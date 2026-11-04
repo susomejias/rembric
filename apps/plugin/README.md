@@ -183,7 +183,7 @@ is uploaded as `Connect with [REDACTED] and check the row count.`
 | PostCompact                  | 0 tok     | side effect; no model output       |
 | SessionEnd                   | 0 tok     | side effect; runs after model exit |
 
-The proactive-save protocol travels via the MCP `initialize.instructions` (~500 chars, paid once per connection by every client) — it does not show up in the plugin's per-turn budget.
+The proactive-save protocol travels via the MCP `initialize.instructions` (~1 400 chars, paid once per connection by every client) — it does not show up in the plugin's per-turn budget.
 
 ## Bridge runtime
 

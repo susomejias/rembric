@@ -26,6 +26,7 @@ import {
   DESCRIPTION_MAX_LENGTH,
   TIMELINE_WINDOW_MAX,
 } from '@rembric/mcp';
+import { INSTRUCTIONS_MAX_LENGTH } from '@rembric/mcp';
 import type { judgeOutput, memoryGetOutput, sessionGetOutput } from '@rembric/mcp';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -994,14 +995,14 @@ describe('MCP protocol conformance', () => {
     expect(globalInstructions).toMatch(/project\.use/);
     expect(globalInstructions).not.toContain('X-Rembric-Project');
     expect(globalInstructions).toContain(SUMMARY_SECTIONS);
-    expect((globalInstructions ?? '').length).toBeLessThanOrEqual(1000);
+    expect((globalInstructions ?? '').length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
     await globalClient.close();
 
     const projClient = await connect({ projectSlug: 'integration-proj' });
     const projInstructions = projClient.getInstructions();
     expect(projInstructions).toContain("'integration-proj'");
     expect(projInstructions).toContain(SUMMARY_SECTIONS);
-    expect((projInstructions ?? '').length).toBeLessThanOrEqual(1000);
+    expect((projInstructions ?? '').length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
     await projClient.close();
   });
 

@@ -462,14 +462,20 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
+            "Rembric is this project's long-term memory: only what you write to "
+            "it outlives this conversation. Run this loop yourself; host "
+            "reminders may help, never wait for them.\n"
+            "RECALL: memory.context/memory.search for new-area/diagnosis/recall "
+            "if you lack prior detail.\n"
             "SAVE: fix/decision/discovery/config/pattern/preference→"
-            "memory.save(title≤100,content,tags);topic_key?,"
+            "memory.save(title≤100,content,tags) as soon as it is settled, not "
+            "at the end: one fact per memory, written so a later session can act "
+            "on it without this chat. A session summary never replaces it. "
+            "topic_key? updates an evolving fact; "
             "candidates[]→memory.judge_batch({judgments:[…]}).\n"
             "Tags required, normally 1–5 useful reusable lowercase ASCII kebab-case: "
             "dashboard/sqlite/bug-fix.\n"
             "Pass known sessionId; never guess.\n"
-            "RECALL: memory.context/memory.search for new-area/diagnosis/recall "
-            "if you lack prior detail.\n"
             "READ:memory.get_batch(creation)/memory.session_get_batch(activity):"
             "ids OR from/to;full current data/errors,limit≤20,"
             "offset=nextOffset until null;all failed=isError.\n"
@@ -480,6 +486,8 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "order, each on its own line (never one flat paragraph):\n## Goal\n"
             "## Accomplished\n## Decisions+why\n## Verified+how\n"
             "## Unfinished+why\n## Files\n"
+            "session_not_found (no host registered one)→memory.session_start "
+            "once, then retry.\n"
             "memory.about"
         )
 

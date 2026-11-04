@@ -36,14 +36,55 @@ describe('MCP initialize instructions', () => {
     );
     expect(buildInstructions({ requestedSlug: 'demo' }).split('\n\n')[0]).toBe(hermes);
   });
-  it('emits ≤ 1000 characters for the unscoped variant', () => {
+  it('emits ≤ INSTRUCTIONS_MAX_LENGTH characters for the unscoped variant', () => {
     const text = buildInstructions({ requestedSlug: null });
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
   });
 
-  it('emits ≤ 1000 characters for the path-scoped variant', () => {
+  it('emits ≤ INSTRUCTIONS_MAX_LENGTH characters for the path-scoped variant', () => {
     const text = buildInstructions({ requestedSlug: 'rembric' });
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
+  });
+
+  it('keeps the self-imposed cap below the 2048-character Claude Code truncation ceiling', () => {
+    expect(INSTRUCTIONS_MAX_LENGTH).toBeLessThan(2048);
+  });
+
+  it('teaches the whole loop without depending on host reminders, in both variants', () => {
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      const firstLine = text.split('\n')[0]!;
+      expect(firstLine).toContain('only what you write to it outlives this conversation');
+      expect(firstLine).toContain('never wait for them');
+      const order = ['RECALL:', 'SAVE:', 'SUMMARIZE:'].map((label) => text.indexOf(label));
+      expect(order.every((i) => i >= 0)).toBe(true);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    }
+  });
+
+  it('times SAVE at the moment a fact settles and refuses the summary as a substitute', () => {
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      const saveLine = text.split('\n').find((line) => line.startsWith('SAVE:'))!;
+      expect(saveLine).toContain('as soon as it is settled, not at the end');
+      expect(saveLine).toContain('one fact per memory');
+      expect(saveLine).toContain('A session summary never replaces it');
+    }
+  });
+
+  it('names the recovery for a connection no host registered a session for', () => {
+    for (const text of [
+      buildInstructions({ requestedSlug: null }),
+      buildInstructions({ requestedSlug: 'rembric' }),
+    ]) {
+      expect(text).toContain(
+        'session_not_found (no host registered one)→memory.session_start once',
+      );
+    }
   });
 
   it('teaches batch selectors, complete pages and errors without retired recommendations', () => {

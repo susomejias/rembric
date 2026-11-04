@@ -4,7 +4,7 @@ This block is the SAME text as the server's `buildInstructions()` BASE
 (the SAVE/RECALL/SUMMARIZE flows) — one version for every client. Asserts
 the proactive session-close protocol (memory.session_summary, bound to
 ending a working turn — NOT the literal "done"), the recall/post-compact
-clause (memory.context), and the SAVE flow. Self-imposed cap: ≤1000 chars
+clause (memory.context), and the SAVE flow. Self-imposed cap: ≤1500 chars
 (Hermes itself applies no truncation; the ceiling is token-budget hygiene).
 """
 
@@ -72,13 +72,13 @@ class SystemPromptBlockTest(unittest.TestCase):
         self.assertIn("Before ending", block)
         self.assertNotIn('before declaring work done', block)
 
-    def test_block_is_within_1000_char_cap(self) -> None:
+    def test_block_is_within_1500_char_cap(self) -> None:
         # Self-imposed token budget — Hermes itself applies no truncation
         # (upstream build_system_prompt joins blocks verbatim). Mirrors the
         # server's INSTRUCTIONS_MAX_LENGTH so the two surfaces stay in lock-step.
         provider = self.mod.RembricMemoryProvider()
         block = provider.system_prompt_block()
-        self.assertLessEqual(len(block), 1000, msg=f"block is {len(block)} chars; cap is 1000")
+        self.assertLessEqual(len(block), 1500, msg=f"block is {len(block)} chars; cap is 1500")
 
 
 if __name__ == "__main__":
