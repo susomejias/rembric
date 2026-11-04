@@ -8,6 +8,8 @@ export interface SessionNudgeRow {
   activityStartedAt: Date | null;
   lastSummaryAt: Date | null;
   lastNudgeAt: Date | null;
+  lastWorkAt: Date | null;
+  lastMemoryAt: Date | null;
   summary: string | null;
   title: string | null;
 }
@@ -58,17 +60,33 @@ function directiveText(): string {
   );
 }
 
+function formatElapsed(ms: number): string {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60_000));
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  return `${hours}h ${String(totalMinutes % 60).padStart(2, '0')}m`;
+}
+
+export function composeSaveClause(sinceLastMemoryMs: number): string {
+  return (
+    `rembric: ${formatElapsed(sinceLastMemoryMs)} without a \`memory.save\` in this session. ` +
+    'Fix, decision or discovery settled? Save each now; nothing durable? Skip.'
+  );
+}
+
 function closingLine(usedChars: number, summaryMaxChars: number): string {
   return `${usedChars} used of ${summaryMaxChars} available.`;
 }
 
 function storedSectionsFrame(
+  lead: readonly string[],
   title: string,
   sectionCount: number,
   usedChars: number,
   summaryMaxChars: number,
 ): string[] {
   return [
+    ...lead,
     directiveText(),
     introLine(title),
     `+${sectionCount} more`,
@@ -77,6 +95,7 @@ function storedSectionsFrame(
 }
 
 function buildWithStoredSections(
+  lead: readonly string[],
   title: string,
   sections: SummarySection[],
   usedChars: number,
@@ -85,7 +104,7 @@ function buildWithStoredSections(
   const directive = directiveText();
   const intro = introLine(title);
   const closing = closingLine(usedChars, summaryMaxChars);
-  const base = [directive, intro];
+  const base = [...lead, directive, intro];
 
   const kept: string[] = [];
   for (let i = 0; i < sections.length; i++) {
@@ -106,29 +125,42 @@ function buildWithStoredSections(
   return [...base, ...kept, closing].join('\n');
 }
 
-function noStoredSectionsFrame(title: string, summaryMaxChars: number): string[] {
+function noStoredSectionsFrame(
+  lead: readonly string[],
+  title: string,
+  summaryMaxChars: number,
+): string[] {
   return [
+    ...lead,
     directiveText(),
     `Nothing is stored yet for "${title}". ${SUMMARY_SECTIONS}`,
     closingLine(0, summaryMaxChars),
   ];
 }
 
-export function composeSessionNotice(row: SessionNudgeRow, summaryMaxChars: number): string {
+export function composeSessionNotice(
+  row: SessionNudgeRow,
+  summaryMaxChars: number,
+  saveClause?: string,
+): string {
+  const lead = saveClause === undefined ? [] : [saveClause];
   const rawTitle = row.title ?? 'this session';
   const sections =
     row.summary === null ? [] : parseSummarySections(row.summary).filter((s) => s.key !== '');
 
   if (sections.length === 0) {
-    const budget = NOTICE_MAX_BYTES - utf8Bytes(noStoredSectionsFrame('', summaryMaxChars));
-    return noStoredSectionsFrame(sliceToUtf8Bytes(rawTitle, budget), summaryMaxChars).join('\n');
+    const budget = NOTICE_MAX_BYTES - utf8Bytes(noStoredSectionsFrame(lead, '', summaryMaxChars));
+    return noStoredSectionsFrame(lead, sliceToUtf8Bytes(rawTitle, budget), summaryMaxChars).join(
+      '\n',
+    );
   }
 
   const usedChars = row.summary?.length ?? 0;
   const budget =
     NOTICE_MAX_BYTES -
-    utf8Bytes(storedSectionsFrame('', sections.length, usedChars, summaryMaxChars));
+    utf8Bytes(storedSectionsFrame(lead, '', sections.length, usedChars, summaryMaxChars));
   return buildWithStoredSections(
+    lead,
     sliceToUtf8Bytes(rawTitle, budget),
     sections,
     usedChars,
@@ -142,11 +174,16 @@ export function evaluateSessionNudge(
   floorMs: number,
   summaryMaxChars: number,
 ): string[] | null {
-  if (row.activityStartedAt === null) return null;
-  const activityAfterSummary =
-    row.lastSummaryAt === null || row.activityStartedAt.getTime() > row.lastSummaryAt.getTime();
-  if (!activityAfterSummary) return null;
   const anchor = row.lastNudgeAt ?? row.startedAt;
   if (now.getTime() - anchor.getTime() < floorMs) return null;
-  return [composeSessionNotice(row, summaryMaxChars)];
+  const summaryDue =
+    row.activityStartedAt !== null &&
+    (row.lastSummaryAt === null || row.activityStartedAt.getTime() > row.lastSummaryAt.getTime());
+  const saveDue =
+    row.lastWorkAt !== null &&
+    (row.lastMemoryAt === null || row.lastWorkAt.getTime() > row.lastMemoryAt.getTime()) &&
+    (row.lastNudgeAt === null || row.lastWorkAt.getTime() >= row.lastNudgeAt.getTime());
+  if (!saveDue) return summaryDue ? [composeSessionNotice(row, summaryMaxChars)] : null;
+  const clause = composeSaveClause(now.getTime() - (row.lastMemoryAt ?? row.startedAt).getTime());
+  return [summaryDue ? composeSessionNotice(row, summaryMaxChars, clause) : clause];
 }

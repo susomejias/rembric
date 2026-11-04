@@ -647,6 +647,66 @@ describe('MemoryRepository', () => {
     });
   });
 
+  describe('lastCreatedAtForSession', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(tokens)
+        .values([{ id: 'tk1', name: 'test', hash: 'x', scope: '*', createdAt: new Date(500) }])
+        .run();
+      t.handle.db
+        .insert(agentSessions)
+        .values(
+          ['S1', 'S2'].map((id) => ({
+            id,
+            tokenId: 'tk1',
+            projectId: 'p0',
+            agent: 'claude-code',
+            status: 'active' as const,
+            startedAt: new Date(0),
+          })),
+        )
+        .run();
+    });
+
+    it('returns the newest write of the session in any status, and null when it wrote none', () => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '01A', content: 'a', sessionId: 'S1', createdAt: new Date(2_000) }),
+          row({
+            id: '01B',
+            content: 'b',
+            sessionId: 'S1',
+            status: 'superseded',
+            createdAt: new Date(5_000),
+          }),
+          row({ id: '01C', content: 'c', sessionId: 'S2', createdAt: new Date(9_000) }),
+          row({ id: '01D', content: 'd', sessionId: null, createdAt: new Date(9_500) }),
+        ])
+        .run();
+      expect(repo.lastCreatedAtForSession(projectScope('p0'), 'S1')?.getTime()).toBe(5_000);
+      expect(repo.lastCreatedAtForSession(projectScope('p0'), 'S-none')).toBeNull();
+    });
+
+    it('ignores a write attributed to the session outside the scope it is asked in', () => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '01A', content: 'a', sessionId: 'S1', createdAt: new Date(2_000) }),
+          row({
+            id: '01B',
+            content: 'b',
+            sessionId: 'S1',
+            projectId: 'p1',
+            createdAt: new Date(7_000),
+          }),
+        ])
+        .run();
+      expect(repo.lastCreatedAtForSession(projectScope('p0'), 'S1')?.getTime()).toBe(2_000);
+      expect(repo.lastCreatedAtForSession(projectScope('p1'), 'S1')?.getTime()).toBe(7_000);
+    });
+  });
+
   describe('adminMemoryWritesBySessionPerDay', () => {
     const DAY_MS = 86_400_000;
 

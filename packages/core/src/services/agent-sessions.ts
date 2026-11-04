@@ -150,7 +150,10 @@ export interface ReportTurnResult {
 
 export class AgentSessionsService {
   constructor(
-    private readonly repos: Pick<Repositories, 'agentSessions' | 'consolidation' | 'entities'>,
+    private readonly repos: Pick<
+      Repositories,
+      'agentSessions' | 'consolidation' | 'entities' | 'memory'
+    >,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -393,6 +396,11 @@ export class AgentSessionsService {
       activityStartedAt,
       lastSummaryAt: row.lastSummaryAt,
       lastNudgeAt: row.lastNudgeAt,
+      lastWorkAt: row.lastWorkAt,
+      lastMemoryAt:
+        row.projectId === null
+          ? null
+          : this.repos.memory.lastCreatedAtForSession(projectScope(row.projectId), sessionId),
       summary: row.summary,
       title: row.title,
     };

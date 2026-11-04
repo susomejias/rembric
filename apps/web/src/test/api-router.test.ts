@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { NUDGE_FLOOR_MS, type CreatedToken } from '@rembric/core';
-import type { Project } from '@rembric/db';
+import { projectScope, type Project } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GET as fallbackGet, POST as fallbackPost } from '../app/api/[...path]/route';
@@ -529,9 +529,9 @@ describe('session routes: token binding and lifecycle', () => {
         vi.setSystemTime(start.getTime() + 32 * 60_000);
         const result = await report(id, curated);
         expect(result.status).toBe(200);
-        expect(result.json.lines).toEqual(
-          curated ? [] : [expect.stringContaining('memory.session_summary')],
-        );
+        const joined = (result.json.lines as string[]).join('\n');
+        expect(joined.includes('`memory.session_summary`')).toBe(!curated);
+        expect(joined.includes('`memory.save`')).toBe(curated);
         const stored = getServices().agentSessions.getById(id)!;
         expect(stored.summary).toBe(
           curated ? '## Goal\nDiscuss design' : 'user: hello\nassistant: hi',
@@ -541,6 +541,55 @@ describe('session routes: token binding and lifecycle', () => {
         expect(stored.lastSummaryAt?.getTime() ?? null).toBe(
           curated ? start.getTime() + 30 * 60_000 : null,
         );
+      },
+    );
+
+    it('turn asks a working session with a fresh summary and no saved memory for memory.save', async () => {
+      const id = 'sess-save-gap';
+      await ensure(id);
+      vi.setSystemTime(start.getTime() + 30 * 60_000);
+      const curated = await call(
+        summaryPost,
+        request('POST', `/api/${project.slug}/sessions/${id}/summary`, {
+          token: writer.plaintext,
+          body: { summary: '## Goal\nShip the fix', final: true },
+        }),
+        sessionCtx(id),
+      );
+      expect(curated.status).toBe(200);
+      vi.setSystemTime(start.getTime() + 31 * 60_000);
+      const result = await report(id, true);
+      expect(result.status).toBe(200);
+      expect(result.json.lines).toEqual([
+        'rembric: 31 min without a `memory.save` in this session. ' +
+          'Fix, decision or discovery settled? Save each now; nothing durable? Skip.',
+      ]);
+    });
+
+    it.each([true, false])(
+      'turn: a memory saved in the session mid-turn=%s decides the save clause',
+      async (saved) => {
+        const id = `sess-save-${saved}`;
+        await ensure(id);
+        vi.setSystemTime(start.getTime() + 20 * 60_000);
+        await report(id, true);
+        if (saved) {
+          vi.setSystemTime(start.getTime() + 30 * 60_000);
+          getServices().memory.saveWithTopicKey(
+            {
+              type: 'project',
+              title: 'Timeouts come from the pool size',
+              content: 'The 10 s timeouts come from a pool of 1.',
+              tags: ['bug-fix'],
+              sessionId: id,
+            },
+            projectScope(project.id),
+          );
+        }
+        vi.setSystemTime(start.getTime() + 31 * 60_000);
+        const joined = ((await report(id, true)).json.lines as string[]).join('\n');
+        expect(joined.includes('`memory.save`')).toBe(!saved);
+        expect(joined.includes('`memory.session_summary`')).toBe(true);
       },
     );
 

@@ -1701,6 +1701,27 @@ describe('AgentSessionsService', () => {
     });
 
     describe('reportTurn', () => {
+      const asksSummary = (r: { lines: string[] }) =>
+        r.lines.some((l) => l.includes('`memory.session_summary`'));
+      const asksSave = (r: { lines: string[] }) => r.lines.some((l) => l.includes('`memory.save`'));
+
+      function attachMemory(sessionId: string, at: Date, project = projectId): void {
+        repos.memory.insert({
+          id: `mem-${sessionId}-${at.getTime()}-${project}`,
+          scope: 'project',
+          projectId: project,
+          type: 'project',
+          title: 'a saved fact',
+          content: 'a saved fact',
+          tags: ['test'],
+          status: 'active',
+          replaces: [],
+          sessionId,
+          createdAt: at,
+          lastSeenAt: at,
+        });
+      }
+
       it('stamps last_activity_at always and last_work_at only when usedTools', () => {
         const s = svc.start({ tokenId, projectId, agent: 'claude' });
         clock = minutesAfter(START, 1);
@@ -1721,10 +1742,10 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 30);
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
         clock = minutesAfter(START, 31);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: true }))).toBe(false);
 
         clock = minutesAfter(START, 60);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines.length).toBeGreaterThan(0);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: false }))).toBe(true);
 
         clock = minutesAfter(START, 70);
         expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
@@ -1738,7 +1759,7 @@ describe('AgentSessionsService', () => {
         svc.writeSummary(s.id, { tokenId, summary: 'user: …\n\nassistant: …', final: false });
         clock = minutesAfter(START, 32);
 
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: true }))).toBe(false);
         const after = svc.getById(s.id)!;
         expect(after.lastActivityAt!.getTime()).toBeGreaterThan(after.lastSummaryAt!.getTime());
       });
@@ -1748,7 +1769,7 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 31);
         svc.writeSummary(s.id, { tokenId, summary: 'user: …\n\nassistant: …', final: false });
         clock = minutesAfter(START, 32);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: true }))).toBe(true);
       });
 
       it('stamps last_turn_report_at on every report, and nothing else writes it', () => {
@@ -1806,7 +1827,7 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 31);
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
         clock = minutesAfter(START, 32);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines).toEqual([]);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: true }))).toBe(false);
       });
 
       it('control: the same post-step-back timeline without the curated write does fire', () => {
@@ -1817,7 +1838,7 @@ describe('AgentSessionsService', () => {
         svc.reportTurn(s.id, { tokenId, usedTools: false });
 
         clock = minutesAfter(START, 32);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length).toBeGreaterThan(0);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: true }))).toBe(true);
       });
 
       it('a lost report leaves the anchor further back, so it suppresses more and never less', () => {
@@ -1832,7 +1853,7 @@ describe('AgentSessionsService', () => {
             lines.push(
               minute === dropped
                 ? 0
-                : svc.reportTurn(s.id, { tokenId, usedTools: true }).lines.length,
+                : Number(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: true }))),
             );
             work.push(svc.getById(s.id)?.lastWorkAt?.getTime() ?? null);
             if (minute === REPORTS[0]) {
@@ -1854,6 +1875,62 @@ describe('AgentSessionsService', () => {
           expect(workAt, `turn ${i}`).toBeLessThanOrEqual(keptAt);
         }
         expect(lost.work.at(-1) ?? 0).toBeLessThan(kept.work.at(-1) ?? 0);
+      });
+
+      it('asks a session that keeps its summary fresh but never saves to call memory.save', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude-code' });
+        const asked: boolean[] = [];
+        for (let minute = 10; minute <= 240; minute += 10) {
+          clock = minutesAfter(START, minute - 1);
+          svc.writeSummary(s.id, { tokenId, summary: `## Goal\nturn ${minute}`, final: true });
+          clock = minutesAfter(START, minute);
+          const r = svc.reportTurn(s.id, { tokenId, usedTools: true });
+          expect(asksSummary(r), `minute ${minute}`).toBe(false);
+          asked.push(asksSave(r));
+        }
+        expect(asked.filter(Boolean).length).toBeGreaterThanOrEqual(8);
+      });
+
+      it('a memory the session saved during the turn suppresses the save clause', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude-code' });
+        clock = minutesAfter(START, 20);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        attachMemory(s.id, minutesAfter(START, 30));
+        clock = minutesAfter(START, 31);
+        const r = svc.reportTurn(s.id, { tokenId, usedTools: true });
+        expect(asksSave(r)).toBe(false);
+        expect(asksSummary(r)).toBe(true);
+      });
+
+      it('control: the same timeline without the save asks for one', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude-code' });
+        clock = minutesAfter(START, 20);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        clock = minutesAfter(START, 31);
+        const r = svc.reportTurn(s.id, { tokenId, usedTools: true });
+        expect(asksSave(r)).toBe(true);
+        expect(r.lines[0]).toMatch(/^rembric: 31 min without a `memory\.save` in this session\./);
+      });
+
+      it('a memory saved before the latest tool-using turn does not suppress it', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude-code' });
+        attachMemory(s.id, minutesAfter(START, 5));
+        clock = minutesAfter(START, 20);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        clock = minutesAfter(START, 31);
+        const r = svc.reportTurn(s.id, { tokenId, usedTools: true });
+        expect(asksSave(r)).toBe(true);
+        expect(r.lines[0]).toContain('26 min without a `memory.save`');
+      });
+
+      it("a memory carrying the session id in another project's scope does not count", () => {
+        const other = projects.create({ slug: 'save-gate-other' }).id;
+        const s = svc.start({ tokenId, projectId, agent: 'claude-code' });
+        clock = minutesAfter(START, 20);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        attachMemory(s.id, minutesAfter(START, 30), other);
+        clock = minutesAfter(START, 31);
+        expect(asksSave(svc.reportTurn(s.id, { tokenId, usedTools: true }))).toBe(true);
       });
 
       it('rejects an over-long or NUL-bearing title instead of storing it', () => {
@@ -1921,9 +1998,23 @@ describe('AgentSessionsService', () => {
         clock = minutesAfter(START, 6);
         svc.writeSummary(s.id, { tokenId, summary: '## Goal\ncaught up', final: true });
         clock = minutesAfter(START, 40);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines).toEqual([]);
-        clock = minutesAfter(START, 41);
-        expect(svc.reportTurn(s.id, { tokenId, usedTools: false }).lines.length).toBeGreaterThan(0);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: false }))).toBe(false);
+        clock = minutesAfter(START, 66);
+        expect(asksSummary(svc.reportTurn(s.id, { tokenId, usedTools: false }))).toBe(true);
+      });
+
+      it('asks once for the unsaved work, then only again after further tool work', () => {
+        const s = svc.start({ tokenId, projectId, agent: 'claude' });
+        clock = minutesAfter(START, 5);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        clock = minutesAfter(START, 30);
+        expect(asksSave(svc.reportTurn(s.id, { tokenId, usedTools: false }))).toBe(true);
+        clock = minutesAfter(START, 60);
+        expect(asksSave(svc.reportTurn(s.id, { tokenId, usedTools: false }))).toBe(false);
+        clock = minutesAfter(START, 70);
+        svc.reportTurn(s.id, { tokenId, usedTools: true });
+        clock = minutesAfter(START, 90);
+        expect(asksSave(svc.reportTurn(s.id, { tokenId, usedTools: false }))).toBe(true);
       });
 
       it('is not repeated inside the floor once emitted, even with continued work', () => {

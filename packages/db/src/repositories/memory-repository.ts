@@ -142,6 +142,17 @@ export class MemoryRepository {
       .all();
   }
 
+  lastCreatedAtForSession(scope: Scope, sessionId: string): Date | null {
+    const row = this.db
+      .select({ createdAt: memory.createdAt })
+      .from(memory)
+      .where(and(scopeCondition(scope), eq(memory.sessionId, sessionId)))
+      .orderBy(desc(memory.createdAt))
+      .limit(1)
+      .get();
+    return row?.createdAt ?? null;
+  }
+
   /** Timeline neighbors within the same session, before/after a pivot. */
   sessionNeighbors(opts: {
     projectId: string;
