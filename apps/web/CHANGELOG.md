@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.8](https://github.com/susomejias/rembric/compare/server-v0.30.7...server-v0.30.8) (2026-11-04)
+
+
+### Features
+
+* **mcp:** teach the whole memory loop in initialize.instructions ([19bc5d2](https://github.com/susomejias/rembric/commit/19bc5d2ae76a2800072435b09c922571a969ba5c)), closes [#439](https://github.com/susomejias/rembric/issues/439)
+* **sessions:** ask for memory.save in the server-composed notice ([203e3cf](https://github.com/susomejias/rembric/commit/203e3cfde282846001d017a6dbe1ecfa70c856e7)), closes [#439](https://github.com/susomejias/rembric/issues/439)
+
 ## [0.30.7](https://github.com/susomejias/rembric/compare/server-v0.30.6...server-v0.30.7) (2026-11-02)
 
 
