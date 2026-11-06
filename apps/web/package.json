@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@rembric/config": "workspace:*",
-    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/postcss": "^4.3.4",
     "@types/express": "^5.0.6",
     "@types/node": "^22.7.0",
     "@types/react": "^19.3.0",
