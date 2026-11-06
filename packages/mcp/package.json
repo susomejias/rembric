@@ -32,7 +32,7 @@
     "@rembric/config": "workspace:*",
     "@types/node": "^22.7.0",
     "drizzle-orm": "^0.36.0",
-    "fast-check": "^3.22.0",
+    "fast-check": "^4.10.2",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }
