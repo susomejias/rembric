@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { RUNTIME_IMAGE_LABEL_FILTER } from '@rembric/core';
 import type { RequestContext } from '@rembric/core';
 import { defaultMigrationsDir } from '@rembric/db';
+import ts from 'typescript';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { createTestDb } from './db.js';
@@ -1837,5 +1838,203 @@ describe('the widened scope has one construction site', () => {
     expect(byFile, matches.map((m) => `  ${m.file}:${m.line}  ${m.text}`).join('\n')).toEqual(
       WIDENED_SCOPE_SITES,
     );
+  });
+});
+
+const RETIREMENT_HELPER = 'orphanPendingOnRetirement';
+
+const MEMORY_RETIREMENT_FLIPS = [
+  'memory-repository.ts::archiveActive',
+  'memory-repository.ts::archiveOne',
+  'memory-repository.ts::markArchived',
+  'memory-repository.ts::markSuperseded',
+  'memory-repository.ts::markSupersededMany',
+] as const;
+
+const RETIREMENT_CALL_SITES = [
+  'packages/core/src/consolidation/operations.ts::archiveActive',
+  'packages/core/src/consolidation/operations.ts::archiveOne',
+  'packages/core/src/services/memory.ts::markArchived',
+  'packages/core/src/services/memory.ts::markSuperseded',
+  'packages/core/src/services/memory.ts::markSupersededMany',
+  'packages/core/src/services/relations.ts::markSuperseded',
+] as const;
+
+const RETIRING_UPDATE = [
+  /\bupdate\(\s*memory\s*\)[\s\S]*?\bstatus\s*:\s*'(superseded|archived)'/,
+  /UPDATE\s+memory\b[\s\S]*?\bSET\b[\s\S]*?\bstatus\s*=\s*'(superseded|archived)'/i,
+];
+
+function parseSource(name: string, src: string): ts.SourceFile {
+  const kind = name.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  return ts.createSourceFile(name, src, ts.ScriptTarget.Latest, true, kind);
+}
+
+function retiringRepositoryMethods(name: string, src: string): string[] {
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isMethodDeclaration(node) && node.body && ts.isIdentifier(node.name)) {
+      const body = node.body.getText();
+      if (RETIRING_UPDATE.some((re) => re.test(body))) found.push(node.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parseSource(name, src));
+  return found;
+}
+
+function calleeName(call: ts.CallExpression): string | null {
+  const callee = call.expression;
+  if (ts.isIdentifier(callee)) return callee.text;
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text;
+  return null;
+}
+
+function enclosingFunction(node: ts.Node): ts.FunctionLikeDeclaration | null {
+  for (let at = node.parent; at; at = at.parent) {
+    if (ts.isFunctionLike(at) && 'body' in at && at.body) return at;
+  }
+  return null;
+}
+
+function callsHelperAfter(fn: ts.FunctionLikeDeclaration, after: number): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node) && node.pos >= after && calleeName(node) === RETIREMENT_HELPER) {
+      found = true;
+      return;
+    }
+    if (node !== fn && ts.isFunctionLike(node)) return;
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(fn, visit);
+  return found;
+}
+
+interface RetirementCallSite {
+  file: string;
+  line: number;
+  method: string;
+  guarded: boolean;
+}
+
+function retirementCallSites(
+  name: string,
+  src: string,
+  flips: ReadonlySet<string>,
+): RetirementCallSite[] {
+  const sf = parseSource(name, src);
+  const sites: RetirementCallSite[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      if (flips.has(method)) {
+        const fn = enclosingFunction(node);
+        sites.push({
+          file: name,
+          line: sf.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          method,
+          guarded: fn !== null && callsHelperAfter(fn, node.end),
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return sites;
+}
+
+function listTsAndTsxSources(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      if (entry === 'migrations' || entry === 'node_modules') continue;
+      out.push(...listTsAndTsxSources(full));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry) || /\.(test|spec)\.tsx?$/.test(entry)) continue;
+    out.push(full);
+  }
+  return out;
+}
+
+describe('every memory retirement goes through the retirement helper', () => {
+  const flipMethods = new Set(MEMORY_RETIREMENT_FLIPS.map((f) => f.split('::')[1]!));
+  const sources = [srcRoot, coreRoot, dbRoot, mcpRoot]
+    .flatMap(listTsAndTsxSources)
+    .filter((f) => !relToRepo(f).startsWith('packages/db/src/repositories/'));
+  const sites = sources.flatMap((f) =>
+    retirementCallSites(relToRepo(f), readFileSync(f, 'utf8'), flipMethods),
+  );
+
+  it('the repository methods that retire a memory are exactly the inventory', () => {
+    const found: string[] = [];
+    for (const file of readdirSync(REPOSITORIES_DIR)) {
+      if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
+      const src = readFileSync(join(REPOSITORIES_DIR, file), 'utf8');
+      for (const method of retiringRepositoryMethods(file, src)) found.push(`${file}::${method}`);
+    }
+    expect(found.sort()).toEqual([...MEMORY_RETIREMENT_FLIPS].sort());
+  });
+
+  it('anchor: the scan finds every known retirement call site', () => {
+    expect(sources.some((f) => f.endsWith('.tsx'))).toBe(true);
+    expect([...new Set(sites.map((s) => `${s.file}::${s.method}`))].sort()).toEqual(
+      [...RETIREMENT_CALL_SITES].sort(),
+    );
+  });
+
+  it('every call site calls the helper after the flip, in the same function', () => {
+    const offenders = sites.filter((s) => !s.guarded);
+    expect(
+      offenders.map((o) => `${o.file}:${o.line}  ${o.method}`),
+      `a memory retirement must call ${RETIREMENT_HELPER} after the status flip, inside the same transaction callback`,
+    ).toEqual([]);
+  });
+
+  it('control: an unguarded, an earlier or an out-of-function helper call is reported', () => {
+    const scan = (src: string) =>
+      retirementCallSites('control.ts', src, flipMethods).filter((s) => !s.guarded);
+    expect(scan('function f(r) { r.memory.archiveOne(id); }')).toHaveLength(1);
+    expect(
+      scan(`function f(r) { ${RETIREMENT_HELPER}(r, s, {}); r.memory.markSuperseded(id); }`),
+    ).toHaveLength(1);
+    expect(
+      scan(
+        `function f(r, tx) { tx.transaction(() => { r.memory.markArchived(id, at); }); ${RETIREMENT_HELPER}(r, s, {}); }`,
+      ),
+    ).toHaveLength(1);
+    expect(
+      scan(
+        `function f(r, tx) { tx.transaction(() => { r.memory.markArchived(id, at); ${RETIREMENT_HELPER}(r, s, {}); }); }`,
+      ),
+    ).toEqual([]);
+  });
+
+  it('control: a real retirement path with its helper call removed is reported', () => {
+    const rel = 'packages/core/src/consolidation/operations.ts';
+    const real = readFileSync(join(repoRoot, rel), 'utf8');
+    const decayCall = new RegExp(`${RETIREMENT_HELPER}\\([^;]*cause: 'decay'[^;]*\\);`);
+    expect(decayCall.test(real)).toBe(true);
+    const unguarded = (src: string) =>
+      retirementCallSites(rel, src, flipMethods)
+        .filter((s) => !s.guarded)
+        .map((s) => s.method);
+
+    expect(unguarded(real)).toEqual([]);
+    expect(unguarded(real.replace(decayCall, ''))).toEqual(['archiveActive']);
+  });
+
+  it('control: the inventory scan recognises a retiring update and nothing else', () => {
+    const src = `export class R {
+      retireAll(): void { this.db.update(memory).set({ status: 'superseded' as const }).run(); }
+      retireRaw(): void { this.raw.prepare("UPDATE memory SET status = 'archived' WHERE id = ?").run(); }
+      touch(at: Date): void { this.db.update(memory).set({ lastSeenAt: at }).run(); }
+      reactivate(): void { this.db.update(memory).set({ status: 'active' as const }).run(); }
+      orphan(): void { this.db.update(memoryRelations).set({ status: 'orphaned' }).run(); }
+    }`;
+    expect(retiringRepositoryMethods('control.ts', src)).toEqual(['retireAll', 'retireRaw']);
   });
 });

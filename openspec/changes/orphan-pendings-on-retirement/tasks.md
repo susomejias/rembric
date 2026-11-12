@@ -23,7 +23,7 @@
 
 ## 5. Enforcement
 
-- [ ] 5.1 Add the retirement-path scan to `apps/web/src/test/invariants.test.ts`: the inventory of flip methods, the call-site scan with the TypeScript compiler API, the six-call-site anchor and the two controls (design D7)
+- [x] 5.1 Add the retirement-path scan to `apps/web/src/test/invariants.test.ts`: the inventory of flip methods, the call-site scan with the TypeScript compiler API, the six-call-site anchor and the two controls (design D7)
 
 ## 6. Docs
 
