@@ -113,8 +113,9 @@ The runtime image moved to a distroless base in v0.21.14 (node is at `/nodejs/bi
 
 Every save inserts `memory_relations` rows with `status='pending'` for each candidate. If the agent ignores `candidates[]`, they accumulate as `pending_conflict` annotations.
 
-- After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) they re-surface in `memory.context.pendingJudgments[]` for any agent to close with `memory.judge_batch` — unless one of the pair has since left `active`, in which case the queue withholds it. `/dashboard/judgments` still lists it, and the sweep's stale pending drain orphans it on its next runs.
-- Before the deadline, the sweep's stale pending drain orphans the pairs no current save-time channel would create (lexical below the floor, stored vectors below the threshold, no shared entity) and the pairs with a retired endpoint. A pair it cannot evaluate, for example one whose vector is missing, stays pending. It works in bounded batches, so a large backlog drains over several runs; each drain is journaled and undoable, and an undone pair is not drained again.
+- After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) they re-surface in `memory.context.pendingJudgments[]` for any agent to close with `memory.judge_batch`.
+- Retiring one of the pair's memories — a `topic_key` revision, a `supersedes` verdict, a merge, an archive or the decay pass — orphans the pair in the same transaction, journaled as `endpoint retired at retirement`. Undoing that retirement from `/dashboard/consolidation` restores it.
+- Before the deadline, the sweep's stale pending drain orphans the pairs no current save-time channel would create (lexical below the floor, stored vectors below the threshold, no shared entity) and the pairs with a retired endpoint that predate orphaning at retirement. A pair it cannot evaluate, for example one whose vector is missing, stays pending. It works in bounded batches, so a large backlog drains over several runs; each drain is journaled and undoable, and an undone pair is not drained again.
 - After `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks them `orphaned` (journaled, undoable from `/dashboard/consolidation`).
 - If the agent never calls `memory.judge_batch`, confirm the tool is in `tools/list` and paste the relations excerpt into the agent's prompt.
 

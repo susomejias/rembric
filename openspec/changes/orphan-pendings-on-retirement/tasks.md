@@ -27,7 +27,7 @@
 
 ## 6. Docs
 
-- [ ] 6.1 Update `docs/relations.md`, `docs/troubleshooting.md` and the consolidation section and invariants list of `README.md` where they describe the pending lifecycle
+- [x] 6.1 Update `docs/relations.md`, `docs/troubleshooting.md` and the consolidation section and invariants list of `README.md` where they describe the pending lifecycle
 
 ## 7. Evidence after code
 

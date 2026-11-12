@@ -4,30 +4,47 @@ The `memory_relations` table records the judgment graph between memories. Each r
 
 - **candidate** — detected at `memory.save` time in the middle or high confidence band, awaiting agent judgment (`status='pending'`, `relation=null`). A low-band pair is returned in the save response's `related[]` and never gets a row (see `docs/embeddings.md`).
 - **judged verdict** — from the agent (`memory.judge_batch` / `memory.compare`) (`status='judged'`, `relation` set, `marked_by_kind` set).
-- **orphan** — the deterministic sweep retired it (`status='orphaned'`, `relation=null`): no agent closed it before the deadline, or the sweep's stale pending drain found that no current save-time channel would surface the pair, or that one of its endpoints was retired.
+- **orphan** — closed without a verdict (`status='orphaned'`, `relation=null`): one of its memories was retired, which closes the pair in the same transaction; or the deterministic sweep closed it, because no agent judged it before the deadline or its stale pending drain found that no current save-time channel would surface the pair.
 
 ## Lifecycle
 
 ```
-   memory.save          memory.judge_batch          sweep
-   surfaces a            closes the           deadline or
-   candidate             pending row          stale drain
-        │                     │                    │
-        ▼                     ▼                    ▼
+   memory.save          memory.judge_batch       retirement, or the
+   surfaces a            closes the            sweep's deadline
+   candidate             pending row           or stale drain
+        │                     │                       │
+        ▼                     ▼                       ▼
     pending ─────────────▶ judged ─────────▶ (terminal)
         │
         ▼
     orphaned ────────────▶ (terminal — re-judging not allowed)
 ```
 
-A row stays `pending` until an agent closes it via `memory.judge_batch({ judgments: [{ judgmentId, relation }] })`. After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) it re-surfaces in `memory.context.pendingJudgments[]` so any later session can judge it with fresh context — but only while BOTH endpoints are still `active`, since a pair naming a superseded or archived memory is withheld from that queue (it stays visible on `/dashboard/judgments`, and the sweep's stale pending drain orphans it on its next runs); after `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks it `orphaned` (journaled, undoable). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
+A row stays `pending` until an agent closes it via `memory.judge_batch({ judgments: [{ judgmentId, relation }] })`. After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) it re-surfaces in `memory.context.pendingJudgments[]` so any later session can judge it with fresh context, while BOTH endpoints are still `active`. After `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks it `orphaned` (journaled, undoable). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
+
+### Closed when a memory is retired
+
+Retiring a memory closes its pending pairs in the same transaction, on either side and whatever the other memory's status, because no agent can judge a pair once one of its memories is gone. That holds on every retirement path:
+
+- a `topic_key` revision, for the superseded row;
+- a `supersedes` verdict through `memory.judge_batch` or `memory.compare`, for the target;
+- a `memory.merge` commit, for every original;
+- `memory.archive` and the archive actions in `/dashboard/memories`;
+- the sweep's decay pass;
+- undoing a merge, for the successor it archives.
+
+Each closed pair is journaled as an `orphan_promote` op with the reasoning prefix `endpoint retired at retirement`. A retirement that already journals an op (`merge`, `agent_memory_archive`, `decay`) journals the closed pairs in that op's run. A `topic_key` revision, a `supersedes` verdict or a merge undo opens one `maintenance` run of kind `retirement_orphan`, only when it has a pair to close. If the journal write fails, the retirement fails with it.
+
+Undoing a decay, an archive or a merge from `/dashboard/consolidation` also restores the pairs that retirement closed. A pair keeps a verdict written after it was closed, and the dashboard says so. A pair stays closed when one of its memories is still retired after the undo, because its topic slot is now taken or the other memory was retired since; its op stays active, and the dashboard names it. Each closed pair can also be restored on its own by undoing its op.
+
+A pending pair with a retired memory therefore exists only when it predates this behaviour, or when an operator restored it by undoing its op. The queue withholds it, `/dashboard/judgments` still lists it, and the stale pending drain below closes it, or the deadline does if an operator restored it.
 
 ### Stale pending drain
 
 Each sweep run also re-checks pending pairs against the save-time detection rules of the running build, in the pair's own project, and orphans a pair when:
 
 - **no current channel would create it:** the lexical overlap of the source's content with the target is below `LEXICAL_CANDIDATE_FLOOR` (0.6), the cosine similarity of their stored embeddings is below `VEC_THRESHOLD` (0.7), and the two share no entity, counting each one's stored links and a fresh extraction of its text. The entity check ignores the rarity gate save-time detection applies, so any shared identifier keeps the pair. Age never decides; that stays the deadline's job.
-- **or an endpoint is retired:** the source or target was superseded or archived. No agent can judge such a pair, because the queue withholds it.
+- **or an endpoint is retired:** the source or target was superseded or archived. No agent can judge such a pair, because the queue withholds it. Retirement already closes these pairs, so the drain finds only rows that predate that behaviour.
 
 It never loads the embedding model. A pair stays `pending` whenever a channel cannot be evaluated: a missing vector, a vector index that predates the current embedding recipe, an extraction that fails, an endpoint longer than `DRAIN_MAX_PAIR_CHARS` (64 000 characters), or an unreadable row. Rules drains and retired-endpoint drains journal as `orphan_promote` with their own reasoning prefixes (`stale under current rules`, `endpoint retired`), distinct from the deadline's `unjudged after …`.
 
