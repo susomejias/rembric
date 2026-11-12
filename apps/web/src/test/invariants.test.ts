@@ -10,7 +10,13 @@ import { defaultMigrationsDir } from '@rembric/db';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { createTestDb } from './db.js';
-import { DERIVED_TABLES, SHADOW_TABLE_NAMES, SOURCE_TABLES } from './schema-inventory.js';
+import {
+  DERIVED_TABLES,
+  SHADOW_TABLE_NAMES,
+  SOURCE_TABLES,
+  TEXT_COLUMNS,
+  textColumnsOf,
+} from './schema-inventory.js';
 import { findSupplyChainViolations, readSupplyChainSources } from './supply-chain-inventory.js';
 
 type DbRaw = ReturnType<typeof createTestDb>['handle']['raw'];
@@ -1592,6 +1598,27 @@ describe('the post-compaction protocol text has one source', () => {
       .split('\n')
       .filter(Boolean);
     expect(found.sort()).toEqual([...surfaces].sort());
+  });
+});
+
+describe('secret-redaction coverage invariant', () => {
+  const fixture = createTestDb();
+  afterAll(() => fixture.cleanup());
+
+  it('classifies every persisted text column as redacted or exempt with a reason', () => {
+    const live = textColumnsOf(fixture.handle.raw, SOURCE_TABLES).sort();
+    const classified = Object.keys(TEXT_COLUMNS).sort();
+    const unclassified = live.filter((c) => !classified.includes(c));
+    const stale = classified.filter((c) => !live.includes(c));
+    expect(
+      unclassified,
+      `unclassified text column(s): ${unclassified.join(', ')}. Add each to TEXT_COLUMNS in ` +
+        "schema-inventory.ts as 'redacted' (and redact it in its service write path, which " +
+        'secret-redaction-sweep.test.ts then proves) or with an exemption reason.',
+    ).toEqual([]);
+    expect(stale, `TEXT_COLUMNS names column(s) that no longer exist: ${stale.join(', ')}`).toEqual(
+      [],
+    );
   });
 });
 
