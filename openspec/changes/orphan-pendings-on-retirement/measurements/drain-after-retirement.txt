@@ -1,0 +1,7 @@
+# drain after retirement — corpus vol-20000, 20 rounds of every path, 3 fresh pending judgments per retired memory
+# helper = public retirement paths; control = the same memories retired by repository-level flips, without the helper
+| copy | retired-endpoint drains to clear older rows (calls) | retired-endpoint pending before | retirement calls | retired-endpoint pending after | retired-endpoint drains after (calls) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| helper | 1791 (10) | 0 | 140 | 0 | 0 (5) |
+| control | 1791 (10) | 0 | 140 | 498 | 498 (11) |
+# PASS: the helper copy leaves the drain nothing; the control copy leaves it every row its flips stranded

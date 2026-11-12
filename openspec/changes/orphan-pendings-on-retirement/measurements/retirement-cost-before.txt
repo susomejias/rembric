@@ -4,51 +4,51 @@
 # host: Apple M5 · darwin 25.6.0 · node v22.23.0
 | memories | path | k | n | median ms | p95 ms | pending left |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| 1000 | topic_key revision (saveWithTopicKey) | 0 | 31 | 0.627 | 1.321 | 7 |
-| 1000 | supersedes verdict (RelationsService.judge) | 0 | 31 | 0.306 | 0.795 | 5 |
-| 1000 | memory.archive (MemoryService.archive) | 0 | 31 | 0.256 | 0.400 | 2 |
-| 1000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 31 | 0.608 | 3.173 | 12 |
-| 1000 | decay of 1 (applyDecay) | 0 | 31 | 0.128 | 0.171 | 2 |
-| 1000 | undo of memory.archive (undoOp) | 0 | 31 | 0.225 | 0.938 | 0 |
-| 1000 | undo of decay (undoOp) | 0 | 31 | 0.206 | 0.250 | 0 |
-| 1000 | undo of merge, successor archived (undoOp) | 0 | 31 | 0.302 | 0.557 | 0 |
-| 1000 | topic_key revision (saveWithTopicKey) | 3 | 31 | 0.533 | 3.563 | 98 |
-| 1000 | supersedes verdict (RelationsService.judge) | 3 | 31 | 0.299 | 2.957 | 97 |
-| 1000 | memory.archive (MemoryService.archive) | 3 | 31 | 0.209 | 0.352 | 97 |
-| 1000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 31 | 0.534 | 0.742 | 193 |
-| 1000 | decay of 1 (applyDecay) | 3 | 31 | 0.149 | 0.230 | 98 |
-| 1000 | undo of memory.archive (undoOp) | 3 | 31 | 0.183 | 0.667 | 0 |
-| 1000 | undo of decay (undoOp) | 3 | 31 | 0.180 | 0.349 | 0 |
-| 1000 | undo of merge, successor archived (undoOp) | 3 | 31 | 0.263 | 0.726 | 93 |
-| 20000 | topic_key revision (saveWithTopicKey) | 0 | 40 | 0.415 | 0.838 | 6 |
-| 20000 | supersedes verdict (RelationsService.judge) | 0 | 40 | 0.303 | 0.411 | 6 |
-| 20000 | memory.archive (MemoryService.archive) | 0 | 40 | 0.197 | 0.229 | 7 |
-| 20000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 40 | 0.470 | 1.348 | 13 |
-| 20000 | decay of 1 (applyDecay) | 0 | 40 | 0.110 | 0.139 | 4 |
-| 20000 | undo of memory.archive (undoOp) | 0 | 40 | 0.168 | 0.231 | 0 |
-| 20000 | undo of decay (undoOp) | 0 | 40 | 0.165 | 0.191 | 0 |
-| 20000 | undo of merge, successor archived (undoOp) | 0 | 40 | 0.248 | 0.810 | 0 |
-| 20000 | topic_key revision (saveWithTopicKey) | 3 | 40 | 0.416 | 1.890 | 128 |
-| 20000 | supersedes verdict (RelationsService.judge) | 3 | 40 | 0.305 | 0.382 | 123 |
-| 20000 | memory.archive (MemoryService.archive) | 3 | 40 | 0.183 | 0.251 | 126 |
-| 20000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 40 | 0.494 | 1.083 | 250 |
-| 20000 | decay of 1 (applyDecay) | 3 | 40 | 0.143 | 0.215 | 123 |
-| 20000 | undo of memory.archive (undoOp) | 3 | 40 | 0.167 | 0.276 | 0 |
-| 20000 | undo of decay (undoOp) | 3 | 40 | 0.172 | 0.244 | 0 |
-| 20000 | undo of merge, successor archived (undoOp) | 3 | 40 | 0.265 | 4.941 | 120 |
-| 50000 | topic_key revision (saveWithTopicKey) | 0 | 40 | 0.534 | 5.473 | 2 |
-| 50000 | supersedes verdict (RelationsService.judge) | 0 | 40 | 0.418 | 3.030 | 8 |
-| 50000 | memory.archive (MemoryService.archive) | 0 | 40 | 0.191 | 0.839 | 12 |
-| 50000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 40 | 0.456 | 4.933 | 10 |
-| 50000 | decay of 1 (applyDecay) | 0 | 40 | 0.122 | 0.279 | 7 |
-| 50000 | undo of memory.archive (undoOp) | 0 | 40 | 0.152 | 0.177 | 0 |
-| 50000 | undo of decay (undoOp) | 0 | 40 | 0.159 | 0.230 | 0 |
-| 50000 | undo of merge, successor archived (undoOp) | 0 | 40 | 0.242 | 0.414 | 0 |
-| 50000 | topic_key revision (saveWithTopicKey) | 3 | 40 | 0.403 | 6.675 | 125 |
-| 50000 | supersedes verdict (RelationsService.judge) | 3 | 40 | 0.438 | 3.532 | 127 |
-| 50000 | memory.archive (MemoryService.archive) | 3 | 40 | 0.198 | 1.241 | 123 |
-| 50000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 40 | 0.493 | 1.109 | 252 |
-| 50000 | decay of 1 (applyDecay) | 3 | 40 | 0.144 | 1.057 | 125 |
-| 50000 | undo of memory.archive (undoOp) | 3 | 40 | 0.150 | 0.166 | 0 |
-| 50000 | undo of decay (undoOp) | 3 | 40 | 0.155 | 0.189 | 0 |
-| 50000 | undo of merge, successor archived (undoOp) | 3 | 40 | 0.239 | 5.188 | 120 |
+| 1000 | topic_key revision (saveWithTopicKey) | 0 | 31 | 0.474 | 1.306 | 7 |
+| 1000 | supersedes verdict (RelationsService.judge) | 0 | 31 | 0.249 | 0.564 | 5 |
+| 1000 | memory.archive (MemoryService.archive) | 0 | 31 | 0.185 | 0.225 | 2 |
+| 1000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 31 | 0.438 | 3.386 | 12 |
+| 1000 | decay of 1 (applyDecay) | 0 | 31 | 0.102 | 0.129 | 2 |
+| 1000 | undo of memory.archive (undoOp) | 0 | 31 | 0.173 | 0.459 | 0 |
+| 1000 | undo of decay (undoOp) | 0 | 31 | 0.170 | 0.208 | 0 |
+| 1000 | undo of merge, successor archived (undoOp) | 0 | 31 | 0.226 | 0.586 | 0 |
+| 1000 | topic_key revision (saveWithTopicKey) | 3 | 31 | 0.363 | 3.042 | 98 |
+| 1000 | supersedes verdict (RelationsService.judge) | 3 | 31 | 0.210 | 2.250 | 97 |
+| 1000 | memory.archive (MemoryService.archive) | 3 | 31 | 0.159 | 0.475 | 97 |
+| 1000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 31 | 0.387 | 0.688 | 193 |
+| 1000 | decay of 1 (applyDecay) | 3 | 31 | 0.097 | 0.111 | 98 |
+| 1000 | undo of memory.archive (undoOp) | 3 | 31 | 0.151 | 0.176 | 0 |
+| 1000 | undo of decay (undoOp) | 3 | 31 | 0.151 | 0.194 | 0 |
+| 1000 | undo of merge, successor archived (undoOp) | 3 | 31 | 0.219 | 0.482 | 93 |
+| 20000 | topic_key revision (saveWithTopicKey) | 0 | 40 | 0.372 | 0.884 | 6 |
+| 20000 | supersedes verdict (RelationsService.judge) | 0 | 40 | 0.283 | 0.375 | 6 |
+| 20000 | memory.archive (MemoryService.archive) | 0 | 40 | 0.176 | 0.221 | 7 |
+| 20000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 40 | 0.408 | 0.857 | 13 |
+| 20000 | decay of 1 (applyDecay) | 0 | 40 | 0.101 | 0.140 | 4 |
+| 20000 | undo of memory.archive (undoOp) | 0 | 40 | 0.148 | 0.176 | 0 |
+| 20000 | undo of decay (undoOp) | 0 | 40 | 0.158 | 0.224 | 0 |
+| 20000 | undo of merge, successor archived (undoOp) | 0 | 40 | 0.229 | 0.277 | 0 |
+| 20000 | topic_key revision (saveWithTopicKey) | 3 | 40 | 0.358 | 1.378 | 128 |
+| 20000 | supersedes verdict (RelationsService.judge) | 3 | 40 | 0.281 | 0.339 | 123 |
+| 20000 | memory.archive (MemoryService.archive) | 3 | 40 | 0.169 | 0.236 | 126 |
+| 20000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 40 | 0.429 | 0.502 | 250 |
+| 20000 | decay of 1 (applyDecay) | 3 | 40 | 0.115 | 0.180 | 123 |
+| 20000 | undo of memory.archive (undoOp) | 3 | 40 | 0.150 | 0.201 | 0 |
+| 20000 | undo of decay (undoOp) | 3 | 40 | 0.154 | 0.196 | 0 |
+| 20000 | undo of merge, successor archived (undoOp) | 3 | 40 | 0.229 | 0.270 | 120 |
+| 50000 | topic_key revision (saveWithTopicKey) | 0 | 40 | 0.395 | 0.850 | 2 |
+| 50000 | supersedes verdict (RelationsService.judge) | 0 | 40 | 0.411 | 0.711 | 8 |
+| 50000 | memory.archive (MemoryService.archive) | 0 | 40 | 0.182 | 0.579 | 12 |
+| 50000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 40 | 0.451 | 0.842 | 10 |
+| 50000 | decay of 1 (applyDecay) | 0 | 40 | 0.127 | 0.180 | 7 |
+| 50000 | undo of memory.archive (undoOp) | 0 | 40 | 0.148 | 0.173 | 0 |
+| 50000 | undo of decay (undoOp) | 0 | 40 | 0.155 | 0.173 | 0 |
+| 50000 | undo of merge, successor archived (undoOp) | 0 | 40 | 0.235 | 0.290 | 0 |
+| 50000 | topic_key revision (saveWithTopicKey) | 3 | 40 | 0.405 | 1.352 | 125 |
+| 50000 | supersedes verdict (RelationsService.judge) | 3 | 40 | 0.425 | 0.654 | 127 |
+| 50000 | memory.archive (MemoryService.archive) | 3 | 40 | 0.197 | 0.429 | 123 |
+| 50000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 40 | 0.473 | 1.049 | 252 |
+| 50000 | decay of 1 (applyDecay) | 3 | 40 | 0.141 | 0.212 | 125 |
+| 50000 | undo of memory.archive (undoOp) | 3 | 40 | 0.151 | 0.176 | 0 |
+| 50000 | undo of decay (undoOp) | 3 | 40 | 0.154 | 0.185 | 0 |
+| 50000 | undo of merge, successor archived (undoOp) | 3 | 40 | 0.239 | 0.270 | 120 |

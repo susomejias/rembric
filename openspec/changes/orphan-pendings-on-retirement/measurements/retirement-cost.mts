@@ -165,12 +165,13 @@ function runPaths(handle: any, size: number, k: number): Row[] {
         .get(opType, affectedId) as { id: string }
     ).id;
 
-  const runId = `cost-run-${LABEL}-${size}-${k}`;
-  repos.consolidation.insertRun({
-    id: runId,
-    startedAt: new Date(),
-    scope: `project:${project.id}`,
-  });
+  let runSeq = 0;
+  // One decay per run, as the sweep does.
+  const freshRun = () => {
+    const id = `cost-run-${LABEL}-${size}-${k}-${runSeq++}`;
+    repos.consolidation.insertRun({ id, startedAt: new Date(), scope: `project:${project.id}` });
+    return id;
+  };
 
   const mergeInput = (ids: string[], i: number) => ({
     ids,
@@ -247,6 +248,7 @@ function runPaths(handle: any, size: number, k: number): Row[] {
       once: () => {
         const t = takePlain();
         attach(t.id);
+        const runId = freshRun();
         return {
           retired: [t.id],
           timed: () => core.applyDecay(repos, handle.db, { runId, ids: [t.id], reasoning: 'cost' }),
@@ -269,7 +271,7 @@ function runPaths(handle: any, size: number, k: number): Row[] {
         const t = takePlain();
         attach(t.id);
         const { opId } = core.applyDecay(repos, handle.db, {
-          runId,
+          runId: freshRun(),
           ids: [t.id],
           reasoning: 'cost',
         });

@@ -1,0 +1,443 @@
+# orphan at retirement — mutation check (task 7.1)
+Each case weakens one condition, runs the suite that names it, and restores the file byte for byte (scripts/mutate.mjs).
+A scratch helper outside the workspace extracted each exact block and called scripts/mutate.mjs once per (case, suite).
+Suites: packages/core retirement.test.ts (paths, rollback, undo), apps/web invariants.test.ts (the retirement-path scan),
+packages/mcp context-pending-judgments.test.ts (the memory.archive tool), packages/db relations-repository.test.ts,
+apps/web dashboard/consolidation.test.tsx.
+Source at 16042e95, unchanged since; the prefix case was re-run at b9604674, after its test was added.
+Every case below turned at least one named test red; no mutation survived.
+
+### Path call: topic_key revision — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+            orphanPendingOnRetirement(this.repos, this.relationsService(), {
+              retiredIds: [supersededByTopicKey.id],
+              status: 'superseded',
+              cause: 'topic_key revision',
+              at: ts,
+            });
+replace:
+    (deleted)
+  CAUGHT by 4:
+    × orphan at retirement — every retirement path > a topic_key revision orphans the superseded memory’s pending judgments on both sides
+    × orphan at retirement — a failed journal rolls the whole retirement back > topic_key revision
+    × undo symmetry — undoing a retirement restores what it orphaned > control: a topic_key revision’s orphaning is undone on its own and no memory changes
+    × undo symmetry — undoing a retirement restores what it orphaned > control: undoing a retirement_orphan run restores each of its judgments
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: topic_key revision — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec apps/web/src/test/invariants.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+            orphanPendingOnRetirement(this.repos, this.relationsService(), {
+              retiredIds: [supersededByTopicKey.id],
+              status: 'superseded',
+              cause: 'topic_key revision',
+              at: ts,
+            });
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × every memory retirement goes through the retirement helper > every call site calls the helper after the flip, in the same function
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: memory.archive / dashboard archive — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          orphanPendingOnRetirement(this.repos, this.relationsService(), {
+            retiredIds: [id],
+            status: 'archived',
+            cause: 'archive',
+            at: ts,
+            runId,
+          });
+replace:
+    (deleted)
+  CAUGHT by 8:
+    × orphan at retirement — every retirement path > memory.archive, which the dashboard archive actions share, orphans in the archive op’s run
+    × orphan at retirement — every retirement path > a pair whose other endpoint is already retired is orphaned too
+    × orphan at retirement — every retirement path > one timestamp covers the retirement, the orphaning and its op even when the clock moves
+    × orphan at retirement — every retirement path > the retirement prefix differs from the deadline, rules-drain and retired-drain prefixes
+    × orphan at retirement — a failed journal rolls the whole retirement back > memory.archive and the dashboard archive actions
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing memory.archive restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo keeps a verdict written after the orphaning and reports it
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo leaves a judgment orphaned while its other endpoint is retired, and reports it
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: memory.archive / dashboard archive — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec apps/web/src/test/invariants.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+          orphanPendingOnRetirement(this.repos, this.relationsService(), {
+            retiredIds: [id],
+            status: 'archived',
+            cause: 'archive',
+            at: ts,
+            runId,
+          });
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × every memory retirement goes through the retirement helper > every call site calls the helper after the flip, in the same function
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: memory.archive / dashboard archive — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec packages/mcp/src/context-pending-judgments.test.ts --workspace packages/mcp --mutation <find> --with <replace>
+find:
+          orphanPendingOnRetirement(this.repos, this.relationsService(), {
+            retiredIds: [id],
+            status: 'archived',
+            cause: 'archive',
+            at: ts,
+            runId,
+          });
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × memory.context withholds pending pairs whose endpoint is retired > archiving through the memory.archive tool closes the pair instead of withholding it
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: memory.merge commit — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          orphanPendingOnRetirement(this.repos, this.relationsService(), {
+            retiredIds: successor.replaces,
+            status: 'superseded',
+            cause: 'merge',
+            at: ts,
+            runId,
+          });
+replace:
+    (deleted)
+  CAUGHT by 3:
+    × orphan at retirement — every retirement path > a merge commit orphans every original’s pending judgments in the merge op’s run
+    × orphan at retirement — a failed journal rolls the whole retirement back > memory.merge commit
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a merge restores the originals’ orphaned judgments and archives the successor
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: memory.merge commit — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec apps/web/src/test/invariants.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+          orphanPendingOnRetirement(this.repos, this.relationsService(), {
+            retiredIds: successor.replaces,
+            status: 'superseded',
+            cause: 'merge',
+            at: ts,
+            runId,
+          });
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × every memory retirement goes through the retirement helper > every call site calls the helper after the flip, in the same function
+all 1 mutations caught; memory.ts restored
+exit 0
+### Path call: supersedes verdict (judge, compare) — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/relations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        orphanPendingOnRetirement(this.repos, this, {
+          retiredIds: [targetId],
+          status: 'superseded',
+          cause: 'supersedes verdict',
+          at,
+        });
+replace:
+    (deleted)
+      retiredIds: [t…
+  CAUGHT by 4:
+    × orphan at retirement — every retirement path > a supersedes verdict through memory.judge orphans the target’s other pending judgments only
+    × orphan at retirement — every retirement path > a supersedes verdict through memory.compare orphans the target’s pending judgments, inserted or in place
+    × orphan at retirement — a failed journal rolls the whole retirement back > supersedes verdict through memory.judge
+    × orphan at retirement — a failed journal rolls the whole retirement back > supersedes verdict through memory.compare
+all 1 mutations caught; relations.ts restored
+exit 0
+### Path call: supersedes verdict (judge, compare) — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/relations.ts --spec apps/web/src/test/invariants.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+        orphanPendingOnRetirement(this.repos, this, {
+          retiredIds: [targetId],
+          status: 'superseded',
+          cause: 'supersedes verdict',
+          at,
+        });
+replace:
+    (deleted)
+      retiredIds: [t…
+  CAUGHT by 1:
+    × every memory retirement goes through the retirement helper > every call site calls the helper after the flip, in the same function
+all 1 mutations caught; relations.ts restored
+exit 0
+### Path call: decay pass — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+          retiredIds: input.ids,
+          status: 'archived',
+          cause: 'decay',
+          at: now,
+          runId: input.runId,
+        });
+replace:
+    (deleted)
+  CAUGHT by 6:
+    × orphan at retirement — every retirement path > the decay pass orphans a decayed memory’s pending judgments in the sweep’s run
+    × orphan at retirement — a failed journal rolls the whole retirement back > decay pass
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > a run undo leaves a judgment orphaned when its memory keeps a taken topic slot
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay op alone leaves the deadline and drain orphanings of its run in place
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing one decay of a run shared with another restores only the judgments it orphaned
+all 1 mutations caught; operations.ts restored
+exit 0
+### Path call: decay pass — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec apps/web/src/test/invariants.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+        orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+          retiredIds: input.ids,
+          status: 'archived',
+          cause: 'decay',
+          at: now,
+          runId: input.runId,
+        });
+replace:
+    (deleted)
+  CAUGHT by 2:
+    × every memory retirement goes through the retirement helper > every call site calls the helper after the flip, in the same function
+    × every memory retirement goes through the retirement helper > control: a real retirement path with its helper call removed is reported
+all 1 mutations caught; operations.ts restored
+exit 0
+### Path call: merge undo — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+            orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+              retiredIds: [op.createdId],
+              status: 'archived',
+              cause: 'merge undo',
+              at: now,
+            });
+replace:
+    (deleted)
+  CAUGHT by 2:
+    × orphan at retirement — every retirement path > a merge undo orphans the successor’s pending judgments into a new maintenance run
+    × orphan at retirement — a failed journal rolls the whole retirement back > merge undo
+all 1 mutations caught; operations.ts restored
+exit 0
+### Path call: merge undo — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec apps/web/src/test/invariants.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+            orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+              retiredIds: [op.createdId],
+              status: 'archived',
+              cause: 'merge undo',
+              at: now,
+            });
+replace:
+    (deleted)
+  CAUGHT by 2:
+    × every memory retirement goes through the retirement helper > every call site calls the helper after the flip, in the same function
+    × every memory retirement goes through the retirement helper > control: a real retirement path with its helper call removed is reported
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: restoration call deleted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          restoreRetirementOrphanings(repos, op, now, {
+            skipped,
+            keptVerdicts,
+            keptOrphaned,
+            alsoReverted,
+          });
+replace:
+    (deleted)
+        skipped,
+ …
+  CAUGHT by 9:
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing memory.archive restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a merge restores the originals’ orphaned judgments and archives the successor
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a whole sweep run restores the decay’s judgments and reverts every op exactly once
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo keeps a verdict written after the orphaning and reports it
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo leaves a judgment orphaned while its other endpoint is retired, and reports it
+    × undo symmetry — undoing a retirement restores what it orphaned > a run undo leaves a judgment orphaned when its memory keeps a taken topic slot
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay op alone leaves the deadline and drain orphanings of its run in place
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing one decay of a run shared with another restores only the judgments it orphaned
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: endpoint-still-retired check disabled
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          if (retiredId !== undefined) {
+replace:
+          if (retiredId === 'never') {
+  CAUGHT by 2:
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo leaves a judgment orphaned while its other endpoint is retired, and reports it
+    × undo symmetry — undoing a retirement restores what it orphaned > a run undo leaves a judgment orphaned when its memory keeps a taken topic slot
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: restoration bypasses the later-verdict guard
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        undoOrphaning(repos, linked, out.skipped, out.keptVerdicts);
+replace:
+        if (rel) repos.relations.resetToPending(rel.id);
+  CAUGHT by 1:
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo keeps a verdict written after the orphaning and reports it
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: linking ignores the retirement prefix
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true &&
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a historical merge op leaves the LLM-era promote verdicts of its run alone
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: linking ignores which memories the retirement retired
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+     &&
+        op.affectedIds.some((id) => retiredIds.has(id))
+replace:
+    (deleted)
+    op.affectedIds.some((id) => retiredIds.has(id))
+  CAUGHT by 2:
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing one decay of a run shared with another restores only the judgments it orphaned
+    × undo symmetry — undoing a retirement restores what it orphaned > control: undoing a retirement_orphan run restores each of its judgments
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: undoRun no longer leaves linked ops to their retirement
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        if (isRetirementOrphaning(op, retiredInRun)) continue;
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × undo symmetry — undoing a retirement restores what it orphaned > a run undo leaves a judgment orphaned when its memory keeps a taken topic slot
+all 1 mutations caught; operations.ts restored
+exit 0
+### Undo: undoRun drops the linked op ids from reverted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        reverted.push(op.id, ...result.alsoReverted);
+replace:
+        reverted.push(op.id);
+  CAUGHT by 1:
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a whole sweep run restores the decay’s judgments and reverts every op exactly once
+all 1 mutations caught; operations.ts restored
+exit 0
+### Helper: orphaning takes its own timestamp
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        relations.orphan(row.judgmentId, reasoning, input.at);
+replace:
+        relations.orphan(row.judgmentId, reasoning);
+  CAUGHT by 3:
+    × orphan at retirement — every retirement path > the decay pass orphans a decayed memory’s pending judgments in the sweep’s run
+    × orphan at retirement — every retirement path > one timestamp covers the retirement, the orphaning and its op even when the clock moves
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a whole sweep run restores the decay’s judgments and reverts every op exactly once
+all 1 mutations caught; operations.ts restored
+exit 0
+### Helper: ignores the retirement op's run
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+      let runId = input.runId;
+replace:
+      let runId: string | undefined;
+  CAUGHT by 13:
+    × orphan at retirement — every retirement path > a merge commit orphans every original’s pending judgments in the merge op’s run
+    × orphan at retirement — every retirement path > memory.archive, which the dashboard archive actions share, orphans in the archive op’s run
+    × orphan at retirement — every retirement path > the decay pass orphans a decayed memory’s pending judgments in the sweep’s run
+    × orphan at retirement — every retirement path > one timestamp covers the retirement, the orphaning and its op even when the clock moves
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing memory.archive restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a merge restores the originals’ orphaned judgments and archives the successor
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a whole sweep run restores the decay’s judgments and reverts every op exactly once
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo keeps a verdict written after the orphaning and reports it
+    × undo symmetry — undoing a retirement restores what it orphaned > an undo leaves a judgment orphaned while its other endpoint is retired, and reports it
+    × undo symmetry — undoing a retirement restores what it orphaned > a run undo leaves a judgment orphaned when its memory keeps a taken topic slot
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay op alone leaves the deadline and drain orphanings of its run in place
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing one decay of a run shared with another restores only the judgments it orphaned
+all 1 mutations caught; operations.ts restored
+exit 0
+### Read: target side dropped
+$ node scripts/mutate.mjs --file packages/db/src/repositories/relations-repository.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    or(inArray(memoryRelations.sourceId, ids), inArray(memoryRelations.targetId, ids)),
+            ),
+          )
+          .orderBy(memoryRelations.createdAt
+replace:
+    inArray(memoryRelations.sourceId, ids),
+            ),
+          )
+          .orderBy(memoryRelations.createdAt
+  CAUGHT by 10:
+    × orphan at retirement — every retirement path > a topic_key revision orphans the superseded memory’s pending judgments on both sides
+    × orphan at retirement — every retirement path > a supersedes verdict through memory.compare orphans the target’s pending judgments, inserted or in place
+    × orphan at retirement — every retirement path > a merge commit orphans every original’s pending judgments in the merge op’s run
+    × orphan at retirement — every retirement path > the decay pass orphans a decayed memory’s pending judgments in the sweep’s run
+    × orphan at retirement — a failed journal rolls the whole retirement back > supersedes verdict through memory.compare
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay restores its orphaned judgments to pending
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a merge restores the originals’ orphaned judgments and archives the successor
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing a decay op alone leaves the deadline and drain orphanings of its run in place
+    × undo symmetry — undoing a retirement restores what it orphaned > undoing one decay of a run shared with another restores only the judgments it orphaned
+    × undo symmetry — undoing a retirement restores what it orphaned > control: undoing a retirement_orphan run restores each of its judgments
+all 1 mutations caught; relations-repository.ts restored
+exit 0
+### Read: target side dropped
+$ node scripts/mutate.mjs --file packages/db/src/repositories/relations-repository.ts --spec packages/db/src/repositories/relations-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    or(inArray(memoryRelations.sourceId, ids), inArray(memoryRelations.targetId, ids)),
+            ),
+          )
+          .orderBy(memoryRelations.createdAt
+replace:
+    inArray(memoryRelations.sourceId, ids),
+            ),
+          )
+          .orderBy(memoryRelations.createdAt
+  CAUGHT by 4:
+    × RelationsRepository > listPendingTouchingAny > returns the pending rows on either side, in (created_at, judgment_id) order
+    × RelationsRepository > listPendingTouchingAny > returns a row touching two of the ids once
+    × RelationsRepository > listPendingTouchingAny > carries the pair, so the caller can journal it
+    × RelationsRepository > listPendingTouchingAny > control: judged and orphaned rows touching the id are left out
+all 1 mutations caught; relations-repository.ts restored
+exit 0
+### Dashboard: kept-orphaned note deleted
+$ node scripts/mutate.mjs --file apps/web/src/app/dashboard/consolidation/undo-messages.ts --spec apps/web/src/test/dashboard/consolidation.test.tsx --workspace apps/web --mutation <find> --with <replace>
+find:
+      if (keptOrphaned.length > 0) {
+        const rows = keptOrphaned
+          .map((k) => `${shortId(k.judgmentId)} (${shortId(k.retiredId)} is still retired)`)
+          .join('; ');
+        notes.push(
+          `${keptOrphaned.length} judgment(s) stay orphaned — one of their memories is still ` +
+            `retired, so no agent could judge them. Their ops stay active. ${rows}`,
+        );
+      }
+replace:
+    (deleted)
+    const rows = keptOrphaned
+      .…
+  CAUGHT by 1:
+    × consolidation drain visibility > says an undo left a judgment orphaned because one of its memories is still retired
+all 1 mutations caught; undo-messages.ts restored
+exit 0
+
+## Mutations that survived an earlier test set, and the test that now catches each
+1. Dropping the explicit timestamp from relations.orphan (case "Helper: orphaning takes its own timestamp").
+   Before 878c2b37 it was caught in 2 of 3 runs and NOT CAUGHT in 1, run with
+   -t '^(?!.*(one timestamp covers|undoing a decay op alone)).*$': the older tests see it only when the wall
+   clock ticks between the retirement's timestamp and the orphaning. The ticking-clock test catches it every run.
+2. Dropping the prefix check from the undo link (case "Undo: linking ignores the retirement prefix").
+   Before 878c2b37 it was NOT CAUGHT; the "decay op alone" test then caught it. After 16042e95 also required the
+   retired memories in the link, that test no longer could, because the deadline and drain ops it uses never touch
+   the decayed memory. The run against 16042e95 recorded:
+   ### Undo: linking ignores the retirement prefix
+   $ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+   find:
+           op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true &&
+   replace:
+       (deleted)
+     NOT CAUGHT — no test covers this condition
+   1 of 1 NOT caught
+   exit 1
+   b9604674 added the historical-run test, which catches it (above).
