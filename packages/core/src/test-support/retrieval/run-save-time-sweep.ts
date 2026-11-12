@@ -1,17 +1,20 @@
 import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
+import { LEXICAL_CANDIDATE_FLOOR } from '../../services/save-time-candidates.js';
 
 import { CORPUS } from './corpus.js';
 import { ingestCorpus } from './ingest.js';
-import { SAVE_TIME_BASE, SAVE_TIME_SAVES } from './save-time-fixture.js';
+import { SAVE_TIME_BASE, SAVE_TIME_RELATED_SAVES, SAVE_TIME_SAVES } from './save-time-fixture.js';
 import {
   admissible,
   formatArm,
+  formatBands,
   MIN_PLATEAU_WIDTH,
   type PointSummary,
   runSaveTimeArm,
   SAVE_TIME_FLOORS,
   SAVE_TIME_PER_SAVE_MAX,
   summarize,
+  summarizeBands,
   widestPlateau,
 } from './save-time-sweep.js';
 
@@ -32,13 +35,17 @@ function memoized(embedder: Embedder): Embedder {
 async function sweepArm(embedder: Embedder | null): Promise<PointSummary[]> {
   const points: PointSummary[] = [];
   for (const floor of SAVE_TIME_FLOORS) {
-    points.push(summarize(floor, await runSaveTimeArm(embedder, floor)));
+    points.push(summarize(floor, await runSaveTimeArm(embedder, floor, undefined, false)));
   }
   return points;
 }
 
-async function retrievalCorpusPendingRows(embedder: Embedder, floor: number): Promise<number> {
-  const corpus = await ingestCorpus(CORPUS, embedder, { lexicalFloor: floor });
+async function retrievalCorpusPendingRows(
+  embedder: Embedder,
+  floor: number,
+  bands = false,
+): Promise<number> {
+  const corpus = await ingestCorpus(CORPUS, embedder, { lexicalFloor: floor, bands });
   try {
     let rows = 0;
     for (const projectId of corpus.projectIdBySlug.values()) {
@@ -85,8 +92,26 @@ async function main(): Promise<void> {
     '## secondary series (not gating) — pending rows written while ingesting the retrieval corpus, production arm',
     `floor 0.00: ${await retrievalCorpusPendingRows(embedder, 0)}`,
     `floor ${plateau.chosen.toFixed(2)}: ${await retrievalCorpusPendingRows(embedder, plateau.chosen)}`,
+    '',
+    ...(await bandSection(embedder)),
   );
   console.log(out.join('\n'));
+}
+
+async function bandSection(embedder: Embedder): Promise<string[]> {
+  const floor = LEXICAL_CANDIDATE_FLOOR;
+  const fixture = { base: SAVE_TIME_BASE, saves: [...SAVE_TIME_SAVES, ...SAVE_TIME_RELATED_SAVES] };
+  const off = await runSaveTimeArm(embedder, floor, fixture, false);
+  const on = await runSaveTimeArm(embedder, floor, fixture, true);
+  const depth = (o: typeof on) => o.reduce((n, s) => n + s.sources.length, 0);
+  const n = fixture.saves.length;
+  return [
+    `## confidence bands — production arm, floor ${floor.toFixed(2)}, per-save cap ${SAVE_TIME_PER_SAVE_MAX}, ${n} saves (the ${SAVE_TIME_SAVES.length} labelled saves above, then ${SAVE_TIME_RELATED_SAVES.length} related)`,
+    'instrument: pending rows written and related rows returned by the production curation path; "off" = bands seam disabled, every admitted pair pending',
+    ...formatBands(summarizeBands(off, on)),
+    `queue depth over ${n} saves: bands off ${depth(off)}, bands on ${depth(on)} (${(depth(off) / n).toFixed(2)} -> ${(depth(on) / n).toFixed(2)} per save)`,
+    `retrieval corpus ingest, pending rows at floor ${floor.toFixed(2)}: bands off ${await retrievalCorpusPendingRows(embedder, floor)}, bands on ${await retrievalCorpusPendingRows(embedder, floor, true)}`,
+  ];
 }
 
 main().catch((err: unknown) => {

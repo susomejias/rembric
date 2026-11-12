@@ -21,7 +21,9 @@ import { errToMcp, type ErrorReportingDeps } from './errors.js';
 import {
   candidate,
   memorySaveSchema,
+  relatedMemory,
   saveMemoryWithCandidates,
+  type RelatedMemoryView,
   type SaveTimeCandidateView,
 } from './memory-tools.js';
 import { redactionsField, redactionsOutput } from './redactions.js';
@@ -77,6 +79,8 @@ export const capturePassiveOutput = {
   saved: z.number(),
   ids: z.array(z.string()),
   candidates: z.array(candidate).optional(),
+  related: z.array(relatedMemory).optional(),
+  convergeWith: z.array(z.string()).optional(),
   /** Present (and `saved` will be 0) when no learnings section was found. */
   reason: z.string().optional(),
   /** Summed over the saves this capture performed; 0 when it extracted nothing. */
@@ -166,6 +170,8 @@ async function handleCapturePassive(
   }
   const ids: string[] = [];
   const candidates: SaveTimeCandidateView[] = [];
+  const related: RelatedMemoryView[] = [];
+  const convergeWith: string[] = [];
   const redactions = new RedactionTally();
   let candidatesDetected = 0;
   try {
@@ -185,6 +191,8 @@ async function handleCapturePassive(
       );
       ids.push(saved.memory.id);
       candidates.push(...saved.candidates);
+      related.push(...saved.related);
+      convergeWith.push(...saved.convergeWith);
       candidatesDetected += saved.candidatesDetected;
     }
   } catch (err) {
@@ -194,6 +202,8 @@ async function handleCapturePassive(
     saved: ids.length,
     ids,
     ...(candidates.length > 0 ? { candidates } : {}),
+    ...(related.length > 0 ? { related } : {}),
+    ...(convergeWith.length > 0 ? { convergeWith } : {}),
     candidatesDetected,
     ...redactionsField(redactions),
   });

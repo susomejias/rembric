@@ -6,6 +6,7 @@ import { MemoryService } from '../../services/memory.js';
 import { ProjectsService } from '../../services/projects.js';
 import { RelationsService } from '../../services/relations.js';
 import { runPostSaveSteps, type SaveTimeCandidateView } from '../../services/save-curation.js';
+import type { CandidateBand } from '../../services/save-time-candidates.js';
 import { TestClock } from '../clock.js';
 import { createTestDb } from '../db.js';
 
@@ -25,7 +26,7 @@ export const MIN_PLATEAU_WIDTH = 0.1;
 
 export type CandidateSource = SaveTimeCandidateView['source'];
 export type SweepArm = 'lexical-only' | 'production';
-export type LabelledClass = Exclude<SaveTimeClass, 'unrelated'>;
+export type LabelledClass = Exclude<SaveTimeClass, 'unrelated' | 'related'>;
 
 const LABELLED_CLASSES: readonly LabelledClass[] = [
   'near-duplicate',
@@ -40,6 +41,9 @@ export interface SaveOutcome {
   class: SaveTimeClass;
   surfacedExpected: boolean | null;
   sources: CandidateSource[];
+  bands: Record<CandidateBand, number>;
+  /** Where the expected target landed: a pending band, `low` (related), or `null` (missed). */
+  expectedBand: CandidateBand | null;
 }
 
 export interface Fixture {
@@ -51,6 +55,7 @@ export async function runSaveTimeArm(
   embedder: Embedder | null,
   floor: number,
   fixture: Fixture = { base: SAVE_TIME_BASE, saves: SAVE_TIME_SAVES },
+  bands = true,
 ): Promise<SaveOutcome[]> {
   const { handle, cleanup } = createTestDb();
   try {
@@ -67,7 +72,7 @@ export async function runSaveTimeArm(
     const deps = {
       relations,
       repos,
-      candidates: { perSaveMax: SAVE_TIME_PER_SAVE_MAX, lexicalFloor: floor },
+      candidates: { perSaveMax: SAVE_TIME_PER_SAVE_MAX, lexicalFloor: floor, bands },
       ...(worker
         ? {
             embedNow: (id: string, title: string, content: string, projectId: string) =>
@@ -77,31 +82,41 @@ export async function runSaveTimeArm(
     };
 
     const idByFixtureId = new Map<string, string>();
-    const save = async (item: SaveTimeBaseItem): Promise<SaveTimeCandidateView[]> => {
+    const save = async (item: SaveTimeBaseItem) => {
       clock.set(new Date(clock.now().getTime() + MINUTE_MS));
       const { memory: saved } = memory.saveWithTopicKey(
         { type: item.type, title: item.title, content: item.content },
         scope,
       );
       idByFixtureId.set(item.id, saved.id);
-      const { candidates } = await runPostSaveSteps(deps, saved, scope);
-      return candidates;
+      return runPostSaveSteps(deps, saved, scope);
     };
 
     for (const item of fixture.base) await save(item);
 
     const outcomes: SaveOutcome[] = [];
     for (const item of fixture.saves) {
-      const candidates = await save(item);
+      const { candidates, related, convergeWith } = await save(item);
       const expectedId = item.expects ? idByFixtureId.get(item.expects) : undefined;
       if (item.expects && !expectedId) {
         throw new Error(`save '${item.id}' expects unknown base item '${item.expects}'`);
       }
+      const bandOf = (targetId: string): CandidateBand | null => {
+        if (convergeWith.includes(targetId)) return 'high';
+        if (candidates.some((c) => c.targetId === targetId)) return 'middle';
+        return related.some((r) => r.targetId === targetId) ? 'low' : null;
+      };
       outcomes.push({
         id: item.id,
         class: item.class,
         surfacedExpected: expectedId ? candidates.some((c) => c.targetId === expectedId) : null,
         sources: candidates.map((c) => c.source).sort(),
+        bands: {
+          low: related.length,
+          middle: candidates.length - convergeWith.length,
+          high: convergeWith.length,
+        },
+        expectedBand: expectedId ? bandOf(expectedId) : null,
       });
     }
     return outcomes;
@@ -216,6 +231,81 @@ export function formatArm(arm: SweepArm, points: readonly PointSummary[]): strin
       ]
         .map((c) => c.padStart(15))
         .join(''),
+    );
+  }
+  return lines;
+}
+
+const BAND_CLASSES: readonly SaveTimeClass[] = [
+  'near-duplicate',
+  'expanded-rewrite',
+  'contradiction',
+  'related',
+  'unrelated',
+];
+
+export interface BandComposition {
+  class: SaveTimeClass;
+  saves: number;
+  pendingWithoutBands: number;
+  bands: Record<CandidateBand, number>;
+  expected: Record<CandidateBand | 'missed', number>;
+}
+
+export function summarizeBands(
+  withoutBands: readonly SaveOutcome[],
+  withBands: readonly SaveOutcome[],
+): BandComposition[] {
+  return BAND_CLASSES.map((cls) => {
+    const on = withBands.filter((o) => o.class === cls);
+    const off = withoutBands.filter((o) => o.class === cls);
+    const sum = (band: CandidateBand) => on.reduce((n, o) => n + o.bands[band], 0);
+    const landed = (band: CandidateBand) => on.filter((o) => o.expectedBand === band).length;
+    return {
+      class: cls,
+      saves: on.length,
+      pendingWithoutBands: off.reduce((n, o) => n + o.sources.length, 0),
+      bands: { high: sum('high'), middle: sum('middle'), low: sum('low') },
+      expected: {
+        high: landed('high'),
+        middle: landed('middle'),
+        low: landed('low'),
+        missed: on.filter((o) => o.surfacedExpected !== null && o.expectedBand === null).length,
+      },
+    };
+  });
+}
+
+export function formatBands(rows: readonly BandComposition[]): string[] {
+  const head = [
+    'class',
+    'saves',
+    'pending off',
+    'pending on',
+    'high',
+    'middle',
+    'related low',
+    'target hi/mid/low/miss',
+  ];
+  const lines = [
+    head.map((h, i) => (i === 0 ? h.padEnd(18) : h.padStart(i === 7 ? 24 : 13))).join(''),
+  ];
+  for (const r of rows) {
+    const hasTarget = r.class !== 'unrelated';
+    const target = hasTarget
+      ? `${r.expected.high}/${r.expected.middle}/${r.expected.low}/${r.expected.missed}`
+      : '-';
+    lines.push(
+      [
+        r.class.padEnd(18),
+        String(r.saves).padStart(13),
+        String(r.pendingWithoutBands).padStart(13),
+        String(r.bands.high + r.bands.middle).padStart(13),
+        String(r.bands.high).padStart(13),
+        String(r.bands.middle).padStart(13),
+        String(r.bands.low).padStart(13),
+        target.padStart(24),
+      ].join(''),
     );
   }
   return lines;

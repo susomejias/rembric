@@ -26,6 +26,34 @@ export const DRAIN_MAX_PAIR_CHARS = 64_000;
 /** FTS5's bm25 clamps a term's idf to 1e-6 from exactly this share of indexed rows upward. */
 export const COMMON_TERM_DOCUMENT_RATIO = 0.5;
 
+export const CANDIDATE_LOW_BAND_CEILING = 0.75;
+
+export const CANDIDATE_HIGH_BAND_FLOOR = 0.85;
+
+export type CandidateBand = 'low' | 'middle' | 'high';
+
+export interface CandidateSignals {
+  /** Cosine to the saved memory; null when either side has no vector, so it is unknown. */
+  vecSimilarity: number | null;
+  /** Admitted by the lexical channel (rank pool and floor). */
+  lexical: boolean;
+  /** Shares a rare entity with the saved memory. */
+  entity: boolean;
+}
+
+export function classifyCandidateBand({
+  vecSimilarity: vec,
+  lexical,
+  entity,
+}: CandidateSignals): CandidateBand | null {
+  const dense = vec !== null && vec >= VEC_THRESHOLD;
+  if (!dense && !lexical && !entity) return null;
+  if (vec !== null && vec >= CANDIDATE_HIGH_BAND_FLOOR) return 'high';
+  if (lexical || vec === null) return 'middle';
+  if (entity) return dense ? 'middle' : 'low';
+  return vec < CANDIDATE_LOW_BAND_CEILING ? 'low' : 'middle';
+}
+
 export interface CandidateOptions {
   perSaveMax: number;
   /** Test seam only — never read from the environment. */
@@ -34,6 +62,8 @@ export interface CandidateOptions {
   lexicalFloor?: number;
   /** Test seam only — never read from the environment; `null` turns pruning and its reads off. */
   commonTermRatio?: number | null;
+  /** Test seam only — never read from the environment. `false` puts every pair in the middle band. */
+  bands?: boolean;
 }
 
 export interface SaveCandidate {
@@ -46,6 +76,7 @@ export interface SaveCandidate {
   topicKey: string | null;
   /** Set only for `source: 'entity'` — the value both memories share. */
   entityValue?: string;
+  band: CandidateBand;
 }
 
 export function lexicalOverlap(
@@ -71,10 +102,14 @@ export function vectorAdmits(similarity: number): boolean {
 }
 
 export interface SaveCandidateResult {
-  /** The first `perSaveMax` of the same ranked order `detected` was counted over. */
+  /** The first `perSaveMax` middle- and high-band pairs of the ranked order `detected` counts. */
   candidates: SaveCandidate[];
+  /** The first `perSaveMax` low-band pairs of the same ranked order; never judged. */
+  related: SaveCandidate[];
   detected: number;
 }
+
+type Unbanded = Omit<SaveCandidate, 'band'>;
 
 export function findSaveTimeCandidates(
   repos: Pick<Repositories, 'memory' | 'vectors' | 'relations' | 'entities' | 'termStatistics'>,
@@ -85,7 +120,7 @@ export function findSaveTimeCandidates(
   const poolSize = opts.poolSize ?? CANDIDATE_POOL_SIZE;
   const lexicalFloor = opts.lexicalFloor ?? LEXICAL_CANDIDATE_FLOOR;
   const projectId = saved.projectId;
-  if (projectId === null) return { candidates: [], detected: 0 };
+  if (projectId === null) return { candidates: [], related: [], detected: 0 };
 
   const ancestorIds = repos.memory.unsafeAncestorIds({
     startIds: saved.replaces,
@@ -101,7 +136,8 @@ export function findSaveTimeCandidates(
     excludeIds,
     limit: poolSize,
   });
-  const vecPool: SaveCandidate[] = vecRows
+  const cosineById = new Map(vecRows.map((r) => [r.id, vectorSimilarity(r.distance)]));
+  const vecPool: Unbanded[] = vecRows
     .map((r) => ({
       targetId: r.id,
       similarity: vectorSimilarity(r.distance),
@@ -118,7 +154,7 @@ export function findSaveTimeCandidates(
     saved.content,
     opts.commonTermRatio === undefined ? COMMON_TERM_DOCUMENT_RATIO : opts.commonTermRatio,
   );
-  const ftsPool: SaveCandidate[] = [];
+  const ftsPool: Unbanded[] = [];
   if (matchExpr.length > 0) {
     const ftsRows = repos.memory.searchBm25Candidates({
       matchExpr,
@@ -141,7 +177,7 @@ export function findSaveTimeCandidates(
     }
   }
 
-  const entityPool: SaveCandidate[] = [];
+  const entityPool: Unbanded[] = [];
   if (extractedEntities.length > 0) {
     const excludeIdSet = new Set(excludeIds);
     const scopeMemoryCount = repos.entities.scopeActiveMemoryCount({
@@ -186,7 +222,7 @@ export function findSaveTimeCandidates(
     }
   }
 
-  const byId = new Map<string, SaveCandidate>();
+  const byId = new Map<string, Unbanded>();
   for (const c of [...vecPool, ...ftsPool, ...entityPool]) {
     const prev = byId.get(c.targetId);
     if (!prev) {
@@ -198,11 +234,42 @@ export function findSaveTimeCandidates(
       byId.set(c.targetId, c);
     }
   }
-  const all = [...byId.values()].sort(
-    (a, b) =>
-      Number(b.source === 'entity') - Number(a.source === 'entity') || b.similarity - a.similarity,
-  );
-  return { candidates: all.slice(0, opts.perSaveMax), detected: all.length };
+
+  const unknown = [...byId.keys()].filter((id) => !cosineById.has(id));
+  if (vecRows.length > 0 && unknown.length > 0) {
+    const scope = projectScope(projectId);
+    for (const r of repos.vectors.cosineDistances({
+      memoryId: saved.id,
+      scope,
+      targetIds: unknown,
+    }))
+      cosineById.set(r.id, vectorSimilarity(r.distance));
+  }
+  const lexicalIds = new Set(ftsPool.map((c) => c.targetId));
+  const entityIds = new Set(entityPool.map((c) => c.targetId));
+  const all: SaveCandidate[] = [...byId.values()]
+    .sort(
+      (a, b) =>
+        Number(b.source === 'entity') - Number(a.source === 'entity') ||
+        b.similarity - a.similarity,
+    )
+    .map((c) => ({
+      ...c,
+      band:
+        opts.bands === false
+          ? 'middle'
+          : (classifyCandidateBand({
+              vecSimilarity: cosineById.get(c.targetId) ?? null,
+              lexical: lexicalIds.has(c.targetId),
+              entity: entityIds.has(c.targetId),
+            }) ?? 'middle'),
+    }));
+  const judged = all.filter((c) => c.band !== 'low');
+  return {
+    candidates: judged.slice(0, opts.perSaveMax),
+    related: all.filter((c) => c.band === 'low').slice(0, opts.perSaveMax),
+    detected: judged.length,
+  };
 }
 
 export function saveTimeMatchExpression(

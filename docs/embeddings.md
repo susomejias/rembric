@@ -105,9 +105,15 @@ memory.save (MCP)                            ← packages/mcp/src/memory-tools.t
    │     │                                          token containment ≥ LEXICAL_CANDIDATE_FLOOR
    │     │                                          0.60; reported similarity = that containment)
    │     ├─ entity pass shared rare identifier     (rarity-gated; no text-overlap floor)
-   │     └─ dedupe by target, higher score wins, cap CANDIDATES_PER_SAVE_MAX
+   │     ├─ dedupe by target, rank (entity first, then similarity)
+   │     ├─ cosine by id for merged targets the vec pass did not return
+   │     │                                         (only when the vec pass returned rows)
+   │     ├─ classifyCandidateBand() per pair       low / middle / high, see below
+   │     └─ cap CANDIDATES_PER_SAVE_MAX on middle+high; low capped separately
    │
-   └─ response: candidates[] → the agent closes each with memory.judge_batch
+   └─ response: candidates[] (middle+high, pending) → memory.judge_batch
+                convergeWith[] (high: likely the same fact) → memory.merge or supersedes
+                related[] (low: no row, no judgmentId) → context only
 ```
 
 The two passes are complementary by design: FTS5 anchors on stable
@@ -138,6 +144,8 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 | `VEC_THRESHOLD`              | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `packages/core/src/services/save-time-candidates.ts` |
 | `LEXICAL_CANDIDATE_FLOOR`    | 0.60 (save-time sweep, `pnpm run eval:save-time`)      | `packages/core/src/services/save-time-candidates.ts` |
 | `COMMON_TERM_DOCUMENT_RATIO` | 0.5 (where FTS5's bm25 stops weighting a term)         | `packages/core/src/services/save-time-candidates.ts` |
+| `CANDIDATE_LOW_BAND_CEILING` | 0.75 (per-band verdict rates, issue #467)              | `packages/core/src/services/save-time-candidates.ts` |
+| `CANDIDATE_HIGH_BAND_FLOOR`  | 0.85 (per-band verdict rates, issue #467)              | `packages/core/src/services/save-time-candidates.ts` |
 
 The lexical pass never thresholds raw bm25: bm25 is unbounded and depends on
 corpus size, so no fixed floor over it is stable. bm25 only orders the pool
@@ -162,5 +170,24 @@ The query then orders by `bm25(memory_fts)` rather than FTS5's `rank`
 column, so FTS5 scores only the saving project's matches instead of
 scoring and sorting every match in every project. The scores and order are
 identical either way, because bm25 still uses whole-index statistics.
+
+Every admitted pair then gets a confidence band from `classifyCandidateBand`,
+which uses the pair's exact cosine and the channels that admitted it:
+
+- **High:** cosine ≥ `CANDIDATE_HIGH_BAND_FLOOR`. The pair is still a pending
+  candidate; `convergeWith[]` also names it, because the two memories likely
+  state the same fact.
+- **Low:** admitted only by the vec pass with cosine below
+  `CANDIDATE_LOW_BAND_CEILING`, or only by a shared entity with a known cosine
+  below `VEC_THRESHOLD`. No pending row; the pair is returned in `related[]` and
+  takes no candidate slot.
+- **Middle:** everything else, including a lexically admitted pair and an
+  entity-only pair whose cosine is unknown because a vector is missing.
+
+The thresholds come from per-band verdict rates on one real installation: 72%
+of judged pairs at cosine ≥ 0.85 were `supersedes` or `conflicts_with`, against
+3% at 0.70–0.75 and 1% for shared-entity-only pairs below 0.70. The committed
+sweep's band section shows the effect on the synthetic fixture; it does not
+calibrate the values.
 
 Changing any of these is an architectural change (OpenSpec), not tuning.
