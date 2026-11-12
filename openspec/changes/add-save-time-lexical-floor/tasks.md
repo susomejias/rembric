@@ -32,28 +32,28 @@
 
 ## 3. The lexical floor
 
-- [ ] 3.1 RED: add the issue-probe regression test to `packages/core/src/services/save-time-candidates.test.ts`, with no embeddings:
+- [x] 3.1 RED: add the issue-probe regression test to `packages/core/src/services/save-time-candidates.test.ts`, with no embeddings:
   - an unrelated save over a heterogeneous scope of at least 20 memories yields no `source: 'fts'` candidate and writes no pending row for one;
   - a lightly edited near-duplicate is surfaced with `source: 'fts'` and `similarity >= LEXICAL_CANDIDATE_FLOOR`.
 
   Observe the first assertion fail on the unchanged code.
 
-- [ ] 3.2 GREEN: set `LEXICAL_CANDIDATE_FLOOR` to the value chosen in 2.6. The vector and entity pools are untouched.
-- [ ] 3.3 Add one test per `memory` delta scenario:
+- [x] 3.2 GREEN: set `LEXICAL_CANDIDATE_FLOOR` to the value chosen in 2.6. The vector and entity pools are untouched.
+- [x] 3.3 Add one test per `memory` delta scenario:
   - a below-floor lexical match takes no slot, and `candidatesDetected` counts only admitted rows;
   - a below-floor lexical target is still surfaced as `source: 'vec'`;
   - the entity channel is not gated;
   - the same repository reads occur at the shipped floor and at `0`, asserted with a recording proxy over the `repos` argument.
-- [ ] 3.4 Extend the existing environment-schema test so that `LEXICAL_CANDIDATE_FLOOR` is asserted not readable from the environment, alongside `CANDIDATE_POOL_SIZE` and `ENTITY_RARITY_MIN_LINKS`.
-- [ ] 3.5 Mutation check. Weaken each piece separately with `node scripts/mutate.mjs`:
+- [x] 3.4 Assert that `LEXICAL_CANDIDATE_FLOOR`, `CANDIDATE_POOL_SIZE` and `ENTITY_RARITY_MIN_LINKS` are not readable from the environment. No such test existed, so `apps/web/src/test/save-time-constants-env.test.ts` adds one, with a control proving the scan sees the `CANDIDATES_PER_SAVE_MAX` env read.
+- [x] 3.5 Mutation check. Weaken each piece separately with `node scripts/mutate.mjs`:
   - the floor comparison removed;
   - the constant set to `0`;
   - the filter moved after the cap.
 
   Confirm that the tests naming each piece turn red. Commit the commands and outcomes to `measurements/mutation.txt`.
 
-- [ ] 3.6 Re-run the sweep at the shipped constant and confirm it matches the chosen grid point. Re-run `pnpm eval` and confirm the retrieval baselines are unchanged.
-- [ ] 3.7 Commit: `fix(core): floor lexical save-time candidates so unrelated saves stop filling the judgment queue`.
+- [x] 3.6 Re-run the sweep at the shipped constant and confirm it matches the chosen grid point. Re-run `pnpm eval` and confirm the retrieval baselines are unchanged.
+- [x] 3.7 Commit: `fix(core): floor lexical save-time candidates so unrelated saves stop filling the judgment queue`.
 
 ## 4. Performance: no regression
 

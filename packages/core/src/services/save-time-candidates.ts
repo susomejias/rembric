@@ -7,7 +7,7 @@ export const DISMISSAL_ANCESTRY_CAP = 10;
 
 export const VEC_THRESHOLD = 0.7;
 
-export const LEXICAL_CANDIDATE_FLOOR = 0;
+export const LEXICAL_CANDIDATE_FLOOR = 0.6;
 
 export const ENTITY_RARITY_THRESHOLD = 0.15;
 
