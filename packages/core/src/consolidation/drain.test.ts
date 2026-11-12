@@ -186,6 +186,17 @@ function keyOf(p: Pair): { createdAt: number; judgmentId: string } {
   return { createdAt: rel.createdAt.getTime(), judgmentId: rel.judgmentId };
 }
 
+/** Fake time advances by `stepMs` per evaluated pair, however often the step reads the clock. */
+function pairPacedClock(stepMs: number): { drainClock: () => number; repos: Repositories } {
+  let now = 0;
+  const memoryRepo = Object.create(repos.memory) as Repositories['memory'];
+  memoryRepo.findBoundedEndpoints = (o) => {
+    now += stepMs;
+    return repos.memory.findBoundedEndpoints(o);
+  };
+  return { drainClock: () => now, repos: { ...repos, memory: memoryRepo } };
+}
+
 function sweepOnce(r: ConsolidationRunner = runner(), s: Scope = scope) {
   return r.runScope({ projectId: s.projectId });
 }
@@ -358,6 +369,15 @@ describe('drain — fail-safe', () => {
     expect(lastSummary().drain.keptUnknown).toBe(1);
   });
 
+  it('a runner built without vectorIndexCurrent drains no pair by the rules, only retired ones', () => {
+    const stale = drainablePair();
+    const retired = drainablePair();
+    repos.memory.archiveOne(retired.targetId);
+    sweepOnce(runner({ vectorIndexCurrent: undefined }));
+    expect(statusOf(stale)).toBe('pending');
+    expect(statusOf(retired)).toBe('orphaned');
+  });
+
   it('calls vectorIndexCurrent once per drain step', () => {
     drainablePair();
     drainablePair();
@@ -475,14 +495,9 @@ describe('drain — scope', () => {
     const b = projectScope(projectsSvc.create({ slug: 'project-b' }).id);
     const inA = Array.from({ length: 4 }, () => drainablePair({ scope: a }));
     const inB = Array.from({ length: 3 }, () => drainablePair({ scope: b }));
-    let t = 0;
-    const drainClock = () => {
-      const v = t;
-      t += DRAIN_BUDGET_MS / 2;
-      return v;
-    };
+    const paced = pairPacedClock(DRAIN_BUDGET_MS / 2);
 
-    const summary = runner({ drainClock }).runAll({ force: true });
+    const summary = runner(paced).runAll({ force: true });
 
     const order = summary.runs
       .map((r) => r.scope.projectId)
@@ -499,13 +514,8 @@ describe('drain — scope', () => {
     const b = projectScope(projectsSvc.create({ slug: 'project-b' }).id);
     const inA = Array.from({ length: 4 }, () => drainablePair({ scope: a }));
     const onlyB = drainablePair({ scope: b });
-    let t = 0;
-    const drainClock = () => {
-      const v = t;
-      t += DRAIN_BUDGET_MS / 2;
-      return v;
-    };
-    runner({ drainClock }).runAll({ force: true });
+    const paced = pairPacedClock(DRAIN_BUDGET_MS / 2);
+    runner(paced).runAll({ force: true });
     expect(inA.filter((p) => statusOf(p) === 'orphaned').length).toBeGreaterThanOrEqual(1);
     expect(statusOf(onlyB)).toBe('orphaned');
   });
@@ -535,24 +545,51 @@ describe('drain — bounds and cursor', () => {
 
   it('the budget ends a run after two pairs and the next run resumes at the third', () => {
     const ps = Array.from({ length: 5 }, () => keptUnknownPair());
-    let t = 0;
-    const drainClock = () => {
-      const v = t;
-      t += DRAIN_BUDGET_MS / 2;
-      return v;
-    };
-    const r = runner({ drainClock });
+    const paced = pairPacedClock(DRAIN_BUDGET_MS / 2);
+    const r = runner(paced);
     sweepOnce(r);
     expect(lastSummary().drain).toMatchObject({ examined: 2, cursor: keyOf(ps[1]!) });
     sweepOnce(r);
     expect(lastSummary().drain).toMatchObject({ examined: 2, cursor: keyOf(ps[3]!) });
   });
 
-  it('a clock already past the budget still examines exactly one pair', () => {
+  it('a step that begins with the shared budget spent examines exactly one pair', () => {
+    const a = projectScope(projectsSvc.create({ slug: 'project-a' }).id);
+    const b = projectScope(projectsSvc.create({ slug: 'project-b' }).id);
+    const inA = [drainablePair({ scope: a }), drainablePair({ scope: a })];
+    const inB = [
+      drainablePair({ scope: b, targetVector: null }),
+      drainablePair({ scope: b, targetVector: null }),
+    ];
+    const paced = pairPacedClock(DRAIN_BUDGET_MS * 2);
+    const relationsRepo = Object.create(repos.relations) as Repositories['relations'];
+    const limits = new Map<string, number[]>();
+    relationsRepo.listExaminablePendingInScope = (o) => {
+      limits.set(o.projectId, [...(limits.get(o.projectId) ?? []), o.limit]);
+      return repos.relations.listExaminablePendingInScope(o);
+    };
+    const summary = runner({
+      ...paced,
+      repos: { ...paced.repos, relations: relationsRepo },
+    }).runAll({
+      force: true,
+    });
+    const order = summary.runs
+      .map((r) => r.scope.projectId)
+      .filter((id) => id === a.projectId || id === b.projectId);
+    const [first, second] = order[0] === a.projectId ? [a, b] : [b, a];
+    const secondPairs = second === b ? inB : inA;
+    expect(lastSummary(first).drain.examined).toBe(1);
+    expect(lastSummary(second).drain).toMatchObject({
+      examined: 1,
+      cursor: keyOf(secondPairs[0]!),
+    });
+    expect(limits.get(second.projectId)).toEqual([1]);
+  });
+
+  it('a first pair slower than the whole budget still completes, and the step stops after it', () => {
     const ps = [keptUnknownPair(), keptUnknownPair(), keptUnknownPair()];
-    let calls = 0;
-    const drainClock = () => (calls++ === 0 ? 0 : DRAIN_BUDGET_MS * 10);
-    sweepOnce(runner({ drainClock }));
+    sweepOnce(runner(pairPacedClock(DRAIN_BUDGET_MS * 10)));
     expect(lastSummary().drain).toMatchObject({ examined: 1, cursor: keyOf(ps[0]!) });
   });
 

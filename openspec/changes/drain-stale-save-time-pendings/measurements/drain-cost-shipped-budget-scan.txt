@@ -1,0 +1,35 @@
+# stale pending drain — budget scan that chose DRAIN_BUDGET_MS (drain-cost-shipped.mts with BUDGETS=40,35,30, CLONES=2, CALLS_PER_CLONE=10)
+Run with the constant still at 50: an emulated budget B scales the drain clock seam by 50/B, so a step stops after B ms of real drain time. Instrument A only (drain per call = Instrument A summed over one sweep call); the shipped value is confirmed with the plain clock in drain-cost-shipped.txt.
+
+## 50000 memories, backlog ~600 (R = 14400)
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 1.35 ms, indexed range alone 0.54 ms; vol-shared LIMIT 1: shipped 0.19 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.05 ms, indexed range alone 2.00 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), emulated budget 40 ms:
+  Instrument A, drain per call (20 calls): p50 50.1  p95 56.6  max 57.9 ms; pairs examined per call p50 72
+runAll forced, 50 projects (6 loaded + default + 43 empty), emulated budget 35 ms:
+  Instrument A, drain per call (20 calls): p50 42.4  p95 46.3  max 49.4 ms; pairs examined per call p50 78
+runAll forced, 50 projects (6 loaded + default + 43 empty), emulated budget 30 ms:
+  Instrument A, drain per call (20 calls): p50 37.0  p95 39.3  max 40.4 ms; pairs examined per call p50 75
+## 50000 memories, backlog ~5000 (R = 120000)
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.90 ms, indexed range alone 0.54 ms; vol-shared LIMIT 1: shipped 0.12 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.04 ms, indexed range alone 27.80 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), emulated budget 40 ms:
+  Instrument A, drain per call (20 calls): p50 50.5  p95 56.5  max 58.2 ms; pairs examined per call p50 100
+runAll forced, 50 projects (6 loaded + default + 43 empty), emulated budget 35 ms:
+  Instrument A, drain per call (20 calls): p50 45.7  p95 51.8  max 58.6 ms; pairs examined per call p50 94
+runAll forced, 50 projects (6 loaded + default + 43 empty), emulated budget 30 ms:
+  Instrument A, drain per call (20 calls): p50 40.5  p95 47.8  max 51.5 ms; pairs examined per call p50 79
+## 50000 memories, backlog ~600 (R = 14400)
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 1.35 ms, indexed range alone 0.53 ms; vol-shared LIMIT 1: shipped 0.20 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.05 ms, indexed range alone 2.22 ms
+runAll forced, 7 projects (6 loaded + default), emulated budget 40 ms:
+  Instrument A, drain per call (20 calls): p50 44.8  p95 49.3  max 52.1 ms; pairs examined per call p50 82
+runAll forced, 7 projects (6 loaded + default), emulated budget 35 ms:
+  Instrument A, drain per call (20 calls): p50 39.1  p95 42.4  max 43.0 ms; pairs examined per call p50 80
+runAll forced, 7 projects (6 loaded + default), emulated budget 30 ms:
+  Instrument A, drain per call (20 calls): p50 33.6  p95 36.3  max 36.8 ms; pairs examined per call p50 70
+## 50000 memories, backlog ~5000 (R = 120000)
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.89 ms, indexed range alone 0.54 ms; vol-shared LIMIT 1: shipped 0.12 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.04 ms, indexed range alone 29.45 ms
+runAll forced, 7 projects (6 loaded + default), emulated budget 40 ms:
+  Instrument A, drain per call (20 calls): p50 44.7  p95 48.8  max 50.2 ms; pairs examined per call p50 108
+runAll forced, 7 projects (6 loaded + default), emulated budget 35 ms:
+  Instrument A, drain per call (20 calls): p50 39.2  p95 42.5  max 42.8 ms; pairs examined per call p50 89
+runAll forced, 7 projects (6 loaded + default), emulated budget 30 ms:
+  Instrument A, drain per call (20 calls): p50 34.4  p95 36.8  max 38.9 ms; pairs examined per call p50 77

@@ -215,9 +215,9 @@ Batching is a requirement, not an optimisation. The sweep runs on the server's s
 Two bounds apply, and both SHALL be named constants, not operator-configurable, with values carried by a committed measurement:
 
 - **`DRAIN_ROW_CAP`:** the most relations one scope's drain step examines in one run.
-- **`DRAIN_BUDGET_MS`:** the wall-clock budget for ALL drain steps of one sweep call, shared across the scopes that call runs. One sweep call is one session-start callback, which sweeps the session's project and the default project, or one forced `runAll`, which sweeps every project. The clock SHALL start when the first drain step of the call begins, not when the run begins, and SHALL be checked between pairs.
+- **`DRAIN_BUDGET_MS`:** the wall-clock budget of drain time for ALL drain steps of one sweep call, shared across the scopes that call runs. One sweep call is one session-start callback, which sweeps the session's project and the default project, or one forced `runAll`, which sweeps every project. The budget SHALL count only the time spent inside the call's drain steps: it starts when the first drain step begins, not when the run begins, it SHALL NOT run during the decay and deadline steps of the call's later scopes, and it SHALL be checked between pairs.
 
-A drain step SHALL stop at its row cap or when the shared budget is spent, whichever comes first, and the next run of that scope SHALL resume from the cursor. Every drain step SHALL examine at least one examinable pair, even when the shared budget is already spent, so a slow host and a late scope still make progress. The drain's time in one call is therefore bounded by `DRAIN_BUDGET_MS` plus one pair per scope of that call, each pair bounded by `DRAIN_MAX_PAIR_CHARS`.
+A drain step SHALL stop at its row cap or when the shared budget is spent, whichever comes first, and the next run of that scope SHALL resume from the cursor. Every drain step SHALL examine at least one examinable pair, even when the shared budget is already spent, so a slow host and a late scope still make progress. The drain's time in one call is therefore bounded by `DRAIN_BUDGET_MS` plus, per scope of that call, one pair and the step's fixed reads, each pair bounded by `DRAIN_MAX_PAIR_CHARS`. The budget's value SHALL leave room for those per-scope costs at the measured project counts.
 
 Each drain SHALL commit in its own transaction, holding only that pair's orphan and journal writes. No transaction SHALL span several pairs, a run or the backlog. A failure therefore rolls back only the pair it happened on.
 
@@ -261,13 +261,13 @@ A relation whose drain op an operator has reverted SHALL NOT be drained again by
 
 #### Scenario: A slow host still progresses
 
-- **GIVEN** an injected clock that reports the shared budget already spent when the drain step begins
-- **WHEN** the drain step runs
+- **GIVEN** a sweep call whose earlier drain steps have already spent the shared budget when a scope's drain step begins
+- **WHEN** that drain step runs
 - **THEN** it SHALL examine exactly one pair and record that pair's key as the cursor
 
 #### Scenario: Time spent before the drain does not consume its budget
 
-- **GIVEN** a run whose decay and deadline steps take longer than `DRAIN_BUDGET_MS`, and an injected clock that measures from the start of the drain step
+- **GIVEN** a run whose decay and deadline steps take longer than `DRAIN_BUDGET_MS`, and an injected clock that keeps running through them
 - **WHEN** the drain step runs
 - **THEN** it SHALL examine pairs up to its row cap or its own budget, not just the minimum single pair
 

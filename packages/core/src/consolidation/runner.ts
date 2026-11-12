@@ -71,16 +71,17 @@ export const DEFAULT_MIN_INTERVAL_MS = 24 * 3_600_000;
 const ORPHAN_BATCH = 50;
 
 export const DRAIN_ROW_CAP = 150;
-export const DRAIN_BUDGET_MS = 50;
+export const DRAIN_BUDGET_MS = 30;
 export const DRAIN_RULES_REASON = 'stale under current rules';
 export const DRAIN_RETIRED_REASON = 'endpoint retired';
 
+/** Drain time is counted only inside drain steps, so decay and deadline orphaning never spend it. */
 interface SweepCall {
-  drainStartedAt: number | null;
+  drainSpentMs: number;
   revertedJudgmentIds: string[] | null;
 }
 
-const newSweepCall = (): SweepCall => ({ drainStartedAt: null, revertedJudgmentIds: null });
+const newSweepCall = (): SweepCall => ({ drainSpentMs: 0, revertedJudgmentIds: null });
 
 export function drainDisposition(evaluation: PairEvaluation): DrainDisposition {
   if (evaluation.kind === 'retired') return 'drain_retired';
@@ -187,10 +188,10 @@ export class ConsolidationRunner {
       keptAdmitted: 0,
       keptUnknown: 0,
     };
+    const clock = this.opts.drainClock ?? (() => performance.now());
+    const stepStart = clock();
+    const budgetSpent = () => call.drainSpentMs + (clock() - stepStart) >= DRAIN_BUDGET_MS;
     try {
-      const clock = this.opts.drainClock ?? (() => performance.now());
-      call.drainStartedAt ??= clock();
-      const deadline = call.drainStartedAt + DRAIN_BUDGET_MS;
       summary.cursor = parseDrainCursor(
         this.opts.repos.consolidation.latestFinishedRunSummary(scopeString(scope)),
       );
@@ -201,9 +202,10 @@ export class ConsolidationRunner {
         scope.projectId,
         summary.cursor,
         call.revertedJudgmentIds,
+        budgetSpent() ? 1 : DRAIN_ROW_CAP,
       );
       for (const pair of batch) {
-        if (summary.examined > 0 && clock() >= deadline) break;
+        if (summary.examined > 0 && budgetSpent()) break;
         summary.examined++;
         summary.cursor = { createdAt: pair.createdAt.getTime(), judgmentId: pair.judgmentId };
         this.drainPair(runId, scope.projectId, pair, vectorIndexCurrent, summary);
@@ -211,6 +213,7 @@ export class ConsolidationRunner {
     } catch (err) {
       console.error('[consolidation] stale pending drain failed', err);
     }
+    call.drainSpentMs += clock() - stepStart;
     return summary;
   }
 
@@ -219,30 +222,27 @@ export class ConsolidationRunner {
     projectId: string,
     cursor: DrainCursor | null,
     excludeJudgmentIds: readonly string[],
+    limit: number,
   ): ExaminablePending[] {
     const relations = this.opts.repos.relations;
     if (cursor === null) {
-      return relations.listExaminablePendingInScope({
-        projectId,
-        excludeJudgmentIds,
-        limit: DRAIN_ROW_CAP,
-      });
+      return relations.listExaminablePendingInScope({ projectId, excludeJudgmentIds, limit });
     }
     const key = { createdAt: new Date(cursor.createdAt), judgmentId: cursor.judgmentId };
     const head = relations.listExaminablePendingInScope({
       projectId,
       after: key,
       excludeJudgmentIds,
-      limit: DRAIN_ROW_CAP,
+      limit,
     });
-    if (head.length >= DRAIN_ROW_CAP) return head;
+    if (head.length >= limit) return head;
     return [
       ...head,
       ...relations.listExaminablePendingInScope({
         projectId,
         until: key,
         excludeJudgmentIds,
-        limit: DRAIN_ROW_CAP - head.length,
+        limit: limit - head.length,
       }),
     ];
   }
