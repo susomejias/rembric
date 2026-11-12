@@ -190,7 +190,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 10. Dry-run count
 
-- [ ] 10.1 Write `measurements/dry-run-count.mts`.
+- [x] 10.1 Write `measurements/dry-run-count.mts`.
   - **Input:** the path of a database COPY. It refuses the path the server is configured to use.
   - **Setup:** it opens the copy through the repository's database client, so sqlite-vec is loaded, and applies migrations to that copy.
   - **Evaluation:** it runs the drain's selection and `evaluatePair` over every examinable pending pair, without writing.
@@ -201,7 +201,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
     - would drain because an endpoint is retired;
     - kept as admitted, by channel;
     - kept as unknown, by reason.
-- [ ] 10.2 Run it on a `corpus:build` copy carrying the 9.1 backlog. Confirm that the `memory` and `memory_relations` table hashes, taken after migration, are unchanged by the evaluation.
+- [x] 10.2 Run it on a `corpus:build` copy carrying the 9.1 backlog. Confirm that the `memory` and `memory_relations` table hashes, taken after migration, are unchanged by the evaluation.
 - [ ] 10.3 **OPERATOR-ONLY.** The owner runs `dry-run-count.mts` against a BACKUP COPY of their production database, never against the live file and never while a server holds it open. Only aggregate counts are recorded in `measurements/dry-run.md`, with no ids, titles, content or project names.
 
 ## 11. Verification and delivery
