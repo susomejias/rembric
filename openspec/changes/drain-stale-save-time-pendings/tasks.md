@@ -45,7 +45,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 4. Pair evaluator with three-valued verdicts
 
-- [ ] 4.1 RED first. Add tests in `packages/core/src/services/save-time-candidates.test.ts` for `evaluatePair`, and observe them fail before 4.2:
+- [x] 4.1 RED first. Add tests in `packages/core/src/services/save-time-candidates.test.ts` for `evaluatePair`, and observe them fail before 4.2:
   - an admitted lexical pair, an admitted vector pair, and an entity pair that shares an entity the rarity gate would block, each returning `admitted` on its channel;
   - a pair whose target ranks beyond `CANDIDATE_POOL_SIZE` but clears the floor, returning lexical `admitted`;
   - a missing embedding on either endpoint, returning vector `unknown`;
@@ -54,8 +54,8 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
   - an extraction that throws for either endpoint, returning entity `unknown`;
   - an endpoint longer than `DRAIN_MAX_PAIR_CHARS`, returning `unknown` without its content being loaded;
   - an unreadable row, or a read that throws, returning `unknown`.
-- [ ] 4.2 Implement `evaluatePair` per design D1–D3 and D5. It calls only the 2.2 functions, the 3.1 reads, the stored links and `extractEntities` on both endpoints, in the D3 order.
-- [ ] 4.3 Add the agreement test: over the save-time fixture, every candidate `findSaveTimeCandidates` returns at an unbounded `perSaveMax` is `admitted` by `evaluatePair` on some channel.
+- [x] 4.2 Implement `evaluatePair` per design D1–D3 and D5. It calls only the 2.2 functions, the 3.1 reads, the stored links and `extractEntities` on both endpoints, in the D3 order.
+- [x] 4.3 Add the agreement test: over the save-time fixture, every candidate `findSaveTimeCandidates` returns at an unbounded `perSaveMax` is `admitted` by `evaluatePair` on some channel.
 
 ## 5. The drain step
 

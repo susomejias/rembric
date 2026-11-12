@@ -23,9 +23,18 @@ import {
   tokenContainment,
   tokenSet,
 } from '@rembric/core';
+import {
+  DRAIN_MAX_PAIR_CHARS,
+  evaluatePair,
+  extractEntities,
+  VEC_THRESHOLD,
+  type EvaluatePairOptions,
+  type PairEvaluation,
+} from '@rembric/core';
 
 import { seedProject } from '../test-support/default-project.js';
 import { createTestDb, defaultProjectScope, type TestDb } from '../test-support/index.js';
+import { SAVE_TIME_BASE, SAVE_TIME_SAVES } from '../test-support/retrieval/save-time-fixture.js';
 
 let db: TestDb;
 let memorySvc: MemoryService;
@@ -1374,5 +1383,312 @@ describe('RelationsService.compare — idempotency + cross-scope rejection', () 
         kind: 'agent',
       }),
     ).toThrow(/already/i);
+  });
+});
+
+describe('evaluatePair — the drain re-check of one pending pair', () => {
+  const current: EvaluatePairOptions = { vectorIndexCurrent: true };
+
+  function vec(axisWeights: [number, number]): Buffer {
+    const v = new Float32Array(768);
+    const norm = Math.hypot(...axisWeights);
+    v[0] = axisWeights[0] / norm;
+    v[1] = axisWeights[1] / norm;
+    return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  }
+
+  function save(title: string, content: string, scope: Scope = defaultProjectScope(db.handle)) {
+    return memorySvc.save({ type: 'project', title, content }, scope);
+  }
+
+  function embed(id: string, v: Buffer, projectId = defaultProjectScope(db.handle).projectId) {
+    createRepositories(db.handle.db).vectors.insertEmbedding(id, v, partitionKeyFor(projectId));
+  }
+
+  function evaluate(
+    sourceId: string,
+    targetId: string,
+    opts: EvaluatePairOptions = current,
+    repos: Repositories = createRepositories(db.handle.db),
+  ): PairEvaluation {
+    return evaluatePair(repos, defaultProjectScope(db.handle).projectId, sourceId, targetId, opts);
+  }
+
+  function channels(e: PairEvaluation) {
+    if (e.kind !== 'channels') throw new Error(`expected channel verdicts, got ${e.kind}`);
+    return e;
+  }
+
+  function unrelatedPair(): { source: string; target: string } {
+    const target = save(
+      'Quarterly offsite venue',
+      'The offsite moved to the lakeside hall in May.',
+    );
+    const source = save(
+      'Linter rule for imports',
+      'Imports are sorted by the formatter before every commit.',
+    );
+    return { source: source.id, target: target.id };
+  }
+
+  it('control: a pair no channel admits returns three not_admitted verdicts', () => {
+    const { source, target } = unrelatedPair();
+    embed(source, vec([1, 0]));
+    embed(target, vec([0, 1]));
+    const e = channels(evaluate(source, target));
+    expect([e.lexical, e.vector, e.entity]).toEqual([
+      'not_admitted',
+      'not_admitted',
+      'not_admitted',
+    ]);
+    expect(e.lexicalSimilarity).toBeLessThan(LEXICAL_CANDIDATE_FLOOR);
+    expect(e.vectorSimilarity).toBeLessThan(VEC_THRESHOLD);
+  });
+
+  it('a lexically admitted pair returns lexical admitted', () => {
+    const target = save('Two-space indentation', 'use two-space indentation always in every file');
+    const source = save('Indentation again', 'use two-space indentation always in every file');
+    expect(channels(evaluate(source.id, target.id)).lexical).toBe('admitted');
+  });
+
+  it('a pair exactly at the lexical floor is admitted, as at save time', () => {
+    const target = save('Floor', 'alpha beta gamma');
+    const source = save('Floor source', 'alpha beta gamma delta epsilon');
+    const e = channels(evaluate(source.id, target.id));
+    expect(e.lexicalSimilarity).toBe(LEXICAL_CANDIDATE_FLOOR);
+    expect(e.lexical).toBe('admitted');
+  });
+
+  it('a vector-admitted pair returns vector admitted from the stored embeddings', () => {
+    const { source, target } = unrelatedPair();
+    embed(source, vec([1, 0]));
+    embed(target, vec([1, 0.2]));
+    const e = channels(evaluate(source, target));
+    expect(e.vector).toBe('admitted');
+    expect(e.vectorSimilarity).toBeGreaterThanOrEqual(VEC_THRESHOLD);
+  });
+
+  it('a shared entity the rarity gate blocks still returns entity admitted', () => {
+    const repos = createRepositories(db.handle.db);
+    const projectId = defaultProjectScope(db.handle).projectId;
+    for (let i = 0; i < 6; i++) {
+      const m = save(`Ticket note ${i}`, `ticket note number ${i}`);
+      repos.entities.linkMemory(m.id, projectId, [{ kind: 'ticket', value: 'PROJ-1' }], new Date());
+    }
+    const { source, target } = unrelatedPair();
+    for (const id of [source, target]) {
+      repos.entities.linkMemory(id, projectId, [{ kind: 'ticket', value: 'PROJ-1' }], new Date());
+    }
+    const [saved] = repos.memory.unsafeGetByIds([source]);
+    const detected = findSaveTimeCandidates(repos, saved!, { perSaveMax: 50 }, [
+      { kind: 'ticket', value: 'PROJ-1' },
+    ]).candidates;
+    expect(detected.some((c) => c.targetId === target && c.source === 'entity')).toBe(false);
+
+    expect(channels(evaluate(source, target)).entity).toBe('admitted');
+  });
+
+  it('a target ranked beyond CANDIDATE_POOL_SIZE that clears the floor returns lexical admitted', () => {
+    const repos = createRepositories(db.handle.db);
+    for (let i = 0; i < CANDIDATE_POOL_SIZE + 5; i++) {
+      save(`Short ${i}`, 'deploy freeze friday');
+    }
+    const target = save(
+      'Long note',
+      `deploy freeze friday ${Array.from({ length: 60 }, (_, i) => `filler${i}`).join(' ')}`,
+    );
+    const source = save('Freeze', 'deploy freeze friday');
+    const detected = findSaveTimeCandidates(repos, source, { perSaveMax: 100 }).candidates;
+    expect(detected.some((c) => c.targetId === target.id)).toBe(false);
+
+    expect(channels(evaluate(source.id, target.id)).lexical).toBe('admitted');
+  });
+
+  it.each(['source', 'target'] as const)(
+    'a missing embedding on the %s returns vector unknown',
+    (missing) => {
+      const { source, target } = unrelatedPair();
+      if (missing !== 'source') embed(source, vec([1, 0]));
+      if (missing !== 'target') embed(target, vec([0, 1]));
+      const e = channels(evaluate(source, target));
+      expect(e.vector).toBe('unknown');
+      expect(e.vectorSimilarity).toBeNull();
+    },
+  );
+
+  it('a stale vector index returns vector unknown, even below the threshold', () => {
+    const { source, target } = unrelatedPair();
+    embed(source, vec([1, 0]));
+    embed(target, vec([0, 1]));
+    const e = channels(evaluate(source, target, { vectorIndexCurrent: false }));
+    expect(e.vector).toBe('unknown');
+    expect(e.vectorSimilarity).toBeNull();
+  });
+
+  it('a target scanned without links is still checked by fresh extraction', () => {
+    const repos = createRepositories(db.handle.db);
+    const projectId = defaultProjectScope(db.handle).projectId;
+    const target = save('Session store', 'Expiry is enforced in src/lib/session-expiry.ts today.');
+    repos.entities.markScanned(target.id, new Date());
+    const source = save('Login lifetime', 'Operators edited src/lib/session-expiry.ts last week.');
+    repos.entities.linkMemory(
+      source.id,
+      projectId,
+      [{ kind: 'path', value: 'src/lib/session-expiry.ts' }],
+      new Date(),
+    );
+    expect(repos.entities.findEntitiesForMemory(target.id)).toEqual([]);
+    expect(channels(evaluate(source.id, target.id)).entity).toBe('admitted');
+  });
+
+  it.each(['source', 'target'] as const)(
+    'an extraction that throws for the %s returns entity unknown',
+    (side) => {
+      const { source, target } = unrelatedPair();
+      const failing = side === 'source' ? 'Imports are sorted' : 'The offsite moved';
+      const extract = (title: string, content: string) => {
+        if (content.includes(failing)) throw new Error('extractor failed');
+        return extractEntities(title, content);
+      };
+      expect(channels(evaluate(source, target, { ...current, extract })).entity).toBe('unknown');
+    },
+  );
+
+  it('an endpoint longer than DRAIN_MAX_PAIR_CHARS is unknown, and its text is never loaded', () => {
+    const repos = createRepositories(db.handle.db);
+    const target = save('Huge', 'word '.repeat(Math.ceil(DRAIN_MAX_PAIR_CHARS / 5) + 1));
+    const source = save('Small', 'a short unrelated note');
+    const read = repos.memory.findBoundedEndpoints.bind(repos.memory);
+    const loaded: (string | null)[] = [];
+    const memoryRepo = Object.create(repos.memory) as typeof repos.memory;
+    memoryRepo.findBoundedEndpoints = (o) => {
+      const rows = read(o);
+      for (const r of rows) loaded.push(r.content);
+      return rows;
+    };
+    let extracted = 0;
+    const extract = (title: string, content: string) => {
+      extracted++;
+      return extractEntities(title, content);
+    };
+    const e = evaluate(
+      source.id,
+      target.id,
+      { ...current, extract },
+      { ...repos, memory: memoryRepo },
+    );
+    expect(e.kind).toBe('oversized');
+    expect(loaded).toContain(null);
+    expect(extracted).toBe(0);
+  });
+
+  it('control: an endpoint exactly at DRAIN_MAX_PAIR_CHARS is evaluated', () => {
+    const title = 'Edge';
+    const target = save(title, 'x'.repeat(DRAIN_MAX_PAIR_CHARS - title.length));
+    const source = save('Small', 'a short unrelated note');
+    expect(evaluate(source.id, target.id).kind).toBe('channels');
+  });
+
+  it('a missing endpoint row is unreadable', () => {
+    const { source } = unrelatedPair();
+    expect(evaluate(source, 'no-such-memory').kind).toBe('unreadable');
+  });
+
+  it('an endpoint in another project is unreadable, never evaluated', () => {
+    const other = projects.create({ slug: 'other-project' });
+    const { source } = unrelatedPair();
+    const foreign = save(
+      'Foreign',
+      'Imports are sorted by the formatter before every commit.',
+      projectScope(other.id),
+    );
+    expect(evaluate(source, foreign.id).kind).toBe('unreadable');
+  });
+
+  it('a read that throws returns failed instead of throwing', () => {
+    const repos = createRepositories(db.handle.db);
+    const { source, target } = unrelatedPair();
+    const vectors = Object.create(repos.vectors) as typeof repos.vectors;
+    vectors.pairCosineDistance = () => {
+      throw new Error('vector read failed');
+    };
+    const e = evaluate(source, target, current, { ...repos, vectors });
+    expect(e.kind).toBe('failed');
+  });
+
+  it('a retired endpoint is reported as retired without reading any channel', () => {
+    const repos = createRepositories(db.handle.db);
+    const { source, target } = unrelatedPair();
+    repos.memory.archiveOne(target);
+    let extracted = 0;
+    const extract = (title: string, content: string) => {
+      extracted++;
+      return extractEntities(title, content);
+    };
+    expect(evaluate(source, target, { ...current, extract })).toEqual({
+      kind: 'retired',
+      sourceStatus: 'active',
+      targetStatus: 'archived',
+    });
+    expect(extracted).toBe(0);
+  });
+});
+
+describe('evaluatePair agrees with detection over the save-time fixture', () => {
+  function bagOfWordsVector(text: string): Buffer {
+    const v = new Float32Array(768);
+    for (const term of tokenSet(text)) {
+      let h = 0x811c9dc5;
+      for (let i = 0; i < term.length; i++) h = Math.imul(h ^ term.charCodeAt(i), 0x01000193) >>> 0;
+      v[h % 768]! += 1;
+    }
+    const norm = Math.hypot(...v) || 1;
+    for (let i = 0; i < v.length; i++) v[i]! /= norm;
+    return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  }
+
+  it('every candidate detection returns at an unbounded cap is admitted by evaluatePair on some channel', async () => {
+    const repos = createRepositories(db.handle.db);
+    const scope = defaultProjectScope(db.handle);
+    const saved = [];
+    for (const item of [...SAVE_TIME_BASE, ...SAVE_TIME_SAVES]) {
+      const m = memorySvc.save(
+        { type: item.type, title: item.title, content: item.content },
+        scope,
+      );
+      repos.vectors.insertEmbedding(
+        m.id,
+        bagOfWordsVector(`${m.title}\n\n${m.content}`),
+        partitionKeyFor(scope.projectId),
+      );
+      await runPostSaveSteps({ repos }, m, scope);
+      saved.push(m);
+    }
+
+    const bySource = { vec: 0, fts: 0, entity: 0 };
+    const disagreements: string[] = [];
+    for (const m of saved) {
+      const found = findSaveTimeCandidates(
+        repos,
+        m,
+        { perSaveMax: Number.MAX_SAFE_INTEGER },
+        extractEntities(m.title, m.content),
+      );
+      for (const c of found.candidates) {
+        bySource[c.source]++;
+        const e = evaluatePair(repos, scope.projectId, m.id, c.targetId, {
+          vectorIndexCurrent: true,
+        });
+        const admitted =
+          e.kind === 'channels' &&
+          (e.lexical === 'admitted' || e.vector === 'admitted' || e.entity === 'admitted');
+        if (!admitted) disagreements.push(`${m.title} -> ${c.title} (${c.source}): ${e.kind}`);
+      }
+    }
+
+    expect(disagreements).toEqual([]);
+    expect(bySource.vec).toBeGreaterThan(0);
+    expect(bySource.fts).toBeGreaterThan(0);
+    expect(bySource.entity).toBeGreaterThan(0);
   });
 });
