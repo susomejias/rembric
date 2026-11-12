@@ -1,4 +1,4 @@
-import { isAuthorized, truncateTitle } from '@rembric/core';
+import { isAuthorized, truncateTitle, redactSecrets } from '@rembric/core';
 
 import {
   authenticateRequest,
@@ -38,7 +38,10 @@ export async function POST(
     const result = deps.agentSessions.reportTurn(sessionId, {
       tokenId: ctx.token.id,
       usedTools: parsed.data.usedTools,
-      title: parsed.data.title === undefined ? undefined : truncateTitle(parsed.data.title),
+      title:
+        parsed.data.title === undefined
+          ? undefined
+          : truncateTitle(redactSecrets(parsed.data.title).text),
     });
     return Response.json({ ok: true, sessionId: result.session.id, lines: result.lines });
   } catch (err) {

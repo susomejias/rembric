@@ -174,7 +174,7 @@ async function handleCapturePassive(
         deps,
         {
           type: 'reference',
-          title: deriveTitle(content),
+          title: deriveTitle(redactions.redact(content)),
           content,
           tags: args.tags,
           source: { tokenName: ctx.token.name, agent: 'passive' },

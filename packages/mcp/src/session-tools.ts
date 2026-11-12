@@ -350,7 +350,7 @@ async function handleSessionSummary(
       titleFinal: updated.titleFinal,
       applied,
       ...(applied === false && { discardReason: 'terminal_final' }),
-      ...redactionsField(redactions),
+      ...(applied && redactionsField(redactions)),
     });
   } catch (err) {
     return errToMcp(err, deps.logInternalError);

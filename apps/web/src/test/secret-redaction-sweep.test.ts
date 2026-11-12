@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { redactionPlaceholder } from '@rembric/core';
+import { redactionPlaceholder, SUMMARY_MAX_CHARS, SUMMARY_TRUNCATE_MARKER } from '@rembric/core';
 import type * as CoreModule from '@rembric/core';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -71,6 +71,14 @@ function secret(label: string): string {
   const value = `ghp_${base64Run(label)
     .replace(/[^A-Za-z0-9]/g, '')
     .slice(0, 36)}`;
+  secrets.push(value);
+  return value;
+}
+
+function password(label: string, length: number): string {
+  const value = `P9${base64Run(label)
+    .replace(/[^A-Za-z0-9]/g, '')
+    .slice(0, length - 2)}`;
   secrets.push(value);
   return value;
 }
@@ -189,7 +197,7 @@ describe('secret redaction sweep — every write path through its real boundary'
     });
 
     responses['capture'] = await tool('memory.capture_passive', {
-      text: `## Key Learnings\n1. The registry push used ${secret('capture-1')} as its credential.\n2. The mirror job also read ${secret('capture-2')} from its environment.`,
+      text: `## Key Learnings\n1. The registry push used ${secret('capture-1')} as its credential.\n2. The mirror job also read ${secret('capture-2')} from its environment.\n3. Root cause of the nightly ETL load failure: the job now connects with postgres://etl:${password('capture-url', 14)}@warehouse.internal:5432/dw now.`,
       tags: ['sweep'],
     });
     responses['confirm'] = await tool('memory.confirm_batch', {
@@ -230,7 +238,15 @@ describe('secret redaction sweep — every write path through its real boundary'
       relation: 'related',
       confidence: 0.5,
       reason: `both mention ${secret('compare')}`,
-      evidence: [secret('compare-evidence')],
+      evidence: {
+        [secret('compare-evidence-key')]: 'seen in the CI log',
+        list: [secret('compare-evidence')],
+      },
+    });
+    await tool('memory.session_end', {});
+    responses['summary_discarded'] = await tool('memory.session_summary', {
+      sessionId: responses['session_start']['sessionId'],
+      summary: `## Goal\nlate ${secret('discarded')}`,
     });
 
     const sessions = `/api/${SLUG}/sessions`;
@@ -264,6 +280,34 @@ describe('secret redaction sweep — every write path through its real boundary'
       await http(endPost, `${sessions}/sweep-http-1/end`, one, {
         summary: `## Goal\nend ${secret('http-end')}`,
       }),
+    );
+
+    const kept = SUMMARY_MAX_CHARS - SUMMARY_TRUNCATE_MARKER.length;
+    const keptTail = (lead: string) => `${lead} ${'y'.repeat(kept - lead.length - 1)}`;
+    for (const id of ['sweep-http-2', 'sweep-http-3']) {
+      httpBodies.push(await http(sessionsPost, sessions, { slug: SLUG }, { id, agent: 'hook' }));
+    }
+    const two = { slug: SLUG, id: 'sweep-http-2' };
+    httpBodies.push(
+      await http(turnPost, `${sessions}/sweep-http-2/turn`, two, {
+        usedTools: false,
+        title: `${'x'.repeat(69)} postgres://app:${password('http-turn-cut', 14)}@db`,
+      }),
+    );
+    httpBodies.push(
+      await http(summaryPost, `${sessions}/sweep-http-2/summary`, two, {
+        summary: `${'x'.repeat(2000)}\nAuthoriz${keptTail(`ation: Bearer ${password('http-bearer-cut', 40)}`)}`,
+      }),
+    );
+    httpBodies.push(
+      await http(
+        endPost,
+        `${sessions}/sweep-http-3/end`,
+        { slug: SLUG, id: 'sweep-http-3' },
+        {
+          summary: `${'x'.repeat(2000)}\nDB_PASS${keptTail(`WORD=${password('http-end-cut', 20)}`)}`,
+        },
+      ),
     );
   });
 
@@ -299,7 +343,8 @@ describe('secret redaction sweep — every write path through its real boundary'
               : Buffer.isBuffer(value)
                 ? value.toString('latin1')
                 : '';
-          for (const s of secrets) if (text.includes(s)) leaks.push(`${table}.${column}`);
+          for (const s of secrets)
+            if (text.includes(s)) leaks.push(`${table}.${column} (${s.slice(0, 6)}…)`);
         }
       }
     }
@@ -349,14 +394,23 @@ describe('secret redaction sweep — every write path through its real boundary'
     ]);
     expect(responses['save_tagged']!['redactions']).toEqual([{ kind: 'github_token', count: 2 }]);
     expect(responses['save_clean']).not.toHaveProperty('redactions');
-    for (const key of ['session_start', 'session_summary', 'compare']) {
+    for (const key of ['session_start', 'session_summary']) {
       expect(responses[key]!['redactions'], key).toEqual([{ kind: 'github_token', count: 2 }]);
     }
-    expect(responses['capture']!['redactions']).toEqual([{ kind: 'github_token', count: 4 }]);
+    expect(responses['compare']!['redactions']).toEqual([{ kind: 'github_token', count: 3 }]);
+    expect(responses['capture']!['redactions']).toEqual([
+      { kind: 'github_token', count: 4 },
+      { kind: 'url_password', count: 2 },
+    ]);
     expect(responses['confirm']!['redactions']).toEqual([{ kind: 'github_token', count: 1 }]);
     expect(responses['prompt']!['redactions']).toEqual([{ kind: 'github_token', count: 3 }]);
     const [judged] = responses['judge']!['results'] as Record<string, unknown>[];
     expect(judged!['redactions']).toEqual([{ kind: 'github_token', count: 2 }]);
+  });
+
+  it('reports no redactions for a summary write that stored nothing', () => {
+    expect(responses['summary_discarded']).toMatchObject({ applied: false });
+    expect(responses['summary_discarded']).not.toHaveProperty('redactions');
   });
 
   it('leaves the HTTP session response bodies without a redactions field', () => {

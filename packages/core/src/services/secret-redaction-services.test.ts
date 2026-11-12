@@ -10,12 +10,13 @@ import {
   type TestDb,
 } from '../test-support/index.js';
 
-import { AgentSessionsService } from './agent-sessions.js';
+import { AgentSessionsService, SUMMARY_MAX_CHARS } from './agent-sessions.js';
 import { MemoryService } from './memory.js';
 import { ProjectsService } from './projects.js';
 import { PromptsService } from './prompts.js';
 import { RelationsService } from './relations.js';
 import { RedactionTally } from './secret-redaction.js';
+import { mergeSummarySections } from './summary-sections.js';
 import { TokensService } from './tokens.js';
 
 const GH = fakeGithubToken(101);
@@ -174,6 +175,34 @@ describe('AgentSessionsService', () => {
     expect(sessions.end(b.id, { tokenId, summary: `done ${GH_2}` }).row.summary).toBe(
       'done [REDACTED:github_token]',
     );
+  });
+
+  it('cuts a curated merge that placeholders lengthen past the cap instead of refusing it', () => {
+    const s = sessions.start({ tokenId, projectId: scope.projectId, agent: 'cli' });
+    const first = `## Goal\n${'g'.repeat(4990)}`;
+    sessions.writeSummary(s.id, { tokenId, summary: first, final: true });
+    const head = '## Accomplished\n';
+    const secret = ' password="hunter22"';
+    const filler = 'a'.repeat(
+      SUMMARY_MAX_CHARS - 5 - mergeSummarySections(first, `${head}${secret}`).length,
+    );
+    const incoming = `${head}${filler}${secret}`;
+    expect(mergeSummarySections(first, incoming)).toHaveLength(SUMMARY_MAX_CHARS - 5);
+    const { row } = sessions.writeSummary(s.id, { tokenId, summary: incoming, final: true });
+    expect(row.summary!.length).toBeLessThanOrEqual(SUMMARY_MAX_CHARS);
+    expect(row.summary).not.toContain('hunter22');
+  });
+
+  it('still refuses a curated merge that exceeds the cap as sent', () => {
+    const s = sessions.start({ tokenId, projectId: scope.projectId, agent: 'cli' });
+    sessions.writeSummary(s.id, { tokenId, summary: `## Goal\n${'g'.repeat(6000)}`, final: true });
+    expect(() =>
+      sessions.writeSummary(s.id, {
+        tokenId,
+        summary: `## Accomplished\n${'a'.repeat(5000)}`,
+        final: true,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'invalid_input' }) as Error);
   });
 
   it('redacts a summary written onto an already-ended session', () => {

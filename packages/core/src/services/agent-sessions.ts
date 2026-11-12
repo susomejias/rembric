@@ -266,7 +266,7 @@ export class AgentSessionsService {
     if (sent.summary !== undefined) assertNoNul('sessions.writeSummary', 'summary', sent.summary);
     assertSummaryWithinCap('sessions.writeSummary', sent.summary);
     assertTitleValid('sessions.writeSummary', sent.title);
-    const input = redactSummaryAndTitle(sent, redactions);
+    const input = { ...redactSummaryAndTitle(sent, redactions), sentSummary: sent.summary };
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -302,7 +302,7 @@ export class AgentSessionsService {
     if (sent.summary !== undefined) assertNoNul('sessions.end', 'summary', sent.summary);
     assertSummaryWithinCap('sessions.end', sent.summary);
     assertTitleValid('sessions.end', sent.title);
-    const input = redactSummaryAndTitle(sent, redactions);
+    const input = { ...redactSummaryAndTitle(sent, redactions), sentSummary: sent.summary };
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -723,7 +723,7 @@ function applyPrecedence(
   return { changed: true, value: incomingValue, final: incomingFinal };
 }
 
-type PrecedenceInput = Omit<WriteSummaryInput, 'tokenId'>;
+type PrecedenceInput = Omit<WriteSummaryInput, 'tokenId'> & { sentSummary?: string };
 
 function precedenceSet(
   existing: AgentSession,
@@ -754,13 +754,24 @@ function precedenceSet(
         );
       }
       const merged = mergeSummarySections(storedSummary, incomingSummary);
-      if (merged.length > SUMMARY_MAX_CHARS) {
+      const mergedAsSent =
+        input.sentSummary === undefined
+          ? merged
+          : mergeSummarySections(storedSummary, input.sentSummary);
+      if (mergedAsSent.length > SUMMARY_MAX_CHARS) {
         throw new DomainError(
           'invalid_input',
-          `sessions: merged summary would be ${merged.length} characters, exceeding the ${SUMMARY_MAX_CHARS}-character cap — condense the ## sections and resend; read the stored summary with memory.session_get_batch first`,
+          `sessions: merged summary would be ${mergedAsSent.length} characters, exceeding the ${SUMMARY_MAX_CHARS}-character cap — condense the ## sections and resend; read the stored summary with memory.session_get_batch first`,
         );
       }
-      summarySet = { summary: merged, summaryFinal: summary.final, ...stamp };
+      summarySet = {
+        summary:
+          merged.length > SUMMARY_MAX_CHARS
+            ? sliceWithoutSplittingSurrogatePair(merged, SUMMARY_MAX_CHARS)
+            : merged,
+        summaryFinal: summary.final,
+        ...stamp,
+      };
     } else {
       summarySet = { summary: summary.value, summaryFinal: summary.final, ...stamp };
     }
@@ -781,7 +792,7 @@ function redactedIdentity(
     agent: redactions.redact(input.agent),
     description: input.description == null ? null : redactions.redact(input.description),
     title: redactions.redactWithin(
-      computePlaceholderTitle(input.cwd ?? null, ts),
+      computePlaceholderTitle(input.cwd == null ? null : redactions.redact(input.cwd), ts),
       TITLE_MAX_LENGTH,
     ),
   };

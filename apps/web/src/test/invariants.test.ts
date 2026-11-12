@@ -1620,6 +1620,27 @@ describe('secret-redaction coverage invariant', () => {
       [],
     );
   });
+
+  it('cuts text only after redacting it, so a cut cannot leave a secret undetectable', () => {
+    const CUT = /\b(?:truncateSummary|truncateTitle|deriveTitle)\(/;
+    const ALLOW = new Set(['apps/web/src/scripts/seed-dev.ts']);
+    const hits: string[] = [];
+    let calls = 0;
+    for (const file of scanRoots()) {
+      if (ALLOW.has(relToRepo(file))) continue;
+      const lines = readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, i) => {
+        if (!CUT.test(line) || /^\s*export function /.test(line)) return;
+        calls += 1;
+        if (!/redact/i.test(line)) hits.push(`${relToRepo(file)}:${i + 1} ${line.trim()}`);
+      });
+    }
+    expect(calls, 'the scan found no cut call sites — the pattern is stale').toBeGreaterThan(0);
+    expect(
+      hits,
+      'redact the value before cutting it (e.g. truncateTitle(redactSecrets(v).text))',
+    ).toEqual([]);
+  });
 });
 
 describe('derived-table reproducibility invariant', () => {
