@@ -159,6 +159,48 @@ describe('consolidation run summary fallback', () => {
   });
 });
 
+describe('consolidation drain visibility', () => {
+  it('states the drained count when the summary carries a drain object', async () => {
+    createRepositories(t.handle.db).consolidation.insertRun({
+      id: 'RUN-DRAIN',
+      startedAt: new Date(3_000),
+      scope: 'global',
+      summary: JSON.stringify({
+        archives: 0,
+        orphaned: 1,
+        drain: {
+          cursor: { createdAt: 1_000, judgmentId: 'J1' },
+          examined: 5,
+          drainedRules: 2,
+          drainedRetired: 1,
+          keptAdmitted: 1,
+          keptUnknown: 1,
+        },
+      }),
+    });
+    const html = await renderRunDetail('RUN-DRAIN');
+    expect(html).toMatch(/<pre[^>]*>[\s\S]*0 archived · 1 orphaned · 3 drained[\s\S]*<\/pre>/);
+    expect(html).not.toContain('drainedRules');
+  });
+
+  it('says an undo kept a relation because a later verdict exists, and that the op is reverted', async () => {
+    const { partialUndo } = await import('../../app/dashboard/consolidation/undo-messages');
+    const state = partialUndo({
+      skipped: [],
+      keptVerdicts: [{ judgmentId: 'JUDGMENT-0001', status: 'judged', relation: 'supersedes' }],
+    });
+    expect(state?.error).toContain('not restored');
+    expect(state?.error).toContain('later verdict');
+    expect(state?.error).toContain('marked reverted');
+    expect(state?.error).toContain('supersedes');
+  });
+
+  it('control: an undo with nothing skipped or kept is not partial', async () => {
+    const { partialUndo } = await import('../../app/dashboard/consolidation/undo-messages');
+    expect(partialUndo({ skipped: [], keptVerdicts: [] })).toBeNull();
+  });
+});
+
 describe('consolidation list page slice', () => {
   it(`caps the runs list at PAGE_SIZE for ${SEEDED} seeded runs`, async () => {
     const repos = createRepositories(t.handle.db);

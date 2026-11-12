@@ -1,4 +1,10 @@
-import { type ConsolidationOpType, type Repositories, type TransactionRunner } from '@rembric/db';
+import {
+  type ConsolidationOpType,
+  type RelationKind,
+  type RelationStatus,
+  type Repositories,
+  type TransactionRunner,
+} from '@rembric/db';
 import { ulid } from 'ulid';
 
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
@@ -22,9 +28,23 @@ export interface SkippedRow {
   occupiedBy: string;
 }
 
+/** A relation an `orphan_promote` undo left as it was, because a verdict was written after the op. */
+export interface KeptVerdict {
+  judgmentId: string;
+  status: RelationStatus;
+  relation: RelationKind | null;
+}
+
 export interface UndoResult {
   reverted: string;
   skipped: SkippedRow[];
+  keptVerdicts: KeptVerdict[];
+}
+
+export interface UndoRunResult {
+  reverted: string[];
+  skipped: SkippedRow[];
+  keptVerdicts: KeptVerdict[];
 }
 
 function topicSlotOccupiedBy(
@@ -140,6 +160,7 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
 
   const now = new Date();
   const skipped: SkippedRow[] = [];
+  const keptVerdicts: KeptVerdict[] = [];
 
   tx.transaction(() => {
     if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
@@ -160,7 +181,16 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
       if (reactivatable.length > 0) repos.memory.touchLastSeenBatch(reactivatable, now);
     } else if (op.opType === 'orphan_promote' && op.createdId) {
       const rel = repos.relations.findByJudgmentId(op.createdId);
-      if (rel) {
+      const writtenSinceOp =
+        rel !== undefined &&
+        (rel.judgedAt === null || rel.judgedAt.getTime() > op.appliedAt.getTime());
+      if (rel && writtenSinceOp) {
+        keptVerdicts.push({
+          judgmentId: rel.judgmentId,
+          status: rel.status,
+          relation: rel.relation,
+        });
+      } else if (rel) {
         if (rel.relation === 'supersedes' && rel.status === 'judged') {
           const [targetRow] = repos.memory.unsafeGetByIds([rel.targetId]);
           const occupiedBy = targetRow ? topicSlotOccupiedBy(repos, targetRow) : null;
@@ -184,24 +214,26 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
     repos.consolidation.markReverted(opId, now);
   });
 
-  return { reverted: opId, skipped };
+  return { reverted: opId, skipped, keptVerdicts };
 }
 
 export function undoRun(
   repos: ConsolidationDeps,
   tx: TransactionRunner,
   runId: string,
-): { reverted: string[]; skipped: SkippedRow[] } {
+): UndoRunResult {
   const ops = repos.consolidation.listActiveOps(runId);
   const reverted: string[] = [];
   const skipped: SkippedRow[] = [];
+  const keptVerdicts: KeptVerdict[] = [];
   // Reverse order so dependent ops unwind cleanly.
   for (const op of [...ops].reverse()) {
     const result = undoOp(repos, tx, op.id);
     reverted.push(op.id);
     skipped.push(...result.skipped);
+    keptVerdicts.push(...result.keptVerdicts);
   }
-  return { reverted, skipped };
+  return { reverted, skipped, keptVerdicts };
 }
 
 export type { ConsolidationOpType };
