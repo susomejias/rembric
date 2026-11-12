@@ -18,6 +18,8 @@ Conventional Commits required (commitlint). Pre-commit = lint-staged + `tsc --no
 
 PR titles and descriptions are always written in English (regardless of the language used in chat).
 
+Chained/stacked PRs: base each PR on the previous branch and register the chain as a native GitHub stack with the official `gh stack` extension (`gh extension install github/gh-stack`; `gh stack link <bottom> … <top>` for existing PRs, `gh stack submit` for new ones).
+
 Operator surface = dashboard (`/dashboard/{tokens,projects,sessions,judgments,memories,consolidation,maintenance}`). No operator CLI; Docker image runs the server only.
 
 ## Claims need evidence
