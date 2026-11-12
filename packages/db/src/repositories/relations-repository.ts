@@ -80,6 +80,9 @@ export type ExaminablePending = Pick<
   'judgmentId' | 'sourceId' | 'targetId' | 'createdAt'
 >;
 
+/** The indexed range then scans about `limit × all pending / probe rows` rows. */
+const SMALL_RANGE_PROBE_MIN_ROWS = 16;
+
 const sourceMemory = aliasedTable(memory, 'ms');
 const targetMemory = aliasedTable(memory, 'mt');
 
@@ -275,7 +278,12 @@ export class RelationsRepository {
       .all();
   }
 
-  /** `(created_at, judgment_id)` order rides `memory_relations_status_created_idx`; `until` is inclusive. */
+  /**
+   * `(created_at, judgment_id)` order; `until` is inclusive. A probe driven by the project's own
+   * memories returns a project's whole range when it holds fewer than the probe's rows; otherwise
+   * the range rides `memory_relations_status_created_idx`, which would scan every project's
+   * pending rows for a project with few of its own.
+   */
   listExaminablePendingInScope(opts: {
     projectId: string;
     after?: PendingOrderKey;
@@ -285,6 +293,35 @@ export class RelationsRepository {
   }): ExaminablePending[] {
     const order = sql`(${memoryRelations.createdAt}, ${memoryRelations.judgmentId})`;
     const key = (k: PendingOrderKey): SQL => sql`(${k.createdAt.getTime()}, ${k.judgmentId})`;
+    const filter = and(
+      eq(memoryRelations.status, 'pending'),
+      opts.after ? sql`${order} > ${key(opts.after)}` : undefined,
+      opts.until ? sql`${order} <= ${key(opts.until)}` : undefined,
+      opts.excludeJudgmentIds.length > 0
+        ? sql`${memoryRelations.judgmentId} NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeJudgmentIds)}))`
+        : undefined,
+      endpointsInScope(opts.projectId),
+    );
+    const probeRows = Math.max(opts.limit, SMALL_RANGE_PROBE_MIN_ROWS);
+    const probe = this.db.all<Omit<ExaminablePending, 'createdAt'> & { createdAt: number }>(sql`
+      SELECT memory_relations.judgment_id AS judgmentId, memory_relations.source_id AS sourceId,
+             memory_relations.target_id AS targetId, memory_relations.created_at AS createdAt
+      FROM memory ms
+        CROSS JOIN memory_relations ON memory_relations.source_id = ms.id
+        JOIN memory mt ON mt.id = memory_relations.target_id
+      WHERE ${filter}
+      LIMIT ${probeRows}
+    `);
+    if (probe.length < probeRows) {
+      return probe
+        .map((r) => ({ ...r, createdAt: new Date(r.createdAt) }))
+        .sort(
+          (a, b) =>
+            a.createdAt.getTime() - b.createdAt.getTime() ||
+            (a.judgmentId < b.judgmentId ? -1 : a.judgmentId > b.judgmentId ? 1 : 0),
+        )
+        .slice(0, opts.limit);
+    }
     return this.db
       .select({
         judgmentId: memoryRelations.judgmentId,
@@ -295,17 +332,7 @@ export class RelationsRepository {
       .from(memoryRelations)
       .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
       .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
-      .where(
-        and(
-          eq(memoryRelations.status, 'pending'),
-          opts.after ? sql`${order} > ${key(opts.after)}` : undefined,
-          opts.until ? sql`${order} <= ${key(opts.until)}` : undefined,
-          opts.excludeJudgmentIds.length > 0
-            ? sql`${memoryRelations.judgmentId} NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeJudgmentIds)}))`
-            : undefined,
-          endpointsInScope(opts.projectId),
-        ),
-      )
+      .where(filter)
       .orderBy(memoryRelations.createdAt, memoryRelations.judgmentId)
       .limit(opts.limit)
       .all();

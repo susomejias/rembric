@@ -179,6 +179,40 @@ The same fixture and corpus validations, re-run through the shipped step: `Conso
 
 The shipped entity channel unions each endpoint's stored links with its fresh extraction (design D2), where the prototype compared stored with stored and fresh with fresh. The union can only add keeps; on both data sets it changed no decision.
 
+## Cost of the shipped step (`drain-cost-shipped.mts`)
+
+`drain-cost-shipped.txt` holds the plain-clock run of the shipped constants; `drain-cost-shipped-budget-scan.txt` holds the scan that chose the budget. Same corpora as the prototype (`corpus:build`, 1 000 / 20 000 / 50 000 memories, ~600 and ~5 000 pending per loaded project), with memory timestamps moved to today on a private copy so decay archives nothing, and relation timestamps left aged so the deadline step orphans its 50 rows per scope per run.
+
+- **Instrument A (drain step):** wall clock from the step's first repository read to the run's `finishRun`. "Drain per call" sums it over one sweep call; this is the figure the p95 ≤ 50 ms budget binds.
+- **Instrument B (whole callback):** wall clock of one `sweepFor` or `runAll`, including decay, deadline orphaning and the session purge. It is never tabulated with Instrument A.
+- **Sample:** 3 fresh copy-on-write clones × 10 consecutive calls per row; the first call of each clone is cold.
+
+**Instrument A, drain per call, p95 / max in ms, `DRAIN_ROW_CAP = 150`, `DRAIN_BUDGET_MS = 30`:**
+
+| memories, backlog | sweepFor (2 scopes) | runAll, 2 loaded | runAll, 7 (6 loaded) | runAll, 10  | runAll, 50  |
+| ----------------- | ------------------- | ---------------- | -------------------- | ----------- | ----------- |
+| 1 000, ~600       | 30.4 / 30.7         | 31.2 / 31.8      | 35.5 / 35.9          | 36.2 / 36.5 | 36.5 / 37.0 |
+| 1 000, ~5 000     | 32.6 / 32.7         | 35.2 / 35.3      | 38.2 / 38.6          | 37.5 / 39.4 | 42.3 / 42.4 |
+| 20 000, ~600      | 32.6 / 33.2         | 31.1 / 31.5      | 34.9 / 38.8          | 37.2 / 37.6 | 45.0 / 45.4 |
+| 20 000, ~5 000    | 33.2 / 33.8         | 31.4 / 32.7      | 36.9 / 37.8          | 38.4 / 38.4 | 41.5 / 42.1 |
+| 50 000, ~600      | 30.4 / 31.2         | 31.5 / 31.6      | 37.7 / 40.7          | 36.4 / 36.4 | 40.2 / 40.2 |
+| 50 000, ~5 000    | 35.2 / 37.0         | 34.4 / 36.4      | 38.8 / 39.5          | 39.7 / 39.9 | 43.2 / 45.9 |
+
+Every row meets p95 ≤ 50 ms; the worst single call is 45.9 ms. At 50 000 memories a call examines 67–77 pairs (p50). In the ~600 rows of `sweepFor`, the p50 of pairs examined is 0–8 because ten consecutive calls exhaust a 625-row backlog: the p95 is the loaded calls'.
+
+**Instrument B** is reported per row in the file. It is dominated by work outside the drain: at 50 000 memories a 50-project `runAll` takes 1.4–1.7 s. The deadline step's read costs 29.4 ms for the empty default project and 0.32 ms for a loaded one, because it walks every project's aged pending rows; that predates this change and is recorded as an advisory, not changed here.
+
+**Two findings from the first shipped runs, fixed before the numbers above:**
+
+1. **The selection's indexed range was pathological for a project with few rows of its own.** For the empty default project, which every session start sweeps, it read all 30 017 pending rows: 27.8–29.5 ms per selection at 50 000 memories, against 0.04 ms with the shipped probe through the project's own memories (`selection read` lines). For a loaded project the probe costs 0.9–1.4 ms against 0.5 ms for the range alone.
+2. **The budget clock ran through later scopes' decay and deadline steps,** so a session start's second scope could find its budget spent before its drain began. The budget now counts only time inside drain steps (design D7), and a step that begins with the budget spent selects one row.
+
+**Choosing the budget.** With both fixes, the scan emulated budgets of 40, 35 and 30 ms at 50 000 memories. For a 7-project `runAll` (six loaded scopes) p95 was 48.8–49.3 / 42.4–42.5 / 36.3–36.8 ms; for a 50-project `runAll` it was 56.5–56.6 / 46.3–51.8 / 39.3–47.8 ms. 30 ms is the largest value meeting the target in both. The gap above the budget is the per-scope fixed cost after the budget is spent: in the plain-clock run of 50-project calls, the drain step's p50 is 0.1 ms and its p95 0.6–1.1 ms (`per drain step` lines).
+
+**The reverted-op lookup** reads once per sweep call: 0.08–0.14 ms at 1 000 ops, 0.53–0.62 ms at 10 000 and 5.5–5.8 ms at 100 000, with every tenth op reverted. Excluding 10 000 reverted ids inside the selection costs 6.4–6.6 ms per selection against about 1 ms with none. Both run inside the drain's budget, so they shrink its throughput rather than extend the call; no index is needed at these sizes.
+
+**Expected drain time for the 589-row backlog:** `ceil(589 / 150) = 4` runs when the budget does not cut a run short, 589 runs at worst. Measured calls examined 100–110 pairs at 1 000 memories and 67–77 at 50 000, so a 589-row backlog in one scope takes about 6–9 runs at those sizes: 6–9 days of session starts, or that many dashboard "run now" clicks.
+
 ## Prototype figures measured on a backup copy (design D11)
 
 These figures come from the parent's prototype run on a BACKUP COPY of a real installation's database, never the live file. Only aggregate figures are recorded: no content, titles, project names or identifiers. They are prototype figures; the committed measurements in this directory are the evidence for the constants.

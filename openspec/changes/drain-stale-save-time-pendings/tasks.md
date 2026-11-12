@@ -179,14 +179,14 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 9. Measured cost per drain step and per sweep call
 
-- [ ] 9.1 Point the existing prototype instrument `measurements/drain-cost.mts` at the shipped drain step, and keep its prototype outputs as they are:
+- [x] 9.1 Point the existing prototype instrument `measurements/drain-cost.mts` at the shipped drain step, and keep its prototype outputs as they are:
   - **Corpora:** built with `pnpm run corpus:build` at 1 000, 20 000 and 50 000 memories.
   - **Backlogs:** about 600 and about 5 000 pending rows, created by saving probe texts through `runPostSaveSteps` with `lexicalFloor: 0`.
   - **Instrument A:** wall clock of one drain step, measured with `performance.now()`.
   - **Instrument B:** wall clock of one whole sweep call, including decay and deadline. Measure a session-start `sweepFor` (two scopes) and a forced `runAll` over 2, 10 and 50 projects.
   - Report p50 and p95 over repeated runs on fresh copies. Report the two instruments separately, and never tabulate them together.
-- [ ] 9.2 Budget: p95 drain time per sweep call ≤ 50 ms at every size. Choose `DRAIN_ROW_CAP` and `DRAIN_BUDGET_MS` from Instrument A. If the budget is missed, lower the cap; that mitigation is pre-authorised. Report Instrument B as its own figure. Record the expected drain time for a 589-row backlog: `ceil(589 / DRAIN_ROW_CAP)` runs, and 589 runs in the worst case.
-- [ ] 9.3 Commit the output as `measurements/drain-cost-shipped.txt`, with both instruments named in its header, and extend `measurements/README.md`.
+- [x] 9.2 Budget: p95 drain time per sweep call ≤ 50 ms at every size. Choose `DRAIN_ROW_CAP` and `DRAIN_BUDGET_MS` from Instrument A. If the budget is missed, lower the cap; that mitigation is pre-authorised. Report Instrument B as its own figure. Record the expected drain time for a 589-row backlog: `ceil(589 / DRAIN_ROW_CAP)` runs, and 589 runs in the worst case.
+- [x] 9.3 Commit the output as `measurements/drain-cost-shipped.txt`, with both instruments named in its header, and extend `measurements/README.md`.
 
 ## 10. Dry-run count
 

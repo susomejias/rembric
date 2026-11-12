@@ -583,6 +583,17 @@ describe('RelationsRepository.listExaminablePendingInScope', () => {
     ).toEqual(['J2', 'J3']);
   });
 
+  it('the small-project probe and the indexed range return the same prefix at every limit', () => {
+    const full = ids(
+      repo.listExaminablePendingInScope({ projectId: 'p0', excludeJudgmentIds: [], limit: 100 }),
+    );
+    for (let limit = 1; limit <= full.length + 1; limit++) {
+      expect(
+        ids(repo.listExaminablePendingInScope({ projectId: 'p0', excludeJudgmentIds: [], limit })),
+      ).toEqual(full.slice(0, limit));
+    }
+  });
+
   it('honours the limit', () => {
     expect(
       ids(repo.listExaminablePendingInScope({ projectId: 'p0', excludeJudgmentIds: [], limit: 1 })),

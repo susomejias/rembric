@@ -25,7 +25,7 @@ The change `add-save-time-lexical-floor` stops new saves from creating noise pen
 - **Scope.** A pair is re-evaluated only against its own two memories, inside its own project.
 - **Journal.** Each drain is one `pending` → `orphaned` flip, journaled in the SAME transaction as an `orphan_promote` op through the existing `recordOrphanPromote`, with one timestamp shared by both writes and a reasoning prefix distinct from the deadline's. Each pair commits on its own. No transaction spans several pairs, a run or the backlog. No schema change, no migration, no new table and no new op type.
 - **Batched, with no starvation.** Batching is a requirement. The sweep runs synchronously on the server's single Node thread, so a long run blocks every other request.
-  - Each scope's drain step stops at a row cap, and all drain steps of one sweep call share one wall-clock budget, which starts at the first drain step.
+  - Each scope's drain step stops at a row cap, and all drain steps of one sweep call share one wall-clock budget of drain time, which counts only time spent inside drain steps.
   - Every drain step examines at least one pair, so a slow host or a late scope still progresses.
   - A wrap-around cursor (the last examined row's `created_at` and `judgment_id`) is kept in a nested object of the run's existing `summary` JSON, so kept pairs do not block the rest.
   - A pair the operator restored by undo is never drained again by the drain. The deadline step can still close it later.

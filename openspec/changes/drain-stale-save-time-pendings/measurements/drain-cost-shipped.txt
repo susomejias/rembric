@@ -1,0 +1,171 @@
+# stale pending drain — cost of the SHIPPED step
+CAVEAT: vectors are deterministic pseudo-random unit vectors, NOT embeddings — no retrieval-quality, ranking, fusion or abstention claim may be drawn from this corpus (use `pnpm run eval`). The vocabulary is tiny and the vectors are pseudo-random: this file measures cost, not correctness.
+model inference: none — the drain reads stored vectors only, and no embedder is loaded in this process.
+corpus: pnpm run corpus:build generator (buildCorpus, seed 1) with --relations R: R relations between random pairs of one scope slot (i % 6), 25% pending, 5% orphaned, 70% judged. Six loaded projects plus the empty default project.
+preparation: memory created_at and last_seen_at shifted to today on a private copy, so the decay step sees a corpus in use and archives nothing; relation timestamps keep their generated age, so every pending row is past the deadline and the deadline step orphans its 50 rows per scope per run, as on an upgraded install with an aged backlog.
+runner: the shipped ConsolidationRunner (DRAIN_ROW_CAP 150, DRAIN_BUDGET_MS 30, DRAIN_MAX_PAIR_CHARS 64000), vectorIndexCurrent true, minIntervalMs 0 so repeated session-start sweeps are not throttled. An emulated budget B scales the drain clock seam by 30/B; the shipped budget uses the plain clock.
+Instrument A (drain step): wall clock from the step's first repository read to the run's finishRun, performance.now. "Drain per call" sums Instrument A over the steps of one sweep call — the figure the p95 <= 50 ms budget binds.
+Instrument B (whole callback): wall clock of one sweep call — sweepFor or runAll — including decay, deadline orphaning, the drain and the session purge. Never tabulated with Instrument A.
+sample: 3 fresh copy-on-write clones per row x 10 consecutive calls each, every call timed (the first call of each clone is cold).
+node v22.23.0, darwin/arm64
+
+## 1000 memories, backlog ~600 (R = 14400)
+pending per loaded project: vol-shared 625, vol-0 607, vol-1 592, vol-2 625, vol-3 595, vol-4 589
+selection plan (the shipped query shape, indexed branch): SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | LIST SUBQUERY 1 | SCAN json_each VIRTUAL TABLE INDEX 1: | CREATE BLOOM FILTER | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.86 ms, indexed range alone 0.37 ms; vol-shared LIMIT 1: shipped 0.16 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.05 ms, indexed range alone 1.27 ms
+sweepFor, session start (default + vol-shared), shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.2  p95 30.1  max 30.5 ms
+  Instrument A, drain per call (30 calls): p50 0.5  p95 30.4  max 30.7 ms; pairs examined per call p50 0
+  Instrument B, whole callback (30 calls): p50 9.9  p95 44.1  max 44.2 ms
+runAll forced, 2 loaded projects, shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.7  p95 30.2  max 31.0 ms
+  Instrument A, drain per call (30 calls): p50 30.1  p95 31.2  max 31.8 ms; pairs examined per call p50 100
+  Instrument B, whole callback (30 calls): p50 43.4  p95 48.5  max 48.7 ms
+runAll forced, 7 projects (6 loaded + default), shipped budget 30 ms:
+  Instrument A, per drain step (210 steps): p50 0.5  p95 30.0  max 33.1 ms
+  Instrument A, drain per call (30 calls): p50 32.8  p95 35.5  max 35.9 ms; pairs examined per call p50 108
+  Instrument B, whole callback (30 calls): p50 73.5  p95 83.4  max 85.4 ms
+runAll forced, 10 projects (6 loaded + default + 3 empty), shipped budget 30 ms:
+  Instrument A, per drain step (300 steps): p50 0.4  p95 29.6  max 33.1 ms
+  Instrument A, drain per call (30 calls): p50 32.9  p95 36.2  max 36.5 ms; pairs examined per call p50 109
+  Instrument B, whole callback (30 calls): p50 75.7  p95 88.2  max 88.5 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), shipped budget 30 ms:
+  Instrument A, per drain step (1500 steps): p50 0.1  p95 0.6  max 31.1 ms
+  Instrument A, drain per call (30 calls): p50 35.6  p95 36.5  max 37.0 ms; pairs examined per call p50 108
+  Instrument B, whole callback (30 calls): p50 107.7  p95 144.7  max 147.6 ms
+
+## 1000 memories, backlog ~5000 (R = 120000)
+pending per loaded project: vol-shared 4959, vol-0 5040, vol-1 4925, vol-2 4993, vol-3 4980, vol-4 5120
+selection plan (the shipped query shape, indexed branch): SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | LIST SUBQUERY 1 | SCAN json_each VIRTUAL TABLE INDEX 1: | CREATE BLOOM FILTER | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.67 ms, indexed range alone 0.38 ms; vol-shared LIMIT 1: shipped 0.18 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.04 ms, indexed range alone 11.34 ms
+sweepFor, session start (default + vol-shared), shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.5  p95 31.6  max 32.6 ms
+  Instrument A, drain per call (30 calls): p50 30.1  p95 32.6  max 32.7 ms; pairs examined per call p50 105
+  Instrument B, whole callback (30 calls): p50 50.6  p95 56.4  max 57.0 ms
+runAll forced, 2 loaded projects, shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 1.2  p95 32.3  max 34.8 ms
+  Instrument A, drain per call (30 calls): p50 30.9  p95 35.2  max 35.3 ms; pairs examined per call p50 103
+  Instrument B, whole callback (30 calls): p50 49.6  p95 55.2  max 55.3 ms
+runAll forced, 7 projects (6 loaded + default), shipped budget 30 ms:
+  Instrument A, per drain step (210 steps): p50 0.7  p95 30.3  max 34.7 ms
+  Instrument A, drain per call (30 calls): p50 34.0  p95 38.2  max 38.6 ms; pairs examined per call p50 110
+  Instrument B, whole callback (30 calls): p50 97.8  p95 104.8  max 105.5 ms
+runAll forced, 10 projects (6 loaded + default + 3 empty), shipped budget 30 ms:
+  Instrument A, per drain step (300 steps): p50 0.5  p95 30.1  max 34.2 ms
+  Instrument A, drain per call (30 calls): p50 33.9  p95 37.5  max 39.4 ms; pairs examined per call p50 106
+  Instrument B, whole callback (30 calls): p50 130.4  p95 136.0  max 137.7 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), shipped budget 30 ms:
+  Instrument A, per drain step (1500 steps): p50 0.1  p95 0.8  max 34.6 ms
+  Instrument A, drain per call (30 calls): p50 38.4  p95 42.3  max 42.4 ms; pairs examined per call p50 104
+  Instrument B, whole callback (30 calls): p50 604.9  p95 654.5  max 669.7 ms
+
+## 20000 memories, backlog ~600 (R = 14400)
+pending per loaded project: vol-shared 625, vol-0 607, vol-1 592, vol-2 625, vol-3 595, vol-4 589
+selection plan (the shipped query shape, indexed branch): SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | LIST SUBQUERY 1 | SCAN json_each VIRTUAL TABLE INDEX 1: | CREATE BLOOM FILTER | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.99 ms, indexed range alone 0.55 ms; vol-shared LIMIT 1: shipped 0.15 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.04 ms, indexed range alone 1.94 ms
+sweepFor, session start (default + vol-shared), shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.2  p95 30.1  max 33.1 ms
+  Instrument A, drain per call (30 calls): p50 3.6  p95 32.6  max 33.2 ms; pairs examined per call p50 8
+  Instrument B, whole callback (30 calls): p50 16.5  p95 49.7  max 50.5 ms
+runAll forced, 2 loaded projects, shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 1.8  p95 30.2  max 30.4 ms
+  Instrument A, drain per call (30 calls): p50 30.6  p95 31.1  max 31.5 ms; pairs examined per call p50 71
+  Instrument B, whole callback (30 calls): p50 47.9  p95 76.3  max 158.7 ms
+runAll forced, 7 projects (6 loaded + default), shipped budget 30 ms:
+  Instrument A, per drain step (210 steps): p50 0.8  p95 30.1  max 30.4 ms
+  Instrument A, drain per call (30 calls): p50 33.8  p95 34.9  max 38.8 ms; pairs examined per call p50 75
+  Instrument B, whole callback (30 calls): p50 93.6  p95 175.4  max 176.2 ms
+runAll forced, 10 projects (6 loaded + default + 3 empty), shipped budget 30 ms:
+  Instrument A, per drain step (300 steps): p50 0.6  p95 30.0  max 32.6 ms
+  Instrument A, drain per call (30 calls): p50 34.1  p95 37.2  max 37.6 ms; pairs examined per call p50 76
+  Instrument B, whole callback (30 calls): p50 100.5  p95 188.8  max 189.6 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), shipped budget 30 ms:
+  Instrument A, per drain step (1500 steps): p50 0.1  p95 1.1  max 33.4 ms
+  Instrument A, drain per call (30 calls): p50 37.5  p95 45.0  max 45.4 ms; pairs examined per call p50 89
+  Instrument B, whole callback (30 calls): p50 148.9  p95 310.4  max 435.2 ms
+
+## 20000 memories, backlog ~5000 (R = 120000)
+pending per loaded project: vol-shared 4959, vol-0 5040, vol-1 4925, vol-2 4993, vol-3 4980, vol-4 5120
+selection plan (the shipped query shape, indexed branch): SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | LIST SUBQUERY 1 | SCAN json_each VIRTUAL TABLE INDEX 1: | CREATE BLOOM FILTER | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.96 ms, indexed range alone 0.59 ms; vol-shared LIMIT 1: shipped 0.16 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.05 ms, indexed range alone 21.54 ms
+sweepFor, session start (default + vol-shared), shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.3  p95 31.7  max 33.5 ms
+  Instrument A, drain per call (30 calls): p50 30.1  p95 33.2  max 33.8 ms; pairs examined per call p50 65
+  Instrument B, whole callback (30 calls): p50 63.9  p95 76.9  max 80.8 ms
+runAll forced, 2 loaded projects, shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 1.0  p95 30.4  max 32.1 ms
+  Instrument A, drain per call (30 calls): p50 30.9  p95 31.4  max 32.7 ms; pairs examined per call p50 80
+  Instrument B, whole callback (30 calls): p50 55.9  p95 80.0  max 81.8 ms
+runAll forced, 7 projects (6 loaded + default), shipped budget 30 ms:
+  Instrument A, per drain step (210 steps): p50 0.5  p95 30.3  max 34.9 ms
+  Instrument A, drain per call (30 calls): p50 33.5  p95 36.9  max 37.8 ms; pairs examined per call p50 99
+  Instrument B, whole callback (30 calls): p50 105.7  p95 179.9  max 192.3 ms
+runAll forced, 10 projects (6 loaded + default + 3 empty), shipped budget 30 ms:
+  Instrument A, per drain step (300 steps): p50 0.4  p95 30.2  max 33.4 ms
+  Instrument A, drain per call (30 calls): p50 33.6  p95 38.4  max 38.4 ms; pairs examined per call p50 100
+  Instrument B, whole callback (30 calls): p50 150.8  p95 222.3  max 226.6 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), shipped budget 30 ms:
+  Instrument A, per drain step (1500 steps): p50 0.1  p95 0.7  max 35.1 ms
+  Instrument A, drain per call (30 calls): p50 37.1  p95 41.5  max 42.1 ms; pairs examined per call p50 97
+  Instrument B, whole callback (30 calls): p50 764.8  p95 879.3  max 991.3 ms
+
+## 50000 memories, backlog ~600 (R = 14400)
+pending per loaded project: vol-shared 625, vol-0 607, vol-1 592, vol-2 625, vol-3 595, vol-4 589
+selection plan (the shipped query shape, indexed branch): SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | LIST SUBQUERY 1 | SCAN json_each VIRTUAL TABLE INDEX 1: | CREATE BLOOM FILTER | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 1.04 ms, indexed range alone 0.49 ms; vol-shared LIMIT 1: shipped 0.13 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.03 ms, indexed range alone 1.91 ms
+sweepFor, session start (default + vol-shared), shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.2  p95 30.2  max 31.1 ms
+  Instrument A, drain per call (30 calls): p50 2.9  p95 30.4  max 31.2 ms; pairs examined per call p50 0
+  Instrument B, whole callback (30 calls): p50 13.3  p95 116.4  max 120.4 ms
+runAll forced, 2 loaded projects, shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 3.0  p95 30.2  max 30.4 ms
+  Instrument A, drain per call (30 calls): p50 30.5  p95 31.5  max 31.6 ms; pairs examined per call p50 74
+  Instrument B, whole callback (30 calls): p50 50.8  p95 175.3  max 198.0 ms
+runAll forced, 7 projects (6 loaded + default), shipped budget 30 ms:
+  Instrument A, per drain step (210 steps): p50 0.8  p95 30.2  max 31.0 ms
+  Instrument A, drain per call (30 calls): p50 34.3  p95 37.7  max 40.7 ms; pairs examined per call p50 67
+  Instrument B, whole callback (30 calls): p50 109.3  p95 432.0  max 563.5 ms
+runAll forced, 10 projects (6 loaded + default + 3 empty), shipped budget 30 ms:
+  Instrument A, per drain step (300 steps): p50 0.6  p95 27.4  max 30.6 ms
+  Instrument A, drain per call (30 calls): p50 34.2  p95 36.4  max 36.4 ms; pairs examined per call p50 70
+  Instrument B, whole callback (30 calls): p50 112.9  p95 321.0  max 325.0 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), shipped budget 30 ms:
+  Instrument A, per drain step (1500 steps): p50 0.1  p95 1.1  max 30.5 ms
+  Instrument A, drain per call (30 calls): p50 37.2  p95 40.2  max 40.2 ms; pairs examined per call p50 70
+  Instrument B, whole callback (30 calls): p50 163.9  p95 411.1  max 411.6 ms
+
+## 50000 memories, backlog ~5000 (R = 120000)
+pending per loaded project: vol-shared 4959, vol-0 5040, vol-1 4925, vol-2 4993, vol-3 4980, vol-4 5120
+selection plan (the shipped query shape, indexed branch): SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | LIST SUBQUERY 1 | SCAN json_each VIRTUAL TABLE INDEX 1: | CREATE BLOOM FILTER | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+selection read (instrument: wall clock of one read, warm, median of 9): vol-shared LIMIT 150: shipped 0.87 ms, indexed range alone 0.53 ms; vol-shared LIMIT 1: shipped 0.13 ms, indexed range alone 0.02 ms; empty default project LIMIT 150: shipped 0.04 ms, indexed range alone 28.07 ms
+sweepFor, session start (default + vol-shared), shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 0.3  p95 34.2  max 36.8 ms
+  Instrument A, drain per call (30 calls): p50 30.1  p95 35.2  max 37.0 ms; pairs examined per call p50 67
+  Instrument B, whole callback (30 calls): p50 75.6  p95 151.1  max 241.3 ms
+runAll forced, 2 loaded projects, shipped budget 30 ms:
+  Instrument A, per drain step (60 steps): p50 1.8  p95 31.0  max 35.2 ms
+  Instrument A, drain per call (30 calls): p50 31.2  p95 34.4  max 36.4 ms; pairs examined per call p50 76
+  Instrument B, whole callback (30 calls): p50 57.8  p95 190.9  max 236.8 ms
+runAll forced, 7 projects (6 loaded + default), shipped budget 30 ms:
+  Instrument A, per drain step (210 steps): p50 0.7  p95 30.3  max 31.2 ms
+  Instrument A, drain per call (30 calls): p50 34.5  p95 38.8  max 39.5 ms; pairs examined per call p50 74
+  Instrument B, whole callback (30 calls): p50 153.6  p95 606.3  max 703.1 ms
+runAll forced, 10 projects (6 loaded + default + 3 empty), shipped budget 30 ms:
+  Instrument A, per drain step (300 steps): p50 0.5  p95 30.2  max 34.5 ms
+  Instrument A, drain per call (30 calls): p50 35.2  p95 39.7  max 39.9 ms; pairs examined per call p50 71
+  Instrument B, whole callback (30 calls): p50 225.0  p95 703.6  max 753.9 ms
+runAll forced, 50 projects (6 loaded + default + 43 empty), shipped budget 30 ms:
+  Instrument A, per drain step (1500 steps): p50 0.1  p95 1.1  max 31.2 ms
+  Instrument A, drain per call (30 calls): p50 40.4  p95 43.2  max 45.9 ms; pairs examined per call p50 77
+  Instrument B, whole callback (30 calls): p50 1435.7  p95 1722.3  max 1755.8 ms
+
+## reverted-op lookup (instrument: wall clock of one listRevertedOrphanPromoteCreatedIds read, median of 7, and of the selection with that exclusion list)
+  consolidation_ops rows   1000: read 0.08 ms (100 reverted ids); selection with that exclusion 1.19 ms
+  consolidation_ops rows  10000: read 0.62 ms (1000 reverted ids); selection with that exclusion 1.76 ms
+  consolidation_ops rows 100000: read 5.77 ms (10000 reverted ids); selection with that exclusion 6.57 ms
+
+(the section below was appended from a MATRIX=0 run of the same script on the same prepared 50 000-memory, ~5000-backlog copy)
+
+## deadline-step read for an empty project (advisory, not the drain; instrument: wall clock of one RelationsService.findPendingOlderThanInScope, limit 50, median of 9)
+  empty default project: 29.41 ms
+  vol-shared: 0.32 ms
