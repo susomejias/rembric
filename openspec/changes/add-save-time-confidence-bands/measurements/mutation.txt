@@ -139,3 +139,55 @@ mutation: convergeWith.push(...saved.convergeWith);
   CAUGHT by 2:
     × memory.capture_passive — handler-level (fix-audited-defects) > reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty
     × memory.capture_passive — handler-level (fix-audited-defects) > convergeWith names each pair by judgment id, so two learnings near one target stay distinct
+## 7. Follow-up: drain low-band condition (spec: drain.test.ts, whole file)
+baseline: packages/core/src/consolidation/drain.test.ts
+  green
+mutation: return band === 'low' ? 'drain_low_band' : 'keep_admitted';
+  CAUGHT by 2:
+    × drain — low confidence band > drains an entity-only pair with a known cosine below the vector threshold
+    × drain — low confidence band > drains a vector-only pair at 0.72
+mutation: return band === 'low' ? 'drain_low_band' : 'keep_admitted';
+  CAUGHT by 4:
+    × drain — which pairs it orphans > keeps a vector-admitted pair
+    × drain — which pairs it orphans > keeps a pair sharing an entity the rarity gate would block
+    × drain — low confidence band > keeps a vector-only pair at 0.76
+    × drain — low confidence band > keeps an entity pair in the dense middle band
+mutation: if (band === null) return 'drain_rules';
+  CAUGHT by 19:
+    × drain — which pairs it orphans > drains a pair no channel admits, journaled with the rules prefix and one timestamp
+    × drain — which pairs it orphans > age does not decide: of two pairs created at the same instant only the unadmitted one drains
+    × drain — writes > changes no memory row and no closed relation
+    × drain — writes > a failure on the third pair keeps the first two drains and the run continues with the fourth
+    × drain — fail-safe > keeps an oversized pair and still drains an ordinary one
+    × drain — fail-safe > keeps a pair whose re-check throws, and the rest of the run continues
+    × drain — scope > another project's memories do not keep a pair
+    × drain — scope > one project's backlog does not starve another in the same call, and the budget is shared
+    × drain — scope > a project with one drainable relation drains it even after another project spent the budget
+    × drain — bounds and cursor > kept rows at the head do not starve later rows
+    × drain — bounds and cursor > wraps to the lowest key and reaches a pair that became drainable after the cursor passed it
+    × drain — bounds and cursor > a 5 000-row backlog is examined in capped runs that resume from the cursor
+    × drain — undo and the deadline > an undone drain is never drained again by the drain
+    × drain — undo and the deadline > an undone drain that crosses the deadline is orphaned by the deadline step
+    × drain — summary and journal > a back-to-back run with no writes drains nothing
+    × drain — summary and journal > deadline, rules-drain and retired-endpoint ops carry three different reasoning prefixes
+    × drain — summary and journal > the summary keeps archives and orphaned on top and nests the cursor and counts under drain
+    × drain — summary and journal > memory.doctor lastRunOps holds exactly archives and orphaned after a run that drained
+    × drain — no model inference > decides from stored vectors with the model never loaded, and keeps a pair with no vector
+mutation: entity: entity === 'admitted',
+  CAUGHT by 3:
+    × drain — which pairs it orphans > keeps a pair sharing an entity the rarity gate would block
+    × drain — low confidence band > drains an entity-only pair with a known cosine below the vector threshold
+    × drain — low confidence band > keeps an entity pair in the dense middle band
+mutation: if (cosine !== null && entity !== 'unknown') {
+  CAUGHT by 2:
+    × drain — low confidence band > keeps a low-cosine pair whose entity extraction fails
+    × drain — fail-safe > keeps a pair whose entity extraction fails
+mutation: if (lexical === 'admitted') return 'keep_admitted';
+  CAUGHT by 7:
+    × drain — which pairs it orphans > keeps a lexically admitted pair
+    × drain — which pairs it orphans > keeps a pair outside today's pool and cap
+    × drain — which pairs it orphans > age does not decide: of two pairs created at the same instant only the unadmitted one drains
+    × drain — low confidence band > keeps a lexically admitted pair whose cosine is in the low band
+    × drain — bounds and cursor > kept rows at the head do not starve later rows
+    × drain — summary and journal > a back-to-back run with no writes drains nothing
+    × drain — summary and journal > the summary keeps archives and orphaned on top and nests the cursor and counts under drain

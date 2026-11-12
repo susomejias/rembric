@@ -5,6 +5,7 @@ import type { AgentSessionsService } from '../services/agent-sessions.js';
 import type { ProjectsService } from '../services/projects.js';
 import type { RelationsService } from '../services/relations.js';
 import {
+  classifyCandidateBand,
   evaluatePair,
   LEXICAL_CANDIDATE_FLOOR,
   VEC_THRESHOLD,
@@ -64,7 +65,12 @@ export interface DrainSummary {
   keptUnknown: number;
 }
 
-export type DrainDisposition = 'drain_rules' | 'drain_retired' | 'keep_admitted' | 'keep_unknown';
+export type DrainDisposition =
+  | 'drain_rules'
+  | 'drain_low_band'
+  | 'drain_retired'
+  | 'keep_admitted'
+  | 'keep_unknown';
 
 const DEFAULT_ORPHAN_DEADLINE_MS = 14 * 86_400_000;
 export const DEFAULT_MIN_INTERVAL_MS = 24 * 3_600_000;
@@ -74,6 +80,7 @@ export const DRAIN_ROW_CAP = 150;
 export const DRAIN_BUDGET_MS = 30;
 export const DRAIN_RULES_REASON = 'stale under current rules';
 export const DRAIN_RETIRED_REASON = 'endpoint retired';
+export const DRAIN_LOW_BAND_REASON = 'low confidence band';
 
 /** Drain time is counted only inside drain steps, so decay and deadline orphaning never spend it. */
 interface SweepCall {
@@ -86,10 +93,19 @@ const newSweepCall = (): SweepCall => ({ drainSpentMs: 0, revertedJudgmentIds: n
 export function drainDisposition(evaluation: PairEvaluation): DrainDisposition {
   if (evaluation.kind === 'retired') return 'drain_retired';
   if (evaluation.kind !== 'channels') return 'keep_unknown';
-  const verdicts = [evaluation.lexical, evaluation.vector, evaluation.entity];
-  if (verdicts.includes('admitted')) return 'keep_admitted';
-  if (verdicts.includes('unknown')) return 'keep_unknown';
-  return 'drain_rules';
+  const { lexical, vector, entity, vectorSimilarity: cosine } = evaluation;
+  if (lexical === 'admitted') return 'keep_admitted';
+  if (cosine !== null && entity !== 'unknown') {
+    const band = classifyCandidateBand({
+      vecSimilarity: cosine,
+      lexical: false,
+      entity: entity === 'admitted',
+    });
+    if (band === null) return 'drain_rules';
+    return band === 'low' ? 'drain_low_band' : 'keep_admitted';
+  }
+  if ([vector, entity].includes('admitted')) return 'keep_admitted';
+  return 'keep_unknown';
 }
 
 export class ConsolidationRunner {
@@ -272,7 +288,7 @@ export class ConsolidationRunner {
       return;
     }
     try {
-      this.orphanAndJournal(runId, pair, drainReasoning(evaluation));
+      this.orphanAndJournal(runId, pair, drainReasoning(evaluation, disposition));
     } catch {
       // Concurrent verdict or failed write: the pair rolled back and stays as it was.
       summary.keptUnknown++;
@@ -332,12 +348,20 @@ function scopeString(scope: ScopeKey): string {
   return `project:${scope.projectId}`;
 }
 
-function drainReasoning(evaluation: PairEvaluation): string {
+function drainReasoning(evaluation: PairEvaluation, disposition: DrainDisposition): string {
   if (evaluation.kind === 'retired') {
     return `${DRAIN_RETIRED_REASON}: source ${evaluation.sourceStatus}, target ${evaluation.targetStatus}`;
   }
   if (evaluation.kind !== 'channels' || evaluation.vectorSimilarity === null) {
     throw new Error(`drainReasoning: ${evaluation.kind} is not drainable`);
+  }
+  if (disposition === 'drain_low_band') {
+    return (
+      `${DRAIN_LOW_BAND_REASON}: vector ${evaluation.vectorSimilarity.toFixed(3)}, ` +
+      (evaluation.entity === 'admitted'
+        ? 'shared entity only'
+        : 'no shared entity, no lexical match')
+    );
   }
   return (
     `${DRAIN_RULES_REASON}: lexical ${evaluation.lexicalSimilarity.toFixed(3)} < ${LEXICAL_CANDIDATE_FLOOR}, ` +
