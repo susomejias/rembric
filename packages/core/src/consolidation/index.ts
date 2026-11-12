@@ -7,9 +7,20 @@ export { applyDecay, undoOp, undoRun } from './operations.js';
 export type { SkippedRow, UndoResult } from './operations.js';
 export type { DecayOpInput, ConsolidationOpType } from './operations.js';
 
-export { ConsolidationRunner, DEFAULT_MIN_INTERVAL_MS } from './runner.js';
+export {
+  ConsolidationRunner,
+  DEFAULT_MIN_INTERVAL_MS,
+  DRAIN_BUDGET_MS,
+  DRAIN_RETIRED_REASON,
+  DRAIN_ROW_CAP,
+  DRAIN_RULES_REASON,
+  drainDisposition,
+} from './runner.js';
 export type {
   ConsolidationRunnerOptions,
   ConsolidationRunSummary,
+  DrainCursor,
+  DrainDisposition,
+  DrainSummary,
   ScopeRunResult,
 } from './runner.js';

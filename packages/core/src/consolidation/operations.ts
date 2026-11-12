@@ -81,9 +81,10 @@ export function recordOrphanPromote(
     targetId: string;
     relation: string | null;
     reasoning: string;
+    appliedAt?: Date;
   },
 ): { opId: string } {
-  const now = new Date();
+  const now = input.appliedAt ?? new Date();
   const opId = ulid(now.getTime());
   repos.consolidation.insertOp({
     id: opId,

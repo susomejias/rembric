@@ -59,7 +59,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 5. The drain step
 
-- [ ] 5.1 RED first. Add `packages/core/src/consolidation/drain.test.ts` with one test per spec scenario, and observe each fail before 5.3.
+- [x] 5.1 RED first. Add `packages/core/src/consolidation/drain.test.ts` with one test per spec scenario, and observe each fail before 5.3.
   - **Drain and keep:**
     - a pair no channel admits is drained and journaled, with the rules-drain reasoning prefix, and its `judged_at` equals its op's `applied_at`;
     - a genuine pair is NOT drained, one test per channel: a lexical pair, a vector pair, and an entity pair that the rarity gate would block;
@@ -98,10 +98,10 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
   - **No inference:**
     - the drain runs with the embedding model not loaded: no `loadEmbedder` call (spied, or mocked to throw), the pair with stored vectors is decided from them, and the pair without one stays `pending`;
     - after the vector index is wiped, as `ensureVectorModel` does on a model-identity change, every active-endpoint pair that the lexical and entity checks do not admit stays `pending` and is counted as kept unknown.
-- [ ] 5.2 Add the structural pins for design D10, with a control for each:
+- [x] 5.2 Add the structural pins for design D10, with a control for each:
   - a type test (`expectTypeOf`) fixing the exact key set of `ConsolidationRunnerOptions`: today's eight keys plus `vectorIndexCurrent` and `drainClock`. Adding an embedder dependency must fail the build.
   - a scan of the drain's transitive relative imports, from `runner.ts` and `save-time-candidates.ts`, asserting that none reaches `embeddings/`. Its control proves the same scan detects the import in `packages/core/src/services/embedding-worker.ts`.
-- [ ] 5.3 Implement the step in `packages/core/src/consolidation/runner.ts` as step 3 of `runScope`, per design D3, D4, D6, D7, D9 and D10:
+- [x] 5.3 Implement the step in `packages/core/src/consolidation/runner.ts` as step 3 of `runScope`, per design D3, D4, D6, D7, D9 and D10:
   - **Writes:**
     - each pair's orphan and journal op are written in their own transaction;
     - one timestamp is passed to `RelationsService.orphan` and `recordOrphanPromote` through their new optional parameters;
@@ -122,7 +122,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
   Wire `vectorIndexCurrent: () => vectorIdentityMatches(dataDir)` in `apps/web/src/lib/services.ts`. Do not change the deadline step.
 
 - [ ] 5.4 Re-run `measurements/false-drain.mts` through the shipped `evaluatePair` and confirm the per-class counts equal the 1.2 output.
-- [ ] 5.5 Done when `drain.test.ts`, `orphan-promotion.test.ts`, `runner.test.ts` and `operations.test.ts` pass. Commit: `feat(core): drain stale save-time pending judgments in the consolidation sweep`.
+- [x] 5.5 Done when `drain.test.ts`, `orphan-promotion.test.ts`, `runner.test.ts` and `operations.test.ts` pass. Commit: `feat(core): drain stale save-time pending judgments in the consolidation sweep`.
 
 ## 6. Undo guard and dashboard
 

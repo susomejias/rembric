@@ -18,6 +18,7 @@ import {
   loadEmbedder,
   undoOp as coreUndoOp,
   undoRun as coreUndoRun,
+  vectorIdentityMatches,
   type ConsolidationRunSummary,
   type Embedder,
   type SkippedRow,
@@ -114,6 +115,7 @@ function buildServices(): Services {
       min: 3_600_000,
       max: 365 * 86_400_000,
     }),
+    vectorIndexCurrent: () => vectorIdentityMatches(dataDir),
   });
   const sweep = (projectId: string | null): void => {
     setImmediate(() => {

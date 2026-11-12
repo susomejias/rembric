@@ -9,6 +9,7 @@ import {
   deriveOAuthAreqKey,
   deriveSessionKey,
   DomainError,
+  ensureVectorModel,
   EntityBackfillWorker,
   ProjectsService,
   SessionsService,
@@ -18,6 +19,7 @@ import {
 import {
   createDb,
   createRepositories,
+  partitionKeyFor,
   projectScope,
   type DashboardSession,
   type DbHandle,
@@ -680,6 +682,34 @@ describe('consolidation sweep and undo', () => {
     if (run === undefined) throw new Error('fixture: the default project did not sweep');
     return run.runId;
   }
+
+  it('a forced sweep drains a stale pending pair only while the vector index matches the current recipe', () => {
+    const services = getServices();
+    const scope = projectScope(fixture.projects.getDefault().id);
+    const save = (content: string) =>
+      services.memory.save({ type: 'project', title: content, content }, scope);
+    const axis = (i: number) => {
+      const v = new Float32Array(768);
+      v[i] = 1;
+      return Buffer.from(v.buffer);
+    };
+    const target = save('quarterly offsite venue booked');
+    const source = save('linter sorts imports before commits');
+    const { judgmentId } = services.relations.createPending({
+      sourceId: source.id,
+      targetId: target.id,
+    });
+    const status = () => services.relations.findByJudgmentId(judgmentId)?.status;
+
+    services.forcedSweep();
+    expect(status()).toBe('pending');
+
+    ensureVectorModel(services.repos, fixture.dataDir);
+    services.repos.vectors.insertEmbedding(source.id, axis(0), partitionKeyFor(scope.projectId));
+    services.repos.vectors.insertEmbedding(target.id, axis(1), partitionKeyFor(scope.projectId));
+    services.forcedSweep();
+    expect(status()).toBe('orphaned');
+  });
 
   it('forces a sweep whose run undoes back to the pre-run status', async () => {
     const guard = await guardAction(submission(SWEEP_FORM), SWEEP_FORM, adminCookie);
