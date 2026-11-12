@@ -1,0 +1,32 @@
+# Write-side cost per option, 50000 rows
+insert instrument: wall clock of one INSERT INTO memory (the FTS triggers fire inside it), 200 rows per configuration;
+  in-tx = each INSERT timed inside one rolled-back transaction; commit = each INSERT its own autocommit transaction (WAL, synchronous=NORMAL)
+create instrument: wall clock of creating one empty project index (view + FTS5 table + 3 triggers), p50 over the projects created
+open instrument: wall clock of new Database() + preparing the save-time statement (forces the schema parse), p50 of 5
+rows inserted: the content and title of the 2% project's rows, cycled, into the 2% project
+configurations:
+  d      status quo: memory_fts and its 3 triggers
+  b@P    d plus one per-project index per project (P projects in total; the extra projects are empty)
+  a@6    per-project indexes only: the global triggers dropped
+  c      E1 only: the global triggers dropped, E1 and its 3 triggers added
+
+## generator-skew
+  d       insert in-tx p50 0.031 ms, p90 0.041 ms | insert commit p50 0.102 ms, p90 0.295 ms | open p50 0.22 ms | schema objects 112
+  b@6     insert in-tx p50 0.077 ms, p90 0.243 ms | insert commit p50 0.196 ms, p90 0.381 ms | open p50 0.36 ms | schema objects 166
+  b@200   insert in-tx p50 0.102 ms, p90 0.263 ms | insert commit p50 0.213 ms, p90 0.419 ms | open p50 4.15 ms | schema objects 1912
+          create one project index (up to 200 projects): p50 0.428 ms, p90 0.611 ms
+  b@1000  insert in-tx p50 0.325 ms, p90 0.546 ms | insert commit p50 0.552 ms, p90 0.969 ms | open p50 42.63 ms | schema objects 9112
+          create one project index (up to 1000 projects): p50 1.726 ms, p90 2.683 ms
+  a@6     insert in-tx p50 0.054 ms, p90 0.067 ms | insert commit p50 0.133 ms, p90 0.234 ms | open p50 0.31 ms | schema objects 163
+  c       insert in-tx p50 0.052 ms, p90 0.064 ms | insert commit p50 0.112 ms, p90 0.227 ms | open p50 0.25 ms | schema objects 118
+
+## realistic-skew
+  d       insert in-tx p50 0.015 ms, p90 0.024 ms | insert commit p50 0.063 ms, p90 0.130 ms | open p50 0.24 ms | schema objects 112
+  b@6     insert in-tx p50 0.042 ms, p90 0.090 ms | insert commit p50 0.103 ms, p90 0.184 ms | open p50 0.31 ms | schema objects 166
+  b@200   insert in-tx p50 0.073 ms, p90 0.175 ms | insert commit p50 0.140 ms, p90 0.229 ms | open p50 4.32 ms | schema objects 1912
+          create one project index (up to 200 projects): p50 0.408 ms, p90 0.704 ms
+  b@1000  insert in-tx p50 0.272 ms, p90 0.323 ms | insert commit p50 0.390 ms, p90 0.477 ms | open p50 34.17 ms | schema objects 9112
+          create one project index (up to 1000 projects): p50 1.790 ms, p90 2.568 ms
+  a@6     insert in-tx p50 0.034 ms, p90 0.040 ms | insert commit p50 0.077 ms, p90 0.106 ms | open p50 0.30 ms | schema objects 163
+  c       insert in-tx p50 0.034 ms, p90 0.038 ms | insert commit p50 0.076 ms, p90 0.118 ms | open p50 0.20 ms | schema objects 118
+
