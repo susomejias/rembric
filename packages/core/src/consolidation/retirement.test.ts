@@ -278,6 +278,25 @@ describe('orphan at retirement — every retirement path', () => {
     expect(op.reasoning).toContain('source archived by archive');
   });
 
+  it('one timestamp covers the retirement, the orphaning and its op even when the clock moves', () => {
+    let tick = Date.parse('2026-03-01T00:00:00Z');
+    const ticking = () => new Date((tick += 7));
+    const svc = new MemoryService(repos, db.handle.db, ticking);
+    const m = svc.save({ type: 'project', title: 'm', content: 'm' }, scope);
+    const x = svc.save({ type: 'project', title: 'x', content: 'x' }, scope);
+    const p = new RelationsService(repos, db.handle.db, ticking).createPending({
+      sourceId: m.id,
+      targetId: x.id,
+    }).judgmentId;
+
+    svc.archive(m.id, scope);
+
+    const [archiveOp] = opsOfType('agent_memory_archive');
+    const op = expectRetirementOrphan(p, archiveOp!.runId);
+    expect(op.appliedAt.getTime()).toBe(archiveOp!.appliedAt.getTime());
+    expect(repos.memory.unsafeGetById(m.id)!.lastSeenAt?.getTime()).toBe(op.appliedAt.getTime());
+  });
+
   it('a retirement with nothing pending opens no run and writes no op', () => {
     const a = save('a', 't');
     const s = save('s');
@@ -640,6 +659,39 @@ describe('undo symmetry — undoing a retirement restores what it orphaned', () 
     expect(rel(p).status).toBe('orphaned');
     expect(opById(opFor(p).id).revertedAt).toBeNull();
     expect(result.keptOrphaned).toEqual([{ judgmentId: p, retiredId: r.id }]);
+  });
+
+  it('undoing a decay op alone leaves the deadline and drain orphanings of its run in place', () => {
+    const live = new RelationsService(repos, db.handle.db);
+    const m = save('decays');
+    const x = save('stays');
+    const y = save('also stays');
+    const z = save('legacy');
+    const linked = live.createPending({ sourceId: x.id, targetId: m.id }).judgmentId;
+    const aged = live.createPending({ sourceId: x.id, targetId: y.id }).judgmentId;
+    db.handle.raw
+      .prepare('UPDATE memory_relations SET created_at = ? WHERE judgment_id = ?')
+      .run(Date.now() - 10 * DAY, aged);
+    const drained = live.createPending({ sourceId: z.id, targetId: y.id }).judgmentId;
+    repos.memory.markSuperseded(z.id);
+    backdateLastSeen(m.id, 2 * DAY);
+    for (const id of [x.id, y.id]) backdateLastSeen(id, 0);
+    sweepRunner(live, { orphanDeadlineMs: DAY }).runScope({ projectId: scope.projectId });
+    expect([linked, aged, drained].map((j) => rel(j).status)).toEqual([
+      'orphaned',
+      'orphaned',
+      'orphaned',
+    ]);
+
+    const result = undoOp(repos, db.handle.db, opsOfType('decay')[0]!.id);
+
+    expect(rel(linked).status).toBe('pending');
+    expect([rel(aged).status, rel(drained).status]).toEqual(['orphaned', 'orphaned']);
+    expect(result.alsoReverted).toEqual([opFor(linked).id]);
+    expect([opById(opFor(aged).id).revertedAt, opById(opFor(drained).id).revertedAt]).toEqual([
+      null,
+      null,
+    ]);
   });
 
   it('control: a topic_key revision’s orphaning is undone on its own and no memory changes', () => {
