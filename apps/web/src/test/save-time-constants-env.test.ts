@@ -42,3 +42,12 @@ describe('save-time candidate constants are not environment-configurable', () =>
     },
   );
 });
+
+describe('the README documents only the save-time setting the server reads', () => {
+  it('names CANDIDATES_PER_SAVE_MAX and no candidate threshold variable', () => {
+    const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+    const documented = new Set([...readme.matchAll(/`(CANDIDATE[A-Z_]*)`/g)].map((m) => m[1]));
+    expect([...documented]).toEqual(['CANDIDATES_PER_SAVE_MAX']);
+    expect(envReadsOf('CANDIDATES_PER_SAVE_MAX').length).toBeGreaterThan(0);
+  });
+});

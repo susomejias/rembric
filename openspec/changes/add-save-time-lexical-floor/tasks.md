@@ -67,21 +67,21 @@
 
 ## 5. Description and documentation
 
-- [ ] 5.1 Rewrite `SAVE_DESCRIPTION` in `packages/mcp/src/server.ts` per design D6 and the `mcp-api` delta:
+- [x] 5.1 Rewrite `SAVE_DESCRIPTION` in `packages/mcp/src/server.ts` per design D6 and the `mcp-api` delta:
   - no "configured similarity threshold";
   - the shared-rare-identifier source and its little-shared-wording caveat;
   - every `candidatesDetected` obligation kept.
 
   It must stay within `DESCRIPTION_MAX_LENGTH` including the redaction note.
 
-- [ ] 5.2 Update `apps/web/src/test/mcp-transport.test.ts` with one assertion per `mcp-api` delta scenario.
-- [ ] 5.3 Remove the `CANDIDATE_VEC_THRESHOLD` and `CANDIDATE_FTS_THRESHOLD` rows from `README.md`. Add a test asserting that `CANDIDATES_PER_SAVE_MAX` is the only save-time candidate variable the README documents.
-- [ ] 5.4 Update `docs/embeddings.md`:
+- [x] 5.2 Update `apps/web/src/test/mcp-transport.test.ts` with one assertion per `mcp-api` delta scenario, and re-pin the `memory.save` description length (1780 → 1884, still within the 1900 ceiling).
+- [x] 5.3 Remove the `CANDIDATE_VEC_THRESHOLD` and `CANDIDATE_FTS_THRESHOLD` rows from `README.md`. Add a test asserting that `CANDIDATES_PER_SAVE_MAX` is the only save-time candidate variable the README documents. Also correct the README's claim that `0` still inserts pending rows: detection does not run at `0`.
+- [x] 5.4 Update `docs/embeddings.md`:
   - in the detection diagram, the FTS5 pass admits by rank AND `LEXICAL_CANDIDATE_FLOOR`;
   - replace the "lexical pass has no equivalent absolute threshold" paragraph so it distinguishes the forbidden raw-bm25 threshold from the floor on the reported overlap measure;
   - add the constant to the engine-constants table.
-- [ ] 5.5 Search `docs/` for other descriptions of save-time candidate admission and align any that say the lexical channel is rank-only.
-- [ ] 5.6 Commit: `docs: make save-time candidate thresholds in the README, docs and memory.save description match the code`.
+- [x] 5.5 Search `docs/` for other descriptions of save-time candidate admission and align any that say the lexical channel is rank-only.
+- [x] 5.6 Commit: `docs: make save-time candidate thresholds in the README, docs and memory.save description match the code`.
 
 ## 6. Verification and delivery
 
