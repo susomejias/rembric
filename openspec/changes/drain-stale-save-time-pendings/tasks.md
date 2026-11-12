@@ -206,8 +206,8 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 11. Verification and delivery
 
-- [ ] 11.1 Run `pnpm run typecheck`, `pnpm run lint` and `pnpm test`, and record any failure that also fails on the base commit.
-- [ ] 11.2 Run the OpenSpec checks, all green:
+- [x] 11.1 Run `pnpm run typecheck`, `pnpm run lint` and `pnpm test`, and record any failure that also fails on the base commit.
+- [x] 11.2 Run the OpenSpec checks, all green:
   - `openspec validate drain-stale-save-time-pendings --strict`;
   - `node scripts/check-delta-freshness.mjs`;
   - `node scripts/check-spec-crossrefs.mjs`.

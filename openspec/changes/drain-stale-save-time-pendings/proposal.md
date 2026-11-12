@@ -74,7 +74,7 @@ None.
   - `packages/db/src/repositories/vectors-repository.ts`: the public point read `pairCosineDistance`.
   - `packages/db/src/repositories/consolidation-repository.ts`: reads for the latest finished run summary of a scope, and for the created ids of every reverted `orphan_promote` op, read once per sweep call.
   - `apps/web/src/lib/services.ts`: wires `vectorIndexCurrent` to `vectorIdentityMatches(dataDir)`.
-  - `apps/web/src/app/dashboard/consolidation/[id]/page.tsx` and `page.tsx`: the drained count in the run summary, and the kept-verdict message on a partial undo.
+  - `apps/web/src/app/dashboard/consolidation/[id]/page.tsx` and `page.tsx`: the drained count in the run summary, and the kept-verdict message on a partial undo, which both pages now take from one shared `undo-messages.ts`.
 - **Tests:** co-located beside each unit above.
 - **Measurements:** `openspec/changes/drain-stale-save-time-pendings/measurements/`, holding:
   - the false-drain measurement and the decidable share;
