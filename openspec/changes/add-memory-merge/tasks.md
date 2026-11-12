@@ -11,11 +11,11 @@
 
 ## 3. MCP tool
 
-- [ ] 3.1 Extract the post-commit half of `saveMemoryWithCandidates` into a helper shared with merge.
-- [ ] 3.2 `memory.merge` schema, output schema, handler and registration with the steering description.
-- [ ] 3.3 Catalog wiring: `WRITE_TOOLS` (`mcp-transport.test.ts`), `MINIMAL_ARGS` (`unresolvable-slug.test.ts`), authorization test, `statusForCode` for `fingerprint_mismatch`.
-- [ ] 3.4 Handler tests at the MCP boundary: preview, confirm, mismatch + control, read-only token, cross-scope, end-to-end undo through the dashboard's `undoOp` service.
-- [ ] 3.5 Docs that list the tool catalog (`docs/agents.md`, `docs/relations.md`, README).
+- [x] 3.1 Extract the post-commit half of `saveMemoryWithCandidates` into a helper shared with merge.
+- [x] 3.2 `memory.merge` schema, output schema, handler and registration with the steering description.
+- [x] 3.3 Catalog wiring: `WRITE_TOOLS` (`mcp-transport.test.ts`), `MINIMAL_ARGS` (`unresolvable-slug.test.ts`), authorization test. `statusForCode` is not touched: no HTTP route reaches `memory.merge`.
+- [x] 3.4 Handler tests at the MCP boundary: preview, confirm, mismatch + control, read-only token, cross-scope, end-to-end undo through the dashboard's `undoOp` service.
+- [x] 3.5 Docs that list the tool catalog (`docs/agents.md`, `docs/relations.md`). Plugins need no change: every client discovers tools through `tools/list` and none keeps an allowlist.
 
 ## 4. Close
 

@@ -466,6 +466,13 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.get_batch': { ids: ['placeholder'] },
   'memory.confirm_batch': { ids: ['placeholder'] },
   'memory.archive': { id: 'placeholder' },
+  'memory.merge': {
+    ids: ['placeholder-a', 'placeholder-b'],
+    type: 'user',
+    title: 't',
+    content: 'c',
+    tags: ['mcp'],
+  },
   'memory.session_start': {},
   'memory.session_end': {},
   'memory.session_summary': { summary: 's' },

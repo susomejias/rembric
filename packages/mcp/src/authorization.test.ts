@@ -235,6 +235,31 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
     );
   });
 
+  it('memory.merge rejects a read:* token with forbidden on preview and confirm; nothing merges', async () => {
+    const scope = { kind: 'project', projectId: projectA.id } as const;
+    const a = memory.save({ type: 'project', title: 'ma', content: 'ma' }, scope);
+    const b = memory.save({ type: 'project', title: 'mb', content: 'mb' }, scope);
+    const args = {
+      ids: [a.id, b.id],
+      type: 'project' as const,
+      title: 'm',
+      content: 'm',
+      tags: ['x'],
+    };
+    const { fingerprint } = memory.previewMerge(args, scope);
+    const ctx = ctxFor('read:*', { project: projectA, requestedSlug: projectA.slug });
+
+    for (const call of [args, { ...args, fingerprint }]) {
+      const { isError, payload } = decode(
+        await runWithContext(ctx, () => memoryHandlers.merge(call)),
+      );
+      expect(isError).toBe(true);
+      expect(payload.code).toBe('forbidden');
+    }
+    expect(memory.get(a.id, scope)?.memory.status).toBe('active');
+    expect(memory.get(b.id, scope)?.memory.status).toBe('active');
+  });
+
   it('memory.compare succeeds for a write-capable token (records a judged relation)', async () => {
     const a = memory.save(
       { type: 'project', title: 'a2', content: 'a2' },

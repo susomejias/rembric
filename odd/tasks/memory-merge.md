@@ -20,12 +20,12 @@ Branch: `feat/memory-merge` (worktree `rembric-worktrees/feat-450-memory-merge`)
 
 ## Tasks
 
-| ID  | Specs                    | Route  | Status  | Commit |
-| --- | ------------------------ | ------ | ------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| T1  | S1-S12                   | inline | pending | —      | OpenSpec change `add-memory-merge` (proposal, design, delta specs `mcp-api` + `consolidation`, tasks) |
-| T2  | S11                      | inline | pending | —      | `undoOp` merge ordering fix + regression test                                                         |
-| T3  | S2-S8                    | inline | pending | —      | `MemoryService` merge preview/commit + journal + tests                                                |
-| T4  | S1, S4, S7, S9, S10, S12 | inline | pending | —      | `memory.merge` MCP tool, catalog wiring, docs, e2e undo test                                          |
+| ID  | Specs                    | Route  | Status                                         | Commit         |
+| --- | ------------------------ | ------ | ---------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| T1  | S1-S12                   | inline | done                                           | 084edb43       | OpenSpec change `add-memory-merge` (proposal, design, delta specs `mcp-api` + `consolidation`, tasks) |
+| T2  | S11                      | inline | done: RED (original skipped) then GREEN        | e7563e2f       | `undoOp` merge ordering fix + regression test                                                         |
+| T3  | S2-S8                    | inline | done: 20 tests, 14/14 mutations caught         | 11faee79       | `MemoryService` merge preview/commit + journal + tests                                                |
+| T4  | S1, S4, S7, S9, S10, S12 | inline | done: wire tests, 4/4 handler mutations caught | pending commit | `memory.merge` MCP tool, catalog wiring, docs, e2e undo test                                          |
 
 Route evidence: no Writer trigger — units depend on each other (T4 on T3), so they are not independent parallel units.
 
@@ -34,3 +34,6 @@ Route evidence: no Writer trigger — units depend on each other (T4 on T3), so 
 - L1 (2026-11-12, user): "necesito implementar esta issue en un nuevo worktree: https://github.com/susomejias/rembric/issues/450" — then "hay que hacer un grill-me supongo antes porque habrá ciertas dudas".
 - L2 (2026-11-12, grill-me decisions): one tool `memory.merge` (fingerprint presence = confirm); N max 10; confirmations not carried over; no new relations and existing ones not copied (pending → preview warning); caller-named `topic_key` held outside the set → refuse; fingerprint mismatch → error `fingerprint_mismatch` with fresh preview; single PR with per-unit commits.
 - L3: found `undoOp` reactivates originals before archiving the successor (`packages/core/src/consolidation/operations.ts`), so an original sharing the successor's `topic_key` is skipped → fixed in T2. Engram mirror: pending (Engram tools unavailable in this session).
+- L4: run scope switched from `project:<id>` to `maintenance` — a `project:<id>` run satisfies the sweep throttle `recentRunExists` and would skip that project's next sweep (pinned by a test).
+- L5 (user, 2026-11-12): "revisa si hay que actualizar o implementar algo en los plugins" → verified: no client keeps a tool allowlist (all discover via `tools/list`; Pi maps `.`→`_` dynamically); only prose mentions tools. No plugin change, to avoid an unrequested plugin release.
+- L6: RDD off (global); native review not applicable.
