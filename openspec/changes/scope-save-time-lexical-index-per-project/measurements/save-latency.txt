@@ -1,0 +1,32 @@
+# memory.save latency — status quo (d) against option (b)
+instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5; all values in ms
+paired design: each round saves the SAME probe text through all three arms, in rotating order, in one process against one database; 10 warm-up rounds discarded, 200 rounds
+arms: 'd' = production repositories; 'b' = the save-time statement on the project's table, pruned with that table's statistics; d (b) repeats d (a) as the noise band
+caveat: every arm runs with the per-project triggers installed, so every arm pays option (b)'s extra write; write-cost.txt measures that write separately
+statistic: median of per-round paired differences against 'd (a)', with a 2000-resample bootstrap 95% interval
+corpora: the skewed generator and skewed realistic control (corpora.mts); probes are 80%-prefix and reversed rewrites of the project's memories
+
+generator-skew   1000  2%  p50 d    9.46 b    9.31  p90 d   13.60 b   12.77  | paired: b−d -0.29 [-0.38, -0.14]  noise d(b)−d(a) 0.00 [-0.10, 0.07]
+generator-skew   1000 20%  p50 d    7.52 b    7.41  p90 d   10.93 b   10.37  | paired: b−d -0.14 [-0.29, -0.05]  noise d(b)−d(a) 0.00 [-0.12, 0.11]
+generator-skew   1000 60%  p50 d    7.84 b    7.63  p90 d   11.21 b   11.00  | paired: b−d -0.08 [-0.19, 0.05]  noise d(b)−d(a) -0.11 [-0.20, 0.00]
+
+generator-skew  20000  2%  p50 d   12.16 b    7.61  p90 d   20.02 b   10.75  | paired: b−d -5.25 [-5.79, -4.44]  noise d(b)−d(a) 0.05 [-0.08, 0.12]
+generator-skew  20000 20%  p50 d   15.50 b   12.05  p90 d   28.82 b   21.61  | paired: b−d -3.84 [-4.37, -3.35]  noise d(b)−d(a) 0.08 [-0.03, 0.21]
+generator-skew  20000 60%  p50 d   21.14 b   19.94  p90 d   41.48 b   37.85  | paired: b−d -1.69 [-2.10, -1.49]  noise d(b)−d(a) -0.02 [-0.10, 0.13]
+
+generator-skew  50000  2%  p50 d   20.62 b   10.11  p90 d   48.17 b   14.71  | paired: b−d -11.16 [-11.94, -9.73]  noise d(b)−d(a) 0.10 [-0.01, 0.20]
+generator-skew  50000 20%  p50 d   28.55 b   20.53  p90 d   65.21 b   38.06  | paired: b−d -8.17 [-9.49, -7.34]  noise d(b)−d(a) 0.10 [-0.05, 0.31]
+generator-skew  50000 60%  p50 d   46.78 b   44.31  p90 d  104.62 b   93.84  | paired: b−d -3.10 [-4.02, -1.96]  noise d(b)−d(a) 0.22 [-0.12, 0.60]
+
+realistic-skew   1000  2%  p50 d    1.56 b    1.35  p90 d    2.16 b    1.94  | paired: b−d -0.15 [-0.20, -0.13]  noise d(b)−d(a) 0.01 [-0.01, 0.02]
+realistic-skew   1000 20%  p50 d    1.31 b    1.25  p90 d    1.73 b    1.59  | paired: b−d -0.04 [-0.07, -0.01]  noise d(b)−d(a) -0.01 [-0.03, 0.01]
+realistic-skew   1000 60%  p50 d    1.43 b    1.41  p90 d    1.75 b    1.79  | paired: b−d -0.01 [-0.05, 0.01]  noise d(b)−d(a) 0.01 [-0.01, 0.03]
+
+realistic-skew  20000  2%  p50 d    3.52 b    1.26  p90 d    4.45 b    1.81  | paired: b−d -2.25 [-2.38, -2.18]  noise d(b)−d(a) -0.01 [-0.03, 0.02]
+realistic-skew  20000 20%  p50 d    4.22 b    2.37  p90 d    5.17 b    3.22  | paired: b−d -1.75 [-1.86, -1.58]  noise d(b)−d(a) -0.01 [-0.03, 0.04]
+realistic-skew  20000 60%  p50 d    5.99 b    5.28  p90 d    8.26 b    6.83  | paired: b−d -0.63 [-0.70, -0.55]  noise d(b)−d(a) -0.00 [-0.04, 0.03]
+
+realistic-skew  50000  2%  p50 d    8.02 b    2.57  p90 d   10.79 b    3.98  | paired: b−d -5.33 [-5.57, -5.08]  noise d(b)−d(a) 0.06 [0.02, 0.12]
+realistic-skew  50000 20%  p50 d    9.29 b    6.24  p90 d   13.37 b    8.86  | paired: b−d -3.19 [-3.37, -2.99]  noise d(b)−d(a) 0.06 [-0.06, 0.20]
+realistic-skew  50000 60%  p50 d   13.74 b   12.70  p90 d   18.08 b   17.11  | paired: b−d -0.83 [-0.98, -0.69]  noise d(b)−d(a) 0.02 [-0.06, 0.07]
+

@@ -1,0 +1,69 @@
+# Behaviour gates per option — pnpm run eval:save-time, pnpm eval, dump-ids.ts
+instrument: the repository's own eval commands, run in a scratch clone with eval-prototype/apply.py; PROTO selects the option
+control: the patched clone with PROTO unset must reproduce the base commit byte for byte (it does: sweep diff empty, dump sha256 identical)
+base: 85c1c2b3; base dump-ids sha256 670ec7c16c34e380… (84 entries, 449 ids)
+
+## PROTO=control
+sweep vs base (diff of the report body):
+  identical
+pnpm eval:
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+dump-ids: sha256 670ec7c16c34e380…, entries whose ids differ from base: 0 of 84
+
+## PROTO=a
+sweep vs base (diff of the report body):
+  54c54
+  < floor 0.00: 275
+  ---
+  > floor 0.00: 250
+pnpm eval:
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=355 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 145 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+dump-ids: sha256 95e3f919fb1e675f…, entries whose ids differ from base: 47 of 84
+
+## PROTO=b
+sweep vs base (diff of the report body):
+  54c54
+  < floor 0.00: 275
+  ---
+  > floor 0.00: 250
+pnpm eval:
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+dump-ids: sha256 670ec7c16c34e380…, entries whose ids differ from base: 0 of 84
+
+## PROTO=bG
+sweep vs base (diff of the report body):
+  identical
+pnpm eval:
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+dump-ids: sha256 670ec7c16c34e380…, entries whose ids differ from base: 0 of 84
+
+## PROTO=c
+sweep vs base (diff of the report body):
+  identical
+pnpm eval:
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+dump-ids: sha256 670ec7c16c34e380…, entries whose ids differ from base: 0 of 84
+
+base pnpm eval:
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+
+reading: the sweep's only difference for a and b is the secondary series at floor 0.00 (retrieval-corpus ingest pending rows 275 -> 250); at the shipped floor 0.60 it is 54 in every arm, and every labelled-pair count is identical.
+option a moves 47 of 84 search id lists; P@8, R@8 and MRR@8 are unchanged, the hybrid retriever returns 145 rows instead of 140 and 355 tokens instead of 344.
+option c is identical to base on this fixture: E1 shifts bm25 scores (options.txt) but not, at 73 items, any id order these gates read.

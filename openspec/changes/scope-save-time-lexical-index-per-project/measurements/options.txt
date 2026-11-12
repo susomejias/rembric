@@ -1,0 +1,110 @@
+# Save-time lexical statement per option — cost by project share, fidelity to the status quo (d)
+statement instrument: wall clock (performance.now), p50 of 3 warm repetitions per probe, then p50 over 10 probes
+lookup instrument: the pruning read alone (document count + per-token frequencies), same scheme; a separate instrument, never added to the statement
+corpora: the skewed generator and the skewed realistic control (corpora.mts), project shares 2% / 20% / 60%
+shapes (all with the shipped ORDER BY bm25(...) LIMIT 20 and the #469 pruning):
+  d   status quo after #469: memory_fts, pruned with global statistics (the production repository call)
+  b   per-project table (options a and b), pruned with the PROJECT table statistics
+  bG  per-project table, pruned with global statistics (isolates the table from the pruning source)
+  c   E1: one table with a project_id column, `{content tags title} : (expr) AND project_id : "<id>"`, pruned with global statistics
+probes:
+  verbatim  the 10 most recent active memories of the project, saved text = the memory (self excluded): cost and fidelity
+  prefix80  a new row holding the first 80% of each of those memories, inserted in a rolled-back transaction: is the source memory surfaced?
+fidelity: "top20" = probes whose top-20 ids equal d's; "cand" = post-floor lexical candidates summed over probes, then lost/gained against d
+
+## generator-skew, 1000 rows, 6 projects
+build (single run): memory_fts rebuild 10 ms | every per-project index created+rebuilt 39 ms | E1 created+rebuilt 9 ms
+storage (dbstat): memory table 2.2 MB | memory_fts 0.7 MB | all per-project indexes 0.9 MB | E1 0.7 MB
+  share  2% (   20 rows) pruned   d 0.11 ms [cand 6]  b 0.08 ms [top20 2/10, cand 36 -1+31]  bG 0.03 ms [top20 9/10, cand 6 -0+0]  c 0.11 ms [top20 10/10, cand 6 -0+0]
+  share  2% (   20 rows) unpruned d 0.51 ms [cand 49]  b 0.15 ms [top20 1/10, cand 49 -0+0]  bG 0.14 ms [top20 1/10, cand 49 -0+0]  c 0.56 ms [top20 10/10, cand 49 -0+0]
+  share  2% lookup p50: global 0.231 ms | project 0.104 ms
+  share  2% prefix80 source surfaced: d 8/10 [cand 8]  b 8/10 [cand 35 -0+27]  bG 8/10 [cand 8 -0+0]  c 8/10 [cand 8 -0+0]
+  share 20% (  200 rows) pruned   d 0.14 ms [cand 34]  b 0.12 ms [top20 5/10, cand 88 -0+54]  bG 0.10 ms [top20 8/10, cand 34 -0+0]  c 0.17 ms [top20 10/10, cand 34 -0+0]
+  share 20% (  200 rows) unpruned d 0.68 ms [cand 168]  b 0.49 ms [top20 2/10, cand 167 -2+1]  bG 0.49 ms [top20 2/10, cand 167 -2+1]  c 0.84 ms [top20 6/10, cand 168 -1+1]
+  share 20% lookup p50: global 0.190 ms | project 0.169 ms
+  share 20% prefix80 source surfaced: d 8/10 [cand 8]  b 8/10 [cand 8 -0+0]  bG 8/10 [cand 8 -0+0]  c 8/10 [cand 8 -0+0]
+  share 60% (  600 rows) pruned   d 0.13 ms [cand 40]  b 0.13 ms [top20 9/10, cand 40 -0+0]  bG 0.12 ms [top20 9/10, cand 40 -0+0]  c 0.14 ms [top20 10/10, cand 40 -0+0]
+  share 60% (  600 rows) unpruned d 1.10 ms [cand 187]  b 1.10 ms [top20 5/10, cand 187 -0+0]  bG 1.04 ms [top20 5/10, cand 187 -0+0]  c 1.34 ms [top20 4/10, cand 187 -0+0]
+  share 60% lookup p50: global 0.232 ms | project 0.286 ms
+  share 60% prefix80 source surfaced: d 8/10 [cand 48]  b 8/10 [cand 48 -0+0]  bG 8/10 [cand 48 -0+0]  c 8/10 [cand 48 -0+0]
+
+## generator-skew, 20000 rows, 6 projects
+build (single run): memory_fts rebuild 308 ms | every per-project index created+rebuilt 244 ms | E1 created+rebuilt 296 ms
+storage (dbstat): memory table 43.3 MB | memory_fts 12.8 MB | all per-project indexes 13.3 MB | E1 12.9 MB
+  share  2% (  400 rows) pruned   d 0.92 ms [cand 0]  b 0.04 ms [top20 8/10, cand 38 -0+38]  bG 0.04 ms [top20 10/10, cand 0 -0+0]  c 1.43 ms [top20 10/10, cand 0 -0+0]
+  share  2% (  400 rows) unpruned d 8.49 ms [cand 169]  b 0.62 ms [top20 6/10, cand 169 -0+0]  bG 0.58 ms [top20 6/10, cand 169 -0+0]  c 8.29 ms [top20 5/10, cand 169 -0+0]
+  share  2% lookup p50: global 3.068 ms | project 0.132 ms
+  share  2% prefix80 source surfaced: d 8/10 [cand 8]  b 8/10 [cand 8 -0+0]  bG 8/10 [cand 8 -0+0]  c 8/10 [cand 8 -0+0]
+  share 20% ( 4000 rows) pruned   d 0.40 ms [cand 20]  b 0.17 ms [top20 9/10, cand 20 -1+1]  bG 0.16 ms [top20 9/10, cand 20 -1+1]  c 0.61 ms [top20 9/10, cand 20 -1+1]
+  share 20% ( 4000 rows) unpruned d 12.50 ms [cand 194]  b 6.01 ms [top20 3/10, cand 194 -3+3]  bG 6.03 ms [top20 3/10, cand 194 -3+3]  c 14.30 ms [top20 2/10, cand 194 -3+3]
+  share 20% lookup p50: global 2.408 ms | project 0.632 ms
+  share 20% prefix80 source surfaced: d 8/10 [cand 27]  b 8/10 [cand 27 -0+0]  bG 8/10 [cand 27 -0+0]  c 8/10 [cand 27 -0+0]
+  share 60% (12000 rows) pruned   d 0.93 ms [cand 2]  b 0.90 ms [top20 10/10, cand 2 -0+0]  bG 0.91 ms [top20 10/10, cand 2 -0+0]  c 1.50 ms [top20 10/10, cand 2 -0+0]
+  share 60% (12000 rows) unpruned d 20.60 ms [cand 193]  b 17.43 ms [top20 10/10, cand 193 -0+0]  bG 17.43 ms [top20 10/10, cand 193 -0+0]  c 25.50 ms [top20 3/10, cand 193 -1+1]
+  share 60% lookup p50: global 3.269 ms | project 2.130 ms
+  share 60% prefix80 source surfaced: d 8/10 [cand 10]  b 8/10 [cand 10 -0+0]  bG 8/10 [cand 10 -0+0]  c 8/10 [cand 10 -0+0]
+
+## generator-skew, 50000 rows, 6 projects
+build (single run): memory_fts rebuild 801 ms | every per-project index created+rebuilt 779 ms | E1 created+rebuilt 781 ms
+storage (dbstat): memory table 108.8 MB | memory_fts 32.1 MB | all per-project indexes 32.8 MB | E1 32.4 MB
+  share  2% ( 1000 rows) pruned   d 1.92 ms [cand 0]  b 0.09 ms [top20 10/10, cand 0 -0+0]  bG 0.09 ms [top20 10/10, cand 0 -0+0]  c 2.50 ms [top20 10/10, cand 0 -0+0]
+  share  2% ( 1000 rows) unpruned d 34.70 ms [cand 193]  b 1.64 ms [top20 5/10, cand 193 -0+0]  bG 1.56 ms [top20 5/10, cand 193 -0+0]  c 18.54 ms [top20 4/10, cand 193 -0+0]
+  share  2% lookup p50: global 7.641 ms | project 1.036 ms
+  share  2% prefix80 source surfaced: d 8/10 [cand 8]  b 8/10 [cand 8 -0+0]  bG 8/10 [cand 8 -0+0]  c 8/10 [cand 8 -0+0]
+  share 20% (10000 rows) pruned   d 1.88 ms [cand 24]  b 0.75 ms [top20 9/10, cand 24 -0+0]  bG 0.73 ms [top20 9/10, cand 24 -0+0]  c 2.80 ms [top20 9/10, cand 24 -0+0]
+  share 20% (10000 rows) unpruned d 41.53 ms [cand 182]  b 15.42 ms [top20 6/10, cand 182 -2+2]  bG 14.93 ms [top20 6/10, cand 182 -2+2]  c 33.08 ms [top20 0/10, cand 182 -4+4]
+  share 20% lookup p50: global 7.596 ms | project 2.464 ms
+  share 20% prefix80 source surfaced: d 8/10 [cand 32]  b 8/10 [cand 32 -0+0]  bG 8/10 [cand 32 -0+0]  c 8/10 [cand 32 -0+0]
+  share 60% (30000 rows) pruned   d 1.90 ms [cand 21]  b 1.35 ms [top20 10/10, cand 21 -0+0]  bG 1.36 ms [top20 10/10, cand 21 -0+0]  c 2.87 ms [top20 10/10, cand 21 -0+0]
+  share 60% (30000 rows) unpruned d 62.72 ms [cand 194]  b 46.21 ms [top20 10/10, cand 194 -0+0]  bG 45.45 ms [top20 10/10, cand 194 -0+0]  c 65.64 ms [top20 4/10, cand 194 -2+2]
+  share 60% lookup p50: global 7.545 ms | project 5.532 ms
+  share 60% prefix80 source surfaced: d 7/10 [cand 28]  b 7/10 [cand 28 -0+0]  bG 7/10 [cand 28 -0+0]  c 7/10 [cand 28 -0+0]
+
+## realistic-skew, 1000 rows, 6 projects
+build (single run): memory_fts rebuild 3 ms | every per-project index created+rebuilt 12 ms | E1 created+rebuilt 3 ms
+storage (dbstat): memory table 0.4 MB | memory_fts 0.2 MB | all per-project indexes 0.4 MB | E1 0.2 MB
+  share  2% (   20 rows) pruned   d 0.14 ms [cand 5]  b 0.06 ms [top20 5/10, cand 5 -0+0]  bG 0.06 ms [top20 10/10, cand 5 -0+0]  c 0.08 ms [top20 10/10, cand 5 -0+0]
+  share  2% (   20 rows) unpruned d 0.22 ms [cand 5]  b 0.08 ms [top20 6/10, cand 5 -0+0]  bG 0.08 ms [top20 6/10, cand 5 -0+0]  c 0.16 ms [top20 10/10, cand 5 -0+0]
+  share  2% lookup p50: global 0.089 ms | project 0.070 ms
+  share  2% prefix80 source surfaced: d 10/10 [cand 18]  b 10/10 [cand 18 -0+0]  bG 10/10 [cand 18 -0+0]  c 10/10 [cand 18 -0+0]
+  share 20% (  200 rows) pruned   d 0.17 ms [cand 9]  b 0.17 ms [top20 6/10, cand 9 -0+0]  bG 0.16 ms [top20 6/10, cand 9 -0+0]  c 0.13 ms [top20 10/10, cand 9 -0+0]
+  share 20% (  200 rows) unpruned d 0.28 ms [cand 9]  b 0.25 ms [top20 6/10, cand 9 -0+0]  bG 0.25 ms [top20 6/10, cand 9 -0+0]  c 0.25 ms [top20 10/10, cand 9 -0+0]
+  share 20% lookup p50: global 0.079 ms | project 0.108 ms
+  share 20% prefix80 source surfaced: d 10/10 [cand 34]  b 10/10 [cand 34 -0+0]  bG 10/10 [cand 34 -0+0]  c 10/10 [cand 34 -0+0]
+  share 60% (  600 rows) pruned   d 0.23 ms [cand 14]  b 0.28 ms [top20 9/10, cand 14 -0+0]  bG 0.24 ms [top20 9/10, cand 14 -0+0]  c 0.25 ms [top20 10/10, cand 14 -0+0]
+  share 60% (  600 rows) unpruned d 0.39 ms [cand 14]  b 0.40 ms [top20 9/10, cand 14 -0+0]  bG 0.38 ms [top20 9/10, cand 14 -0+0]  c 0.41 ms [top20 10/10, cand 14 -0+0]
+  share 60% lookup p50: global 0.075 ms | project 0.109 ms
+  share 60% prefix80 source surfaced: d 10/10 [cand 10]  b 10/10 [cand 10 -0+0]  bG 10/10 [cand 10 -0+0]  c 10/10 [cand 10 -0+0]
+
+## realistic-skew, 20000 rows, 6 projects
+build (single run): memory_fts rebuild 75 ms | every per-project index created+rebuilt 78 ms | E1 created+rebuilt 76 ms
+storage (dbstat): memory table 8.4 MB | memory_fts 3.8 MB | all per-project indexes 4.2 MB | E1 3.9 MB
+  share  2% (  400 rows) pruned   d 1.95 ms [cand 80]  b 0.15 ms [top20 10/10, cand 80 -0+0]  bG 0.19 ms [top20 10/10, cand 80 -0+0]  c 1.11 ms [top20 10/10, cand 80 -0+0]
+  share  2% (  400 rows) unpruned d 3.22 ms [cand 80]  b 0.29 ms [top20 10/10, cand 80 -0+0]  bG 0.29 ms [top20 10/10, cand 80 -0+0]  c 2.25 ms [top20 10/10, cand 80 -0+0]
+  share  2% lookup p50: global 0.707 ms | project 0.070 ms
+  share  2% prefix80 source surfaced: d 10/10 [cand 105]  b 10/10 [cand 105 -0+0]  bG 10/10 [cand 105 -0+0]  c 10/10 [cand 105 -0+0]
+  share 20% ( 4000 rows) pruned   d 2.24 ms [cand 20]  b 1.00 ms [top20 10/10, cand 20 -0+0]  bG 0.99 ms [top20 10/10, cand 20 -0+0]  c 1.90 ms [top20 10/10, cand 20 -0+0]
+  share 20% ( 4000 rows) unpruned d 4.10 ms [cand 20]  b 2.19 ms [top20 10/10, cand 20 -0+0]  bG 2.20 ms [top20 10/10, cand 20 -0+0]  c 3.89 ms [top20 10/10, cand 20 -0+0]
+  share 20% lookup p50: global 0.588 ms | project 0.255 ms
+  share 20% prefix80 source surfaced: d 10/10 [cand 48]  b 10/10 [cand 48 -0+0]  bG 10/10 [cand 48 -0+0]  c 10/10 [cand 48 -0+0]
+  share 60% (12000 rows) pruned   d 3.36 ms [cand 120]  b 3.42 ms [top20 10/10, cand 120 -0+0]  bG 2.68 ms [top20 10/10, cand 120 -0+0]  c 3.58 ms [top20 10/10, cand 120 -0+0]
+  share 60% (12000 rows) unpruned d 6.47 ms [cand 120]  b 5.59 ms [top20 10/10, cand 120 -0+0]  bG 5.56 ms [top20 10/10, cand 120 -0+0]  c 7.61 ms [top20 10/10, cand 120 -0+0]
+  share 60% lookup p50: global 0.553 ms | project 0.553 ms
+  share 60% prefix80 source surfaced: d 10/10 [cand 105]  b 10/10 [cand 105 -0+0]  bG 10/10 [cand 105 -0+0]  c 10/10 [cand 105 -0+0]
+
+## realistic-skew, 50000 rows, 6 projects
+build (single run): memory_fts rebuild 223 ms | every per-project index created+rebuilt 224 ms | E1 created+rebuilt 213 ms
+storage (dbstat): memory table 21.0 MB | memory_fts 9.6 MB | all per-project indexes 10.6 MB | E1 9.9 MB
+  share  2% ( 1000 rows) pruned   d 4.52 ms [cand 60]  b 0.31 ms [top20 10/10, cand 60 -0+0]  bG 0.35 ms [top20 10/10, cand 60 -0+0]  c 2.39 ms [top20 10/10, cand 60 -0+0]
+  share  2% ( 1000 rows) unpruned d 8.11 ms [cand 60]  b 0.69 ms [top20 10/10, cand 60 -0+0]  bG 0.66 ms [top20 10/10, cand 60 -0+0]  c 5.41 ms [top20 10/10, cand 60 -0+0]
+  share  2% lookup p50: global 1.688 ms | project 0.861 ms
+  share  2% prefix80 source surfaced: d 10/10 [cand 86]  b 10/10 [cand 86 -0+0]  bG 10/10 [cand 86 -0+0]  c 10/10 [cand 86 -0+0]
+  share 20% (10000 rows) pruned   d 5.38 ms [cand 40]  b 2.68 ms [top20 9/10, cand 40 -0+0]  bG 2.63 ms [top20 9/10, cand 40 -0+0]  c 4.33 ms [top20 10/10, cand 40 -0+0]
+  share 20% (10000 rows) unpruned d 10.36 ms [cand 40]  b 5.56 ms [top20 9/10, cand 40 -0+0]  bG 5.47 ms [top20 9/10, cand 40 -0+0]  c 9.86 ms [top20 10/10, cand 40 -0+0]
+  share 20% lookup p50: global 1.369 ms | project 1.167 ms
+  share 20% prefix80 source surfaced: d 9/10 [cand 67]  b 9/10 [cand 84 -0+17]  bG 9/10 [cand 84 -0+17]  c 9/10 [cand 67 -0+0]
+  share 60% (30000 rows) pruned   d 8.22 ms [cand 20]  b 8.06 ms [top20 10/10, cand 20 -0+0]  bG 6.60 ms [top20 10/10, cand 20 -0+0]  c 8.75 ms [top20 10/10, cand 20 -0+0]
+  share 60% (30000 rows) unpruned d 15.44 ms [cand 20]  b 13.31 ms [top20 10/10, cand 20 -0+0]  bG 13.29 ms [top20 10/10, cand 20 -0+0]  c 17.80 ms [top20 10/10, cand 20 -0+0]
+  share 60% lookup p50: global 1.212 ms | project 1.570 ms
+  share 60% prefix80 source surfaced: d 10/10 [cand 10]  b 10/10 [cand 10 -0+0]  bG 10/10 [cand 10 -0+0]  c 10/10 [cand 10 -0+0]
+

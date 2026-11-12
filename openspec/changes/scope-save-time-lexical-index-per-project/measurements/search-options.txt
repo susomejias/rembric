@@ -1,0 +1,38 @@
+# memory.search lexical branch under option (a) — global memory_fts against per-project tables
+statement instrument: wall clock (performance.now), p50 of 5 warm repetitions per query, then p50 over the queries
+lookup instrument: the relevance gate read alone (document count + query-term frequencies); global = production, per-scope = the scope projects' tables summed
+queries: realistic = the 28 retrieval-eval query texts; generator = the first 6 words of the 28 most recent memories of the scope's home project
+rank window computeRankWindowSize(8, 0) = 64; status active; weights bm25(1, 1, 2) as production
+scopes: one project at 2% / 60% of rows; widened = every project (authorized-projects, home = the 2% project), per-project top-window then merged by rank, as production
+fidelity: top-8 ids identical to the global statement / mean overlap of the top-8 sets
+
+## generator-skew, 1000 rows
+  one project, 2%        statement: global 0.285 ms | per-project 0.039 ms   lookup: global 0.113 ms | per-scope 0.040 ms   top-8 identical 13/20, mean overlap 0.94
+  one project, 60%       statement: global 0.459 ms | per-project 0.337 ms   lookup: global 0.105 ms | per-scope 0.082 ms   top-8 identical 25/28, mean overlap 1.00
+  widened, 6 projects    statement: global 0.924 ms | per-project 0.911 ms   lookup: global 0.112 ms | per-scope 0.278 ms   top-8 identical 4/20, mean overlap 0.46
+
+## generator-skew, 20000 rows
+  one project, 2%        statement: global 3.571 ms | per-project 0.226 ms   lookup: global 1.327 ms | per-scope 0.067 ms   top-8 identical 26/28, mean overlap 1.00
+  one project, 60%       statement: global 6.899 ms | per-project 5.813 ms   lookup: global 0.622 ms | per-scope 0.563 ms   top-8 identical 28/28, mean overlap 1.00
+  widened, 6 projects    statement: global 16.552 ms | per-project 11.154 ms   lookup: global 1.399 ms | per-scope 2.205 ms   top-8 identical 6/28, mean overlap 0.94
+
+## generator-skew, 50000 rows
+  one project, 2%        statement: global 21.223 ms | per-project 0.567 ms   lookup: global 1.686 ms | per-scope 0.883 ms   top-8 identical 25/28, mean overlap 1.00
+  one project, 60%       statement: global 29.772 ms | per-project 16.122 ms   lookup: global 3.448 ms | per-scope 2.945 ms   top-8 identical 28/28, mean overlap 1.00
+  widened, 6 projects    statement: global 53.465 ms | per-project 37.743 ms   lookup: global 3.203 ms | per-scope 4.926 ms   top-8 identical 13/28, mean overlap 0.97
+
+## realistic-skew, 1000 rows
+  one project, 2%        statement: global 0.253 ms | per-project 0.045 ms   lookup: global 0.109 ms | per-scope 0.041 ms   top-8 identical 21/28, mean overlap 0.95
+  one project, 60%       statement: global 0.416 ms | per-project 0.289 ms   lookup: global 0.110 ms | per-scope 0.072 ms   top-8 identical 19/28, mean overlap 0.83
+  widened, 6 projects    statement: global 0.872 ms | per-project 0.827 ms   lookup: global 0.109 ms | per-scope 0.283 ms   top-8 identical 11/28, mean overlap 0.71
+
+## realistic-skew, 20000 rows
+  one project, 2%        statement: global 1.870 ms | per-project 0.187 ms   lookup: global 0.332 ms | per-scope 0.042 ms   top-8 identical 24/28, mean overlap 0.86
+  one project, 60%       statement: global 4.622 ms | per-project 3.926 ms   lookup: global 0.333 ms | per-scope 0.366 ms   top-8 identical 21/28, mean overlap 0.87
+  widened, 6 projects    statement: global 13.938 ms | per-project 7.647 ms   lookup: global 0.334 ms | per-scope 0.955 ms   top-8 identical 8/28, mean overlap 0.69
+
+## realistic-skew, 50000 rows
+  one project, 2%        statement: global 4.590 ms | per-project 0.427 ms   lookup: global 0.660 ms | per-scope 0.833 ms   top-8 identical 24/28, mean overlap 0.86
+  one project, 60%       statement: global 11.630 ms | per-project 10.289 ms   lookup: global 0.673 ms | per-scope 1.256 ms   top-8 identical 20/28, mean overlap 0.87
+  widened, 6 projects    statement: global 36.439 ms | per-project 19.867 ms   lookup: global 0.720 ms | per-scope 2.572 ms   top-8 identical 9/28, mean overlap 0.71
+
