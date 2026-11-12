@@ -1,0 +1,13 @@
+# retired-endpoint verdicts — read-only count (design D10)
+# database: synthetic corpus vol-50000
+# CAVEAT: the corpus generator judges random pairs after all memories exist, whatever their status, so this count exercises the instrument and says nothing about real installations
+  judged verdicts (topic_key audit rows excluded): 34897
+  of which touch a currently retired endpoint:      12494
+  of which were recorded after that retirement:     6466  {"compatible":1281,"conflicts_with":1298,"not_conflict":1318,"related":1313,"scoped":1256}
+  retired memories with no derivable time:          0
+# control: one late not_conflict verdict added to a scratch copy
+  judged verdicts (topic_key audit rows excluded): 34898
+  of which touch a currently retired endpoint:      12495
+  of which were recorded after that retirement:     6467  {"compatible":1281,"conflicts_with":1298,"not_conflict":1319,"related":1313,"scoped":1256}
+  retired memories with no derivable time:          0
+# control late delta: 1 (PASS)
