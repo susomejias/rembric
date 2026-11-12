@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -44,6 +44,33 @@ export class ConsolidationRepository {
         .limit(1)
         .get() !== undefined
     );
+  }
+
+  latestFinishedRunSummary(scope: string): string | null {
+    const row = this.db
+      .select({ summary: consolidationRuns.summary })
+      .from(consolidationRuns)
+      .where(and(eq(consolidationRuns.scope, scope), isNotNull(consolidationRuns.finishedAt)))
+      .orderBy(desc(consolidationRuns.startedAt))
+      .limit(1)
+      .get();
+    return row?.summary ?? null;
+  }
+
+  /** Every project's: judgment ids are globally unique. `created_id` has no index, so this scans the journal once. */
+  listRevertedOrphanPromoteCreatedIds(): string[] {
+    return this.db
+      .selectDistinct({ createdId: consolidationOps.createdId })
+      .from(consolidationOps)
+      .where(
+        and(
+          eq(consolidationOps.opType, 'orphan_promote'),
+          isNotNull(consolidationOps.revertedAt),
+          isNotNull(consolidationOps.createdId),
+        ),
+      )
+      .all()
+      .flatMap((r) => (r.createdId === null ? [] : [r.createdId]));
   }
 
   adminLatestRun(): Pick<ConsolidationRun, 'startedAt' | 'summary'> | undefined {

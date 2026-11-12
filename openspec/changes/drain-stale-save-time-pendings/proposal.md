@@ -27,7 +27,7 @@ The change `add-save-time-lexical-floor` stops new saves from creating noise pen
 - **Batched, with no starvation.** Batching is a requirement. The sweep runs synchronously on the server's single Node thread, so a long run blocks every other request.
   - Each scope's drain step stops at a row cap, and all drain steps of one sweep call share one wall-clock budget, which starts at the first drain step.
   - Every drain step examines at least one pair, so a slow host or a late scope still progresses.
-  - A wrap-around cursor (the last examined `judgment_id`) is kept in a nested object of the run's existing `summary` JSON, so kept pairs do not block the rest.
+  - A wrap-around cursor (the last examined row's `created_at` and `judgment_id`) is kept in a nested object of the run's existing `summary` JSON, so kept pairs do not block the rest.
   - A pair the operator restored by undo is never drained again by the drain. The deadline step can still close it later.
 - **Undo.** Undoing an `orphan_promote` op no longer overwrites a verdict written after the orphaning. `memory.compare` can judge an orphaned row `supersedes` in place, and today's undo would revert that supersede.
 - **Operator visibility.** The run summary records the drain's counts in its nested object, including a retired-endpoint counter, and the run-detail page shows the drained count. Each drain op is listed and undoable like any other op.
@@ -69,9 +69,10 @@ None.
   - `packages/core/src/consolidation/runner.ts`: the drain step, a transactional orphan-and-journal helper, the per-scope cap, the per-call budget and its clock seam, the cursor, the nested `drain` summary object, and the `vectorIndexCurrent` and `drainClock` options.
   - `packages/core/src/consolidation/operations.ts`: an optional `appliedAt` for `recordOrphanPromote`, the undo guard in the `orphan_promote` branch, and the kept-verdict report in `UndoResult`.
   - `packages/core/src/services/relations.ts`: an optional timestamp for `orphan`, so one timestamp reaches both writes.
-  - `packages/db/src/repositories/relations-repository.ts`: a scoped selection of examinable pending rows by `judgment_id` cursor, returning endpoint status and lengths.
+  - `packages/db/src/repositories/relations-repository.ts`: a scoped selection of examinable pending rows after a `(created_at, judgment_id)` cursor, with undone rows excluded inside the query.
+  - `packages/db/src/repositories/memory-repository.ts`: a scoped point read of a pair's two rows returning status and `length(title) + length(content)`, with the text only within the size bound.
   - `packages/db/src/repositories/vectors-repository.ts`: the public point read `pairCosineDistance`.
-  - `packages/db/src/repositories/consolidation-repository.ts`: reads for the latest finished run summary of a scope, and for the reverted `orphan_promote` ops among a batch's judgment ids.
+  - `packages/db/src/repositories/consolidation-repository.ts`: reads for the latest finished run summary of a scope, and for the created ids of every reverted `orphan_promote` op, read once per sweep call.
   - `apps/web/src/lib/services.ts`: wires `vectorIndexCurrent` to `vectorIdentityMatches(dataDir)`.
   - `apps/web/src/app/dashboard/consolidation/[id]/page.tsx` and `page.tsx`: the drained count in the run summary, and the kept-verdict message on a partial undo.
 - **Tests:** co-located beside each unit above.

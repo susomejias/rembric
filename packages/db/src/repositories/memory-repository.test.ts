@@ -782,4 +782,50 @@ describe('MemoryRepository', () => {
       expect(repo.adminMemoryWritesBySessionPerDay([], atDay(0))).toEqual([]);
     });
   });
+  describe('findBoundedEndpoints', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: 'A', title: 'short a', content: 'short body a' }),
+          row({ id: 'B', title: 'long b', content: 'x'.repeat(500), status: 'superseded' }),
+          row({ id: 'X', title: 'other project', content: 'short body x', projectId: 'p1' }),
+        ])
+        .run();
+    });
+
+    it('returns status and length, and the text only within the bound', () => {
+      const rows = repo.findBoundedEndpoints({ projectId: 'p0', ids: ['A', 'B'], maxChars: 100 });
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      expect(byId.get('A')).toEqual({
+        id: 'A',
+        status: 'active',
+        chars: 'short a'.length + 'short body a'.length,
+        title: 'short a',
+        content: 'short body a',
+      });
+      expect(byId.get('B')).toEqual({
+        id: 'B',
+        status: 'superseded',
+        chars: 'long b'.length + 500,
+        title: null,
+        content: null,
+      });
+    });
+
+    it('control: a bound at the exact length still loads the text', () => {
+      const [b] = repo.findBoundedEndpoints({ projectId: 'p0', ids: ['B'], maxChars: 506 });
+      expect(b!.content).toBe('x'.repeat(500));
+    });
+
+    it("never returns another project's row", () => {
+      const rows = repo.findBoundedEndpoints({ projectId: 'p0', ids: ['A', 'X'], maxChars: 100 });
+      expect(rows.map((r) => r.id)).toEqual(['A']);
+      expect(
+        repo
+          .findBoundedEndpoints({ projectId: 'p1', ids: ['A', 'X'], maxChars: 100 })
+          .map((r) => r.id),
+      ).toEqual(['X']);
+    });
+  });
 });

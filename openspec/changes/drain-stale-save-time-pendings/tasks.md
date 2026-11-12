@@ -35,12 +35,13 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 3. Scoped repository reads
 
-- [ ] 3.1 Add the reads under `packages/db/src/repositories/`:
-  - **Examinable selection:** pending rows with both endpoints in the project (`endpointsInScope`), ordered by `judgment_id` after a cursor, with a limit, returning each endpoint's status and its `length(title) + length(content)`. Endpoint lifecycle is returned rather than filtered, so retired endpoints are drained.
+- [x] 3.1 Add the reads under `packages/db/src/repositories/`:
+  - **Examinable selection:** pending rows with both endpoints in the project (`endpointsInScope`), ordered by `(created_at, judgment_id)` after a composite cursor (design D7), with a limit and the undone judgment ids excluded inside the query. Endpoint lifecycle is not filtered, so retired endpoints are drained.
+  - **Bounded endpoints:** a pair's two rows in the project, returning each one's status and `length(title) + length(content)`, with the title and content only when that length is within the bound (design D3).
   - **`pairCosineDistance(projectId, sourceId, targetId)`:** a public point read that applies `vec_distance_cosine` to the two stored rows in SQL, and returns `null` when either is missing.
   - **Latest summary:** the latest finished run summary for a scope string.
-  - **Reverted drains:** the `created_id` values among a given list of judgment ids that a reverted `orphan_promote` op carries (`created_id IN (…)` with `reverted_at IS NOT NULL`).
-- [ ] 3.2 Test each read against a two-project fixture, proving it never returns another project's rows. Done when `pnpm test` is green, including the data-access confinement scan in `apps/web/src/test/invariants.test.ts`.
+  - **Reverted drains:** the `created_id` of every reverted `orphan_promote` op, read once per sweep call and passed to the selection (design D7).
+- [x] 3.2 Test each read against a two-project fixture, proving it never returns another project's rows. Done when `pnpm test` is green, including the data-access confinement scan in `apps/web/src/test/invariants.test.ts`.
 
 ## 4. Pair evaluator with three-valued verdicts
 

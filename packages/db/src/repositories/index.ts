@@ -33,7 +33,11 @@ export {
   type MemoryEntityView,
   type PendingEntityScan,
 } from './entities-repository.js';
-export { MemoryRepository, type AdminListMemoriesOpts } from './memory-repository.js';
+export {
+  MemoryRepository,
+  type AdminListMemoriesOpts,
+  type BoundedEndpoint,
+} from './memory-repository.js';
 export { OAuthRepository } from './oauth-repository.js';
 export { ProjectsRepository } from './projects-repository.js';
 export {
@@ -45,6 +49,8 @@ export {
   RelationsRepository,
   type AdminRelationFilters,
   type AdminRelationWithContent,
+  type ExaminablePending,
+  type PendingOrderKey,
 } from './relations-repository.js';
 export { TermStatisticsRepository } from './term-statistics-repository.js';
 export { TokensRepository, type AdminTokenProjectSlug } from './tokens-repository.js';

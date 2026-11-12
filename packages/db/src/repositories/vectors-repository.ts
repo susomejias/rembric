@@ -88,6 +88,19 @@ export class VectorsRepository {
     );
   }
 
+  pairCosineDistance(projectId: string, sourceId: string, targetId: string): number | null {
+    const partitionKey = partitionKeyFor(projectId);
+    const row = this.db.get<{ distance: number }>(
+      sql`
+        SELECT vec_distance_cosine(a.embedding, b.embedding) AS distance
+        FROM memory_vec a, memory_vec b
+        WHERE a.memory_id = ${sourceId} AND b.memory_id = ${targetId}
+          AND a.partition_key = ${partitionKey} AND b.partition_key = ${partitionKey}
+      `,
+    ) as { distance: number } | undefined;
+    return row?.distance ?? null;
+  }
+
   private findEmbedding(memoryId: string): Float32Array | undefined {
     const row = this.db.get<{ embedding: Buffer }>(
       sql`SELECT embedding FROM memory_vec WHERE memory_id = ${memoryId}`,
