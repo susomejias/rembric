@@ -1,4 +1,12 @@
-import { createRepositories, memory, memoryRelations, projectScope, type Scope } from '@rembric/db';
+import {
+  createRepositories,
+  memory,
+  memoryRelations,
+  partitionKeyFor,
+  projectScope,
+  type Repositories,
+  type Scope,
+} from '@rembric/db';
 import { eq, sql } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,6 +18,8 @@ import {
   CANDIDATE_POOL_SIZE,
   ENTITY_RARITY_MIN_LINKS,
   findSaveTimeCandidates,
+  LEXICAL_CANDIDATE_FLOOR,
+  runPostSaveSteps,
 } from '@rembric/core';
 
 import { seedProject } from '../test-support/default-project.js';
@@ -431,6 +441,321 @@ describe('findSaveTimeCandidates', () => {
       perSaveMax: 5,
     }).candidates;
     expect(cands.some((c) => c.targetId === first.memory.id)).toBe(false);
+  });
+});
+
+describe('findSaveTimeCandidates — lexical floor', () => {
+  const HETEROGENEOUS_FACTS: ReadonlyArray<[string, string]> = [
+    [
+      'Billing service uses Drizzle ORM',
+      'The billing service talks to SQLite through Drizzle ORM; migrations are plain SQL files reviewed in every pull request.',
+    ],
+    [
+      'Scheduler listens on port 8781',
+      'The job scheduler binds to port 8781 instead of 8080 so it does not collide with the health-check sidecar in the same pod.',
+    ],
+    [
+      'Node 22 is the minimum runtime',
+      'All services require Node 22 or newer because the test runner relies on the built-in fetch and the stable watch mode.',
+    ],
+    [
+      'Dashboard sessions expire after 12 hours',
+      'Operator dashboard sessions are signed cookies that expire 12 hours after login and are checked on every request.',
+    ],
+    [
+      'Nightly backups go to the off-site bucket',
+      'A cron job at 02:30 UTC copies the SQLite file to the off-site bucket and keeps fourteen daily copies.',
+    ],
+    [
+      'Search results are cached for 60 seconds',
+      'The public search endpoint caches responses in memory for 60 seconds keyed by the normalized query string.',
+    ],
+    [
+      'The production image is distroless',
+      'The Docker image is built in two stages and the runtime stage is distroless, so there is no shell; debugging goes through the ephemeral debug container.',
+    ],
+    [
+      'Use pnpm through corepack',
+      'The repository pins pnpm with corepack; run corepack enable once and never install pnpm globally with npm.',
+    ],
+    [
+      'Deploys happen on Tuesdays',
+      'The team deploys to production only on Tuesday mornings to keep time to react before the weekend.',
+    ],
+    [
+      'API rate limit is 120 requests per minute',
+      'The HTTP API allows 120 requests per minute per bearer token; excess requests get 429 with a Retry-After header.',
+    ],
+    [
+      'Logs are JSON lines on stdout',
+      'Every service writes structured JSON lines to stdout and the log shipper adds the pod name before forwarding them.',
+    ],
+    [
+      'Feature flags have an owner and a removal date',
+      'Feature flags are declared with an owner and a removal date, and a CI check fails when a flag is past that date.',
+    ],
+    [
+      'Invoices are rendered with a headless browser',
+      'Invoice PDFs are produced by rendering the invoice HTML template in headless Chromium with embedded fonts.',
+    ],
+    [
+      'Outbound webhooks retry with backoff',
+      'Failed outbound webhooks are retried up to eight times with exponential backoff, then marked dead in the admin panel.',
+    ],
+    [
+      'Translations are loaded per route',
+      'Translation bundles are split per route and loaded lazily, so the initial page only ships the strings it renders.',
+    ],
+    [
+      'Public identifiers are ULIDs',
+      'Records exposed through the API use ULID identifiers so they sort by creation time.',
+    ],
+    [
+      'Shared UI components live in one package',
+      'Reusable React components belong in the shared UI package and the apps must not import from each other.',
+    ],
+    [
+      'Timestamps are stored in UTC',
+      'Every timestamp is stored as UTC milliseconds and converted to the viewer time zone only in the presentation layer.',
+    ],
+    [
+      'Two approvals to merge into main',
+      'Any pull request against main needs two approvals and a green continuous integration run before it can be merged.',
+    ],
+    [
+      'The analytics replica is read-only',
+      'The analytics replica is opened read-only; every write must go to the primary through the billing service.',
+    ],
+  ];
+
+  const UNRELATED = {
+    type: 'feedback' as const,
+    title: 'Design review moved to Thursdays',
+    content:
+      'The design review for the onboarding flow is on the shared calendar every Thursday, and the notes go to the team channel.',
+  };
+
+  function seedFacts(): Map<string, string> {
+    const ids = new Map<string, string>();
+    for (const [title, content] of HETEROGENEOUS_FACTS) {
+      ids.set(
+        title,
+        memorySvc.save({ type: 'project', title, content }, defaultProjectScope(db.handle)).id,
+      );
+    }
+    return ids;
+  }
+
+  function unitVector(axis: number): Buffer {
+    const v = new Float32Array(768);
+    v[axis] = 1;
+    return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  }
+
+  it('an unrelated save over a heterogeneous scope writes no lexical pending judgment, though rank-only admission would', async () => {
+    seedFacts();
+    const repos = createRepositories(db.handle.db);
+    const scope = defaultProjectScope(db.handle);
+    const unrelated = memorySvc.save(UNRELATED, scope);
+
+    const rankOnly = findSaveTimeCandidates(repos, unrelated, { perSaveMax: 5, lexicalFloor: 0 });
+    expect(rankOnly.candidates.filter((c) => c.source === 'fts').length).toBeGreaterThan(0);
+
+    const { candidates, candidatesDetected } = await runPostSaveSteps(
+      { repos, relations, candidates: { perSaveMax: 5 } },
+      unrelated,
+      scope,
+    );
+    expect(candidates).toEqual([]);
+    expect(candidatesDetected).toBe(0);
+    expect(relations.countPendingInScope(scope)).toBe(0);
+  });
+
+  it('a lightly edited near-duplicate is still surfaced lexically at or above the floor', () => {
+    const ids = seedFacts();
+    const saved = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Production container is distroless',
+        content:
+          'The Docker image builds in two stages and its runtime stage is distroless, so no shell exists; debugging uses the ephemeral debug container.',
+      },
+      defaultProjectScope(db.handle),
+    );
+    const cands = findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
+      perSaveMax: 5,
+    }).candidates;
+    const match = cands.find((c) => c.targetId === ids.get('The production image is distroless'));
+    expect(match?.source).toBe('fts');
+    expect(match!.similarity).toBeGreaterThanOrEqual(LEXICAL_CANDIDATE_FLOOR);
+  });
+
+  it('a below-floor lexical match takes no slot and is not counted', () => {
+    for (let i = 0; i < 8; i++) {
+      memorySvc.save(
+        {
+          type: 'project',
+          title: `Checkout note ${i}`,
+          content: `checkout latency dashboard ${i} lives under observability panel ${i}`,
+        },
+        defaultProjectScope(db.handle),
+      );
+    }
+    const restating = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Checkout retries idempotency keys',
+        content: 'checkout retries reuse the same idempotency key so a double submit charges once',
+      },
+      defaultProjectScope(db.handle),
+    );
+    const saved = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Checkout retries reuse idempotency keys',
+        content: 'checkout retries reuse one idempotency key so a double submit only charges once',
+      },
+      defaultProjectScope(db.handle),
+    );
+    const repos = createRepositories(db.handle.db);
+
+    const rankOnly = findSaveTimeCandidates(repos, saved, { perSaveMax: 5, lexicalFloor: 0 });
+    expect(rankOnly.detected).toBeGreaterThan(5);
+
+    const floored = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 });
+    expect(floored.candidates.map((c) => c.targetId)).toEqual([restating.id]);
+    expect(floored.detected).toBe(1);
+    for (const c of floored.candidates)
+      expect(c.similarity).toBeGreaterThanOrEqual(LEXICAL_CANDIDATE_FLOOR);
+  });
+
+  it('a lexical match exactly at the floor is admitted', () => {
+    const scope = defaultProjectScope(db.handle);
+    const atFloor = memorySvc.save(
+      {
+        type: 'procedural',
+        title: 'Key rotation trigger',
+        content: 'rotate signing keys after incidents',
+      },
+      scope,
+    );
+    const saved = memorySvc.save(
+      {
+        type: 'procedural',
+        title: 'Quarterly rotation',
+        content: 'rotate signing keys every quarter',
+      },
+      scope,
+    );
+    const repos = createRepositories(db.handle.db);
+    const hit = findSaveTimeCandidates(repos, saved, {
+      perSaveMax: 5,
+      lexicalFloor: 0.6,
+    }).candidates.find((c) => c.targetId === atFloor.id);
+    expect(hit?.source).toBe('fts');
+    expect(hit!.similarity).toBe(0.6);
+    expect(
+      findSaveTimeCandidates(repos, saved, { perSaveMax: 5, lexicalFloor: 0.61 }).candidates.some(
+        (c) => c.targetId === atFloor.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('a pair below the lexical floor is still surfaced by the dense channel', () => {
+    seedFacts();
+    const scope = defaultProjectScope(db.handle);
+    const repos = createRepositories(db.handle.db);
+    const target = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Cold starts on the worker fleet',
+        content: 'Worker pods take forty seconds to warm the model cache after a deploy.',
+      },
+      scope,
+    );
+    const saved = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Slow first request after rollout',
+        content:
+          'The first request after each rollout waits while pods warm up, roughly forty seconds.',
+      },
+      scope,
+    );
+    repos.vectors.insertEmbedding(target.id, unitVector(3), partitionKeyFor(scope.projectId));
+    repos.vectors.insertEmbedding(saved.id, unitVector(3), partitionKeyFor(scope.projectId));
+
+    const lexical = findSaveTimeCandidates(repos, saved, { perSaveMax: 5, lexicalFloor: 0 });
+    const lexicalHit = lexical.candidates.find((c) => c.targetId === target.id);
+    expect(lexicalHit?.source).toBe('vec');
+
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }).candidates;
+    const hit = cands.find((c) => c.targetId === target.id);
+    expect(hit?.source).toBe('vec');
+  });
+
+  it('the lexical floor does not gate the entity channel', () => {
+    seedFacts();
+    const scope = defaultProjectScope(db.handle);
+    const repos = createRepositories(db.handle.db);
+    const target = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Session expiry lives in one module',
+        content:
+          'The twelve hour expiry is enforced in src/lib/session-expiry.ts on every request.',
+      },
+      scope,
+    );
+    repos.entities.linkMemory(
+      target.id,
+      scope.projectId,
+      [{ kind: 'path', value: 'src/lib/session-expiry.ts' }],
+      new Date(),
+    );
+    const saved = memorySvc.save(
+      {
+        type: 'project',
+        title: 'Operators keep their login for a week',
+        content: 'Changed src/lib/session-expiry.ts so operators stay signed in seven days.',
+      },
+      scope,
+    );
+    const cands = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 }, [
+      { kind: 'path', value: 'src/lib/session-expiry.ts' },
+    ]).candidates;
+    const hit = cands.find((c) => c.targetId === target.id);
+    expect(hit?.source).toBe('entity');
+    expect(hit!.similarity).toBeLessThan(LEXICAL_CANDIDATE_FLOOR);
+  });
+
+  it('the floor adds no repository read: the same reads run at the shipped floor and at 0', () => {
+    seedFacts();
+    const saved = memorySvc.save(UNRELATED, defaultProjectScope(db.handle));
+    const record = (calls: string[]): Repositories => {
+      const repos = createRepositories(db.handle.db);
+      return new Proxy(repos, {
+        get(target, repoName: string) {
+          const repo = target[repoName as keyof Repositories] as object;
+          return new Proxy(repo, {
+            get(r, method: string) {
+              const value = (r as Record<string, unknown>)[method];
+              if (typeof value !== 'function') return value;
+              return (...args: unknown[]) => {
+                calls.push(`${repoName}.${method}`);
+                return (value as (...a: unknown[]) => unknown).apply(r, args);
+              };
+            },
+          });
+        },
+      });
+    };
+    const atShipped: string[] = [];
+    const atZero: string[] = [];
+    findSaveTimeCandidates(record(atShipped), saved, { perSaveMax: 5 });
+    findSaveTimeCandidates(record(atZero), saved, { perSaveMax: 5, lexicalFloor: 0 });
+    expect(atShipped.length).toBeGreaterThan(0);
+    expect(atShipped).toEqual(atZero);
   });
 });
 

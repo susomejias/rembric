@@ -1,0 +1,32 @@
+# Mutation check — LEXICAL_CANDIDATE_FLOOR
+
+Command (cases 1-4, each applied to the pristine file, restore byte-verified by the script):
+
+node scripts/mutate.mjs --workspace packages/core --file packages/core/src/services/save-time-candidates.ts --spec src/services/save-time-candidates.test.ts -t 'lexical floor' --mutation '<find>' --with '<replace>' ...
+
+mutation:       if (similarity < lexicalFloor) continue;
+  CAUGHT by 3:
+    × findSaveTimeCandidates — lexical floor > an unrelated save over a heterogeneous scope writes no lexical pending judgment, though rank-only admission would
+    × findSaveTimeCandidates — lexical floor > a below-floor lexical match takes no slot and is not counted
+    × findSaveTimeCandidates — lexical floor > a lexical match exactly at the floor is admitted
+mutation: export const LEXICAL_CANDIDATE_FLOOR = 0.6;
+  CAUGHT by 3:
+    × findSaveTimeCandidates — lexical floor > an unrelated save over a heterogeneous scope writes no lexical pending judgment, though rank-only admission would
+    × findSaveTimeCandidates — lexical floor > a below-floor lexical match takes no slot and is not counted
+    × findSaveTimeCandidates — lexical floor > the lexical floor does not gate the entity channel
+mutation: similarity < lexicalFloor
+  CAUGHT by 1:
+    × findSaveTimeCandidates — lexical floor > a lexical match exactly at the floor is admitted
+mutation:   const lexicalFloor = opts.lexicalFloor ?? LEXICAL_CANDIDATE_FLOOR;
+  CAUGHT by 3:
+    × findSaveTimeCandidates — lexical floor > an unrelated save over a heterogeneous scope writes no lexical pending judgment, though rank-only admission would
+    × findSaveTimeCandidates — lexical floor > a below-floor lexical match takes no slot and is not counted
+    × findSaveTimeCandidates — lexical floor > a lexical match exactly at the floor is admitted
+
+Case 5 — filter moved after the cap (two edits in one case, which mutate.mjs cannot express; applied by hand from a backup, restore verified with cmp):
+  removed the in-pool 'if (similarity < lexicalFloor) continue;' and filtered fts rows out of all.slice(0, perSaveMax) instead, keeping detected = all.length
+   × findSaveTimeCandidates — lexical floor > an unrelated save over a heterogeneous scope writes no lexical pending judgment, though rank-only admission would
+   × findSaveTimeCandidates — lexical floor > a below-floor lexical match takes no slot and is not counted
+      Tests  2 failed | 5 passed | 33 skipped (40)
+
+First run, before the boundary test existed: 'similarity < lexicalFloor' -> 'similarity <= lexicalFloor' was NOT caught; the test 'a lexical match exactly at the floor is admitted' was added for it and now catches it.
