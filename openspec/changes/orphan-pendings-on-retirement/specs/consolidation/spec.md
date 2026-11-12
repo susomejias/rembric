@@ -97,7 +97,7 @@ The retirement, its orphanings and their journal ops SHALL commit or roll back t
 
 ### Requirement: Undoing a retirement MUST restore the pending judgments it orphaned
 
-Undoing a `decay`, `agent_memory_archive` or `merge` op SHALL, in the same undo transaction and after reactivating its memories, also undo the orphanings that retirement made: the active `orphan_promote` ops of the same run whose reasoning carries the prefix `endpoint retired at retirement`. For each:
+Undoing a `decay`, `agent_memory_archive` or `merge` op SHALL, in the same undo transaction and after reactivating its memories, also undo the orphanings that retirement made: the active `orphan_promote` ops of the same run whose reasoning carries the prefix `endpoint retired at retirement` and whose pair touches one of the memories the op retired. For each:
 
 - when the relation was written after the op, its later verdict SHALL be kept and reported, and the op SHALL be marked reverted, exactly as "Undoing an orphaning MUST NOT overwrite a verdict written after it" requires;
 - otherwise, when either endpoint is not `active` after the reactivation, the relation SHALL stay `orphaned`, its op SHALL stay active, and the undo SHALL report it with its judgment id and the retired endpoint. That happens when the memory stayed retired because a newer memory holds its `topic_key` slot, or when the other endpoint was retired since. Restoring it would re-create a pending row no agent can judge;
@@ -132,6 +132,12 @@ The operator surface SHALL show which relations an undo left orphaned and why, b
 - **GIVEN** a sweep run whose `decay` op archived M and orphaned X→M, and whose deadline step orphaned another relation R
 - **WHEN** the operator undoes the whole run
 - **THEN** M SHALL be `active`, X→M and R SHALL be `pending`, and every op of the run SHALL be marked reverted exactly once
+
+#### Scenario: Undoing one retirement of a shared run restores only its own judgments
+
+- **GIVEN** one run holding two `decay` ops, the first archiving M1, which orphaned M1→X, and the second archiving M2, which orphaned X→M2
+- **WHEN** the operator undoes the first `decay` op
+- **THEN** M1 SHALL be `active` and M1→X `pending`, while M2 SHALL stay `archived`, X→M2 SHALL stay `orphaned`, its op SHALL stay active, and the undo SHALL report no kept-orphaned judgment
 
 #### Scenario: An undo keeps a verdict written after the orphaning
 

@@ -109,7 +109,7 @@ These are not retirements and are left alone: reactivations (`reactivate`, `reac
 
 ### D6 — Undo symmetry
 
-**Linking.** A retirement's orphanings are the active `orphan_promote` ops in the retirement op's own run whose reasoning carries the retirement prefix. Every run holds at most one undoable retirement op: `journalMaintenanceOp` opens a run per op, and the sweep calls `applyDecay` at most once per run. The deadline and drain ops in a decay's run carry other prefixes. The read is `listActiveOps(runId)`, which rides the `run_id` index.
+**Linking.** A retirement's orphanings are the active `orphan_promote` ops in the retirement op's own run whose reasoning carries the retirement prefix and whose pair touches one of the memories the op retired (its `affected_ids`). The deadline and drain ops in a decay's run carry other prefixes. The memory test keeps the link exact even when one run holds several retirement ops: the sweep never does that, but `applyDecay` is public and a caller can share a run, and the per-path cost measurement first did (task 7.2). The read is `listActiveOps(runId)`, which rides the `run_id` index.
 
 **Restoration.** After the reactivation, `undoOp`'s reactivating branch walks the linked ops:
 
@@ -119,7 +119,7 @@ These are not retirements and are left alone: reactivations (`reactivate`, `reac
 
 All of it runs in the undo's one transaction.
 
-**`undoRun`.** It undoes a run's ops in reverse order. When the run holds an active reactivating op, `undoRun` skips that op's linked orphanings and lets the retirement's undo handle them, so the endpoint check sees the reactivated rows. Otherwise, an individually undone linked op could restore a pair whose endpoint the retirement undo then leaves retired. The ids in `alsoReverted` join `undoRun`'s `reverted` list.
+**`undoRun`.** It undoes a run's ops in reverse order. It skips every orphaning linked to an active reactivating op of the run and lets that retirement's undo handle it, so the endpoint check sees the reactivated rows. Otherwise, an individually undone linked op could restore a pair whose endpoint the retirement undo then leaves retired. The ids in `alsoReverted` join `undoRun`'s `reverted` list.
 
 **Per path:**
 
