@@ -1,0 +1,52 @@
+# stale pending drain — mechanics (synthetic scopes)
+texts: pseudo-random words, so lexical containment is ~0 for noise pairs and 10/12 for genuine near-duplicates; vectors: seeded random unit vectors (cosine ~0); entities linked through EntitiesRepository.linkMemory as the save path does
+scratch root /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY
+
+## validation 4 — no starvation, ceil(N/B) runs, idempotence
+backlog N = 100: the first 30 rows in judgment_id order are genuine near-duplicates (kept), then 70 noise rows; B = 20
+setup check: the first 30 pending ids are the genuine ones: PASS
+control without the cursor (always the first B rows): 10 runs drained 0, distinct rows examined 20 — starvation reproduced: PASS
+with the cursor:
+  run 1: examined 20, drained  0, kept 20, stop cap, cursor 01KDVDQ4K0HS7VRCPSK0TSJ74E
+  run 2: examined 20, drained 10, kept 10, stop cap, cursor 01KDVDRZ6068CDQ319J692GV57
+  run 3: examined 20, drained 20, kept  0, stop cap, cursor 01KDVDTSS0RVA0HZJNNMXWXVZ1
+  run 4: examined 20, drained 20, kept  0, stop cap, cursor 01KDVDWMC0HTSM36BTBMYBYJQA
+  run 5: examined 20, drained 20, kept  0, stop cap, cursor 01KDVDYEZ0CRZ74GHVMXDYT7SQ
+runs 5 (ceil(100/20) = 5); drained 70/70 noise rows: PASS; genuine rows still pending PASS
+second full pass: 2 runs, examined 30, drained 0
+  memory_relations digest e74beef2:12861 -> e74beef2:12861; consolidation_ops digest 9f86e9a7:12391 -> 9f86e9a7:12391; consolidation_runs 15 -> 17 (one bookkeeping row per run)
+  idempotent (relations and journal unchanged): PASS
+
+## validation 5 — fail-safe (one run, B = 100, a throwing spy embedder in the context)
+setup check: f2 target status superseded, f3 source status archived; f1 target has a vector: false
+runs 1, examined 7 of 7 selected — the run continued past the throw: PASS
+  f1 missing target vector     -> kept (fail-safe:vector-unknown)
+  f2 superseded target         -> kept (fail-safe:endpoint-not-active)
+  f2 other pair, both active   -> drained (drained)
+  f3 archived source           -> kept (fail-safe:endpoint-not-active)
+  f4 entity read throws        -> kept (fail-safe:error)
+  c1 control                   -> drained (drained)
+  c2 control                   -> drained (drained)
+missing vector not embedded on the fly: spy embedder calls 0, f1 target vectors 0, memory_vec rows 13 -> 13: PASS
+control (must drain): the same f4 pair without the throwing read -> drained (drained)
+control (must drain): f1 after its target vector is stored -> drained (drained)
+f2 superseded and f3 archived stay pending for the deadline step: pending, pending
+
+## validation 6 — atomicity and concurrency (one run, B = 100)
+  a1 journal insert throws -> write-failed (write-failed: simulated journal failure); relation pending, drain ops 0: PASS (rolled back)
+  a2 control              -> drained (drained); drain ops 1
+  a3 judged before write  -> not-pending (not-pending); relation judged/related by agent, drain ops 0: PASS
+  a4 control              -> drained (drained); drain ops 1
+control (must drain): a1 on the next pass without the failing journal -> drained (drained); relation orphaned, drain ops 1
+
+## probe A — entity channel during an entity-index reset (proposed amendment, not in the owner's rule)
+g1 = a genuine pair that only the entity channel admits (shared path src/lib/session-store.ts, unrelated wording, unrelated vectors); n1 = a noise pair; verdicts are dry re-checks (no write)
+  index intact (control: g1 kept by entity)    g1 owner rule entity                     amended entity                     | n1 owner DRAIN  amended DRAIN
+  after EntityBackfillWorker.resetIndex()      g1 owner rule DRAIN                      amended fail-safe:entity-unknown   | n1 owner DRAIN  amended fail-safe:entity-unknown
+  after the backfill re-scans                  g1 owner rule entity                     amended entity                     | n1 owner DRAIN  amended DRAIN
+  real pass with the owner's rule inside the reset window: g1 -> drained (drained); relation orphaned
+
+## probe B — does an operator undo stick? (proposed amendment, not in the owner's rule)
+pass 1 drained 5/5; undoRun; owner's rule pass 2 re-drained 5/5
+amended pass 3 (skip judgment ids with a reverted drain op): undone rows kept 5/5; control (must drain) a new noise pair -> drained (drained)
+context, the existing deadline step: runScope orphans a pending row older than 14 days (6 orphaned in that run, this row included: yes); undoOp restores it to pending; the next runScope orphans it again -> orphaned

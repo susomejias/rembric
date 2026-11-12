@@ -1,0 +1,472 @@
+# stale pending drain — labelled save-time fixture
+fixture: 24 base memories, 27 labelled saves; saved through runPostSaveSteps with lexicalFloor 0 (pre-floor behaviour), per-save cap 5
+rules: lexical >= 0.6 (tokenContainment), vector >= 0.7 (1 - clamp(vec_distance_cosine)), any shared entity; fail-safe keeps non-active/missing endpoints, missing vectors and errors
+drain batch B = 50, cursor carried in memory between runs; scratch root /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY
+
+embedding model: onnx-community/gte-multilingual-base
+
+runs in the first pass: 5 (50/50 50/48 50/40 50/44 43/25 examined/drained)
+second full pass: 1 runs, examined 18, drained 0 (fixpoint after one pass)
+
+## validation 1 — production arm (real embedder)
+pendings before: 225 (base saves wrote 90; labelled saves wrote 135 — control: the committed sweep reports 135 at floor 0.00 in both arms)
+drained: 207
+kept: 18
+other verdicts (not-pending / write-failed): 0
+
+kept by primary reason (first admitting channel in the order lexical, vector, entity; else the fail-safe):
+  lexical                             8
+  vector                             10
+
+kept by exact admitting-channel combination:
+  lexical+vector+entity               1
+  lexical+vector                      7
+  vector+entity                       4
+  vector                              6
+
+by pair class (source kind -> target kind): pending / drained / kept
+  base -> base                               90   90    0
+  contradiction -> base                      10    5    5
+  contradiction -> contradiction              2    2    0
+  contradiction -> expanded-rewrite          11   11    0
+  contradiction -> near-duplicate             2    1    1
+  expanded-rewrite -> base                   13    9    4
+  expanded-rewrite -> expanded-rewrite        3    3    0
+  expanded-rewrite -> near-duplicate          4    4    0
+  near-duplicate -> base                     34   26    8
+  near-duplicate -> near-duplicate            6    6    0
+  unrelated -> base                          23   23    0
+  unrelated -> contradiction                  1    1    0
+  unrelated -> expanded-rewrite              14   14    0
+  unrelated -> near-duplicate                 7    7    0
+  unrelated -> unrelated                      5    5    0
+
+labelled pairs (save -> its expected base item) pending before the drain: 17 of 17
+FALSE DRAINS (a labelled pair not kept): 0
+  kept     nd-port -> b-port                  lexical                    lex 0.842 | vec 0.968 | entity none
+  kept     nd-orm -> b-orm                    lexical                    lex 0.773 | vec 0.946 | entity none
+  kept     nd-node -> b-node                  lexical                    lex 0.750 | vec 0.966 | entity none
+  kept     nd-backup -> b-backup              lexical                    lex 0.955 | vec 0.978 | entity none
+  kept     nd-rate -> b-rate                  lexical                    lex 0.727 | vec 0.979 | entity none
+  kept     nd-es-reviews -> b-es-reviews      lexical                    lex 0.882 | vec 0.987 | entity none
+  kept     nd-flags -> b-flags                lexical                    lex 0.857 | vec 0.965 | entity path:config/flags.yaml
+  kept     nd-user-lang -> b-user-lang        lexical                    lex 0.933 | vec 0.963 | entity none
+  kept     er-logs -> b-logs                  vector                     lex 0.266 | vec 0.780 | entity none
+  kept     er-docker -> b-docker              vector                     lex 0.287 | vec 0.861 | entity none
+  kept     er-retry -> b-retry                vector                     lex 0.316 | vec 0.892 | entity none
+  kept     er-es-deploy -> b-es-deploy        vector                     lex 0.300 | vec 0.831 | entity none
+  kept     c-session -> b-auth                vector                     lex 0.400 | vec 0.763 | entity path:src/lib/session.ts
+  kept     c-env -> b-env                     vector                     lex 0.412 | vec 0.857 | entity none
+  kept     c-flaky -> b-flaky                 vector                     lex 0.556 | vec 0.865 | entity path:tests/realtime/reconnect.test.ts
+  kept     c-flags -> b-flags                 vector                     lex 0.313 | vec 0.777 | entity path:config/flags.yaml
+  kept     c-cache -> b-cache                 vector                     lex 0.263 | vec 0.751 | entity none
+
+pairs whose source is an unrelated save: 50; drained 50; kept 0
+drained pairs by source kind: base 90, near-duplicate 32, expanded-rewrite 16, contradiction 19, unrelated 50
+
+every kept pair, by title:
+  [lexical] "Job scheduler port is 8781" -> "Scheduler listens on port 8781" (lex 0.842 | vec 0.968 | entity none)
+  [lexical] "Billing persistence goes through Drizzle" -> "Billing service uses Drizzle ORM" (lex 0.773 | vec 0.946 | entity none)
+  [lexical] "Services need Node 22+" -> "Node 22 is the minimum runtime" (lex 0.750 | vec 0.966 | entity none)
+  [lexical] "Off-site SQLite backups run nightly" -> "Nightly backups go to the off-site bucket" (lex 0.955 | vec 0.978 | entity none)
+  [lexical] "Per-token API rate limit" -> "API rate limit is 120 requests per minute per token" (lex 0.727 | vec 0.979 | entity none)
+  [lexical] "Fusionar en main requiere dos aprobaciones" -> "Dos aprobaciones para fusionar en main" (lex 0.882 | vec 0.987 | entity none)
+  [lexical] "Feature flags need an owner and a removal date" -> "Feature flags live in config/flags.yaml" (lex 0.857 | vec 0.965 | entity path:config/flags.yaml)
+  [lexical] "Contestar al usuario en español" -> "El usuario prefiere respuestas en español" (lex 0.933 | vec 0.963 | entity none)
+  [vector] "Logging conventions for every service" -> "Logs are JSON lines on stdout" (lex 0.266 | vec 0.780 | entity none)
+  [vector] "How the production container image is built" -> "The production image is distroless" (lex 0.287 | vec 0.861 | entity none)
+  [vector] "Outbound webhook delivery and retries" -> "Outbound webhooks retry with exponential backoff" (lex 0.316 | vec 0.892 | entity none)
+  [vector] "Calendario y proceso de despliegue" -> "Los despliegues se hacen los martes" (lex 0.300 | vec 0.831 | entity none)
+  [vector] "Operators stay logged in for a week" -> "Dashboard sessions expire after 12 hours" (lex 0.400 | vec 0.763 | entity path:src/lib/session.ts)
+  [vector] "Webhook secret is fetched lazily from the vault" -> "STRIPE_WEBHOOK_SECRET is required in production" (lex 0.412 | vec 0.857 | entity none)
+  [vector] "Reconnect test is stable again" -> "The websocket reconnect test is flaky on CI" (lex 0.556 | vec 0.865 | entity path:tests/realtime/reconnect.test.ts)
+  [vector] "Flags moved to the remote config service" -> "Feature flags live in config/flags.yaml" (lex 0.313 | vec 0.777 | entity path:config/flags.yaml)
+  [vector] "Flags moved to the remote config service" -> "Feature flags need an owner and a removal date" (lex 0.250 | vec 0.728 | entity path:config/flags.yaml)
+  [vector] "Index writes purge cached search responses" -> "Search results are cached for 60 seconds" (lex 0.263 | vec 0.751 | entity none)
+
+sample of drained pairs, by title (every 8th in judgment_id order):
+  "Scheduler listens on port 8781" -> "Billing service uses Drizzle ORM" (lex 0.130 | vec 0.448 | entity none)
+  "Nightly backups go to the off-site bucket" -> "Dashboard sessions expire after 12 hours" (lex 0.043 | vec 0.530 | entity none)
+  "STRIPE_WEBHOOK_SECRET is required in production" -> "Billing service uses Drizzle ORM" (lex 0.130 | vec 0.478 | entity none)
+  "Store timestamps in UTC, render in the viewer's zone" -> "Dashboard sessions expire after 12 hours" (lex 0.211 | vec 0.481 | entity none)
+  "The production image is distroless" -> "STRIPE_WEBHOOK_SECRET is required in production" (lex 0.182 | vec 0.476 | entity none)
+  "Use pnpm through corepack" -> "Nightly backups go to the off-site bucket" (lex 0.214 | vec 0.452 | entity none)
+  "API rate limit is 120 requests per minute per token" -> "Nightly backups go to the off-site bucket" (lex 0.222 | vec 0.497 | entity none)
+  "Logs are JSON lines on stdout" -> "Scheduler listens on port 8781" (lex 0.167 | vec 0.626 | entity none)
+  "Invoices are rendered to PDF with a headless browser" -> "The production image is distroless" (lex 0.158 | vec 0.468 | entity none)
+  "Translations are loaded per route" -> "The production image is distroless" (lex 0.167 | vec 0.475 | entity none)
+  "Public identifiers are ULIDs" -> "The production image is distroless" (lex 0.150 | vec 0.421 | entity none)
+  "Shared UI components live in packages/ui" -> "Outbound webhooks retry with exponential backoff" (lex 0.190 | vec 0.438 | entity none)
+  "Billing persistence goes through Drizzle" -> "Logs are JSON lines on stdout" (lex 0.182 | vec 0.498 | entity none)
+  "Off-site SQLite backups run nightly" -> "Job scheduler port is 8781" (lex 0.182 | vec 0.576 | entity none)
+  "Fusionar en main requiere dos aprobaciones" -> "Los despliegues se hacen los martes" (lex 0.176 | vec 0.469 | entity none)
+  "Contestar al usuario en español" -> "Fusionar en main requiere dos aprobaciones" (lex 0.133 | vec 0.611 | entity none)
+  "How the production container image is built" -> "Scheduler listens on port 8781" (lex 0.113 | vec 0.527 | entity none)
+  "Calendario y proceso de despliegue" -> "El usuario prefiere respuestas en español" (lex 0.086 | vec 0.453 | entity none)
+  "Webhook secret is fetched lazily from the vault" -> "How the production container image is built" (lex 0.353 | vec 0.434 | entity none)
+  "Flags moved to the remote config service" -> "Logging conventions for every service" (lex 0.250 | vec 0.543 | entity none)
+  "Makefiles need tab indentation" -> "Node 22 is the minimum runtime" (lex 0.125 | vec 0.326 | entity none)
+  "Thumbnails are generated on upload" -> "Nightly backups go to the off-site bucket" (lex 0.333 | vec 0.479 | entity none)
+  "Marketing site hosting" -> "Public identifiers are ULIDs" (lex 0.222 | vec 0.398 | entity none)
+  "Cambio de día de la planificación" -> "Fusionar en main requiere dos aprobaciones" (lex 0.182 | vec 0.417 | entity none)
+  "Visible focus rings" -> "Operators stay logged in for a week" (lex 0.182 | vec 0.380 | entity none)
+  "Weekly finance report" -> "Outbound webhook delivery and retries" (lex 0.333 | vec 0.464 | entity none)
+
+### validation 3 — consistency (independent recomputation over raw read-only queries)
+pairs checked 225; recomputed drain 207, keep 18; mismatches 0
+max |lexical(drain) - lexical(recomputed)| = 0.00e+0; max |cosine(drain, sqlite-vec) - cosine(recomputed, float64)| = 7.64e-7
+pairs within 1e-4 of the vector threshold: 0; exactly at the lexical floor: 0
+control (must flag): one drained and one kept decision flipped in a copy of the log -> 2 mismatch(es) flagged, expected 2: PASS
+
+### superset check against the shipped floor (same fixture saved at lexicalFloor 0.60, production arm)
+pending pairs written at 0.60: 18; kept by the drain: 18; written at 0.60 and kept: 18; written at 0.60 but NOT kept: 0
+kept but not written at 0.60: 0
+
+### validation 7 — undo through the dashboard's service path (first run op by op with undoOp, the rest with undoRun)
+before undo: pending 18, drained 207 (control: pending + drained = 225, pre-drain pending 225)
+ops reverted 207 (expected 207); topic-slot skips 0; drain ops still active 0
+drained rows back to a clean pending state (status, relation, reason, marked_by_kind, judged_at): 207/207
+pending after undo 225; identical to the pre-drain pending set: yes
+finding: the next drain pass after the undo drains 207 row(s) again (the rule is deterministic and the undone rows still fail every channel)
+
+## validation 1 — lexical-only arm (no embedder, so no stored vectors)
+pendings before: 225 (base saves wrote 90; labelled saves wrote 135 — control: the committed sweep reports 135 at floor 0.00 in both arms)
+drained: 0
+kept: 225
+other verdicts (not-pending / write-failed): 0
+
+kept by primary reason (first admitting channel in the order lexical, vector, entity; else the fail-safe):
+  entity                              4
+  fail-safe:vector-unknown          213
+  lexical                             8
+
+kept by exact admitting-channel combination:
+  entity                              4
+  fail-safe:vector-unknown          213
+  lexical+entity                      1
+  lexical                             7
+
+by pair class (source kind -> target kind): pending / drained / kept
+  base -> base                               90    0   90
+  contradiction -> base                      10    0   10
+  contradiction -> contradiction              2    0    2
+  contradiction -> expanded-rewrite          11    0   11
+  contradiction -> near-duplicate             2    0    2
+  expanded-rewrite -> base                   13    0   13
+  expanded-rewrite -> expanded-rewrite        3    0    3
+  expanded-rewrite -> near-duplicate          4    0    4
+  near-duplicate -> base                     34    0   34
+  near-duplicate -> near-duplicate            6    0    6
+  unrelated -> base                          23    0   23
+  unrelated -> contradiction                  1    0    1
+  unrelated -> expanded-rewrite              14    0   14
+  unrelated -> near-duplicate                 7    0    7
+  unrelated -> unrelated                      5    0    5
+
+labelled pairs (save -> its expected base item) pending before the drain: 17 of 17
+FALSE DRAINS (a labelled pair not kept): 0
+  kept     nd-port -> b-port                  lexical                    lex 0.842 | vec missing | entity none
+  kept     nd-orm -> b-orm                    lexical                    lex 0.773 | vec missing | entity none
+  kept     nd-node -> b-node                  lexical                    lex 0.750 | vec missing | entity none
+  kept     nd-backup -> b-backup              lexical                    lex 0.955 | vec missing | entity none
+  kept     nd-rate -> b-rate                  lexical                    lex 0.727 | vec missing | entity none
+  kept     nd-es-reviews -> b-es-reviews      lexical                    lex 0.882 | vec missing | entity none
+  kept     nd-flags -> b-flags                lexical                    lex 0.857 | vec missing | entity path:config/flags.yaml
+  kept     nd-user-lang -> b-user-lang        lexical                    lex 0.933 | vec missing | entity none
+  kept     er-logs -> b-logs                  fail-safe:vector-unknown   lex 0.266 | vec missing | entity none
+  kept     er-docker -> b-docker              fail-safe:vector-unknown   lex 0.287 | vec missing | entity none
+  kept     er-retry -> b-retry                fail-safe:vector-unknown   lex 0.316 | vec missing | entity none
+  kept     er-es-deploy -> b-es-deploy        fail-safe:vector-unknown   lex 0.300 | vec missing | entity none
+  kept     c-session -> b-auth                entity                     lex 0.400 | vec missing | entity path:src/lib/session.ts
+  kept     c-env -> b-env                     fail-safe:vector-unknown   lex 0.412 | vec missing | entity none
+  kept     c-flaky -> b-flaky                 entity                     lex 0.556 | vec missing | entity path:tests/realtime/reconnect.test.ts
+  kept     c-flags -> b-flags                 entity                     lex 0.313 | vec missing | entity path:config/flags.yaml
+  kept     c-cache -> b-cache                 fail-safe:vector-unknown   lex 0.263 | vec missing | entity none
+
+pairs whose source is an unrelated save: 50; drained 0; kept 50
+  kept     u-tabs -> b-flaky                  fail-safe:vector-unknown   lex 0.188 | vec missing | entity none
+  kept     u-tabs -> er-logs                  fail-safe:vector-unknown   lex 0.313 | vec missing | entity none
+  kept     u-tabs -> er-retry                 fail-safe:vector-unknown   lex 0.188 | vec missing | entity none
+  kept     u-tabs -> nd-flags                 fail-safe:vector-unknown   lex 0.188 | vec missing | entity none
+  kept     u-tabs -> b-node                   fail-safe:vector-unknown   lex 0.125 | vec missing | entity none
+  kept     u-retro -> b-orm                   fail-safe:vector-unknown   lex 0.267 | vec missing | entity none
+  kept     u-retro -> er-retry                fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-retro -> er-logs                 fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-retro -> b-logs                  fail-safe:vector-unknown   lex 0.267 | vec missing | entity none
+  kept     u-retro -> b-ui                    fail-safe:vector-unknown   lex 0.400 | vec missing | entity none
+  kept     u-thumbs -> b-logs                 fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-thumbs -> er-docker              fail-safe:vector-unknown   lex 0.467 | vec missing | entity none
+  kept     u-thumbs -> er-retry               fail-safe:vector-unknown   lex 0.400 | vec missing | entity none
+  kept     u-thumbs -> b-retry                fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-thumbs -> b-backup               fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-dns -> b-ulid                    fail-safe:vector-unknown   lex 0.222 | vec missing | entity none
+  kept     u-dns -> er-retry                  fail-safe:vector-unknown   lex 0.389 | vec missing | entity none
+  kept     u-dns -> b-flags                   fail-safe:vector-unknown   lex 0.278 | vec missing | entity none
+  kept     u-dns -> b-auth                    fail-safe:vector-unknown   lex 0.278 | vec missing | entity none
+  kept     u-dns -> er-docker                 fail-safe:vector-unknown   lex 0.389 | vec missing | entity none
+  kept     u-logo -> b-ulid                   fail-safe:vector-unknown   lex 0.286 | vec missing | entity none
+  kept     u-logo -> b-node                   fail-safe:vector-unknown   lex 0.429 | vec missing | entity none
+  kept     u-logo -> b-tz                     fail-safe:vector-unknown   lex 0.286 | vec missing | entity none
+  kept     u-logo -> u-retro                  fail-safe:vector-unknown   lex 0.286 | vec missing | entity none
+  kept     u-logo -> b-pnpm                   fail-safe:vector-unknown   lex 0.286 | vec missing | entity none
+  kept     u-es-meeting -> b-es-deploy        fail-safe:vector-unknown   lex 0.364 | vec missing | entity none
+  kept     u-es-meeting -> nd-es-reviews      fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-es-meeting -> b-user-lang        fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-es-meeting -> b-es-db            fail-safe:vector-unknown   lex 0.455 | vec missing | entity none
+  kept     u-es-meeting -> er-es-deploy       fail-safe:vector-unknown   lex 0.545 | vec missing | entity none
+  kept     u-es-icons -> b-es-deploy          fail-safe:vector-unknown   lex 0.286 | vec missing | entity none
+  kept     u-es-icons -> b-es-db              fail-safe:vector-unknown   lex 0.143 | vec missing | entity none
+  kept     u-es-icons -> er-es-deploy         fail-safe:vector-unknown   lex 0.357 | vec missing | entity none
+  kept     u-es-icons -> b-user-lang          fail-safe:vector-unknown   lex 0.143 | vec missing | entity none
+  kept     u-es-icons -> nd-user-lang         fail-safe:vector-unknown   lex 0.143 | vec missing | entity none
+  kept     u-a11y -> c-session                fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-a11y -> er-logs                  fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-a11y -> nd-flags                 fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-a11y -> nd-rate                  fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-a11y -> u-tabs                   fail-safe:vector-unknown   lex 0.182 | vec missing | entity none
+  kept     u-report -> u-thumbs               fail-safe:vector-unknown   lex 0.250 | vec missing | entity none
+  kept     u-report -> er-retry               fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-report -> u-dns                  fail-safe:vector-unknown   lex 0.250 | vec missing | entity none
+  kept     u-report -> er-docker              fail-safe:vector-unknown   lex 0.333 | vec missing | entity none
+  kept     u-report -> nd-port                fail-safe:vector-unknown   lex 0.250 | vec missing | entity none
+  kept     u-onboarding -> u-logo             fail-safe:vector-unknown   lex 0.167 | vec missing | entity none
+  kept     u-onboarding -> er-logs            fail-safe:vector-unknown   lex 0.250 | vec missing | entity none
+  kept     u-onboarding -> b-es-reviews       fail-safe:vector-unknown   lex 0.167 | vec missing | entity none
+  kept     u-onboarding -> b-orm              fail-safe:vector-unknown   lex 0.250 | vec missing | entity none
+  kept     u-onboarding -> nd-es-reviews      fail-safe:vector-unknown   lex 0.167 | vec missing | entity none
+drained pairs by source kind: 
+
+every kept pair, by title:
+  [fail-safe:vector-unknown] "Scheduler listens on port 8781" -> "Billing service uses Drizzle ORM" (lex 0.130 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Node 22 is the minimum runtime" -> "Scheduler listens on port 8781" (lex 0.150 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Node 22 is the minimum runtime" -> "Billing service uses Drizzle ORM" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dashboard sessions expire after 12 hours" -> "Billing service uses Drizzle ORM" (lex 0.192 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dashboard sessions expire after 12 hours" -> "Scheduler listens on port 8781" (lex 0.115 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dashboard sessions expire after 12 hours" -> "Imports are ordered builtin, external, internal, relative" (lex 0.038 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dashboard sessions expire after 12 hours" -> "Node 22 is the minimum runtime" (lex 0.154 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Nightly backups go to the off-site bucket" -> "Billing service uses Drizzle ORM" (lex 0.130 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Nightly backups go to the off-site bucket" -> "Dashboard sessions expire after 12 hours" (lex 0.043 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Nightly backups go to the off-site bucket" -> "Scheduler listens on port 8781" (lex 0.174 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Nightly backups go to the off-site bucket" -> "Node 22 is the minimum runtime" (lex 0.087 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The websocket reconnect test is flaky on CI" -> "Dashboard sessions expire after 12 hours" (lex 0.179 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The websocket reconnect test is flaky on CI" -> "Billing service uses Drizzle ORM" (lex 0.071 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The websocket reconnect test is flaky on CI" -> "Scheduler listens on port 8781" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The websocket reconnect test is flaky on CI" -> "Node 22 is the minimum runtime" (lex 0.214 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The websocket reconnect test is flaky on CI" -> "Nightly backups go to the off-site bucket" (lex 0.036 | vec missing | entity none)
+  [fail-safe:vector-unknown] "STRIPE_WEBHOOK_SECRET is required in production" -> "Dashboard sessions expire after 12 hours" (lex 0.130 | vec missing | entity none)
+  [fail-safe:vector-unknown] "STRIPE_WEBHOOK_SECRET is required in production" -> "Scheduler listens on port 8781" (lex 0.261 | vec missing | entity none)
+  [fail-safe:vector-unknown] "STRIPE_WEBHOOK_SECRET is required in production" -> "Billing service uses Drizzle ORM" (lex 0.130 | vec missing | entity none)
+  [fail-safe:vector-unknown] "STRIPE_WEBHOOK_SECRET is required in production" -> "Node 22 is the minimum runtime" (lex 0.130 | vec missing | entity none)
+  [fail-safe:vector-unknown] "STRIPE_WEBHOOK_SECRET is required in production" -> "The websocket reconnect test is flaky on CI" (lex 0.130 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Store timestamps in UTC, render in the viewer's zone" -> "Nightly backups go to the off-site bucket" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Store timestamps in UTC, render in the viewer's zone" -> "Dashboard sessions expire after 12 hours" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Store timestamps in UTC, render in the viewer's zone" -> "Billing service uses Drizzle ORM" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Store timestamps in UTC, render in the viewer's zone" -> "STRIPE_WEBHOOK_SECRET is required in production" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Store timestamps in UTC, render in the viewer's zone" -> "Node 22 is the minimum runtime" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Search results are cached for 60 seconds" -> "Scheduler listens on port 8781" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Search results are cached for 60 seconds" -> "Node 22 is the minimum runtime" (lex 0.095 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Search results are cached for 60 seconds" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.095 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Search results are cached for 60 seconds" -> "The websocket reconnect test is flaky on CI" (lex 0.095 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Search results are cached for 60 seconds" -> "Dashboard sessions expire after 12 hours" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The production image is distroless" -> "STRIPE_WEBHOOK_SECRET is required in production" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The production image is distroless" -> "Scheduler listens on port 8781" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The production image is distroless" -> "The websocket reconnect test is flaky on CI" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The production image is distroless" -> "Node 22 is the minimum runtime" (lex 0.273 | vec missing | entity none)
+  [fail-safe:vector-unknown] "The production image is distroless" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Use pnpm through corepack" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Use pnpm through corepack" -> "The websocket reconnect test is flaky on CI" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Use pnpm through corepack" -> "Nightly backups go to the off-site bucket" (lex 0.214 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Use pnpm through corepack" -> "Node 22 is the minimum runtime" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Use pnpm through corepack" -> "Scheduler listens on port 8781" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Los despliegues se hacen los martes" -> "Nightly backups go to the off-site bucket" (lex 0.050 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Los despliegues se hacen los martes" -> "El usuario prefiere respuestas en español" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dos aprobaciones para fusionar en main" -> "Los despliegues se hacen los martes" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dos aprobaciones para fusionar en main" -> "El usuario prefiere respuestas en español" (lex 0.111 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dos aprobaciones para fusionar en main" -> "Billing service uses Drizzle ORM" (lex 0.111 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Dos aprobaciones para fusionar en main" -> "Dashboard sessions expire after 12 hours" (lex 0.056 | vec missing | entity none)
+  [fail-safe:vector-unknown] "API rate limit is 120 requests per minute per token" -> "Nightly backups go to the off-site bucket" (lex 0.222 | vec missing | entity none)
+  [fail-safe:vector-unknown] "API rate limit is 120 requests per minute per token" -> "Dashboard sessions expire after 12 hours" (lex 0.111 | vec missing | entity none)
+  [fail-safe:vector-unknown] "API rate limit is 120 requests per minute per token" -> "Node 22 is the minimum runtime" (lex 0.056 | vec missing | entity none)
+  [fail-safe:vector-unknown] "API rate limit is 120 requests per minute per token" -> "Use pnpm through corepack" (lex 0.111 | vec missing | entity none)
+  [fail-safe:vector-unknown] "API rate limit is 120 requests per minute per token" -> "Scheduler listens on port 8781" (lex 0.111 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logs are JSON lines on stdout" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logs are JSON lines on stdout" -> "Scheduler listens on port 8781" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logs are JSON lines on stdout" -> "Search results are cached for 60 seconds" (lex 0.125 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logs are JSON lines on stdout" -> "The production image is distroless" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logs are JSON lines on stdout" -> "Billing service uses Drizzle ORM" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags live in config/flags.yaml" -> "Nightly backups go to the off-site bucket" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags live in config/flags.yaml" -> "API rate limit is 120 requests per minute per token" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags live in config/flags.yaml" -> "Scheduler listens on port 8781" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags live in config/flags.yaml" -> "The websocket reconnect test is flaky on CI" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags live in config/flags.yaml" -> "Dashboard sessions expire after 12 hours" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Invoices are rendered to PDF with a headless browser" -> "Billing service uses Drizzle ORM" (lex 0.158 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Invoices are rendered to PDF with a headless browser" -> "Search results are cached for 60 seconds" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Invoices are rendered to PDF with a headless browser" -> "The production image is distroless" (lex 0.158 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Invoices are rendered to PDF with a headless browser" -> "Logs are JSON lines on stdout" (lex 0.158 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Invoices are rendered to PDF with a headless browser" -> "Dashboard sessions expire after 12 hours" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhooks retry with exponential backoff" -> "Feature flags live in config/flags.yaml" (lex 0.160 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhooks retry with exponential backoff" -> "Search results are cached for 60 seconds" (lex 0.160 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhooks retry with exponential backoff" -> "Invoices are rendered to PDF with a headless browser" (lex 0.200 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhooks retry with exponential backoff" -> "Nightly backups go to the off-site bucket" (lex 0.200 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhooks retry with exponential backoff" -> "Scheduler listens on port 8781" (lex 0.160 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Translations are loaded per route" -> "Logs are JSON lines on stdout" (lex 0.222 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Translations are loaded per route" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Translations are loaded per route" -> "The production image is distroless" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Translations are loaded per route" -> "Invoices are rendered to PDF with a headless browser" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Translations are loaded per route" -> "Scheduler listens on port 8781" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "La base de datos de analítica es de solo lectura" -> "El usuario prefiere respuestas en español" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "La base de datos de analítica es de solo lectura" -> "Dos aprobaciones para fusionar en main" (lex 0.190 | vec missing | entity none)
+  [fail-safe:vector-unknown] "La base de datos de analítica es de solo lectura" -> "Los despliegues se hacen los martes" (lex 0.286 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Public identifiers are ULIDs" -> "The production image is distroless" (lex 0.150 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Public identifiers are ULIDs" -> "Use pnpm through corepack" (lex 0.150 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Public identifiers are ULIDs" -> "API rate limit is 120 requests per minute per token" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Public identifiers are ULIDs" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Public identifiers are ULIDs" -> "Invoices are rendered to PDF with a headless browser" (lex 0.150 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Shared UI components live in packages/ui" -> "Outbound webhooks retry with exponential backoff" (lex 0.190 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Shared UI components live in packages/ui" -> "Scheduler listens on port 8781" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Shared UI components live in packages/ui" -> "Dashboard sessions expire after 12 hours" (lex 0.190 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Shared UI components live in packages/ui" -> "Invoices are rendered to PDF with a headless browser" (lex 0.190 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Shared UI components live in packages/ui" -> "Search results are cached for 60 seconds" (lex 0.238 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Job scheduler port is 8781" -> "Outbound webhooks retry with exponential backoff" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Job scheduler port is 8781" -> "Logs are JSON lines on stdout" (lex 0.263 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Job scheduler port is 8781" -> "Billing service uses Drizzle ORM" (lex 0.211 | vec missing | entity none)
+  [lexical] "Job scheduler port is 8781" -> "Scheduler listens on port 8781" (lex 0.842 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Job scheduler port is 8781" -> "Invoices are rendered to PDF with a headless browser" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Billing persistence goes through Drizzle" -> "Outbound webhooks retry with exponential backoff" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Billing persistence goes through Drizzle" -> "Feature flags live in config/flags.yaml" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Billing persistence goes through Drizzle" -> "Logs are JSON lines on stdout" (lex 0.182 | vec missing | entity none)
+  [lexical] "Billing persistence goes through Drizzle" -> "Billing service uses Drizzle ORM" (lex 0.773 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Billing persistence goes through Drizzle" -> "Shared UI components live in packages/ui" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Services need Node 22+" -> "Billing service uses Drizzle ORM" (lex 0.200 | vec missing | entity none)
+  [lexical] "Services need Node 22+" -> "Node 22 is the minimum runtime" (lex 0.750 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Services need Node 22+" -> "The websocket reconnect test is flaky on CI" (lex 0.200 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Services need Node 22+" -> "Logs are JSON lines on stdout" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Services need Node 22+" -> "Job scheduler port is 8781" (lex 0.200 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Off-site SQLite backups run nightly" -> "Scheduler listens on port 8781" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Off-site SQLite backups run nightly" -> "Outbound webhooks retry with exponential backoff" (lex 0.182 | vec missing | entity none)
+  [lexical] "Off-site SQLite backups run nightly" -> "Nightly backups go to the off-site bucket" (lex 0.955 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Off-site SQLite backups run nightly" -> "API rate limit is 120 requests per minute per token" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Off-site SQLite backups run nightly" -> "Job scheduler port is 8781" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Per-token API rate limit" -> "Translations are loaded per route" (lex 0.136 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Per-token API rate limit" -> "Nightly backups go to the off-site bucket" (lex 0.227 | vec missing | entity none)
+  [lexical] "Per-token API rate limit" -> "API rate limit is 120 requests per minute per token" (lex 0.727 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Per-token API rate limit" -> "Outbound webhooks retry with exponential backoff" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Per-token API rate limit" -> "Off-site SQLite backups run nightly" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Fusionar en main requiere dos aprobaciones" -> "Billing service uses Drizzle ORM" (lex 0.118 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Fusionar en main requiere dos aprobaciones" -> "La base de datos de analítica es de solo lectura" (lex 0.176 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Fusionar en main requiere dos aprobaciones" -> "Los despliegues se hacen los martes" (lex 0.176 | vec missing | entity none)
+  [lexical] "Fusionar en main requiere dos aprobaciones" -> "Dos aprobaciones para fusionar en main" (lex 0.882 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Fusionar en main requiere dos aprobaciones" -> "El usuario prefiere respuestas en español" (lex 0.118 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags need an owner and a removal date" -> "Shared UI components live in packages/ui" (lex 0.190 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags need an owner and a removal date" -> "Per-token API rate limit" (lex 0.190 | vec missing | entity none)
+  [lexical] "Feature flags need an owner and a removal date" -> "Feature flags live in config/flags.yaml" (lex 0.857 | vec missing | entity path:config/flags.yaml)
+  [fail-safe:vector-unknown] "Feature flags need an owner and a removal date" -> "Billing persistence goes through Drizzle" (lex 0.238 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Feature flags need an owner and a removal date" -> "Invoices are rendered to PDF with a headless browser" (lex 0.190 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Contestar al usuario en español" -> "Fusionar en main requiere dos aprobaciones" (lex 0.133 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Contestar al usuario en español" -> "La base de datos de analítica es de solo lectura" (lex 0.133 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Contestar al usuario en español" -> "Los despliegues se hacen los martes" (lex 0.133 | vec missing | entity none)
+  [lexical] "Contestar al usuario en español" -> "El usuario prefiere respuestas en español" (lex 0.933 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Contestar al usuario en español" -> "Dos aprobaciones para fusionar en main" (lex 0.133 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logging conventions for every service" -> "The production image is distroless" (lex 0.101 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logging conventions for every service" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.114 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logging conventions for every service" -> "Billing persistence goes through Drizzle" (lex 0.089 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logging conventions for every service" -> "Logs are JSON lines on stdout" (lex 0.266 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Logging conventions for every service" -> "Billing service uses Drizzle ORM" (lex 0.101 | vec missing | entity none)
+  [fail-safe:vector-unknown] "How the production container image is built" -> "Node 22 is the minimum runtime" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "How the production container image is built" -> "Job scheduler port is 8781" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "How the production container image is built" -> "The production image is distroless" (lex 0.287 | vec missing | entity none)
+  [fail-safe:vector-unknown] "How the production container image is built" -> "Scheduler listens on port 8781" (lex 0.113 | vec missing | entity none)
+  [fail-safe:vector-unknown] "How the production container image is built" -> "Logging conventions for every service" (lex 0.175 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhook delivery and retries" -> "Outbound webhooks retry with exponential backoff" (lex 0.316 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhook delivery and retries" -> "Dashboard sessions expire after 12 hours" (lex 0.145 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhook delivery and retries" -> "Feature flags need an owner and a removal date" (lex 0.105 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhook delivery and retries" -> "Logging conventions for every service" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Outbound webhook delivery and retries" -> "How the production container image is built" (lex 0.145 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Calendario y proceso de despliegue" -> "Contestar al usuario en español" (lex 0.071 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Calendario y proceso de despliegue" -> "Dos aprobaciones para fusionar en main" (lex 0.100 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Calendario y proceso de despliegue" -> "Los despliegues se hacen los martes" (lex 0.300 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Calendario y proceso de despliegue" -> "El usuario prefiere respuestas en español" (lex 0.086 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Calendario y proceso de despliegue" -> "La base de datos de analítica es de solo lectura" (lex 0.129 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Operators stay logged in for a week" -> "Outbound webhook delivery and retries" (lex 0.200 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Operators stay logged in for a week" -> "How the production container image is built" (lex 0.150 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Operators stay logged in for a week" -> "Search results are cached for 60 seconds" (lex 0.150 | vec missing | entity none)
+  [entity] "Operators stay logged in for a week" -> "Dashboard sessions expire after 12 hours" (lex 0.400 | vec missing | entity path:src/lib/session.ts)
+  [fail-safe:vector-unknown] "Operators stay logged in for a week" -> "Logging conventions for every service" (lex 0.200 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Webhook secret is fetched lazily from the vault" -> "STRIPE_WEBHOOK_SECRET is required in production" (lex 0.412 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Webhook secret is fetched lazily from the vault" -> "How the production container image is built" (lex 0.353 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Webhook secret is fetched lazily from the vault" -> "Logging conventions for every service" (lex 0.294 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Webhook secret is fetched lazily from the vault" -> "Outbound webhook delivery and retries" (lex 0.353 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Webhook secret is fetched lazily from the vault" -> "The production image is distroless" (lex 0.235 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Reconnect test is stable again" -> "How the production container image is built" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Reconnect test is stable again" -> "Node 22 is the minimum runtime" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Reconnect test is stable again" -> "Dashboard sessions expire after 12 hours" (lex 0.278 | vec missing | entity none)
+  [entity] "Reconnect test is stable again" -> "The websocket reconnect test is flaky on CI" (lex 0.556 | vec missing | entity path:tests/realtime/reconnect.test.ts)
+  [fail-safe:vector-unknown] "Reconnect test is stable again" -> "Services need Node 22+" (lex 0.278 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Flags moved to the remote config service" -> "How the production container image is built" (lex 0.375 | vec missing | entity none)
+  [entity] "Flags moved to the remote config service" -> "Feature flags live in config/flags.yaml" (lex 0.313 | vec missing | entity path:config/flags.yaml)
+  [fail-safe:vector-unknown] "Flags moved to the remote config service" -> "Logging conventions for every service" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Flags moved to the remote config service" -> "Operators stay logged in for a week" (lex 0.188 | vec missing | entity none)
+  [entity] "Flags moved to the remote config service" -> "Feature flags need an owner and a removal date" (lex 0.250 | vec missing | entity path:config/flags.yaml)
+  [fail-safe:vector-unknown] "Index writes purge cached search responses" -> "Logs are JSON lines on stdout" (lex 0.211 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Index writes purge cached search responses" -> "Search results are cached for 60 seconds" (lex 0.263 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Index writes purge cached search responses" -> "Flags moved to the remote config service" (lex 0.263 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Index writes purge cached search responses" -> "How the production container image is built" (lex 0.368 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Index writes purge cached search responses" -> "Logging conventions for every service" (lex 0.263 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Makefiles need tab indentation" -> "The websocket reconnect test is flaky on CI" (lex 0.188 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Makefiles need tab indentation" -> "Logging conventions for every service" (lex 0.313 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Makefiles need tab indentation" -> "Outbound webhook delivery and retries" (lex 0.188 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Makefiles need tab indentation" -> "Feature flags need an owner and a removal date" (lex 0.188 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Makefiles need tab indentation" -> "Node 22 is the minimum runtime" (lex 0.125 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Retro cadence" -> "Billing service uses Drizzle ORM" (lex 0.267 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Retro cadence" -> "Outbound webhook delivery and retries" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Retro cadence" -> "Logging conventions for every service" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Retro cadence" -> "Logs are JSON lines on stdout" (lex 0.267 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Retro cadence" -> "Shared UI components live in packages/ui" (lex 0.400 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Thumbnails are generated on upload" -> "Logs are JSON lines on stdout" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Thumbnails are generated on upload" -> "How the production container image is built" (lex 0.467 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Thumbnails are generated on upload" -> "Outbound webhook delivery and retries" (lex 0.400 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Thumbnails are generated on upload" -> "Outbound webhooks retry with exponential backoff" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Thumbnails are generated on upload" -> "Nightly backups go to the off-site bucket" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Marketing site hosting" -> "Public identifiers are ULIDs" (lex 0.222 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Marketing site hosting" -> "Outbound webhook delivery and retries" (lex 0.389 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Marketing site hosting" -> "Feature flags live in config/flags.yaml" (lex 0.278 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Marketing site hosting" -> "Dashboard sessions expire after 12 hours" (lex 0.278 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Marketing site hosting" -> "How the production container image is built" (lex 0.389 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Slides use the new logo" -> "Public identifiers are ULIDs" (lex 0.286 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Slides use the new logo" -> "Node 22 is the minimum runtime" (lex 0.429 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Slides use the new logo" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.286 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Slides use the new logo" -> "Retro cadence" (lex 0.286 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Slides use the new logo" -> "Use pnpm through corepack" (lex 0.286 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Cambio de día de la planificación" -> "Los despliegues se hacen los martes" (lex 0.364 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Cambio de día de la planificación" -> "Fusionar en main requiere dos aprobaciones" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Cambio de día de la planificación" -> "El usuario prefiere respuestas en español" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Cambio de día de la planificación" -> "La base de datos de analítica es de solo lectura" (lex 0.455 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Cambio de día de la planificación" -> "Calendario y proceso de despliegue" (lex 0.545 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Iconos del panel" -> "Los despliegues se hacen los martes" (lex 0.286 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Iconos del panel" -> "La base de datos de analítica es de solo lectura" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Iconos del panel" -> "Calendario y proceso de despliegue" (lex 0.357 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Iconos del panel" -> "El usuario prefiere respuestas en español" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Iconos del panel" -> "Contestar al usuario en español" (lex 0.143 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Visible focus rings" -> "Operators stay logged in for a week" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Visible focus rings" -> "Logging conventions for every service" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Visible focus rings" -> "Feature flags need an owner and a removal date" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Visible focus rings" -> "Per-token API rate limit" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Visible focus rings" -> "Makefiles need tab indentation" (lex 0.182 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Weekly finance report" -> "Thumbnails are generated on upload" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Weekly finance report" -> "Outbound webhook delivery and retries" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Weekly finance report" -> "Marketing site hosting" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Weekly finance report" -> "How the production container image is built" (lex 0.333 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Weekly finance report" -> "Job scheduler port is 8781" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Onboarding reading" -> "Slides use the new logo" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Onboarding reading" -> "Logging conventions for every service" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Onboarding reading" -> "Dos aprobaciones para fusionar en main" (lex 0.167 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Onboarding reading" -> "Billing service uses Drizzle ORM" (lex 0.250 | vec missing | entity none)
+  [fail-safe:vector-unknown] "Onboarding reading" -> "Fusionar en main requiere dos aprobaciones" (lex 0.167 | vec missing | entity none)
+
+sample of drained pairs, by title (every 8th in judgment_id order):
+
+### validation 3 — consistency (independent recomputation over raw read-only queries)
+pairs checked 225; recomputed drain 0, keep 225; mismatches 0
+max |lexical(drain) - lexical(recomputed)| = 0.00e+0; max |cosine(drain, sqlite-vec) - cosine(recomputed, float64)| = 0.00e+0
+pairs within 1e-4 of the vector threshold: 0; exactly at the lexical floor: 0
+control (must flag): one drained and one kept decision flipped in a copy of the log -> 1 mismatch(es) flagged, expected 1: PASS

@@ -1,0 +1,210 @@
+# stale pending drain — labelled save-time fixture, rules v2
+fixture: 24 base memories, 27 labelled saves; saved through runPostSaveSteps with lexicalFloor 0 (pre-floor behaviour), per-save cap 5
+rules v2: lexical >= 0.6 (tokenContainment), vector >= 0.7 (1 - clamp(vec_distance_cosine)), any shared entity in the stored links OR in a fresh extractEntities of both endpoints; a superseded/archived endpoint is drained as 'endpoint retired'; fail-safe keeps missing endpoints, missing vectors, a stale vector index, a failed extraction and errors
+drain batch B = 50, cursor carried in memory between runs; scratch root /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY
+
+embedding model: onnx-community/gte-multilingual-base
+
+runs in the first pass: 5 (50/50 50/48 50/40 50/44 43/25 examined/drained)
+second full pass: 1 runs, examined 18, drained 0 (fixpoint after one pass)
+
+## validation 1 — production arm (real embedder)
+pendings before: 225 (base saves wrote 90; labelled saves wrote 135 — control: the committed sweep reports 135 at floor 0.00 in both arms)
+drained: 207 (stale 207, retired endpoint 0)
+kept: 18
+other verdicts (not-pending / write-failed): 0
+
+kept by primary reason (first admitting channel in the order lexical, vector, entity; else the fail-safe):
+  lexical                             8
+  vector                             10
+
+kept by exact admitting-channel combination:
+  lexical+vector+entity               1
+  lexical+vector                      7
+  vector+entity                       4
+  vector                              6
+
+by pair class (source kind -> target kind): pending / drained / kept
+  base -> base                               90   90    0
+  contradiction -> base                      10    5    5
+  contradiction -> contradiction              2    2    0
+  contradiction -> expanded-rewrite          11   11    0
+  contradiction -> near-duplicate             2    1    1
+  expanded-rewrite -> base                   13    9    4
+  expanded-rewrite -> expanded-rewrite        3    3    0
+  expanded-rewrite -> near-duplicate          4    4    0
+  near-duplicate -> base                     34   26    8
+  near-duplicate -> near-duplicate            6    6    0
+  unrelated -> base                          23   23    0
+  unrelated -> contradiction                  1    1    0
+  unrelated -> expanded-rewrite              14   14    0
+  unrelated -> near-duplicate                 7    7    0
+  unrelated -> unrelated                      5    5    0
+
+labelled pairs (save -> its expected base item) pending before the drain: 17 of 17
+FALSE DRAINS (a labelled pair not kept): 0
+  kept     nd-port -> b-port                  lexical                    lex 0.842 | vec 0.968 | stored entity none | re-extracted none
+  kept     nd-orm -> b-orm                    lexical                    lex 0.773 | vec 0.946 | stored entity none | re-extracted none
+  kept     nd-node -> b-node                  lexical                    lex 0.750 | vec 0.966 | stored entity none | re-extracted none
+  kept     nd-backup -> b-backup              lexical                    lex 0.955 | vec 0.978 | stored entity none | re-extracted none
+  kept     nd-rate -> b-rate                  lexical                    lex 0.727 | vec 0.979 | stored entity none | re-extracted none
+  kept     nd-es-reviews -> b-es-reviews      lexical                    lex 0.882 | vec 0.987 | stored entity none | re-extracted none
+  kept     nd-flags -> b-flags                lexical                    lex 0.857 | vec 0.965 | stored entity path:config/flags.yaml
+  kept     nd-user-lang -> b-user-lang        lexical                    lex 0.933 | vec 0.963 | stored entity none | re-extracted none
+  kept     er-logs -> b-logs                  vector                     lex 0.266 | vec 0.780 | stored entity none | re-extracted none
+  kept     er-docker -> b-docker              vector                     lex 0.287 | vec 0.861 | stored entity none | re-extracted none
+  kept     er-retry -> b-retry                vector                     lex 0.316 | vec 0.892 | stored entity none | re-extracted none
+  kept     er-es-deploy -> b-es-deploy        vector                     lex 0.300 | vec 0.831 | stored entity none | re-extracted none
+  kept     c-session -> b-auth                vector                     lex 0.400 | vec 0.763 | stored entity path:src/lib/session.ts
+  kept     c-env -> b-env                     vector                     lex 0.412 | vec 0.857 | stored entity none | re-extracted none
+  kept     c-flaky -> b-flaky                 vector                     lex 0.556 | vec 0.865 | stored entity path:tests/realtime/reconnect.test.ts
+  kept     c-flags -> b-flags                 vector                     lex 0.313 | vec 0.777 | stored entity path:config/flags.yaml
+  kept     c-cache -> b-cache                 vector                     lex 0.263 | vec 0.751 | stored entity none | re-extracted none
+
+pairs whose source is an unrelated save: 50; drained 50; kept 0
+drained pairs by source kind: base 90, near-duplicate 32, expanded-rewrite 16, contradiction 19, unrelated 50
+
+every kept pair not kept by a fail-safe, by title (0 fail-safe keeps not listed):
+  [lexical] "Job scheduler port is 8781" -> "Scheduler listens on port 8781" (lex 0.842 | vec 0.968 | stored entity none | re-extracted none)
+  [lexical] "Billing persistence goes through Drizzle" -> "Billing service uses Drizzle ORM" (lex 0.773 | vec 0.946 | stored entity none | re-extracted none)
+  [lexical] "Services need Node 22+" -> "Node 22 is the minimum runtime" (lex 0.750 | vec 0.966 | stored entity none | re-extracted none)
+  [lexical] "Off-site SQLite backups run nightly" -> "Nightly backups go to the off-site bucket" (lex 0.955 | vec 0.978 | stored entity none | re-extracted none)
+  [lexical] "Per-token API rate limit" -> "API rate limit is 120 requests per minute per token" (lex 0.727 | vec 0.979 | stored entity none | re-extracted none)
+  [lexical] "Fusionar en main requiere dos aprobaciones" -> "Dos aprobaciones para fusionar en main" (lex 0.882 | vec 0.987 | stored entity none | re-extracted none)
+  [lexical] "Feature flags need an owner and a removal date" -> "Feature flags live in config/flags.yaml" (lex 0.857 | vec 0.965 | stored entity path:config/flags.yaml)
+  [lexical] "Contestar al usuario en español" -> "El usuario prefiere respuestas en español" (lex 0.933 | vec 0.963 | stored entity none | re-extracted none)
+  [vector] "Logging conventions for every service" -> "Logs are JSON lines on stdout" (lex 0.266 | vec 0.780 | stored entity none | re-extracted none)
+  [vector] "How the production container image is built" -> "The production image is distroless" (lex 0.287 | vec 0.861 | stored entity none | re-extracted none)
+  [vector] "Outbound webhook delivery and retries" -> "Outbound webhooks retry with exponential backoff" (lex 0.316 | vec 0.892 | stored entity none | re-extracted none)
+  [vector] "Calendario y proceso de despliegue" -> "Los despliegues se hacen los martes" (lex 0.300 | vec 0.831 | stored entity none | re-extracted none)
+  [vector] "Operators stay logged in for a week" -> "Dashboard sessions expire after 12 hours" (lex 0.400 | vec 0.763 | stored entity path:src/lib/session.ts)
+  [vector] "Webhook secret is fetched lazily from the vault" -> "STRIPE_WEBHOOK_SECRET is required in production" (lex 0.412 | vec 0.857 | stored entity none | re-extracted none)
+  [vector] "Reconnect test is stable again" -> "The websocket reconnect test is flaky on CI" (lex 0.556 | vec 0.865 | stored entity path:tests/realtime/reconnect.test.ts)
+  [vector] "Flags moved to the remote config service" -> "Feature flags live in config/flags.yaml" (lex 0.313 | vec 0.777 | stored entity path:config/flags.yaml)
+  [vector] "Flags moved to the remote config service" -> "Feature flags need an owner and a removal date" (lex 0.250 | vec 0.728 | stored entity path:config/flags.yaml)
+  [vector] "Index writes purge cached search responses" -> "Search results are cached for 60 seconds" (lex 0.263 | vec 0.751 | stored entity none | re-extracted none)
+
+sample of drained pairs, by title (every 8th in judgment_id order):
+  "Scheduler listens on port 8781" -> "Billing service uses Drizzle ORM" (lex 0.130 | vec 0.448 | stored entity none | re-extracted none)
+  "Nightly backups go to the off-site bucket" -> "Scheduler listens on port 8781" (lex 0.174 | vec 0.543 | stored entity none | re-extracted none)
+  "STRIPE_WEBHOOK_SECRET is required in production" -> "The websocket reconnect test is flaky on CI" (lex 0.130 | vec 0.542 | stored entity none | re-extracted none)
+  "Store timestamps in UTC, render in the viewer's zone" -> "Nightly backups go to the off-site bucket" (lex 0.211 | vec 0.474 | stored entity none | re-extracted none)
+  "The production image is distroless" -> "Scheduler listens on port 8781" (lex 0.136 | vec 0.550 | stored entity none | re-extracted none)
+  "Use pnpm through corepack" -> "Store timestamps in UTC, render in the viewer's zone" (lex 0.143 | vec 0.326 | stored entity none | re-extracted none)
+  "API rate limit is 120 requests per minute per token" -> "Dashboard sessions expire after 12 hours" (lex 0.111 | vec 0.527 | stored entity none | re-extracted none)
+  "Logs are JSON lines on stdout" -> "Search results are cached for 60 seconds" (lex 0.125 | vec 0.462 | stored entity none | re-extracted none)
+  "Invoices are rendered to PDF with a headless browser" -> "Billing service uses Drizzle ORM" (lex 0.158 | vec 0.474 | stored entity none | re-extracted none)
+  "Translations are loaded per route" -> "Logs are JSON lines on stdout" (lex 0.222 | vec 0.490 | stored entity none | re-extracted none)
+  "Public identifiers are ULIDs" -> "Invoices are rendered to PDF with a headless browser" (lex 0.150 | vec 0.380 | stored entity none | re-extracted none)
+  "Shared UI components live in packages/ui" -> "Outbound webhooks retry with exponential backoff" (lex 0.190 | vec 0.438 | stored entity none | re-extracted none)
+  "Billing persistence goes through Drizzle" -> "Logs are JSON lines on stdout" (lex 0.182 | vec 0.498 | stored entity none | re-extracted none)
+  "Off-site SQLite backups run nightly" -> "API rate limit is 120 requests per minute per token" (lex 0.182 | vec 0.505 | stored entity none | re-extracted none)
+  "Fusionar en main requiere dos aprobaciones" -> "El usuario prefiere respuestas en español" (lex 0.118 | vec 0.601 | stored entity none | re-extracted none)
+  "Contestar al usuario en español" -> "Dos aprobaciones para fusionar en main" (lex 0.133 | vec 0.608 | stored entity none | re-extracted none)
+  "How the production container image is built" -> "Node 22 is the minimum runtime" (lex 0.100 | vec 0.514 | stored entity none | re-extracted none)
+  "Calendario y proceso de despliegue" -> "Dos aprobaciones para fusionar en main" (lex 0.100 | vec 0.509 | stored entity none | re-extracted none)
+  "Webhook secret is fetched lazily from the vault" -> "How the production container image is built" (lex 0.353 | vec 0.434 | stored entity none | re-extracted none)
+  "Flags moved to the remote config service" -> "Logging conventions for every service" (lex 0.250 | vec 0.543 | stored entity none | re-extracted none)
+  "Makefiles need tab indentation" -> "Feature flags need an owner and a removal date" (lex 0.188 | vec 0.442 | stored entity none | re-extracted none)
+  "Thumbnails are generated on upload" -> "Logs are JSON lines on stdout" (lex 0.333 | vec 0.436 | stored entity none | re-extracted none)
+  "Marketing site hosting" -> "Outbound webhook delivery and retries" (lex 0.389 | vec 0.457 | stored entity none | re-extracted none)
+  "Cambio de día de la planificación" -> "Fusionar en main requiere dos aprobaciones" (lex 0.182 | vec 0.417 | stored entity none | re-extracted none)
+  "Visible focus rings" -> "Makefiles need tab indentation" (lex 0.182 | vec 0.425 | stored entity none | re-extracted none)
+  "Weekly finance report" -> "Outbound webhook delivery and retries" (lex 0.333 | vec 0.464 | stored entity none | re-extracted none)
+
+### validation 3 — consistency (independent recomputation over raw read-only queries)
+pairs checked 225; recomputed stale drain 207, retired drain 0, keep 18; mismatches 0
+max |lexical(drain) - lexical(recomputed)| = 0.00e+0; max |cosine(drain, sqlite-vec) - cosine(recomputed, float64)| = 7.64e-7
+pairs within 1e-4 of the vector threshold: 0; exactly at the lexical floor: 0
+control (must flag): one drained and one kept decision flipped in a copy of the log -> 2 mismatch(es) flagged, expected 2: PASS
+
+### superset check against the shipped floor (same fixture saved at lexicalFloor 0.60, production arm)
+pending pairs written at 0.60: 18; kept by the drain: 18; written at 0.60 and kept: 18; written at 0.60 but NOT kept: 0
+kept but not written at 0.60: 0
+
+### validation 7 — undo through the dashboard's service path (first run op by op with undoOp, the rest with undoRun)
+before undo: pending 18, drained 207 (control: pending + drained = 225, pre-drain pending 225)
+ops reverted 207 (expected 207); topic-slot skips 0; drain ops still active 0
+drained rows back to a clean pending state (status, relation, reason, marked_by_kind, judged_at): 207/207
+pending after undo 225; identical to the pre-drain pending set: yes
+finding: the next drain pass after the undo drains 207 row(s) again (stale-rule drains: the owner's rule does not skip an undone stale drain; only undone retired-endpoint drains are skipped)
+
+## validation 1 — lexical-only arm (no embedder, so no stored vectors)
+pendings before: 225 (base saves wrote 90; labelled saves wrote 135 — control: the committed sweep reports 135 at floor 0.00 in both arms)
+drained: 0 (stale 0, retired endpoint 0)
+kept: 225
+other verdicts (not-pending / write-failed): 0
+
+kept by primary reason (first admitting channel in the order lexical, vector, entity; else the fail-safe):
+  entity                              4
+  fail-safe:vector-unknown          213
+  lexical                             8
+
+kept by exact admitting-channel combination:
+  entity                              4
+  fail-safe:vector-unknown          213
+  lexical+entity                      1
+  lexical                             7
+
+by pair class (source kind -> target kind): pending / drained / kept
+  base -> base                               90    0   90
+  contradiction -> base                      10    0   10
+  contradiction -> contradiction              2    0    2
+  contradiction -> expanded-rewrite          11    0   11
+  contradiction -> near-duplicate             2    0    2
+  expanded-rewrite -> base                   13    0   13
+  expanded-rewrite -> expanded-rewrite        3    0    3
+  expanded-rewrite -> near-duplicate          4    0    4
+  near-duplicate -> base                     34    0   34
+  near-duplicate -> near-duplicate            6    0    6
+  unrelated -> base                          23    0   23
+  unrelated -> contradiction                  1    0    1
+  unrelated -> expanded-rewrite              14    0   14
+  unrelated -> near-duplicate                 7    0    7
+  unrelated -> unrelated                      5    0    5
+
+labelled pairs (save -> its expected base item) pending before the drain: 17 of 17
+FALSE DRAINS (a labelled pair not kept): 0
+  kept     nd-port -> b-port                  lexical                    lex 0.842 | vec missing | stored entity none | re-extracted none
+  kept     nd-orm -> b-orm                    lexical                    lex 0.773 | vec missing | stored entity none | re-extracted none
+  kept     nd-node -> b-node                  lexical                    lex 0.750 | vec missing | stored entity none | re-extracted none
+  kept     nd-backup -> b-backup              lexical                    lex 0.955 | vec missing | stored entity none | re-extracted none
+  kept     nd-rate -> b-rate                  lexical                    lex 0.727 | vec missing | stored entity none | re-extracted none
+  kept     nd-es-reviews -> b-es-reviews      lexical                    lex 0.882 | vec missing | stored entity none | re-extracted none
+  kept     nd-flags -> b-flags                lexical                    lex 0.857 | vec missing | stored entity path:config/flags.yaml
+  kept     nd-user-lang -> b-user-lang        lexical                    lex 0.933 | vec missing | stored entity none | re-extracted none
+  kept     er-logs -> b-logs                  fail-safe:vector-unknown   lex 0.266 | vec missing | stored entity none | re-extracted none
+  kept     er-docker -> b-docker              fail-safe:vector-unknown   lex 0.287 | vec missing | stored entity none | re-extracted none
+  kept     er-retry -> b-retry                fail-safe:vector-unknown   lex 0.316 | vec missing | stored entity none | re-extracted none
+  kept     er-es-deploy -> b-es-deploy        fail-safe:vector-unknown   lex 0.300 | vec missing | stored entity none | re-extracted none
+  kept     c-session -> b-auth                entity                     lex 0.400 | vec missing | stored entity path:src/lib/session.ts
+  kept     c-env -> b-env                     fail-safe:vector-unknown   lex 0.412 | vec missing | stored entity none | re-extracted none
+  kept     c-flaky -> b-flaky                 entity                     lex 0.556 | vec missing | stored entity path:tests/realtime/reconnect.test.ts
+  kept     c-flags -> b-flags                 entity                     lex 0.313 | vec missing | stored entity path:config/flags.yaml
+  kept     c-cache -> b-cache                 fail-safe:vector-unknown   lex 0.263 | vec missing | stored entity none | re-extracted none
+
+pairs whose source is an unrelated save: 50; drained 0; kept 50
+  (50 kept by a fail-safe, not listed)
+drained pairs by source kind: none
+
+every kept pair not kept by a fail-safe, by title (213 fail-safe keeps not listed):
+  [lexical] "Job scheduler port is 8781" -> "Scheduler listens on port 8781" (lex 0.842 | vec missing | stored entity none | re-extracted none)
+  [lexical] "Billing persistence goes through Drizzle" -> "Billing service uses Drizzle ORM" (lex 0.773 | vec missing | stored entity none | re-extracted none)
+  [lexical] "Services need Node 22+" -> "Node 22 is the minimum runtime" (lex 0.750 | vec missing | stored entity none | re-extracted none)
+  [lexical] "Off-site SQLite backups run nightly" -> "Nightly backups go to the off-site bucket" (lex 0.955 | vec missing | stored entity none | re-extracted none)
+  [lexical] "Per-token API rate limit" -> "API rate limit is 120 requests per minute per token" (lex 0.727 | vec missing | stored entity none | re-extracted none)
+  [lexical] "Fusionar en main requiere dos aprobaciones" -> "Dos aprobaciones para fusionar en main" (lex 0.882 | vec missing | stored entity none | re-extracted none)
+  [lexical] "Feature flags need an owner and a removal date" -> "Feature flags live in config/flags.yaml" (lex 0.857 | vec missing | stored entity path:config/flags.yaml)
+  [lexical] "Contestar al usuario en español" -> "El usuario prefiere respuestas en español" (lex 0.933 | vec missing | stored entity none | re-extracted none)
+  [entity] "Operators stay logged in for a week" -> "Dashboard sessions expire after 12 hours" (lex 0.400 | vec missing | stored entity path:src/lib/session.ts)
+  [entity] "Reconnect test is stable again" -> "The websocket reconnect test is flaky on CI" (lex 0.556 | vec missing | stored entity path:tests/realtime/reconnect.test.ts)
+  [entity] "Flags moved to the remote config service" -> "Feature flags live in config/flags.yaml" (lex 0.313 | vec missing | stored entity path:config/flags.yaml)
+  [entity] "Flags moved to the remote config service" -> "Feature flags need an owner and a removal date" (lex 0.250 | vec missing | stored entity path:config/flags.yaml)
+
+sample of drained pairs, by title (every 8th in judgment_id order):
+
+### validation 3 — consistency (independent recomputation over raw read-only queries)
+pairs checked 225; recomputed stale drain 0, retired drain 0, keep 225; mismatches 0
+max |lexical(drain) - lexical(recomputed)| = 0.00e+0; max |cosine(drain, sqlite-vec) - cosine(recomputed, float64)| = 0.00e+0
+pairs within 1e-4 of the vector threshold: 0; exactly at the lexical floor: 0
+control (must flag): one drained and one kept decision flipped in a copy of the log -> 1 mismatch(es) flagged, expected 1: PASS

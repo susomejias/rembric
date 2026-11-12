@@ -1,0 +1,25 @@
+# stale pending drain — retrieval corpus (production arm)
+corpus: 70 memories in 3 projects, ingested through runPostSaveSteps (ingestCorpus) at lexicalFloor 0, per-save cap 5; embedding model onnx-community/gte-multilingual-base
+drain batch B = 50 per scope, cursor in memory; scratch root /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY
+
+pending after ingest at 0.00: 295 (both endpoints active: 289 — control: the committed series reports 289)
+  scope atlas    pending  117  runs 3  drained   89  kept   28  | validation 3: recomputed drain 89 keep 28, mismatches 0, max cosine delta 8.7e-7, near threshold 0
+  scope nimbus   pending  119  runs 3  drained   97  kept   22  | validation 3: recomputed drain 97 keep 22, mismatches 0, max cosine delta 9.1e-7, near threshold 0
+  scope shared   pending   59  runs 2  drained   49  kept   10  | validation 3: recomputed drain 49 keep 10, mismatches 0, max cosine delta 9.5e-7, near threshold 0
+drained 235, kept 60, other 0
+kept by admitting-channel combination: fail-safe:endpoint-not-active 6, vector 54
+
+## validation 2 — kept set against the pendings ingest writes at the shipped floor (0.60)
+pending written at 0.60: 54 (both endpoints active: 54 — control: the committed series reports 54)
+pairs written at 0.60 that were also written at 0.00: 54/54
+kept by the drain: 60 (both endpoints active 54; kept by the endpoint fail-safe 6)
+written at 0.60 and kept: 54; written at 0.60 but NOT kept: 0
+kept with active endpoints but not written at 0.60: 0
+
+kept by the endpoint fail-safe (a superseded endpoint, left to the deadline step): 6; of these written at 0.60 too (any endpoint status): 0
+  atlas   atlas-auth-v1 -> atlas-orm-choice                          source superseded, target active
+  atlas   atlas-auth-v1 -> atlas-orm-distractor                      source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-pg-pin                           source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-scheduler-port                   source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-scheduler-port-distractor        source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-pg-pin-distractor                source superseded, target active

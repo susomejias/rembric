@@ -1,0 +1,9 @@
+# stale pending drain — no model inference (fresh process, no embedder loaded)
+snapshot: /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY/fixture-prod-f000-snapshot (the production-arm fixture database copied before its drain)
+guards installed before any module loads: a resolve hook that throws on @huggingface/transformers and onnxruntime, and a process.dlopen recorder
+
+decisions: 225 in this process, 225 in the embedder-loaded process; differing: 0
+drained 207, kept 18
+spy embedder calls: 0; VectorsRepository.insertEmbedding calls: 0; memory_vec rows 51 -> 51
+control (must be refused): calling loadEmbedder() in this process -> PASS: loadEmbedder() was refused (blocked model runtime import: @huggingface/transformers)
+native addons loaded in this process: better_sqlite3.node
