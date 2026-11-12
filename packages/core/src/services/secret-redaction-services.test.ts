@@ -110,9 +110,9 @@ describe('MemoryService.confirm', () => {
     memory.confirm(id, scope, { verdict: 'refute', reason: `leaked ${JWT}` });
     memory.confirm(id, scope, { verdict: 'affirm', reason: `still true, ${GH}` });
     const reasons = db.handle.raw
-      .prepare('SELECT reason FROM confirmations WHERE memory_id = ? ORDER BY event_ts, id')
+      .prepare('SELECT reason FROM confirmations WHERE memory_id = ?')
       .all(id) as { reason: string }[];
-    expect(reasons.map((r) => r.reason)).toEqual([
+    expect(reasons.map((r) => r.reason).sort()).toEqual([
       'leaked [REDACTED:jwt]',
       'still true, [REDACTED:github_token]',
     ]);
