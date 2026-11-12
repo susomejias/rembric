@@ -19,19 +19,19 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 2. Shared per-pair predicate (behaviour-preserving refactor)
 
-- [ ] 2.1 Before editing, run `pnpm run eval:save-time` and keep its output in a `mktemp -d` scratch directory as the baseline.
-- [ ] 2.2 In `packages/core/src/services/save-time-candidates.ts`, extract the following into exported functions, and make `findSaveTimeCandidates` call them (design D1):
+- [x] 2.1 Before editing, run `pnpm run eval:save-time` and keep its output in a `mktemp -d` scratch directory as the baseline.
+- [x] 2.2 In `packages/core/src/services/save-time-candidates.ts`, extract the following into exported functions, and make `findSaveTimeCandidates` call them (design D1):
   - the lexical measure;
   - the vector distance-to-similarity mapping;
   - the lexical and vector threshold comparisons.
 
   Keep the rarity gate inside detection.
 
-- [ ] 2.3 Done when:
+- [x] 2.3 Done when:
   - `pnpm vitest run packages/core/src/services/save-time-candidates.test.ts` passes with no test edited;
   - `pnpm run eval:save-time` output is byte-identical to the 2.1 baseline;
   - `pnpm run typecheck` is green.
-- [ ] 2.4 Commit: `refactor(core): extract the save-time per-pair admission predicate`.
+- [x] 2.4 Commit: `refactor(core): extract the save-time per-pair admission predicate`.
 
 ## 3. Scoped repository reads
 
