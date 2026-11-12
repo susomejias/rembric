@@ -143,7 +143,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 7. Mutation check
 
-- [ ] 7.1 Weaken each piece separately with `node scripts/mutate.mjs` and confirm the tests naming it turn red.
+- [x] 7.1 Weaken each piece separately with `node scripts/mutate.mjs` and confirm the tests naming it turn red.
   - **Rule:**
     - drain on lexical alone, ignoring the vector and entity verdicts;
     - apply the rarity gate to the entity check;
@@ -171,7 +171,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
     - flatten the drain counters to top-level keys, so the `memory.doctor` test goes red.
   - **No inference:**
     - embed a missing vector through an injected embedder instead of returning `unknown`, so the model-not-loaded test and the type test go red.
-- [ ] 7.2 Commit the commands and their outcomes as `openspec/changes/drain-stale-save-time-pendings/measurements/mutation.txt`.
+- [x] 7.2 Commit the commands and their outcomes as `openspec/changes/drain-stale-save-time-pendings/measurements/mutation.txt`.
 
 ## 8. Documentation
 

@@ -1,0 +1,283 @@
+# stale pending drain — mutation check (task 7)
+Each case weakens one condition, runs the suite that names it, and restores the file byte for byte.
+Single-edit cases use scripts/mutate.mjs. Cases needing edits in two places use a scratch helper with the same apply/run/restore loop (multi-mutate.mjs, kept outside the workspace).
+Every case below turned at least one named test red; no mutation survived.
+
+### Rule: drain on lexical alone
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    const verdicts = [evaluation.lexical, evaluation.vector, evaluation.entity];
+replace:
+    const verdicts = [evaluation.lexical];
+  CAUGHT by 3:
+    × drain — which pairs it orphans > keeps a vector-admitted pair
+    × drain — which pairs it orphans > keeps a pair sharing an entity the rarity gate would block
+    × drain — fail-safe > keeps a pair whose entity extraction fails
+exit 0
+### Rule: apply the rarity gate to the entity check
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          entity: entityVerdict(repos, sourceId, targetId, sourceText, targetText, opts),
+replace:
+          entity: (() => {
+            const v = entityVerdict(repos, sourceId, targetId, sourceText, targetText, opts);
+            if (v !== 'admitted') return v;
+            const total = repos.entities.scopeActiveMemoryCount({ projectId });
+            const linked = repos.entities.findEntitiesForMemories([sourceId]).get(sourceId) ?? [];
+            const rare = linked.some((e) => {
+              const n = repos.entities.entityLinkCount({ projectId, kind: e.kind, value: e.value });
+              return !(n >= ENTITY_RARITY_MIN_LINKS && n / total > ENTITY_RARITY_THRESHOLD);
+            });
+            return rare ? v : 'not_admitted';
+          })(),
+  CAUGHT by 1:
+    × drain — which pairs it orphans > keeps a pair sharing an entity the rarity gate would block
+exit 0
+### Rule: drop the fresh extraction of the target
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        for (const e of extract(target.title, target.content)) targetKeys.add(key(e));
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × drain — fail-safe > keeps a pair whose entity extraction fails
+exit 0
+### Fail-safe: treat unknown as not admitted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+      if (verdicts.includes('unknown')) return 'keep_unknown';
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × drain — fail-safe > keeps a pair whose entity extraction fails
+exit 0
+### Fail-safe: ignore vectorIndexCurrent
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    const vectorIndexCurrent = this.opts.vectorIndexCurrent?.() ?? false;
+replace:
+    const vectorIndexCurrent = true;
+  CAUGHT by 3:
+    × drain — fail-safe > keeps a pair while the vector index is not current
+    × drain — fail-safe > a runner built without vectorIndexCurrent drains no pair by the rules, only retired ones
+    × drain — fail-safe > calls vectorIndexCurrent once per drain step
+exit 0
+### Fail-safe: remove the size bound
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          maxChars: DRAIN_MAX_PAIR_CHARS,
+replace:
+          maxChars: Number.MAX_SAFE_INTEGER,
+  CAUGHT by 1:
+    × drain — fail-safe > keeps an oversized pair and still drains an ordinary one
+exit 0
+### Endpoints: treat a retired endpoint as admitted
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    if (evaluation.kind === 'retired') return 'drain_retired';
+replace:
+    if (evaluation.kind === 'retired') return 'keep_admitted';
+  CAUGHT by 4:
+    × drain — fail-safe > a runner built without vectorIndexCurrent drains no pair by the rules, only retired ones
+    × drain — retired endpoints > drains a superseded source and an archived target, undo restores them, and they are not drained again
+    × drain — summary and journal > deadline, rules-drain and retired-endpoint ops carry three different reasoning prefixes
+    × drain — summary and journal > the summary keeps archives and orphaned on top and nests the cursor and counts under drain
+exit 0
+### Endpoints: treat an unreadable endpoint row as drainable
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        if (!source || !target) return { kind: 'unreadable' };
+replace:
+        if (!source || !target) return { kind: 'retired', sourceStatus: 'archived', targetStatus: 'archived' };
+  CAUGHT by 1:
+    × drain — retired endpoints > keeps a pair whose endpoint row cannot be read
+exit 0
+### Scope: drop the project filter of the selection
+$ node scripts/mutate.mjs --file packages/db/src/repositories/relations-repository.ts --spec packages/db/src/repositories/relations-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+            : undefined,
+          endpointsInScope(opts.projectId),
+        );
+replace:
+            : undefined,
+        );
+  CAUGHT by 4:
+    × RelationsRepository.listExaminablePendingInScope > lists pending rows of the project in (created_at, judgment_id) order, retired endpoints included
+    × RelationsRepository.listExaminablePendingInScope > never returns another project's rows or a cross-project pair
+    × RelationsRepository.listExaminablePendingInScope > resumes strictly after a cursor and stops at an inclusive upper key
+    × RelationsRepository.listExaminablePendingInScope > excludes the given judgment ids inside the query, so the limit counts only examinable rows
+exit 0
+### Scope: drop the project filter of the endpoint read
+$ node scripts/mutate.mjs --file packages/db/src/repositories/memory-repository.ts --spec packages/db/src/repositories/memory-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+              eq(memory.projectId, opts.projectId),
+            ),
+          )
+          .all();
+      }
+    
+      unsafeGetById
+replace:
+            ),
+          )
+          .all();
+      }
+    
+      unsafeGetById
+  CAUGHT by 1:
+    × MemoryRepository > findBoundedEndpoints > never returns another project's row
+exit 0
+### Scope: drop the partition filter of the cosine read
+$ node scripts/mutate.mjs --file packages/db/src/repositories/vectors-repository.ts --spec packages/db/src/repositories/vectors-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+              AND a.partition_key = ${partitionKey} AND b.partition_key = ${partitionKey}
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × VectorsRepository > pairCosineDistance > never reads another project's vector
+exit 0
+### Writes: remove the transaction around orphan and journal
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        this.opts.tx.transaction(() => {
+          const at = new Date();
+replace:
+        ((fn: () => void) => fn())(() => {
+          const at = new Date();
+  CAUGHT by 2:
+    × drain — writes > a failed journal insert leaves the relation pending with no op
+    × drain — writes > a failure on the third pair keeps the first two drains and the run continues with the fourth
+exit 0
+### Writes: stamp judged_at and applied_at separately
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          this.opts.relations.orphan(pair.judgmentId, reasoning, at);
+replace:
+          this.opts.relations.orphan(pair.judgmentId, reasoning);
+  CAUGHT by 1:
+    × drain — which pairs it orphans > drains a pair no channel admits, journaled with the rules prefix and one timestamp
+exit 0
+### Bounds: stop persisting the cursor
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    JSON.stringify({ ...ops, drain })
+replace:
+    JSON.stringify({ ...ops, drain: { ...drain, cursor: null } })
+  CAUGHT by 5:
+    × drain — bounds and cursor > kept rows at the head do not starve later rows
+    × drain — bounds and cursor > wraps to the lowest key and reaches a pair that became drainable after the cursor passed it
+    × drain — bounds and cursor > the budget ends a run after two pairs and the next run resumes at the third
+    × drain — bounds and cursor > a step that begins with the shared budget spent examines exactly one pair
+    × drain — bounds and cursor > a first pair slower than the whole budget still completes, and the step stops after it
+exit 0
+### Bounds: drop the reverted-op exclusion
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          call.revertedJudgmentIds ??=
+            this.opts.repos.consolidation.listRevertedOrphanPromoteCreatedIds();
+replace:
+          call.revertedJudgmentIds ??= [];
+  CAUGHT by 3:
+    × drain — retired endpoints > drains a superseded source and an archived target, undo restores them, and they are not drained again
+    × drain — bounds and cursor > reads the reverted drain ids once per sweep call, not once per project
+    × drain — undo and the deadline > an undone drain is never drained again by the drain
+exit 0
+### Bounds: remove the row cap
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    budgetSpent() ? 1 : DRAIN_ROW_CAP,
+replace:
+    budgetSpent() ? 1 : Number.MAX_SAFE_INTEGER,
+  CAUGHT by 2:
+    × drain — bounds and cursor > kept rows at the head do not starve later rows
+    × drain — bounds and cursor > a 5 000-row backlog is examined in capped runs that resume from the cursor
+exit 0
+### Bounds: restart the budget per scope
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+        const budgetSpent = () => call.drainSpentMs + (clock() - stepStart) >= DRAIN_BUDGET_MS;
+replace:
+        const budgetSpent = () => clock() - stepStart >= DRAIN_BUDGET_MS;
+  CAUGHT by 2:
+    × drain — scope > one project's backlog does not starve another in the same call, and the budget is shared
+    × drain — bounds and cursor > a step that begins with the shared budget spent examines exactly one pair
+exit 0
+### Bounds: remove the at-least-one-pair rule
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+            if (summary.examined > 0 && budgetSpent()) break;
+replace:
+            if (budgetSpent()) break;
+  CAUGHT by 3:
+    × drain — scope > one project's backlog does not starve another in the same call, and the budget is shared
+    × drain — scope > a project with one drainable relation drains it even after another project spent the budget
+    × drain — bounds and cursor > a step that begins with the shared budget spent examines exactly one pair
+exit 0
+### Bounds: ask for the full cap when the budget is already spent
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    budgetSpent() ? 1 : DRAIN_ROW_CAP,
+replace:
+    DRAIN_ROW_CAP,
+  CAUGHT by 1:
+    × drain — bounds and cursor > a step that begins with the shared budget spent examines exactly one pair
+exit 0
+### Undo: remove the undo guard
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/operations.ts --spec packages/core/src/consolidation/operations.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+          if (rel && writtenSinceOp) {
+replace:
+          if (rel && false) {
+  CAUGHT by 3:
+    × orphan_promote undo keeps a verdict written after the op > keeps a supersedes verdict that memory.compare wrote after the drain
+    × orphan_promote undo keeps a verdict written after the op > leaves a relation with no judged_at untouched, reports it, and marks the op reverted
+    × orphan_promote undo keeps a verdict written after the op > undoRun reports the kept verdicts of every op it reverts
+exit 0
+### Output: flatten the drain counters to top-level keys
+$ node scripts/mutate.mjs --file packages/core/src/consolidation/runner.ts --spec packages/core/src/consolidation/drain.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    JSON.stringify({ ...ops, drain })
+replace:
+    JSON.stringify({ ...ops, ...drain, drain })
+  CAUGHT by 2:
+    × drain — summary and journal > the summary keeps archives and orphaned on top and nests the cursor and counts under drain
+    × drain — summary and journal > memory.doctor lastRunOps holds exactly archives and orphaned after a run that drained
+exit 0
+### Wiring: drop vectorIndexCurrent from the server runner
+$ node scripts/mutate.mjs --file apps/web/src/lib/services.ts --spec apps/web/src/test/dashboard-mutations.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+        vectorIndexCurrent: () => vectorIdentityMatches(dataDir),
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × consolidation sweep and undo > a forced sweep drains a stale pending pair only while the vector index matches the current recipe
+exit 0
+
+### Writes: wrap the whole run in one transaction (and drop the per-pair one)
+two edits: runner.ts loop wrapped in this.opts.tx.transaction(...); orphanAndJournal's tx.transaction replaced by a plain call
+  CAUGHT by 2:
+    × drain — writes > a failed journal insert leaves the relation pending with no op
+    × drain — writes > a failure on the third pair keeps the first two drains and the run continues with the fourth
+
+### Bounds: start the budget clock at run start
+two edits: runScopeIn reads the drain clock before decay; drainStale measures from that reading
+  CAUGHT by 1:
+    × drain — bounds and cursor > time spent in decay and deadline orphaning does not consume the drain budget
+
+### No inference: embed a missing vector through the model
+three edits: runner.ts imports loadEmbedder, gains an embedder option, and calls loadEmbedder when the vector verdict is unknown
+  CAUGHT by 10:
+    × drain — fail-safe > keeps a pair with a missing embedding
+    × drain — fail-safe > keeps a pair while the vector index is not current
+    × drain — fail-safe > a runner built without vectorIndexCurrent drains no pair by the rules, only retired ones
+    × drain — bounds and cursor > wraps to the lowest key and reaches a pair that became drainable after the cursor passed it
+    × drain — bounds and cursor > the budget ends a run after two pairs and the next run resumes at the third
+    × drain — bounds and cursor > time spent in decay and deadline orphaning does not consume the drain budget
+    × drain — summary and journal > the summary keeps archives and orphaned on top and nests the cursor and counts under drain
+    × drain — no model inference > decides from stored vectors with the model never loaded, and keeps a pair with no vector
+    × drain — no model inference > a wiped vector index keeps every pair the lexical and entity checks do not admit
+    × drain — no model inference > the drain's import graph reaches no embedding module
+  type pin, with only the option key added (pnpm exec tsc --noEmit in packages/core):
+    drain.test.ts(772,7): error TS2344 — the key set no longer equals the declared one
+    drain.test.ts(783,58): error TS2554 — the not-equal control no longer holds
+
