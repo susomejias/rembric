@@ -163,7 +163,7 @@ describe('deadline orphaning', () => {
   });
 
   // The agent queue withholds this pair, so the sweep is the only thing left that can close it.
-  it('orphans a pending row whose source was superseded on its topic_key', () => {
+  it('orphans a pending row whose source was superseded before retirement closed its pendings', () => {
     const a = memory.saveWithTopicKey(
       { type: 'feedback', title: 'first take', content: 'first take', topicKey: 't' },
       dfltScope,
@@ -171,10 +171,7 @@ describe('deadline orphaning', () => {
     const target = memory.save({ type: 'feedback', title: 'other', content: 'other' }, dfltScope);
     const pending = relations.createPending({ sourceId: a.id, targetId: target.id });
     backdate(pending.judgmentId, orphanDeadlineMs + 10_000);
-    memory.saveWithTopicKey(
-      { type: 'feedback', title: 'second take', content: 'second take', topicKey: 't' },
-      dfltScope,
-    );
+    createRepositories(db.handle.db).memory.markSuperseded(a.id);
 
     expect(memory.unsafeGetById(a.id)?.status).toBe('superseded');
 
