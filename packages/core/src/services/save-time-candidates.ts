@@ -35,6 +35,28 @@ export interface SaveCandidate {
   entityValue?: string;
 }
 
+export function lexicalOverlap(
+  queryTokens: ReadonlySet<string>,
+  candidate: { title: string; content: string },
+): number {
+  return tokenContainment(queryTokens, tokenSet(`${candidate.title}\n\n${candidate.content}`));
+}
+
+export function vectorSimilarity(distance: number): number {
+  return 1 - Math.max(0, Math.min(1, distance));
+}
+
+export function lexicalAdmits(
+  similarity: number,
+  floor: number = LEXICAL_CANDIDATE_FLOOR,
+): boolean {
+  return similarity >= floor;
+}
+
+export function vectorAdmits(similarity: number): boolean {
+  return similarity >= VEC_THRESHOLD;
+}
+
 export interface SaveCandidateResult {
   /** The first `perSaveMax` of the same ranked order `detected` was counted over. */
   candidates: SaveCandidate[];
@@ -69,13 +91,13 @@ export function findSaveTimeCandidates(
   const vecPool: SaveCandidate[] = vecRows
     .map((r) => ({
       targetId: r.id,
-      similarity: 1 - Math.max(0, Math.min(1, r.distance)),
+      similarity: vectorSimilarity(r.distance),
       source: 'vec' as const,
       title: r.title,
       snippet: snippet(r.content, 200),
       topicKey: r.topicKey,
     }))
-    .filter((c) => c.similarity >= VEC_THRESHOLD);
+    .filter((c) => vectorAdmits(c.similarity));
 
   const queryTokens = tokenSet(saved.content);
   const matchExpr = sanitizeFtsQuery(saved.content, { maxTerms: 16 });
@@ -89,8 +111,8 @@ export function findSaveTimeCandidates(
       limit: poolSize,
     });
     for (const r of ftsRows) {
-      const similarity = tokenContainment(queryTokens, tokenSet(`${r.title}\n\n${r.content}`));
-      if (similarity < lexicalFloor) continue;
+      const similarity = lexicalOverlap(queryTokens, r);
+      if (!lexicalAdmits(similarity, lexicalFloor)) continue;
       ftsPool.push({
         targetId: r.id,
         similarity,
@@ -136,7 +158,7 @@ export function findSaveTimeCandidates(
         if (excludeIdSet.has(r.id)) continue;
         entityPool.push({
           targetId: r.id,
-          similarity: tokenContainment(queryTokens, tokenSet(`${r.title}\n\n${r.content}`)),
+          similarity: lexicalOverlap(queryTokens, r),
           source: 'entity',
           title: r.title,
           snippet: snippet(r.content, 200),
