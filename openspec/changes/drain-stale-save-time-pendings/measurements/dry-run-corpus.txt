@@ -1,0 +1,120 @@
+# dry-run-count.mts on a corpus:build copy (task 10.2)
+copy: the 20 000-memory, R = 14 400 synthetic corpus (about 600 pending per loaded project), copied to a scratch directory; no production data.
+Run 1 has no embedding-state.json beside the copy, as when only data.db is copied. Run 2 adds a marker that matches this build.
+Cross-check, not part of this script: the shipped ConsolidationRunner, run over another copy of the same file with decay and deadline neutralized until every pair was examined, drained 1137 by the rules and 1324 for a retired endpoint — the counts of run 2.
+
+## run 1 — no marker
+# stale pending drain — dry-run count (read-only)
+vector index current (embedding-state.json matches this build): false — every rules drain is kept as unknown; copy the marker file with data.db
+reverted orphan_promote ops excluded from the selection: 0
+
+## project #1
+  total pending: 625
+  examined: 625
+  kept admitted: entity: 76
+  kept admitted: lexical: 141
+  kept unknown: vector index not current: 189
+  would drain: endpoint retired: 219
+## project #2
+  total pending: 625
+  examined: 625
+  kept admitted: entity: 87
+  kept admitted: lexical: 111
+  kept unknown: vector index not current: 206
+  would drain: endpoint retired: 221
+## project #3
+  total pending: 595
+  examined: 595
+  kept admitted: entity: 86
+  kept admitted: lexical: 114
+  kept unknown: vector index not current: 185
+  would drain: endpoint retired: 210
+## project #4
+  total pending: 589
+  examined: 589
+  kept admitted: entity: 92
+  kept admitted: lexical: 103
+  kept unknown: vector index not current: 168
+  would drain: endpoint retired: 226
+## project #5
+  total pending: 607
+  examined: 607
+  kept admitted: entity: 89
+  kept admitted: lexical: 96
+  kept unknown: vector index not current: 202
+  would drain: endpoint retired: 220
+## project #6
+  total pending: 592
+  examined: 592
+  kept admitted: entity: 67
+  kept admitted: lexical: 110
+  kept unknown: vector index not current: 187
+  would drain: endpoint retired: 228
+
+## all projects
+  examined: 3633
+  kept admitted: entity: 497
+  kept admitted: lexical: 675
+  kept unknown: vector index not current: 1137
+  total pending: 3633
+  would drain: endpoint retired: 1324
+
+table digests after migration, before -> after the evaluation: memory 81cdaa65f5bfb680 -> 81cdaa65f5bfb680, memory_relations ab29fb2c50127178 -> ab29fb2c50127178: UNCHANGED
+
+## run 2 — current marker
+# stale pending drain — dry-run count (read-only)
+vector index current (embedding-state.json matches this build): true
+reverted orphan_promote ops excluded from the selection: 0
+
+## project #1
+  total pending: 625
+  examined: 625
+  kept admitted: entity: 76
+  kept admitted: lexical: 141
+  would drain by the rules: 189
+  would drain: endpoint retired: 219
+## project #2
+  total pending: 625
+  examined: 625
+  kept admitted: entity: 87
+  kept admitted: lexical: 111
+  would drain by the rules: 206
+  would drain: endpoint retired: 221
+## project #3
+  total pending: 595
+  examined: 595
+  kept admitted: entity: 86
+  kept admitted: lexical: 114
+  would drain by the rules: 185
+  would drain: endpoint retired: 210
+## project #4
+  total pending: 589
+  examined: 589
+  kept admitted: entity: 92
+  kept admitted: lexical: 103
+  would drain by the rules: 168
+  would drain: endpoint retired: 226
+## project #5
+  total pending: 607
+  examined: 607
+  kept admitted: entity: 89
+  kept admitted: lexical: 96
+  would drain by the rules: 202
+  would drain: endpoint retired: 220
+## project #6
+  total pending: 592
+  examined: 592
+  kept admitted: entity: 67
+  kept admitted: lexical: 110
+  would drain by the rules: 187
+  would drain: endpoint retired: 228
+
+## all projects
+  examined: 3633
+  kept admitted: entity: 497
+  kept admitted: lexical: 675
+  total pending: 3633
+  would drain by the rules: 1137
+  would drain: endpoint retired: 1324
+
+table digests after migration, before -> after the evaluation: memory 81cdaa65f5bfb680 -> 81cdaa65f5bfb680, memory_relations ab29fb2c50127178 -> ab29fb2c50127178: UNCHANGED
