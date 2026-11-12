@@ -65,3 +65,11 @@
 - [x] 6.3 Change the `mcp-api` and `memory` deltas, the proposal, the design (D4, D6, Risks, Open Questions), `docs/relations.md` and `docs/embeddings.md` to say "judgment ids" and "advisory".
 - [x] 6.4 The description states "holds judgmentIds of candidates likely restating this fact (advisory)". It is now 1891 characters, and the pinned length and substring in `mcp-transport.test.ts` are updated.
 - [x] 6.5 Run the mutation check on the wiring: target id substituted for judgment id, the high-band condition removed, and the MCP and capture aggregation. Every case is caught (`measurements/mutation.txt`, follow-up section).
+
+## 7. Follow-up: the drain orphans low-band pending pairs
+
+- [x] 7.1 RED in `drain.test.ts`: an entity-only pair at cosine 0.65 and a vector-only pair at 0.72 are drained with the low-band prefix; a 0.76 vector-only pair, an entity-only pair with a missing vector and a dense entity pair are kept. Observe 3 failures.
+- [x] 7.2 GREEN: `drainDisposition` calls `classifyCandidateBand` and returns `drain_low_band`, with its own reasoning prefix. The entity-rarity keep test now uses a dense pair, since an entity-only pair with a known low cosine is low band.
+- [x] 7.3 Add the `consolidation` delta requirement.
+- [x] 7.4 Mutation check on the low-band drain condition (`measurements/mutation.txt`, section 7).
+- [x] 7.5 Re-run the drain fixture: zero false drains on the near-duplicate, expanded-rewrite and contradiction classes.

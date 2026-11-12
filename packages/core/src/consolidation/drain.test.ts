@@ -143,6 +143,26 @@ function drainablePair(opts: { scope?: Scope; targetVector?: Buffer | null } = {
   return pending(source.id, target.id);
 }
 
+function vectorAt(cosine: number): Buffer {
+  const v = new Float32Array(768);
+  v[0] = cosine;
+  v[1] = Math.sqrt(1 - cosine * cosine);
+  return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+}
+
+function sharedEntityPair(targetVector: Buffer | null): Pair {
+  const p = drainablePair({ targetVector });
+  for (const id of [p.sourceId, p.targetId]) {
+    repos.entities.linkMemory(
+      id,
+      scope.projectId,
+      [{ kind: 'ticket', value: `LOW-${seq}` }],
+      new Date(),
+    );
+  }
+  return p;
+}
+
 function keptUnknownPair(): Pair {
   return drainablePair({ targetVector: null });
 }
@@ -248,7 +268,7 @@ describe('drain — which pairs it orphans', () => {
         new Date(),
       );
     }
-    const p = drainablePair();
+    const p = drainablePair({ targetVector: vectorAt(0.72) });
     for (const id of [p.sourceId, p.targetId]) {
       repos.entities.linkMemory(
         id,
@@ -298,6 +318,63 @@ describe('drain — which pairs it orphans', () => {
     sweepOnce();
     expect(statusOf(admitted)).toBe('pending');
     expect(statusOf(drainable)).toBe('orphaned');
+  });
+});
+
+describe('drain — low confidence band', () => {
+  it('drains an entity-only pair with a known cosine below the vector threshold', () => {
+    const p = sharedEntityPair(vectorAt(0.65));
+    sweepOnce();
+    expect(statusOf(p)).toBe('orphaned');
+    expect(opsFor(p)[0]!.reasoning).toMatch(/^orphaned: low confidence band: /);
+    expect(lastSummary().drain.drainedRules).toBe(1);
+  });
+
+  it('drains a vector-only pair at 0.72', () => {
+    const p = drainablePair({ targetVector: vectorAt(0.72) });
+    sweepOnce();
+    expect(statusOf(p)).toBe('orphaned');
+    expect(opsFor(p)[0]!.reasoning).toMatch(/^orphaned: low confidence band: /);
+  });
+
+  it('keeps a vector-only pair at 0.76', () => {
+    const p = drainablePair({ targetVector: vectorAt(0.76) });
+    sweepOnce();
+    expect(statusOf(p)).toBe('pending');
+    expect(lastSummary().drain.keptAdmitted).toBe(1);
+  });
+
+  it('keeps an entity-only pair whose vector is missing', () => {
+    const p = sharedEntityPair(null);
+    sweepOnce();
+    expect(statusOf(p)).toBe('pending');
+    expect(lastSummary().drain.drainedRules).toBe(0);
+  });
+
+  it('keeps a lexically admitted pair whose cosine is in the low band', () => {
+    const n = ++seq;
+    const target = remember(`deploy freeze friday kept${n}`, { vector: vectorAt(0.72) });
+    const source = remember('deploy freeze friday', { vector: axis(0) });
+    const p = pending(source.id, target.id);
+    sweepOnce();
+    expect(statusOf(p)).toBe('pending');
+  });
+
+  it('keeps a low-cosine pair whose entity extraction fails', () => {
+    const n = ++seq;
+    const target = remember(`tango${n} boom-fail uniform${n}`, { vector: vectorAt(0.65) });
+    const source = remember(`alpha${n} bravo${n} charlie${n}`, { vector: axis(0) });
+    const p = pending(source.id, target.id);
+    control.extractThrowsOn = 'boom-fail';
+    sweepOnce();
+    expect(statusOf(p)).toBe('pending');
+    expect(lastSummary().drain.keptUnknown).toBe(1);
+  });
+
+  it('keeps an entity pair in the dense middle band', () => {
+    const p = sharedEntityPair(vectorAt(0.72));
+    sweepOnce();
+    expect(statusOf(p)).toBe('pending');
   });
 });
 
