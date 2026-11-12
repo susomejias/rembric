@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { extractEntities, type ExtractedEntity, projectEntities } from '@rembric/core';
+import { projectEntities } from '@rembric/core';
 import { iterateEntityMatches } from '@rembric/core';
 import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';
 import {
@@ -20,7 +20,12 @@ import {
   SEARCH_LIMIT_MAX,
   type RelationsService,
 } from '@rembric/core';
-import { findSaveTimeCandidates, type CandidateOptions } from '@rembric/core';
+import {
+  runPostSaveSteps,
+  type CandidateOptions,
+  type PostSaveDeps,
+  type SaveTimeCandidateView,
+} from '@rembric/core';
 import { RedactionTally } from '@rembric/core';
 import { getRequestContext, tryGetRequestContext } from '@rembric/core';
 import type { PromptsService } from '@rembric/core';
@@ -677,29 +682,10 @@ function resolveActiveSessionId(
   return null;
 }
 
-export interface SaveTimeCandidateView {
-  judgmentId: string;
-  targetId: string;
-  title: string;
-  snippet: string;
-  similarity: number;
-  source: 'vec' | 'fts' | 'entity';
-  topicKey: string | null;
-  /** Set only for `source: 'entity'` — the value both memories share. */
-  entityValue?: string;
-}
+export type { SaveTimeCandidateView } from '@rembric/core';
 
-export interface SaveWithCandidatesDeps {
+export interface SaveWithCandidatesDeps extends PostSaveDeps {
   memory: MemoryService;
-  relations?: RelationsService;
-  candidates?: CandidateOptions;
-  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
-  embedNow?: (
-    memoryId: string,
-    title: string,
-    content: string,
-    projectId: string,
-  ) => Promise<boolean>;
 }
 
 export async function saveMemoryWithCandidates(
@@ -720,53 +706,6 @@ export async function saveMemoryWithCandidates(
   );
   const { candidates, candidatesDetected } = await runPostSaveSteps(deps, m, scope);
   return { memory: m, supersededByTopicKey, candidates, candidatesDetected };
-}
-
-async function runPostSaveSteps(
-  deps: SaveWithCandidatesDeps,
-  m: Memory,
-  scope: Scope,
-): Promise<{ candidates: SaveTimeCandidateView[]; candidatesDetected: number }> {
-  const extractedEntities: ExtractedEntity[] = extractEntities(m.title, m.content);
-
-  let candidates: SaveTimeCandidateView[] = [];
-  let candidatesDetected = 0;
-  if (deps.repos && deps.relations && deps.candidates && deps.candidates.perSaveMax > 0) {
-    try {
-      if (deps.embedNow) await deps.embedNow(m.id, m.title, m.content, scope.projectId);
-      const found = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
-      candidatesDetected = found.detected;
-      for (const c of found.candidates) {
-        const row = deps.relations.createPending({
-          sourceId: m.id,
-          targetId: c.targetId,
-        });
-        candidates.push({
-          judgmentId: row.judgmentId,
-          targetId: c.targetId,
-          title: c.title,
-          snippet: c.snippet,
-          similarity: c.similarity,
-          source: c.source,
-          topicKey: c.topicKey,
-          ...(c.entityValue ? { entityValue: c.entityValue } : {}),
-        });
-      }
-    } catch {
-      candidates = [];
-      candidatesDetected = 0;
-    }
-  }
-
-  if (deps.repos) {
-    try {
-      deps.repos.entities.linkMemory(m.id, scope.projectId, extractedEntities, m.createdAt);
-    } catch {
-      // Extraction/linking failure must never fail the save.
-    }
-  }
-
-  return { candidates, candidatesDetected };
 }
 
 async function handleSave(

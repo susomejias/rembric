@@ -1,12 +1,12 @@
 ## 1. One curation path (behaviour-preserving refactor)
 
-- [ ] 1.1 Move `runPostSaveSteps` and `SaveTimeCandidateView` out of `packages/mcp/src/memory-tools.ts` into a `core` service built only from `core` pieces (`extractEntities`, `findSaveTimeCandidates`, `RelationsService.createPending`, `linkMemory`). Keep its best-effort failure handling unchanged. `saveMemoryWithCandidates` and `handleMerge` call it, and `@rembric/mcp` re-exports the view type so its existing imports keep compiling.
-- [ ] 1.2 Replace `saveThroughCuration` in `packages/core/src/test-support/retrieval/ingest.ts` with a call to that service, and delete the copy.
-- [ ] 1.3 Done when:
+- [x] 1.1 Move `runPostSaveSteps` and `SaveTimeCandidateView` out of `packages/mcp/src/memory-tools.ts` into a `core` service built only from `core` pieces (`extractEntities`, `findSaveTimeCandidates`, `RelationsService.createPending`, `linkMemory`). Keep its best-effort failure handling unchanged. `saveMemoryWithCandidates` and `handleMerge` call it, and `@rembric/mcp` re-exports the view type so its existing imports keep compiling.
+- [x] 1.2 Replace `saveThroughCuration` in `packages/core/src/test-support/retrieval/ingest.ts` with a call to that service, and delete the copy.
+- [x] 1.3 Done when:
   - `pnpm run typecheck` is green;
   - `pnpm test` is green with no test edited;
   - `pnpm eval` produces result ids identical to the committed retrieval baselines, and `floor-ratchet.test.ts` stays green.
-- [ ] 1.4 Commit as its own work unit: `refactor(core): share one post-save curation path between memory.save and the eval harness`.
+- [x] 1.4 Commit as its own work unit: `refactor(core): share one post-save curation path between memory.save and the eval harness`.
 
 ## 2. Save-time fixture and calibration sweep
 
