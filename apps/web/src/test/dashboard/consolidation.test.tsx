@@ -195,9 +195,22 @@ describe('consolidation drain visibility', () => {
     expect(state?.error).toContain('supersedes');
   });
 
+  it('says an undo left a judgment orphaned because one of its memories is still retired', async () => {
+    const { partialUndo } = await import('../../app/dashboard/consolidation/undo-messages');
+    const state = partialUndo({
+      skipped: [],
+      keptVerdicts: [],
+      keptOrphaned: [{ judgmentId: 'JUDGMENT-0002', retiredId: 'MEMORY-0003' }],
+    });
+    expect(state?.error).toContain('1 judgment(s) stay orphaned');
+    expect(state?.error).toContain('still retired');
+    expect(state?.error).toContain('ops stay active');
+  });
+
   it('control: an undo with nothing skipped or kept is not partial', async () => {
     const { partialUndo } = await import('../../app/dashboard/consolidation/undo-messages');
     expect(partialUndo({ skipped: [], keptVerdicts: [] })).toBeNull();
+    expect(partialUndo({ skipped: [], keptVerdicts: [], keptOrphaned: [] })).toBeNull();
   });
 });
 

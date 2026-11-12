@@ -11,6 +11,7 @@ export {
   undoRun,
 } from './operations.js';
 export type {
+  KeptOrphaned,
   KeptVerdict,
   RetirementCause,
   RetirementInput,

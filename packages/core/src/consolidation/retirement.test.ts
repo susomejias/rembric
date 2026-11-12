@@ -20,6 +20,7 @@ import {
   RelationsService,
   RETIREMENT_ORPHAN_REASON,
   undoOp,
+  undoRun,
 } from '@rembric/core';
 
 import { createTestDb, type TestDb, TestClock } from '../test-support/index.js';
@@ -464,5 +465,210 @@ describe('orphan at retirement — no stray writes', () => {
       db.handle.raw.prepare('SELECT id, status FROM memory WHERE id <> ? ORDER BY id').all(m.id),
     ).toEqual(others);
     expect(orphanOps()).toHaveLength(0);
+  });
+});
+
+describe('undo symmetry — undoing a retirement restores what it orphaned', () => {
+  function archiveOp() {
+    const ops = opsOfType('agent_memory_archive');
+    expect(ops).toHaveLength(1);
+    return ops[0]!;
+  }
+
+  function decayRun(): string {
+    const runId = `run-${clock.value.getTime()}`;
+    db.handle.db
+      .insert(consolidationRuns)
+      .values({ id: runId, startedAt: clock.value, scope: `project:${scope.projectId}` })
+      .run();
+    return runId;
+  }
+
+  it('undoing memory.archive restores its orphaned judgments to pending', () => {
+    const m = save('m');
+    const x = save('x');
+    const p = pending(m.id, x.id);
+    memory.archive(m.id, scope);
+    const orphanOp = opFor(p);
+
+    const result = undoOp(repos, db.handle.db, archiveOp().id);
+
+    expect(status(m.id)).toBe('active');
+    expect(rel(p)).toMatchObject({
+      status: 'pending',
+      relation: null,
+      reason: null,
+      judgedAt: null,
+      markedByKind: null,
+      markedByActor: null,
+    });
+    expect(opById(orphanOp.id).revertedAt).not.toBeNull();
+    expect(opById(archiveOp().id).revertedAt).not.toBeNull();
+    expect(result.alsoReverted).toEqual([orphanOp.id]);
+    expect(result.keptOrphaned).toEqual([]);
+    expect(result.keptVerdicts).toEqual([]);
+  });
+
+  it('undoing a decay restores its orphaned judgments to pending', () => {
+    const m = save('m');
+    const x = save('x');
+    const p = pending(x.id, m.id);
+    const { opId } = applyDecay(repos, db.handle.db, {
+      runId: decayRun(),
+      ids: [m.id],
+      reasoning: 'stale',
+    });
+    expect(rel(p).status).toBe('orphaned');
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect(status(m.id)).toBe('active');
+    expect(rel(p).status).toBe('pending');
+    expect(result.alsoReverted).toEqual([opFor(p).id]);
+  });
+
+  it('undoing a merge restores the originals’ orphaned judgments and archives the successor', () => {
+    const a = save('a');
+    const b = save('b');
+    const x = save('x');
+    const y = save('y');
+    const onA = pending(a.id, x.id);
+    const onB = pending(y.id, b.id);
+    const { memory: successor, opId } = commitMerge([a.id, b.id]);
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect([status(a.id), status(b.id), status(successor.id)]).toEqual([
+      'active',
+      'active',
+      'archived',
+    ]);
+    expect([rel(onA).status, rel(onB).status]).toEqual(['pending', 'pending']);
+    expect([...result.alsoReverted].sort()).toEqual([opFor(onA).id, opFor(onB).id].sort());
+  });
+
+  it('undoing a whole sweep run restores the decay’s judgments and reverts every op exactly once', () => {
+    const live = new RelationsService(repos, db.handle.db);
+    const m = save('decays');
+    const x = save('stays');
+    const y = save('also stays');
+    const linked = live.createPending({ sourceId: x.id, targetId: m.id }).judgmentId;
+    const aged = live.createPending({ sourceId: x.id, targetId: y.id }).judgmentId;
+    db.handle.raw
+      .prepare('UPDATE memory_relations SET created_at = ? WHERE judgment_id = ?')
+      .run(Date.now() - 10 * DAY, aged);
+    backdateLastSeen(m.id, 2 * DAY);
+    backdateLastSeen(x.id, 0);
+    backdateLastSeen(y.id, 0);
+    const { runId } = sweepRunner(live, { orphanDeadlineMs: DAY }).runScope({
+      projectId: scope.projectId,
+    });
+    const runOps = allOps().filter((o) => o.runId === runId);
+    expect(runOps.map((o) => o.opType).sort()).toEqual([
+      'decay',
+      'orphan_promote',
+      'orphan_promote',
+    ]);
+
+    const result = undoRun(repos, db.handle.db, runId);
+
+    expect(status(m.id)).toBe('active');
+    expect([rel(linked).status, rel(aged).status]).toEqual(['pending', 'pending']);
+    expect([...result.reverted].sort()).toEqual(runOps.map((o) => o.id).sort());
+    expect(allOps().filter((o) => o.runId === runId && o.revertedAt === null)).toEqual([]);
+  });
+
+  it('an undo keeps a verdict written after the orphaning and reports it', () => {
+    const m = save('m');
+    const x = save('x');
+    const p = pending(m.id, x.id);
+    memory.archive(m.id, scope);
+    clock.advance(1_000);
+    relations.compareInScope(
+      {
+        sourceId: m.id,
+        targetId: x.id,
+        relation: 'conflicts_with',
+        confidence: 0.9,
+        actor: 'agent',
+      },
+      scope,
+    );
+
+    const result = undoOp(repos, db.handle.db, archiveOp().id);
+
+    expect(status(m.id)).toBe('active');
+    expect(rel(p)).toMatchObject({ status: 'judged', relation: 'conflicts_with' });
+    expect(result.keptVerdicts).toEqual([
+      { judgmentId: p, status: 'judged', relation: 'conflicts_with' },
+    ]);
+    expect(opById(opFor(p).id).revertedAt).not.toBeNull();
+    expect(result.keptOrphaned).toEqual([]);
+  });
+
+  it('an undo leaves a judgment orphaned while its other endpoint is retired, and reports it', () => {
+    const m = save('m');
+    const x = save('x', 'x-topic');
+    const p = pending(m.id, x.id);
+    memory.archive(m.id, scope);
+    save('x again', 'x-topic');
+    expect(status(x.id)).toBe('superseded');
+
+    const result = undoOp(repos, db.handle.db, archiveOp().id);
+
+    expect(status(m.id)).toBe('active');
+    expect(rel(p).status).toBe('orphaned');
+    expect(opById(opFor(p).id).revertedAt).toBeNull();
+    expect(opById(archiveOp().id).revertedAt).not.toBeNull();
+    expect(result.keptOrphaned).toEqual([{ judgmentId: p, retiredId: x.id }]);
+    expect(result.alsoReverted).toEqual([]);
+  });
+
+  it('a run undo leaves a judgment orphaned when its memory keeps a taken topic slot', () => {
+    const r = save('r', 'k');
+    const x = save('x');
+    const p = pending(r.id, x.id);
+    const runId = decayRun();
+    applyDecay(repos, db.handle.db, { runId, ids: [r.id], reasoning: 'stale' });
+    const n = save('n', 'k');
+    expect(status(n.id)).toBe('active');
+
+    const result = undoRun(repos, db.handle.db, runId);
+
+    expect(status(r.id)).toBe('archived');
+    expect(result.skipped).toEqual([{ id: r.id, topicKey: 'k', occupiedBy: n.id }]);
+    expect(rel(p).status).toBe('orphaned');
+    expect(opById(opFor(p).id).revertedAt).toBeNull();
+    expect(result.keptOrphaned).toEqual([{ judgmentId: p, retiredId: r.id }]);
+  });
+
+  it('control: a topic_key revision’s orphaning is undone on its own and no memory changes', () => {
+    const a = save('a', 't');
+    const x = save('x');
+    const p = pending(a.id, x.id);
+    memory.saveWithTopicKey({ type: 'project', title: 'a', content: 'a v2', topicKey: 't' }, scope);
+    const statuses = db.handle.raw.prepare('SELECT id, status FROM memory ORDER BY id').all();
+
+    undoOp(repos, db.handle.db, opFor(p).id);
+
+    expect(rel(p).status).toBe('pending');
+    expect(db.handle.raw.prepare('SELECT id, status FROM memory ORDER BY id').all()).toEqual(
+      statuses,
+    );
+  });
+
+  it('control: undoing a retirement_orphan run restores each of its judgments', () => {
+    const a = save('a', 't');
+    const x = save('x');
+    const y = save('y');
+    const p1 = pending(a.id, x.id);
+    const p2 = pending(y.id, a.id);
+    memory.saveWithTopicKey({ type: 'project', title: 'a', content: 'a v2', topicKey: 't' }, scope);
+
+    const result = undoRun(repos, db.handle.db, opFor(p1).runId);
+
+    expect([rel(p1).status, rel(p2).status]).toEqual(['pending', 'pending']);
+    expect(result.reverted).toHaveLength(2);
+    expect(status(a.id)).toBe('superseded');
   });
 });
