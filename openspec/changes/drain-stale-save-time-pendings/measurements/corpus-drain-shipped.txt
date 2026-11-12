@@ -1,0 +1,21 @@
+# stale pending drain — SHIPPED step on the retrieval corpus (production arm)
+corpus: 70 memories in 3 projects, ingested through runPostSaveSteps (ingestCorpus) at lexicalFloor 0, per-save cap 5; embedding model onnx-community/gte-multilingual-base
+drain: ConsolidationRunner.runScope per project until every pending pair was examined once; decay and deadline orphaning neutralized, vectorIndexCurrent true, shipped bounds
+
+  scope atlas    pending  117  runs 1  drained   91  kept   26  | mechanics mismatches 0 | independent recomputation: rules 89 retired 2 keep 26, mismatches 0
+  scope nimbus   pending  119  runs 1  drained  101  kept   18  | mechanics mismatches 0 | independent recomputation: rules 97 retired 4 keep 18, mismatches 0
+  scope shared   pending   59  runs 1  drained   49  kept   10  | mechanics mismatches 0 | independent recomputation: rules 49 retired 0 keep 10, mismatches 0
+pending after ingest at 0.00: 295
+drained: 241 (rules 235, retired endpoint 6)
+kept: 54 (by first admitting channel or unknown reason: vector 54)
+
+## kept set against the pendings ingest writes at the shipped floor (0.60)
+pending written at 0.60: 54; kept by the drain: 54; written at 0.60 but NOT kept: 0; kept but not written at 0.60: 0
+
+drained as endpoint retired:
+  atlas   atlas-auth-v1 -> atlas-orm-choice                          source superseded, target active
+  atlas   atlas-auth-v1 -> atlas-orm-distractor                      source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-scheduler-port-distractor        source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-scheduler-port                   source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-pg-pin-distractor                source superseded, target active
+  nimbus  nimbus-retry-v1 -> nimbus-pg-pin                           source superseded, target active

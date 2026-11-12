@@ -121,7 +121,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
   Wire `vectorIndexCurrent: () => vectorIdentityMatches(dataDir)` in `apps/web/src/lib/services.ts`. Do not change the deadline step.
 
-- [ ] 5.4 Re-run `measurements/false-drain.mts` through the shipped `evaluatePair` and confirm the per-class counts equal the 1.2 output.
+- [x] 5.4 Re-run the fixture and corpus validations through the shipped step (`measurements/validate-shipped.mts`, which drives `ConsolidationRunner.runScope` and reads its reasons from `evaluatePair`) and confirm the per-class counts equal the 1.2 output.
 - [x] 5.5 Done when `drain.test.ts`, `orphan-promotion.test.ts`, `runner.test.ts` and `operations.test.ts` pass. Commit: `feat(core): drain stale save-time pending judgments in the consolidation sweep`.
 
 ## 6. Undo guard and dashboard
