@@ -395,6 +395,38 @@ describe('memories mutations', () => {
     expect(confirm.services.repos.memory.adminCountConfirmations(id)).toBe(1);
   });
 
+  it('archiving from the dashboard closes the memory’s pending judgments, and undoing it restores them', async () => {
+    const id = saveMemory('slice-four-pending');
+    const other = saveMemory('slice-four-counterpart');
+    const judgmentId = getServices().relations.createPending({
+      sourceId: other,
+      targetId: id,
+    }).judgmentId;
+
+    const archive = await guardAction(submission(ARCHIVE_FORM, { id }), ARCHIVE_FORM, adminCookie);
+    expect(archive).toMatchObject({ ok: true });
+    if (!archive.ok) return;
+    archive.services.memory.archive(id, resolveScope(id));
+
+    const { repos } = archive.services;
+    expect(repos.relations.findByJudgmentId(judgmentId)).toMatchObject({
+      status: 'orphaned',
+      markedByKind: 'consolidator',
+    });
+    const archiveOp = repos.consolidation
+      .adminListRuns(50, 0)
+      .flatMap((run) => repos.consolidation.adminListOps(run.id))
+      .find((op) => op.opType === 'agent_memory_archive' && op.affectedIds.includes(id));
+    if (archiveOp === undefined) throw new Error('fixture: the archive journaled no op');
+
+    const result = archive.services.undoOp(archiveOp.id);
+
+    expect(archive.services.memory.unsafeGetById(id)?.status).toBe('active');
+    expect(repos.relations.findByJudgmentId(judgmentId)?.status).toBe('pending');
+    expect(result.alsoReverted).toHaveLength(1);
+    expect(result.keptOrphaned).toEqual([]);
+  });
+
   it('refuses a non-admin session before the service call, leaving the row untouched', async () => {
     const id = saveMemory('slice-four-refused');
 

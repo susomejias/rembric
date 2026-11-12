@@ -422,6 +422,24 @@ replace:
 all 1 mutations caught; undo-messages.ts restored
 exit 0
 
+## The dashboard archive action (added after the run above)
+### Path call: memory.archive / dashboard archive — helper call deleted
+$ node scripts/mutate.mjs --file packages/core/src/services/memory.ts --spec apps/web/src/test/dashboard-mutations.test.ts --workspace apps/web --mutation <find> --with <replace>
+find:
+          orphanPendingOnRetirement(this.repos, this.relationsService(), {
+            retiredIds: [id],
+            status: 'archived',
+            cause: 'archive',
+            at: ts,
+            runId,
+          });
+replace:
+    (deleted)
+  CAUGHT by 1:
+    × memories mutations > archiving from the dashboard closes the memory’s pending judgments, and undoing it restores them
+all 1 mutations caught; memory.ts restored
+exit 0
+
 ## Mutations that survived an earlier test set, and the test that now catches each
 1. Dropping the explicit timestamp from relations.orphan (case "Helper: orphaning takes its own timestamp").
    Before 878c2b37 it was caught in 2 of 3 runs and NOT CAUGHT in 1, run with
