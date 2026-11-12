@@ -25,6 +25,8 @@ import {
 
 import { createTestDb, type TestDb, TestClock } from '../test-support/index.js';
 
+import { recordOrphanPromote } from './operations.js';
+
 const DAY = 86_400_000;
 
 let db: TestDb;
@@ -715,6 +717,46 @@ describe('undo symmetry — undoing a retirement restores what it orphaned', () 
     expect(result.alsoReverted).toEqual([opFor(p1).id]);
     expect(result.keptOrphaned).toEqual([]);
     expect(opById(opFor(p2).id).revertedAt).toBeNull();
+  });
+
+  it('undoing a historical merge op leaves the LLM-era promote verdicts of its run alone', () => {
+    const a = save('a');
+    const b = save('b');
+    const x = save('x');
+    const merged = save('merged');
+    repos.memory.markSupersededMany([a.id, b.id]);
+    const runId = decayRun();
+    repos.consolidation.insertOp({
+      id: 'historical-merge',
+      runId,
+      opType: 'merge',
+      affectedIds: [a.id, b.id],
+      createdId: merged.id,
+      reasoning: 'llm merge',
+      appliedAt: clock.value,
+    });
+    const verdict = pending(a.id, x.id);
+    relations.judge(verdict, { relation: 'related', actor: 'llm', kind: 'consolidator' });
+    recordOrphanPromote(repos, {
+      runId,
+      judgmentId: verdict,
+      sourceId: a.id,
+      targetId: x.id,
+      relation: 'related',
+      reasoning: 'llm promotion',
+      appliedAt: rel(verdict).judgedAt!,
+    });
+
+    const result = undoOp(repos, db.handle.db, 'historical-merge');
+
+    expect([status(a.id), status(b.id), status(merged.id)]).toEqual([
+      'active',
+      'active',
+      'archived',
+    ]);
+    expect(rel(verdict)).toMatchObject({ status: 'judged', relation: 'related' });
+    expect(opFor(verdict).revertedAt).toBeNull();
+    expect(result.alsoReverted).toEqual([]);
   });
 
   it('control: a topic_key revision’s orphaning is undone on its own and no memory changes', () => {
