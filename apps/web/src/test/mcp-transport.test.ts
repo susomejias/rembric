@@ -1139,8 +1139,16 @@ describe('MCP protocol conformance', () => {
 
       const committed = await call(client, { ...mergeArgs(ids), fingerprint: plan.fingerprint });
       expect(committed.isError).toBeFalsy();
-      const result = committed.structuredContent as { merged: boolean; id: string; opId: string };
+      const result = committed.structuredContent as {
+        merged: boolean;
+        id: string;
+        opId: string;
+        related: unknown[];
+        convergeWith: unknown[];
+      };
       expect(result.merged).toBe(true);
+      expect(result.related).toEqual([]);
+      expect(result.convergeWith).toEqual([]);
       expect(ids.map(statusOf)).toEqual(['superseded', 'superseded']);
 
       const read = await client.callTool({ name: 'memory.get_batch', arguments: { ids } });
@@ -1723,6 +1731,11 @@ describe('MCP protocol conformance', () => {
     expect(save).toContain('judgmentId');
     expect(save).toContain('memory.search');
     expect(save).toContain('memory.compare');
+
+    expect(save).toMatch(/`related\[\]`: weaker matches, nothing to judge/);
+    expect(save).toMatch(/`convergeWith\[\]` lists candidates likely restating this fact/);
+    expect(save).toContain('memory.merge');
+    expect(save).not.toMatch(/often a real contradiction/);
   });
 
   describe('descriptions agree with what the tools do', () => {
@@ -1746,7 +1759,7 @@ describe('MCP protocol conformance', () => {
       ['memory.session_start', 1103],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1884],
+      ['memory.save', 1868],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);

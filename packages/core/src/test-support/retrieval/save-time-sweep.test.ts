@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { SAVE_TIME_BASE, SAVE_TIME_SAVES } from './save-time-fixture.js';
-import { runSaveTimeArm, summarize, widestPlateau } from './save-time-sweep.js';
+import { SAVE_TIME_BASE, SAVE_TIME_RELATED_SAVES, SAVE_TIME_SAVES } from './save-time-fixture.js';
+import {
+  runSaveTimeArm,
+  summarize,
+  summarizeBands,
+  widestPlateau,
+  type SaveOutcome,
+} from './save-time-sweep.js';
 
 describe('save-time calibration sweep', () => {
   it('writes the same pending rows at floor 0 as rank-only admission', async () => {
@@ -25,10 +31,53 @@ describe('save-time calibration sweep', () => {
 
   it('labels every non-unrelated save with a base item that exists', () => {
     const baseIds = new Set(SAVE_TIME_BASE.map((b) => b.id));
-    for (const s of SAVE_TIME_SAVES) {
+    for (const s of [...SAVE_TIME_SAVES, ...SAVE_TIME_RELATED_SAVES]) {
       if (s.class === 'unrelated') expect(s.expects).toBeUndefined();
       else expect(baseIds.has(s.expects ?? '')).toBe(true);
     }
+  });
+});
+
+describe('save-time band composition', () => {
+  it('without an embedder every cosine is unknown, so the bands change no pending row', async () => {
+    const fixture = {
+      base: SAVE_TIME_BASE,
+      saves: [...SAVE_TIME_SAVES, ...SAVE_TIME_RELATED_SAVES],
+    };
+    const off = await runSaveTimeArm(null, 0.6, fixture, false);
+    const on = await runSaveTimeArm(null, 0.6, fixture, true);
+    expect(on).toEqual(off);
+    expect(on.every((o) => o.bands.low === 0 && o.bands.high === 0)).toBe(true);
+  });
+
+  it('counts rows per band and where each expected target landed', () => {
+    const outcome = (
+      cls: SaveOutcome['class'],
+      bands: SaveOutcome['bands'],
+      expectedBand: SaveOutcome['expectedBand'],
+      pending: number,
+    ): SaveOutcome => ({
+      id: cls,
+      class: cls,
+      surfacedExpected:
+        cls === 'unrelated' ? null : expectedBand === 'high' || expectedBand === 'middle',
+      sources: Array.from({ length: pending }, () => 'vec' as const),
+      bands,
+      expectedBand,
+    });
+    const off = [outcome('related', { low: 0, middle: 3, high: 0 }, 'middle', 3)];
+    const on = [
+      outcome('related', { low: 2, middle: 1, high: 0 }, 'low', 1),
+      outcome('related', { low: 0, middle: 0, high: 0 }, null, 0),
+    ];
+    const related = summarizeBands(off, on).find((r) => r.class === 'related');
+    expect(related).toEqual({
+      class: 'related',
+      saves: 2,
+      pendingWithoutBands: 3,
+      bands: { high: 0, middle: 1, low: 2 },
+      expected: { high: 0, middle: 0, low: 1, missed: 1 },
+    });
   });
 });
 

@@ -8,6 +8,7 @@ import { SessionRouter } from '@rembric/core';
 import {
   createRepositories,
   memoryRelations,
+  partitionKeyFor,
   projectScope,
   type Project,
   type Token,
@@ -333,6 +334,113 @@ describe('memory.save — candidatesDetected', () => {
     const inA = parseText<SavePayload>(await save(h, 'Rule final', `${RULE}, revision final`));
     expect(inA.candidates).toEqual([]);
     expect(inA.candidatesDetected).toBe(0);
+  });
+});
+
+describe('memory.save and memory.merge — confidence bands', () => {
+  interface BandPayload {
+    id: string;
+    candidates: { judgmentId: string; targetId: string }[];
+    related: Record<string, unknown>[];
+    convergeWith: string[];
+    judgmentRequired: boolean;
+    candidatesDetected: number;
+  }
+
+  function vectorAt(cosine: number, axis: number): Buffer {
+    const v = new Float32Array(768);
+    v[0] = cosine;
+    v[axis] = Math.sqrt(1 - cosine * cosine);
+    return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  }
+
+  function bandHandlers(vectorByContent: Map<string, Buffer>) {
+    const repos = createRepositories(db.handle.db);
+    return buildMemoryHandlers({
+      logInternalError,
+      memory,
+      repos,
+      projects,
+      relations: new RelationsService(repos, db.handle.db),
+      candidates: { perSaveMax: 5 },
+      embedNow: (id, _title, content, projectId) => {
+        const v = vectorByContent.get(content);
+        if (v) repos.vectors.insertEmbedding(id, v, partitionKeyFor(projectId));
+        return Promise.resolve(v !== undefined);
+      },
+    });
+  }
+
+  const LOW = 'staging restores happen every quarter';
+  const HIGH = 'scheduler binds port 8781';
+  const PROBE = 'the job runner listens on a non-default socket';
+  const vectors = () =>
+    new Map([
+      [LOW, vectorAt(0.72, 2)],
+      [HIGH, vectorAt(0.92, 3)],
+      [PROBE, vectorAt(1, 1)],
+    ]);
+
+  function pendingRowsFor(sourceId: string): number {
+    return db.handle.db
+      .select()
+      .from(memoryRelations)
+      .where(and(eq(memoryRelations.sourceId, sourceId), eq(memoryRelations.status, 'pending')))
+      .all().length;
+  }
+
+  const save = (h: ReturnType<typeof buildMemoryHandlers>, title: string, content: string) =>
+    runWithContext(fakeContext(projectA), () =>
+      Promise.resolve(h.save({ type: 'project', title, content })),
+    );
+
+  async function seedLowAndHigh(h: ReturnType<typeof buildMemoryHandlers>) {
+    const low = parseText<{ id: string }>(await save(h, 'Restore drill', LOW)).id;
+    const high = parseText<{ id: string }>(await save(h, 'Scheduler port', HIGH)).id;
+    return { low, high };
+  }
+
+  it('memory.save reports low-band pairs in related[] and high-band targets in convergeWith[]', async () => {
+    const h = bandHandlers(vectors());
+    const { low, high } = await seedLowAndHigh(h);
+    const r = parseText<BandPayload>(await save(h, 'Probe', PROBE));
+
+    expect(r.candidates.map((c) => c.targetId)).toEqual([high]);
+    expect(r.convergeWith).toEqual([high]);
+    expect(r.related.map((x) => x.targetId)).toEqual([low]);
+    expect(r.related[0]).not.toHaveProperty('judgmentId');
+    expect(r.judgmentRequired).toBe(true);
+    expect(r.candidatesDetected).toBe(1);
+    expect(pendingRowsFor(r.id)).toBe(1);
+  });
+
+  it('memory.save carries both arrays, empty, when nothing matched', async () => {
+    const r = parseText<BandPayload>(await save(bandHandlers(new Map()), 'Lonely', 'singular'));
+    expect(r.related).toEqual([]);
+    expect(r.convergeWith).toEqual([]);
+  });
+
+  it('a memory.merge commit reports related[] and convergeWith[] exactly as memory.save does', async () => {
+    const h = bandHandlers(vectors());
+    const { low, high } = await seedLowAndHigh(h);
+    const ids = ['first half', 'second half'].map(
+      (t) => memory.save({ type: 'project', title: t, content: t }, projectScope(projectA.id)).id,
+    );
+    const args = { ids, type: 'project' as const, title: 'Merged', content: PROBE, tags: ['x'] };
+    const plan = parseText<{ fingerprint: string }>(
+      await runWithContext(fakeContext(projectA), () => h.merge(args)),
+    );
+    const r = parseText<BandPayload>(
+      await runWithContext(fakeContext(projectA), () =>
+        h.merge({ ...args, fingerprint: plan.fingerprint }),
+      ),
+    );
+
+    expect(r.candidates.map((c) => c.targetId)).toEqual([high]);
+    expect(r.convergeWith).toEqual([high]);
+    expect(r.related.map((x) => x.targetId)).toEqual([low]);
+    expect(r.candidatesDetected).toBe(1);
+    expect(pendingRowsFor(r.id)).toBe(1);
   });
 });
 

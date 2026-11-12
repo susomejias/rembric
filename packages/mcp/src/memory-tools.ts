@@ -24,7 +24,7 @@ import {
   runPostSaveSteps,
   type CandidateOptions,
   type PostSaveDeps,
-  type SaveTimeCandidateView,
+  type PostSaveResult,
 } from '@rembric/core';
 import { RedactionTally } from '@rembric/core';
 import { getRequestContext, tryGetRequestContext } from '@rembric/core';
@@ -336,6 +336,8 @@ export const candidate = z.object({
   entityValue: z.string().optional(),
 });
 
+export const relatedMemory = candidate.omit({ judgmentId: true });
+
 const entityRef = z.object({ kind: z.string(), value: z.string() });
 
 const memoryRow = z.object({
@@ -376,6 +378,8 @@ export const memorySaveOutput = {
   status: z.string(),
   createdAt: z.string(),
   candidates: z.array(candidate),
+  related: z.array(relatedMemory),
+  convergeWith: z.array(z.string()),
   judgmentRequired: z.boolean(),
   /** Pre-cap detection count. Truncation is `candidatesDetected > candidates.length`. */
   candidatesDetected: z.number(),
@@ -502,6 +506,8 @@ export const memoryMergeOutput = {
   createdAt: z.string().optional(),
   opId: z.string().optional(),
   candidates: z.array(candidate).optional(),
+  related: z.array(relatedMemory).optional(),
+  convergeWith: z.array(z.string()).optional(),
   judgmentRequired: z.boolean().optional(),
   candidatesDetected: z.number().optional(),
   redactions: redactionsOutput,
@@ -682,7 +688,7 @@ function resolveActiveSessionId(
   return null;
 }
 
-export type { SaveTimeCandidateView } from '@rembric/core';
+export type { RelatedMemoryView, SaveTimeCandidateView } from '@rembric/core';
 
 export interface SaveWithCandidatesDeps extends PostSaveDeps {
   memory: MemoryService;
@@ -693,19 +699,28 @@ export async function saveMemoryWithCandidates(
   input: SaveMemoryInput,
   scope: Scope,
   redactions: RedactionTally = new RedactionTally(),
-): Promise<{
-  memory: Awaited<ReturnType<MemoryService['save']>>;
-  supersededByTopicKey: Awaited<ReturnType<MemoryService['save']>> | null;
-  candidates: SaveTimeCandidateView[];
-  candidatesDetected: number;
-}> {
+): Promise<
+  PostSaveResult & {
+    memory: Awaited<ReturnType<MemoryService['save']>>;
+    supersededByTopicKey: Awaited<ReturnType<MemoryService['save']>> | null;
+  }
+> {
   const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(
     input,
     scope,
     redactions,
   );
-  const { candidates, candidatesDetected } = await runPostSaveSteps(deps, m, scope);
-  return { memory: m, supersededByTopicKey, candidates, candidatesDetected };
+  return { memory: m, supersededByTopicKey, ...(await runPostSaveSteps(deps, m, scope)) };
+}
+
+function candidateFields(r: PostSaveResult) {
+  return {
+    candidates: r.candidates,
+    related: r.related,
+    convergeWith: r.convergeWith,
+    judgmentRequired: r.candidates.length > 0,
+    candidatesDetected: r.candidatesDetected,
+  };
 }
 
 async function handleSave(
@@ -753,19 +768,13 @@ async function handleSave(
     if (activeProject) deps.projects.assertWritable(activeProject.id);
 
     const redactions = new RedactionTally();
-    const {
-      memory: m,
-      candidates,
-      candidatesDetected,
-    } = await saveMemoryWithCandidates(deps, input, scope, redactions);
+    const { memory: m, ...found } = await saveMemoryWithCandidates(deps, input, scope, redactions);
 
     return ok({
       id: m.id,
       status: m.status,
       createdAt: m.createdAt,
-      candidates,
-      judgmentRequired: candidates.length > 0,
-      candidatesDetected,
+      ...candidateFields(found),
       ...redactionsField(redactions),
     });
   } catch (err) {
@@ -1140,7 +1149,7 @@ async function handleMerge(
       args.fingerprint,
       redactions,
     );
-    const { candidates, candidatesDetected } = await runPostSaveSteps(deps, m, scope);
+    const found = await runPostSaveSteps(deps, m, scope);
     return ok({
       merged: true,
       ...preview,
@@ -1148,9 +1157,7 @@ async function handleMerge(
       status: m.status,
       createdAt: m.createdAt,
       opId,
-      candidates,
-      judgmentRequired: candidates.length > 0,
-      candidatesDetected,
+      ...candidateFields(found),
       ...redactionsField(redactions),
     });
   } catch (err) {

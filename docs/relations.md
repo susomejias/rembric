@@ -2,7 +2,7 @@
 
 The `memory_relations` table records the judgment graph between memories. Each row is one of:
 
-- **candidate** — detected at `memory.save` time, awaiting agent judgment (`status='pending'`, `relation=null`).
+- **candidate** — detected at `memory.save` time in the middle or high confidence band, awaiting agent judgment (`status='pending'`, `relation=null`). A low-band pair is returned in the save response's `related[]` and never gets a row (see `docs/embeddings.md`).
 - **judged verdict** — from the agent (`memory.judge_batch` / `memory.compare`) (`status='judged'`, `relation` set, `marked_by_kind` set).
 - **orphan** — the deterministic sweep retired it (`status='orphaned'`, `relation=null`): no agent closed it before the deadline, or the sweep's stale pending drain found that no current save-time channel would surface the pair, or that one of its endpoints was retired.
 
@@ -71,6 +71,8 @@ Confirm with explicit `ids: [id, ...]`; judge with `judgments: [{ judgmentId, re
 | Save a memory that evolves a known topic             | `memory.save({topic_key})`                                                                               |
 | Don't know the canonical topic_key                   | `memory.suggest_topic_key` first, then save                                                              |
 | Save returned `candidates[]`                         | `memory.judge_batch({ judgments: [{ judgmentId, relation }] })`                                          |
+| Save returned `convergeWith[]`                       | `memory.merge` the pair, or judge that candidate `supersedes` and reuse its `topic_key`                  |
+| Save returned `related[]`                            | Nothing to judge; read them for context, or record a verdict with `memory.compare`                       |
 | Two arbitrary memories analyzed independently        | `memory.compare({memoryIdA, memoryIdB, …})`                                                              |
 | Search results have `pending_conflict` annotations   | `memory.judge_batch` using the embedded `judgmentId`                                                     |
 | `memory.context` returned `pendingJudgments[]`       | `memory.judge_batch` each entry's `judgmentId`                                                           |

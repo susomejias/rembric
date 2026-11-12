@@ -30,6 +30,12 @@ export interface KnnOpts {
   limit: number;
 }
 
+export interface CosineDistanceOpts {
+  memoryId: string;
+  scope: Scope;
+  targetIds: readonly string[];
+}
+
 /** A memory still missing an embedding, with the metadata the vec row needs. */
 export interface PendingEmbedding {
   id: string;
@@ -99,6 +105,26 @@ export class VectorsRepository {
       `,
     ) as { distance: number } | undefined;
     return row?.distance ?? null;
+  }
+
+  cosineDistances(opts: CosineDistanceOpts): { id: string; distance: number }[] {
+    if (opts.targetIds.length === 0) return [];
+    const queryVector = this.findEmbedding(opts.memoryId);
+    if (!queryVector) return [];
+    const embedding = Buffer.from(
+      queryVector.buffer,
+      queryVector.byteOffset,
+      queryVector.byteLength,
+    );
+    return this.db.all<{ id: string; distance: number }>(
+      sql`
+        SELECT v.memory_id AS id,
+               vec_distance_cosine(${embedding}, v.embedding) AS distance
+        FROM json_each(${JSON.stringify(opts.targetIds)}) je
+          JOIN memory_vec v ON v.memory_id = je.value
+        WHERE v.partition_key = ${partitionKeyFor(opts.scope.projectId)}
+      `,
+    );
   }
 
   private findEmbedding(memoryId: string): Float32Array | undefined {

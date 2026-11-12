@@ -12,13 +12,14 @@ export const SAVE_TIME_CLASSES = [
   'expanded-rewrite',
   'contradiction',
   'unrelated',
+  'related',
 ] as const;
 export type SaveTimeClass = (typeof SAVE_TIME_CLASSES)[number];
 
 export interface LabelledSave {
   id: string;
   class: SaveTimeClass;
-  /** The base item this save must surface; absent only for `unrelated`. */
+  /** The base item this save is about; absent only for `unrelated`. */
   expects?: string;
   type: MemoryType;
   title: string;
@@ -424,5 +425,98 @@ export const SAVE_TIME_SAVES: LabelledSave[] = [
     title: 'Onboarding reading',
     content:
       'New contributors should read the architecture overview before their first pull request.',
+  },
+];
+
+export const SAVE_TIME_RELATED_SAVES: LabelledSave[] = [
+  {
+    id: 'r-session-owner',
+    class: 'related',
+    expects: 'b-auth',
+    type: 'project',
+    title: 'Platform team owns the session module',
+    content:
+      'src/lib/session.ts is owned by the platform team, so a pull request touching it needs one of their reviewers.',
+  },
+  {
+    id: 'r-session-lint',
+    class: 'related',
+    expects: 'b-auth',
+    type: 'procedural',
+    title: 'The session module has no default export',
+    content:
+      'Lint forbids a default export in src/lib/session.ts; import the named helpers instead.',
+  },
+  {
+    id: 'r-retry-after',
+    class: 'related',
+    expects: 'b-rate',
+    type: 'reference',
+    title: 'Clients back off on 429',
+    content:
+      'Our SDK sleeps for the Retry-After interval before resending a request that was rejected with status 429.',
+  },
+  {
+    id: 'r-debug',
+    class: 'related',
+    expects: 'b-docker',
+    type: 'procedural',
+    title: 'Inspecting a live container',
+    content:
+      'To look inside a running service, attach an ephemeral debug container with kubectl debug, since the image ships without a shell.',
+  },
+  {
+    id: 'r-cache-key',
+    class: 'related',
+    expects: 'b-cache',
+    type: 'project',
+    title: 'The search cache normalises queries',
+    content:
+      'Before a query becomes a cache key it is lowercased and trimmed, so equivalent searches hit the same cached entry.',
+  },
+  {
+    id: 'r-es-review-time',
+    class: 'related',
+    expects: 'b-es-reviews',
+    type: 'procedural',
+    title: 'Las revisiones se piden en el canal del equipo',
+    content:
+      'Para pedir revisión de un pull request se avisa en el canal del equipo y se asigna a dos personas.',
+  },
+  {
+    id: 'r-reconnect-shard',
+    class: 'related',
+    expects: 'b-flaky',
+    type: 'project',
+    title: 'Realtime tests run in their own CI shard',
+    content:
+      'tests/realtime/reconnect.test.ts and the other realtime suites run in a separate CI shard with a longer timeout.',
+  },
+  {
+    id: 'r-webhook-replay',
+    class: 'related',
+    expects: 'b-retry',
+    type: 'project',
+    title: 'Dead webhooks can be replayed',
+    content:
+      'Operators can replay a dead outbound webhook from the admin panel once the receiving endpoint is healthy again.',
+  },
+  {
+    id: 'r-reconnect-helper',
+    class: 'related',
+    expects: 'b-flaky',
+    type: 'project',
+    title: 'Socket mocks are shared test helpers',
+    content:
+      'tests/realtime/reconnect.test.ts imports its socket mock from the shared test helpers, so every realtime test builds sockets the same way.',
+  },
+  {
+    id: 'r-cache-metrics',
+    class: 'related',
+    expects: 'b-cache',
+    type: 'project',
+    title: 'Search cache hit rate is on the dashboard',
+    content:
+      'The hit rate of the in-memory search cache is exported as a metric and charted on the operations dashboard.',
   },
 ];

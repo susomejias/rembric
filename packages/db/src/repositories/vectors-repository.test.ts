@@ -142,6 +142,37 @@ describe('VectorsRepository', () => {
     });
   });
 
+  describe('cosineDistances', () => {
+    it('returns the exact distance to each named in-scope target that has a vector', () => {
+      insertWithEmbedding('Q', unit(1, 0));
+      insertWithEmbedding('A', unit(1, 1));
+      insertWithEmbedding('OTHER', unit(1, 0), { projectId: 'p1' });
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'NOVEC', content: 'no vector yet' })])
+        .run();
+
+      const out = repo.cosineDistances({
+        memoryId: 'Q',
+        scope: projectScope('p0'),
+        targetIds: ['A', 'NOVEC', 'OTHER'],
+      });
+      expect(out.map((r) => r.id)).toEqual(['A']);
+      expect(out[0]!.distance).toBeCloseTo(1 - 1 / Math.SQRT2, 5);
+    });
+
+    it('is empty when the query row has no embedding', () => {
+      insertWithEmbedding('A', unit(1, 0));
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'NOVEC', content: 'no vector yet' })])
+        .run();
+      expect(
+        repo.cosineDistances({ memoryId: 'NOVEC', scope: projectScope('p0'), targetIds: ['A'] }),
+      ).toEqual([]);
+    });
+  });
+
   describe('backlog count survives orphaned vec rows', () => {
     it('reports the real backlog when memory_vec holds more rows than memory', () => {
       insertWithEmbedding('m1', unit(1, 0));

@@ -6,6 +6,7 @@ import { MemoryService, type SaveMemoryInput } from '../../services/memory.js';
 import { ProjectsService } from '../../services/projects.js';
 import { RelationsService } from '../../services/relations.js';
 import { runPostSaveSteps } from '../../services/save-curation.js';
+import type { CandidateOptions } from '../../services/save-time-candidates.js';
 import { TestClock } from '../clock.js';
 import { createTestDb } from '../db.js';
 
@@ -35,21 +36,17 @@ interface SaveDeps {
   ) => Promise<boolean>;
 }
 
+type CandidateSeams = Pick<CandidateOptions, 'lexicalFloor' | 'bands'>;
+
 async function saveThroughCuration(
   deps: SaveDeps,
   input: SaveMemoryInput,
   scope: Scope,
-  lexicalFloor: number | undefined,
+  seams: CandidateSeams,
 ): Promise<ReturnType<MemoryService['saveWithTopicKey']>['memory']> {
   const { memory: saved } = deps.memory.saveWithTopicKey(input, scope);
   await runPostSaveSteps(
-    {
-      ...deps,
-      candidates: {
-        perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT,
-        ...(lexicalFloor === undefined ? {} : { lexicalFloor }),
-      },
-    },
+    { ...deps, candidates: { perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT, ...seams } },
     saved,
     scope,
   );
@@ -59,7 +56,7 @@ async function saveThroughCuration(
 export async function ingestCorpus(
   items: CorpusItem[],
   embedder: Embedder,
-  opts: { lexicalFloor?: number } = {},
+  opts: CandidateSeams = {},
 ): Promise<Ingested> {
   const { handle, dataDir, cleanup } = createTestDb();
   const repos = createRepositories(handle.db);
@@ -103,7 +100,7 @@ export async function ingestCorpus(
         topicKey: item.topicKey,
       },
       scope,
-      opts.lexicalFloor,
+      opts,
     );
 
     idByStableId.set(item.id, saved.id);

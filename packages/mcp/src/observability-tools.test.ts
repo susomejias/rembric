@@ -4,7 +4,15 @@ import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import { SessionRouter } from '@rembric/core';
-import { createRepositories, tokens as tokensTable, type Scope, type Token } from '@rembric/db';
+import {
+  createRepositories,
+  memoryRelations,
+  partitionKeyFor,
+  tokens as tokensTable,
+  type Scope,
+  type Token,
+} from '@rembric/db';
+import { and, eq } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -174,13 +182,22 @@ function fakeContext(): RequestContext {
   };
 }
 
-function makeObservability(db: TestDb) {
+function makeObservability(db: TestDb, vectorByContent?: Map<string, Buffer>) {
   const repos = createRepositories(db.handle.db);
   const memory = new MemoryService(repos, db.handle.db);
   const relations = new RelationsService(repos, db.handle.db);
   const projects = new ProjectsService(repos);
   const agentSessions = new AgentSessionsService(repos, db.handle.db);
   const handlers = buildObservabilityHandlers({
+    ...(vectorByContent
+      ? {
+          embedNow: (id: string, _title: string, content: string, projectId: string) => {
+            const v = vectorByContent.get(content);
+            if (v) repos.vectors.insertEmbedding(id, v, partitionKeyFor(projectId));
+            return Promise.resolve(v !== undefined);
+          },
+        }
+      : {}),
     logInternalError,
     memory,
     agentSessions,
@@ -290,6 +307,60 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
       handlers.capturePassive({ text: 'no learnings heading anywhere' }),
     );
     expect(parse<{ candidatesDetected: number }>(empty).candidatesDetected).toBe(0);
+  });
+
+  it('reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty', async () => {
+    const vectorAt = (cosine: number, axis: number) => {
+      const v = new Float32Array(768);
+      v[0] = cosine;
+      v[axis] = Math.sqrt(1 - cosine * cosine);
+      return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+    };
+    const learning = 'the job runner listens on a non-default socket';
+    const {
+      repos,
+      memory: mem,
+      handlers: h,
+    } = makeObservability(db, new Map([[learning, vectorAt(1, 1)]]));
+    const seed = (content: string, cosine: number, axis: number) => {
+      const m = mem.save({ type: 'project', title: content, content }, defaultScope);
+      repos.vectors.insertEmbedding(m.id, vectorAt(cosine, axis), partitionKeyFor(m.projectId!));
+      return m.id;
+    };
+    const low = seed('staging restores happen every quarter', 0.72, 2);
+    const high = seed('scheduler binds port 8781', 0.92, 3);
+
+    const out = parse<{
+      ids: string[];
+      candidates?: { targetId: string }[];
+      related?: Record<string, unknown>[];
+      convergeWith?: string[];
+      candidatesDetected: number;
+    }>(
+      await runWithContext(fakeContext(), () =>
+        h.capturePassive({ text: `## Key Learnings\n\n1. ${learning}\n2. an unrelated aside` }),
+      ),
+    );
+    expect(out.candidates?.map((c) => c.targetId)).toEqual([high]);
+    expect(out.convergeWith).toEqual([high]);
+    expect(out.related?.map((r) => r.targetId)).toEqual([low]);
+    expect(out.related?.[0]).not.toHaveProperty('judgmentId');
+    expect(out.candidatesDetected).toBe(1);
+    const pending = db.handle.db
+      .select()
+      .from(memoryRelations)
+      .where(and(eq(memoryRelations.sourceId, out.ids[0]!), eq(memoryRelations.status, 'pending')))
+      .all();
+    expect(pending.map((p) => p.targetId)).toEqual([high]);
+
+    const quiet = parse<Record<string, unknown>>(
+      await runWithContext(fakeContext(), () =>
+        h.capturePassive({ text: '## Key Learnings\n\n1. zebra quokka' }),
+      ),
+    );
+    expect(quiet).not.toHaveProperty('candidates');
+    expect(quiet).not.toHaveProperty('related');
+    expect(quiet).not.toHaveProperty('convergeWith');
   });
 });
 
