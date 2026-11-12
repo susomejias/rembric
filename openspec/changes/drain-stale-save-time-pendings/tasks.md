@@ -126,7 +126,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 6. Undo guard and dashboard
 
-- [ ] 6.1 RED first. In `packages/core/src/consolidation/operations.test.ts`, add three tests:
+- [x] 6.1 RED first. In `packages/core/src/consolidation/operations.test.ts`, add three tests:
   - undo restores a drained relation to `pending`, with the cleared fields the spec names;
   - a drained relation between two active memories, later judged `supersedes` through `RelationsService.compare` on the same source and target:
     - after undo, it stays `judged` `supersedes`;
@@ -134,8 +134,8 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
     - the source's `replaces` still holds the target;
     - the relation is reported as not restored, and the op is marked reverted.
   - an `orphan_promote` op whose relation has a null `judged_at` leaves it untouched, reports it, and marks the op reverted.
-- [ ] 6.2 Implement the guard in the `orphan_promote` undo branch: reset only when `judged_at` is non-null and `judged_at <= applied_at`. Add the new `UndoResult` field (design D8). The existing fixture "orphan_promote undo skips a target whose topic slot is occupied but still resets the relation" passes unedited.
-- [ ] 6.3 Dashboard, per the `dashboard` delta:
+- [x] 6.2 Implement the guard in the `orphan_promote` undo branch: reset only when `judged_at` is non-null and `judged_at <= applied_at`. Add the new `UndoResult` field (design D8). The existing fixture "orphan_promote undo skips a target whose topic slot is occupied but still resets the relation" passes unedited.
+- [x] 6.3 Dashboard, per the `dashboard` delta:
   - the run-detail summary shows "· N drained", where N is `drainedRules + drainedRetired`, when the nested `drain` object is present;
   - both consolidation pages show a partial-undo message for kept verdicts.
 

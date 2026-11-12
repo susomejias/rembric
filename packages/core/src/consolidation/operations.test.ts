@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
+import { RelationsService } from '@rembric/core';
 import { DEFAULT_DECAY, findDecayCandidates } from '@rembric/core';
 import {
   applyDecay,
@@ -23,6 +24,8 @@ import {
 } from '@rembric/core';
 
 import { createTestDb, type TestDb, TestClock } from '../test-support/index.js';
+
+import { recordOrphanPromote } from './operations.js';
 
 let db: TestDb;
 let repos: Repositories;
@@ -562,5 +565,109 @@ describe('escalation', () => {
 
     const candidates = findDecayCandidates(repos, { projectId }, DEFAULT_DECAY, clock.value);
     expect(candidates).not.toContain(m.id);
+  });
+});
+
+describe('orphan_promote undo keeps a verdict written after the op', () => {
+  function drained(): { sourceId: string; targetId: string; judgmentId: string; opId: string } {
+    const scope = projectScope(projectId);
+    const target = memoryService.save({ type: 'user', title: 'tgt', content: 'target' }, scope);
+    const source = memoryService.save({ type: 'user', title: 'src', content: 'source' }, scope);
+    const relations = new RelationsService(repos, db.handle.db, clock.now);
+    const { judgmentId } = relations.createPending({ sourceId: source.id, targetId: target.id });
+    const at = new Date(clock.value.getTime() + 1_000);
+    const reasoning =
+      'stale under current rules: lexical 0.100 < 0.6, vector 0.000 < 0.7, no shared entity';
+    let opId = '';
+    db.handle.db.transaction(() => {
+      relations.orphan(judgmentId, reasoning, at);
+      opId = recordOrphanPromote(repos, {
+        runId,
+        judgmentId,
+        sourceId: source.id,
+        targetId: target.id,
+        relation: null,
+        reasoning,
+        appliedAt: at,
+      }).opId;
+    });
+    return { sourceId: source.id, targetId: target.id, judgmentId, opId };
+  }
+
+  it('restores a drained relation to pending with every verdict field cleared', () => {
+    const d = drained();
+    const result = undoOp(repos, db.handle.db, d.opId);
+    expect(repos.relations.findByJudgmentId(d.judgmentId)).toMatchObject({
+      status: 'pending',
+      relation: null,
+      reason: null,
+      judgedAt: null,
+      markedByKind: null,
+      markedByActor: null,
+    });
+    expect(result.keptVerdicts).toEqual([]);
+    expect(repos.consolidation.findOpById(d.opId)?.revertedAt).not.toBeNull();
+  });
+
+  it('keeps a supersedes verdict that memory.compare wrote after the drain', () => {
+    const d = drained();
+    const later = new RelationsService(
+      repos,
+      db.handle.db,
+      () => new Date(clock.value.getTime() + 60_000),
+    );
+    later.compare({
+      sourceId: d.sourceId,
+      targetId: d.targetId,
+      relation: 'supersedes',
+      confidence: 0.9,
+      actor: 'agent-x',
+    });
+    expect(memoryService.unsafeGetById(d.targetId)!.status).toBe('superseded');
+
+    const result = undoOp(repos, db.handle.db, d.opId);
+
+    const rel = repos.relations.findByJudgmentId(d.judgmentId)!;
+    expect(rel.status).toBe('judged');
+    expect(rel.relation).toBe('supersedes');
+    expect(memoryService.unsafeGetById(d.targetId)!.status).toBe('superseded');
+    expect(memoryService.unsafeGetById(d.sourceId)!.replaces).toContain(d.targetId);
+    expect(result.keptVerdicts).toEqual([
+      { judgmentId: d.judgmentId, status: 'judged', relation: 'supersedes' },
+    ]);
+    expect(repos.consolidation.findOpById(d.opId)?.revertedAt).not.toBeNull();
+  });
+
+  it('leaves a relation with no judged_at untouched, reports it, and marks the op reverted', () => {
+    const d = drained();
+    repos.relations.resetToPending(repos.relations.findByJudgmentId(d.judgmentId)!.id);
+    const before = repos.relations.findByJudgmentId(d.judgmentId);
+
+    const result = undoOp(repos, db.handle.db, d.opId);
+
+    expect(repos.relations.findByJudgmentId(d.judgmentId)).toEqual(before);
+    expect(result.keptVerdicts).toEqual([
+      { judgmentId: d.judgmentId, status: 'pending', relation: null },
+    ]);
+    expect(repos.consolidation.findOpById(d.opId)?.revertedAt).not.toBeNull();
+  });
+
+  it('undoRun reports the kept verdicts of every op it reverts', () => {
+    const d = drained();
+    const later = new RelationsService(
+      repos,
+      db.handle.db,
+      () => new Date(clock.value.getTime() + 60_000),
+    );
+    later.compare({
+      sourceId: d.sourceId,
+      targetId: d.targetId,
+      relation: 'conflicts_with',
+      confidence: 0.9,
+      actor: 'agent-x',
+    });
+    expect(undoRun(repos, db.handle.db, runId).keptVerdicts).toEqual([
+      { judgmentId: d.judgmentId, status: 'judged', relation: 'conflicts_with' },
+    ]);
   });
 });

@@ -762,7 +762,11 @@ describe('consolidation sweep and undo', () => {
     expect(guard).toMatchObject({ ok: true });
     if (!guard.ok) return;
 
-    expect(guard.services.undoOp(op.id)).toEqual({ reverted: op.id, skipped: [] });
+    expect(guard.services.undoOp(op.id)).toEqual({
+      reverted: op.id,
+      skipped: [],
+      keptVerdicts: [],
+    });
     expect(guard.services.memory.unsafeGetById(id)?.status).toBe('active');
 
     expect(() => guard.services.undoOp(op.id)).toThrow(/already reverted/);

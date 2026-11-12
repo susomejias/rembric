@@ -21,8 +21,8 @@ import {
   vectorIdentityMatches,
   type ConsolidationRunSummary,
   type Embedder,
-  type SkippedRow,
   type UndoResult,
+  type UndoRunResult,
 } from '@rembric/core';
 import { createRepositories, type DbHandle, type Repositories } from '@rembric/db';
 
@@ -48,7 +48,7 @@ export interface Services {
   oauth: OAuthService | null;
   sweep: (projectId: string | null) => void;
   forcedSweep: () => ConsolidationRunSummary;
-  undoRun: (runId: string) => { reverted: string[]; skipped: SkippedRow[] };
+  undoRun: (runId: string) => UndoRunResult;
   undoOp: (opId: string) => UndoResult;
 }
 

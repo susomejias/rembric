@@ -2,12 +2,14 @@ import {
   NotUndoableError,
   PurgedRowMissingError,
   TERMINAL_OP_TYPES,
-  type SkippedRow,
+  type UndoRunResult,
   type UndoResult,
 } from '@rembric/core';
 import type { Repositories } from '@rembric/db';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+
+import { partialUndo } from '../undo-messages';
 
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
@@ -43,30 +45,20 @@ function undoFailure(err: unknown): ActionState {
   return { error: err instanceof Error ? err.message : String(err) };
 }
 
-function partialUndo(skipped: SkippedRow[]): ActionState {
-  const rows = skipped
-    .map((s) => `${shortId(s.id)} (topic ${s.topicKey} now held by ${shortId(s.occupiedBy)})`)
-    .join('; ');
-  return {
-    error:
-      `${skipped.length} row(s) were not reactivated — a newer memory now owns their topic ` +
-      `slot. The rest of the undo was applied. ${rows}`,
-  };
-}
-
 async function undoRun(_prev: ActionState, formData: FormData): Promise<ActionState> {
   'use server';
   const guard = await guardAction(formData, RUN_UNDO_FORM);
   if (!guard.ok) return guardFailure(guard);
 
   const runId = readField(formData, 'runId');
-  let result: { reverted: string[]; skipped: SkippedRow[] };
+  let result: UndoRunResult;
   try {
     result = guard.services.undoRun(runId);
   } catch (err) {
     return undoFailure(err);
   }
-  if (result.skipped.length > 0) return partialUndo(result.skipped);
+  const partial = partialUndo(result);
+  if (partial) return partial;
   redirect(`/dashboard/consolidation?undone=${result.reverted.length}`);
 }
 
@@ -82,7 +74,8 @@ async function undoOp(_prev: ActionState, formData: FormData): Promise<ActionSta
   } catch (err) {
     return undoFailure(err);
   }
-  if (result.skipped.length > 0) return partialUndo(result.skipped);
+  const partial = partialUndo(result);
+  if (partial) return partial;
   redirect('/dashboard/consolidation?undone=1');
 }
 
@@ -106,13 +99,22 @@ function formatRunSummary(summary: string | null): string {
       typeof (parsed as Record<string, unknown>)['archives'] === 'number' &&
       typeof (parsed as Record<string, unknown>)['orphaned'] === 'number'
     ) {
-      const ops = parsed as { archives: number; orphaned: number };
-      return `${ops.archives} archived · ${ops.orphaned} orphaned`;
+      const ops = parsed as { archives: number; orphaned: number; drain?: unknown };
+      const drained = drainedCount(ops.drain);
+      const base = `${ops.archives} archived · ${ops.orphaned} orphaned`;
+      return drained === null ? base : `${base} · ${drained} drained`;
     }
   } catch {
     // The stored summary is not valid run JSON: fall back to the raw text.
   }
   return summary;
+}
+
+function drainedCount(drain: unknown): number | null {
+  if (drain === null || typeof drain !== 'object') return null;
+  const { drainedRules, drainedRetired } = drain as Record<string, unknown>;
+  if (typeof drainedRules !== 'number' || typeof drainedRetired !== 'number') return null;
+  return drainedRules + drainedRetired;
 }
 
 export default async function ConsolidationRunPage({
