@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js';
 import { TokensService, type TokenPair } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
@@ -187,6 +188,74 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       clientInfo: { name: 'c', version: '0' },
     },
   };
+
+  describe('2026-07-28 era negotiation', () => {
+    const MODERN = '2026-07-28';
+    const envelope = {
+      'io.modelcontextprotocol/protocolVersion': MODERN,
+      'io.modelcontextprotocol/clientInfo': { name: 'probe', version: '0' },
+      'io.modelcontextprotocol/clientCapabilities': {},
+    };
+    type RpcError = {
+      id?: unknown;
+      error?: { code?: number; data?: { supported?: string[]; requested?: string } };
+    };
+
+    it('refuses a server/discover probe with -32022 naming only 2025-era versions', async () => {
+      const res = await POST(
+        mcpRequest(
+          { jsonrpc: '2.0', id: 7, method: 'server/discover', params: { _meta: envelope } },
+          { 'mcp-protocol-version': MODERN, 'mcp-method': 'server/discover' },
+        ),
+        ctx,
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as RpcError;
+      expect(body.id).toBe(7);
+      expect(body.error?.code).toBe(-32022);
+      expect(body.error?.data?.requested).toBe(MODERN);
+      expect(body.error?.data?.supported).toEqual([...SUPPORTED_PROTOCOL_VERSIONS]);
+      expect(body.error?.data?.supported?.every((v) => v < MODERN)).toBe(true);
+    });
+
+    it('refuses a modern-era notification with the same -32022', async () => {
+      const res = await POST(
+        mcpRequest(
+          { jsonrpc: '2.0', method: 'notifications/cancelled', params: { _meta: envelope } },
+          { 'mcp-protocol-version': MODERN, 'mcp-method': 'notifications/cancelled' },
+        ),
+        ctx,
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as RpcError;
+      expect(body.id).toBeNull();
+      expect(body.error?.code).toBe(-32022);
+    });
+
+    it('control: a malformed modern request keeps the SDK rejection', async () => {
+      const res = await POST(
+        mcpRequest(
+          { jsonrpc: '2.0', id: 8, method: 'tools/list' },
+          { 'mcp-protocol-version': MODERN },
+        ),
+        ctx,
+      );
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as RpcError).error?.code).toBe(-32602);
+    });
+
+    it('control: an envelope claiming a 2025-era version keeps the SDK answer', async () => {
+      const legacyClaim = { ...envelope, 'io.modelcontextprotocol/protocolVersion': '2025-06-18' };
+      const res = await POST(
+        mcpRequest({ jsonrpc: '2.0', id: 9, method: 'tools/list', params: { _meta: legacyClaim } }),
+        ctx,
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as RpcError;
+      expect(body.error?.code).toBe(-32022);
+      expect(body.error?.data?.supported).toEqual([MODERN]);
+    });
+  });
 
   describe('body cap and DNS-rebinding gates', () => {
     for (const key of [
