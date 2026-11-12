@@ -2,20 +2,20 @@
 
 The prototype measurements already in `measurements/` (`drain-prototype.mts` and the scripts beside it) are the starting point for this group. Extend them; never overwrite their recorded outputs.
 
-- [ ] 1.1 False-drain measurement on the labelled save-time fixture with the compiled-in embedding model (the production arm). It already exists as `measurements/fixture-drain.mts` → `fixture-drain.txt`:
+- [x] 1.1 False-drain measurement on the labelled save-time fixture with the compiled-in embedding model (the production arm). It already exists as `measurements/fixture-drain.mts` → `fixture-drain.txt`:
   - **Backlog:** save the base corpus, then each labelled save, through `runPostSaveSteps` with `lexicalFloor: 0`, which reproduces the old rank-only rule.
   - **Rule:** run the prototype rule, with fresh extraction of both endpoints, and write nothing.
   - **Report:** drained counts per class (near-duplicate, expanded rewrite, contradiction, unrelated), with the instrument named in the header.
 
   Re-run it on the current rule version and confirm the output.
 
-- [ ] 1.2 Gate: every genuine class (near-duplicate, expanded rewrite, contradiction) drains 0. **Stop and report** any other result as a **Needs your decision** result. Never tune the rule to pass.
+- [x] 1.2 Gate: every genuine class (near-duplicate, expanded rewrite, contradiction) drains 0. **Stop and report** any other result as a **Needs your decision** result. Never tune the rule to pass.
 - [ ] 1.3 **OPERATOR-ONLY.** On a BACKUP COPY of the production database, never the live file, report the share of pending pairs whose endpoints both have stored vectors and entity-scan records. Record aggregate percentages only, in `measurements/backup-shares.md`, with no content, titles, project names or identifiers.
-- [ ] 1.4 Record the parent's backup-copy figures from design D11 in `measurements/README.md`, aggregate only, labelled as prototype figures measured on a backup copy.
-- [ ] 1.5 Worst-case content-size measurement. It exists as `measurements/bounds.mts` → `bounds.txt`, which times one pair's evaluation for body sizes up to 1 000 000 characters.
+- [x] 1.4 Record the parent's backup-copy figures from design D11 in `measurements/README.md`, aggregate only, labelled as prototype figures measured on a backup copy.
+- [x] 1.5 Worst-case content-size measurement. It exists as `measurements/bounds.mts` → `bounds.txt`, which times one pair's evaluation for body sizes up to 1 000 000 characters.
   - Choose `DRAIN_MAX_PAIR_CHARS` as the largest measured size at which the worst shape stays within 5 ms (one tenth of the 50 ms per-call budget target), capped at the extractor's 200 000-character input bound.
   - Record the choice and the row it rests on in `measurements/README.md`.
-- [ ] 1.6 Commit: `test(core): record the drain rule's false drains and per-pair cost before implementing it`.
+- [x] 1.6 Commit: `test(core): record the drain rule's false drains and per-pair cost before implementing it`.
 
 ## 2. Shared per-pair predicate (behaviour-preserving refactor)
 

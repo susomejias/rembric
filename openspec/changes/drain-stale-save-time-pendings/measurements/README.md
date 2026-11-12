@@ -160,6 +160,17 @@ Selection order also changes the end-to-end numbers:
 - With the bound on, a 1 MB pair costs 0.51 ms (status and length only) and is kept as `fail-safe:content-too-large`. **Control:** a 1.3 KB noise pair still drains.
 - The reverted-op lookup for a 1 000-id batch scans `consolidation_ops`, which has no index on `created_id`: 0.19 ms at 1 000 ops, 0.54 ms at 10 000 and 3.74 ms at 100 000.
 
+## Prototype figures measured on a backup copy (design D11)
+
+These figures come from the parent's prototype run on a BACKUP COPY of a real installation's database, never the live file. Only aggregate figures are recorded: no content, titles, project names or identifiers. They are prototype figures; the committed measurements in this directory are the evidence for the constants.
+
+- 20% of pending rows were drained by the rules, and 28% had a retired endpoint.
+- 0 of the drained pairs shared an entity when re-extracted independently.
+- An independent re-verification of the verdicts found 0 mismatches.
+- Undoing the drain restored the relations table byte for byte.
+- A second pass drained 0.
+- The cost was about 0.13 ms per pair, and a 400-pair run took about 49 ms on that host.
+
 ## Findings and proposed changes (not applied silently)
 
 1. **Use `(created_at, judgment_id)` order for the selection.** It is the same order with no migration, and it is what makes the shared budget hold (validation 8).
