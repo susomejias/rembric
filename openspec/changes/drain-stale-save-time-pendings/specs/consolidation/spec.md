@@ -221,7 +221,7 @@ A drain step SHALL stop at its row cap or when the shared budget is spent, which
 
 Each drain SHALL commit in its own transaction, holding only that pair's orphan and journal writes. No transaction SHALL span several pairs, a run or the backlog. A failure therefore rolls back only the pair it happened on.
 
-An examinable relation is a `pending` relation whose source and target both belong to the scope, whatever their lifecycle, and that no reverted drain op references. The step SHALL examine them in `judgment_id` order, starting after the last `judgment_id` the previous run of the same scope examined. It SHALL record that cursor in a nested object of the run's existing `consolidation_runs.summary` JSON (see "The drain's outcome MUST be visible to the operator"), with no new table or column. When a run reaches the end of the examinable relations, the cursor SHALL wrap, and the next run SHALL start again from the lowest `judgment_id`. A missing or unparsable cursor SHALL start from the lowest `judgment_id`.
+An examinable relation is a `pending` relation whose source and target both belong to the scope, whatever their lifecycle, and that no reverted drain op references. The step SHALL examine them in `(created_at, judgment_id)` order, starting after the key of the last relation the previous run of the same scope examined. It SHALL exclude relations a reverted drain op references inside its selection, so excluded relations never occupy the row cap. It SHALL record that cursor in a nested object of the run's existing `consolidation_runs.summary` JSON (see "The drain's outcome MUST be visible to the operator"), with no new table or column. When a run reaches the end of the examinable relations, the cursor SHALL wrap: the step SHALL continue from the lowest key, within the same run while its bounds allow, and otherwise the next run SHALL start from there. A run SHALL NOT examine a relation twice. A missing or unparsable cursor SHALL start from the lowest key.
 
 Kept pairs at the head of the order SHALL therefore never prevent later pairs from being examined. Because every run examines at least one pair, every examinable relation SHALL be examined within `P` runs of its scope, where `P` is the scope's examinable count. When no run is cut short by the shared budget, that SHALL happen within `ceil(P / DRAIN_ROW_CAP)` runs.
 
@@ -229,7 +229,7 @@ A relation whose drain op an operator has reverted SHALL NOT be drained again by
 
 #### Scenario: A backlog larger than one run is covered without starvation
 
-- **GIVEN** a scope whose lowest `judgment_id` values belong to more kept pending relations than one run's row cap, followed by drainable ones
+- **GIVEN** a scope whose lowest `(created_at, judgment_id)` keys belong to more kept pending relations than one run's row cap, followed by drainable ones
 - **WHEN** the sweep runs repeatedly (manually forced, bypassing the throttle)
 - **THEN** each run SHALL examine at most the row cap, the cursor SHALL advance past the kept relations, and the drainable relations SHALL be orphaned by a later run
 
@@ -249,21 +249,21 @@ A relation whose drain op an operator has reverted SHALL NOT be drained again by
 
 #### Scenario: The cursor wraps to the start
 
-- **GIVEN** a cursor that has passed the highest pending `judgment_id` of the scope, and a pending relation that became drainable after the cursor passed it
+- **GIVEN** a cursor that has passed the highest pending key of the scope, and a pending relation that became drainable after the cursor passed it
 - **WHEN** the next runs execute
-- **THEN** the cursor SHALL restart from the lowest `judgment_id`, and that relation SHALL be orphaned once reached
+- **THEN** the step SHALL continue from the lowest key, and that relation SHALL be orphaned once reached
 
 #### Scenario: The wall-clock budget ends a run early and the next run resumes
 
 - **GIVEN** an injected clock that starts when the drain step begins and exhausts `DRAIN_BUDGET_MS` after two pairs
 - **WHEN** the drain step runs
-- **THEN** it SHALL examine two pairs, record the second one's `judgment_id` as the cursor, and the next run SHALL begin with the third
+- **THEN** it SHALL examine two pairs, record the second one's key as the cursor, and the next run SHALL begin with the third
 
 #### Scenario: A slow host still progresses
 
 - **GIVEN** an injected clock that reports the shared budget already spent when the drain step begins
 - **WHEN** the drain step runs
-- **THEN** it SHALL examine exactly one pair and record that pair's `judgment_id` as the cursor
+- **THEN** it SHALL examine exactly one pair and record that pair's key as the cursor
 
 #### Scenario: Time spent before the drain does not consume its budget
 

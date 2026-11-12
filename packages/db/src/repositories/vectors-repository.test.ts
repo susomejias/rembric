@@ -202,4 +202,32 @@ describe('VectorsRepository', () => {
       expect(count?.c).toBe(0);
     });
   });
+  describe('pairCosineDistance', () => {
+    it('applies vec_distance_cosine to the two stored rows', () => {
+      insertWithEmbedding('A', unit(1, 0));
+      insertWithEmbedding('B', unit(1, 1));
+      insertWithEmbedding('C', unit(1, 0));
+      expect(repo.pairCosineDistance('p0', 'A', 'B')).toBeCloseTo(1 - 1 / Math.SQRT2, 5);
+      expect(repo.pairCosineDistance('p0', 'A', 'C')).toBeCloseTo(0, 6);
+    });
+
+    it('returns null when either row has no stored embedding', () => {
+      insertWithEmbedding('A', unit(1, 0));
+      t.handle.db
+        .insert(memory)
+        .values([row({ id: 'N', content: 'content N' })])
+        .run();
+      expect(repo.pairCosineDistance('p0', 'A', 'N')).toBeNull();
+      expect(repo.pairCosineDistance('p0', 'N', 'A')).toBeNull();
+    });
+
+    it("never reads another project's vector", () => {
+      insertWithEmbedding('A', unit(1, 0));
+      insertWithEmbedding('X', unit(1, 0), { projectId: 'p1' });
+      expect(repo.pairCosineDistance('p0', 'A', 'X')).toBeNull();
+      expect(repo.pairCosineDistance('p1', 'A', 'X')).toBeNull();
+      insertWithEmbedding('Y', unit(1, 0), { projectId: 'p1' });
+      expect(repo.pairCosineDistance('p1', 'X', 'Y')).toBeCloseTo(0, 6);
+    });
+  });
 });

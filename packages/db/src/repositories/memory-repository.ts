@@ -27,6 +27,13 @@ export interface ReviewTimestamps {
 
 export type RankingMetadata = Pick<Memory, 'type' | 'lastSeenAt' | 'sessionId' | 'projectId'>;
 
+/** `title` and `content` are null when `chars` exceeds the read's bound: they are never loaded. */
+export type BoundedEndpoint = Pick<Memory, 'id' | 'status'> & {
+  chars: number;
+  title: Memory['title'] | null;
+  content: Memory['content'] | null;
+};
+
 export interface SearchMemoryIdsOpts {
   scope: SearchScope;
   /** Omitted means "any but archived", not "active" — the `topic_key` history read (see `MemoryService.search`). */
@@ -368,6 +375,33 @@ export class MemoryRepository {
   }
 
   /** @internal */
+  findBoundedEndpoints(opts: {
+    projectId: string;
+    ids: readonly string[];
+    maxChars: number;
+  }): BoundedEndpoint[] {
+    if (opts.ids.length === 0) return [];
+    const chars = sql<number>`length(${memory.title}) + length(${memory.content})`;
+    const within = sql`${chars} <= ${opts.maxChars}`;
+    return this.db
+      .select({
+        id: memory.id,
+        status: memory.status,
+        chars,
+        title: sql<string | null>`CASE WHEN ${within} THEN ${memory.title} END`,
+        content: sql<string | null>`CASE WHEN ${within} THEN ${memory.content} END`,
+      })
+      .from(memory)
+      .where(
+        and(
+          inArray(memory.id, [...opts.ids]),
+          eq(memory.scope, 'project'),
+          eq(memory.projectId, opts.projectId),
+        ),
+      )
+      .all();
+  }
+
   unsafeGetById(id: string): Memory | undefined {
     return this.db.select().from(memory).where(eq(memory.id, id)).get();
   }

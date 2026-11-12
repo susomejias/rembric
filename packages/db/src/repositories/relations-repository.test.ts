@@ -441,3 +441,151 @@ describe('RelationsRepository scoped pending reads', () => {
     expect(aged.filter((r) => r.sourceId === a)).toHaveLength(5);
   });
 });
+
+describe('RelationsRepository.listExaminablePendingInScope', () => {
+  let t: TestDb;
+  let repo: RelationsRepository;
+
+  function memRow(
+    id: string,
+    projectId: string,
+    status: NewMemory['status'] = 'active',
+  ): NewMemory {
+    return { ...mem(id, `memory ${id}`), projectId, status };
+  }
+
+  beforeEach(() => {
+    t = createTestDb();
+    seedProject(t.handle, 'p0', 'project-zero');
+    seedProject(t.handle, 'p1', 'project-one');
+    repo = new RelationsRepository(t.handle.db);
+    t.handle.db
+      .insert(memory)
+      .values([
+        memRow('A1', 'p0'),
+        memRow('A2', 'p0'),
+        memRow('A3', 'p0', 'superseded'),
+        memRow('B1', 'p1'),
+        memRow('B2', 'p1'),
+      ])
+      .run();
+    t.handle.db
+      .insert(memoryRelations)
+      .values([
+        rel({
+          id: 'R3',
+          judgmentId: 'J3',
+          sourceId: 'A1',
+          targetId: 'A2',
+          createdAt: new Date(2_000),
+        }),
+        rel({
+          id: 'R1',
+          judgmentId: 'J1',
+          sourceId: 'A1',
+          targetId: 'A2',
+          createdAt: new Date(1_000),
+        }),
+        rel({
+          id: 'R2',
+          judgmentId: 'J2',
+          sourceId: 'A3',
+          targetId: 'A2',
+          createdAt: new Date(2_000),
+        }),
+        rel({
+          id: 'R4',
+          judgmentId: 'J4',
+          sourceId: 'A2',
+          targetId: 'A1',
+          createdAt: new Date(3_000),
+          status: 'judged',
+          relation: 'related',
+        }),
+        rel({
+          id: 'R5',
+          judgmentId: 'J5',
+          sourceId: 'B1',
+          targetId: 'B2',
+          createdAt: new Date(1_500),
+        }),
+        rel({
+          id: 'R6',
+          judgmentId: 'J6',
+          sourceId: 'A1',
+          targetId: 'B1',
+          createdAt: new Date(1_200),
+        }),
+      ])
+      .run();
+  });
+
+  afterEach(() => t.cleanup());
+
+  const ids = (rows: { judgmentId: string }[]): string[] => rows.map((r) => r.judgmentId);
+
+  it('lists pending rows of the project in (created_at, judgment_id) order, retired endpoints included', () => {
+    const rows = repo.listExaminablePendingInScope({
+      projectId: 'p0',
+      excludeJudgmentIds: [],
+      limit: 10,
+    });
+    expect(ids(rows)).toEqual(['J1', 'J2', 'J3']);
+    expect(rows[0]).toEqual({
+      judgmentId: 'J1',
+      sourceId: 'A1',
+      targetId: 'A2',
+      createdAt: new Date(1_000),
+    });
+  });
+
+  it("never returns another project's rows or a cross-project pair", () => {
+    expect(
+      ids(
+        repo.listExaminablePendingInScope({ projectId: 'p1', excludeJudgmentIds: [], limit: 10 }),
+      ),
+    ).toEqual(['J5']);
+  });
+
+  it('resumes strictly after a cursor and stops at an inclusive upper key', () => {
+    const after = { createdAt: new Date(2_000), judgmentId: 'J2' };
+    expect(
+      ids(
+        repo.listExaminablePendingInScope({
+          projectId: 'p0',
+          after,
+          excludeJudgmentIds: [],
+          limit: 10,
+        }),
+      ),
+    ).toEqual(['J3']);
+    expect(
+      ids(
+        repo.listExaminablePendingInScope({
+          projectId: 'p0',
+          until: after,
+          excludeJudgmentIds: [],
+          limit: 10,
+        }),
+      ),
+    ).toEqual(['J1', 'J2']);
+  });
+
+  it('excludes the given judgment ids inside the query, so the limit counts only examinable rows', () => {
+    expect(
+      ids(
+        repo.listExaminablePendingInScope({
+          projectId: 'p0',
+          excludeJudgmentIds: ['J1'],
+          limit: 2,
+        }),
+      ),
+    ).toEqual(['J2', 'J3']);
+  });
+
+  it('honours the limit', () => {
+    expect(
+      ids(repo.listExaminablePendingInScope({ projectId: 'p0', excludeJudgmentIds: [], limit: 1 })),
+    ).toEqual(['J1']);
+  });
+});

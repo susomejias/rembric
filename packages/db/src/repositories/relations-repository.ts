@@ -70,6 +70,16 @@ export type AdminRelationWithContent = Pick<
   targetContent: Memory['content'];
 };
 
+export interface PendingOrderKey {
+  createdAt: Date;
+  judgmentId: string;
+}
+
+export type ExaminablePending = Pick<
+  MemoryRelation,
+  'judgmentId' | 'sourceId' | 'targetId' | 'createdAt'
+>;
+
 const sourceMemory = aliasedTable(memory, 'ms');
 const targetMemory = aliasedTable(memory, 'mt');
 
@@ -261,6 +271,42 @@ export class RelationsRepository {
         ),
       )
       .orderBy(memoryRelations.createdAt)
+      .limit(opts.limit)
+      .all();
+  }
+
+  /** `(created_at, judgment_id)` order rides `memory_relations_status_created_idx`; `until` is inclusive. */
+  listExaminablePendingInScope(opts: {
+    projectId: string;
+    after?: PendingOrderKey;
+    until?: PendingOrderKey;
+    excludeJudgmentIds: readonly string[];
+    limit: number;
+  }): ExaminablePending[] {
+    const order = sql`(${memoryRelations.createdAt}, ${memoryRelations.judgmentId})`;
+    const key = (k: PendingOrderKey): SQL => sql`(${k.createdAt.getTime()}, ${k.judgmentId})`;
+    return this.db
+      .select({
+        judgmentId: memoryRelations.judgmentId,
+        sourceId: memoryRelations.sourceId,
+        targetId: memoryRelations.targetId,
+        createdAt: memoryRelations.createdAt,
+      })
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(
+        and(
+          eq(memoryRelations.status, 'pending'),
+          opts.after ? sql`${order} > ${key(opts.after)}` : undefined,
+          opts.until ? sql`${order} <= ${key(opts.until)}` : undefined,
+          opts.excludeJudgmentIds.length > 0
+            ? sql`${memoryRelations.judgmentId} NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeJudgmentIds)}))`
+            : undefined,
+          endpointsInScope(opts.projectId),
+        ),
+      )
+      .orderBy(memoryRelations.createdAt, memoryRelations.judgmentId)
       .limit(opts.limit)
       .all();
   }

@@ -168,9 +168,11 @@ The parent's prototype on a production backup copy measured about 0.13 ms per pa
 
 **Expected drain time for 589 rows:** `ceil(589 / DRAIN_ROW_CAP)` runs, when the budget does not cut runs short. In the worst case, one pair per run, it is 589 runs. On the session-start cadence a run is one day per scope, and each dashboard "run now" adds a run. The measurement states the resulting figure.
 
-**Cursor.** The step selects examinable rows in `judgment_id` order after a cursor. An examinable row is pending, has both endpoints in the project whatever their lifecycle, and is not excluded by a reverted drain op. `judgment_id` is a ULID minted in `createPending` (`relations.ts:131`) and carries a unique index (`packages/db/src/schema/memory-relations.ts`, `judgmentIdUnique`).
+**Cursor.** The step selects examinable rows in `(created_at, judgment_id)` order after a composite cursor. An examinable row is pending, has both endpoints in the project whatever their lifecycle, and is not excluded by a reverted drain op. `judgment_id` is a ULID minted in `createPending` (`relations.ts:131`) and carries a unique index (`packages/db/src/schema/memory-relations.ts`, `judgmentIdUnique`), so it breaks `created_at` ties deterministically.
 
-The cursor (the last examined `judgment_id`) and the run's counts go into ONE nested `drain` object of the summary JSON that `finishRun` already writes (`runner.ts:120`, `packages/db/src/repositories/consolidation-repository.ts:24-30`). Each run reads the latest finished run of its scope. When the selection runs out of rows, the cursor wraps.
+The order rides the existing `memory_relations_status_created_idx` `(status, created_at)` as a range and sorts only ties. Plain `judgment_id` order sorted every pending row of the scope before the first pair: 13–18 ms warm and about 170 ms cold at a 5 000-row backlog and 50 000 memories, against 0.35–4.8 ms for the composite order (`measurements/README.md`, validation 8). The prototype ran both orders over 40 wrapping cursor steps and every batch size: identical batches and identical drained sets. Under a shared budget, the `judgment_id` order could not hold it, because every scope paid its sort before its guaranteed pair.
+
+The cursor (the last examined row's `created_at` and `judgment_id`) and the run's counts go into ONE nested `drain` object of the summary JSON that `finishRun` already writes (`runner.ts:120`, `packages/db/src/repositories/consolidation-repository.ts:24-30`). Each run reads the latest finished run of its scope. When the selection runs out of rows after the cursor, it continues from the lowest key up to the cursor, inclusive, within the same run while the cap allows, so a run never examines a row twice and the next run resumes after the last row examined.
 
 The summary is the right home for the cursor:
 
@@ -178,9 +180,9 @@ The summary is the right home for the cursor:
 - nesting keeps every published reader unchanged (D9);
 - a lost or corrupt cursor restarts from the lowest id, which costs extra work but never causes a wrong drain.
 
-**Undo is final, for the drain.** A row is excluded when a reverted `orphan_promote` op carries its judgment id as `created_id` (`operations.ts:93`). The lookup is keyed by `created_id IN (<the batch's judgment ids>)` with `reverted_at IS NOT NULL`, so its result is bounded by the batch.
+**Undo is final, for the drain.** A row is excluded when a reverted `orphan_promote` op carries its judgment id as `created_id` (`operations.ts:93`). The created ids of every reverted `orphan_promote` op are read once per sweep call, and the selection excludes them inside its own SQL. Excluding after selecting would let excluded rows fill the row cap: a batch made only of undone rows would examine nothing while the cursor advanced.
 
-`consolidation_ops` has no index on `created_id`; its only index is on `run_id` (`packages/db/src/schema/consolidation.ts:53`). So the statement scans the journal once per run. Its cost is included in the task group 9 measurement, and an index is out of scope because it would be a migration.
+`consolidation_ops` has no index on `created_id`; its only index is on `run_id` (`packages/db/src/schema/consolidation.ts:53`). So the read scans the journal. It runs once per sweep call, not once per scope, so a forced `runAll` over N projects pays one scan, not N. It runs inside the first drain step, after the budget clock has started, so its cost spends the drain's own budget instead of adding to it. Its cost at 1 000, 10 000 and 100 000 ops is part of the task group 9 measurement, and an index is out of scope because it would be a migration.
 
 The finality binds the drain only. The deadline step's selection does not read the journal (`relations-repository.ts:242-265`), so an undone row that later crosses the deadline is orphaned by the deadline step, as before this change.
 
