@@ -39,17 +39,28 @@ async function saveThroughCuration(
   deps: SaveDeps,
   input: SaveMemoryInput,
   scope: Scope,
+  lexicalFloor: number | undefined,
 ): Promise<ReturnType<MemoryService['saveWithTopicKey']>['memory']> {
   const { memory: saved } = deps.memory.saveWithTopicKey(input, scope);
   await runPostSaveSteps(
-    { ...deps, candidates: { perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT } },
+    {
+      ...deps,
+      candidates: {
+        perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT,
+        ...(lexicalFloor === undefined ? {} : { lexicalFloor }),
+      },
+    },
     saved,
     scope,
   );
   return saved;
 }
 
-export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Promise<Ingested> {
+export async function ingestCorpus(
+  items: CorpusItem[],
+  embedder: Embedder,
+  opts: { lexicalFloor?: number } = {},
+): Promise<Ingested> {
   const { handle, dataDir, cleanup } = createTestDb();
   const repos = createRepositories(handle.db);
 
@@ -92,6 +103,7 @@ export async function ingestCorpus(items: CorpusItem[], embedder: Embedder): Pro
         topicKey: item.topicKey,
       },
       scope,
+      opts.lexicalFloor,
     );
 
     idByStableId.set(item.id, saved.id);

@@ -10,25 +10,25 @@
 
 ## 2. Save-time fixture and calibration sweep
 
-- [ ] 2.1 Add the labelled save-time fixture beside the retrieval harness. It holds:
+- [x] 2.1 Add the labelled save-time fixture beside the retrieval harness. It holds:
   - a heterogeneous base corpus of at least 20 memories, mixing English and Spanish, memory types and text lengths;
   - labelled saves in four classes: near-duplicate, expanded rewrite, contradiction and unrelated. Every class except unrelated names its expected target.
 
   The retrieval corpus and the query files stay untouched.
 
-- [ ] 2.2 Add `lexicalFloor?: number` to `CandidateOptions` as a test seam beside `poolSize`. It is never read from the environment and defaults to the shipped constant. Until task 3.1 it is threaded through with no filtering, so behaviour is unchanged.
-- [ ] 2.3 Implement the sweep module and a documented root script (`pnpm run eval:save-time`) per the `retrieval-evaluation` delta:
+- [x] 2.2 Add the filter mechanism with no behaviour change: declare `LEXICAL_CANDIDATE_FLOOR = 0` beside `VEC_THRESHOLD`, add `lexicalFloor?: number` to `CandidateOptions` as a test seam beside `poolSize` (never read from the environment), and drop lexical pool rows whose `similarity` is below `opts.lexicalFloor ?? LEXICAL_CANDIDATE_FLOOR` before the merge, ranking and cap. At `0` every row is admitted, so the shipped behaviour is unchanged until task 3.2; `pnpm eval` result ids stay identical. The sweep needs the mechanism in place to vary the floor, which is why it lands before the RED test.
+- [x] 2.3 Implement the sweep module and a documented root script (`pnpm run eval:save-time`) per the `retrieval-evaluation` delta:
   - two arms: lexical-only, and production with the compiled-in embedder;
   - a grid from `0.00` to `0.95` in steps of `0.05`;
   - output per grid point and arm: labelled pairs surfaced per class, pending rows per unrelated save by `source`, and total pending rows labelled as the queue-depth instrument;
   - a secondary series: pending rows created by ingesting the retrieval corpus at `0.00`.
-- [ ] 2.4 Add tests:
+- [x] 2.4 Add tests:
   - the `0.00` grid point writes the same pending rows as rank-only admission;
   - two lexical-only runs on unchanged inputs produce identical output.
-- [ ] 2.5 Run the sweep and commit its output as `openspec/changes/add-save-time-lexical-floor/measurements/sweep.txt`, naming the instrument on every row.
-- [ ] 2.6 From that grid, choose `LEXICAL_CANDIDATE_FLOOR` as the midpoint of the admissible plateau, rounded to the grid, per design D4. Record the plateau and the reasoning in `measurements/README.md`.
-- [ ] 2.7 **Stop and report** if no plateau at least `0.10` wide satisfies every criterion. In particular, report if the lexical-only arm cannot surface every near-duplicate while unrelated saves write zero lexical pending rows. That outcome is a **Needs your decision** result, never a hand-picked value.
-- [ ] 2.8 Commit: `test(core): add a save-time candidate calibration sweep over a labelled fixture`.
+- [x] 2.5 Run the sweep and commit its output as `openspec/changes/add-save-time-lexical-floor/measurements/sweep.txt`, naming the instrument on every row.
+- [x] 2.6 From that grid, choose `LEXICAL_CANDIDATE_FLOOR` as the midpoint of the admissible plateau, rounded to the grid, per design D4. Record the plateau and the reasoning in `measurements/README.md`.
+- [x] 2.7 **Stop and report** if no plateau at least `0.10` wide satisfies every criterion. In particular, report if the lexical-only arm cannot surface every near-duplicate while unrelated saves write zero lexical pending rows. That outcome is a **Needs your decision** result, never a hand-picked value.
+- [x] 2.8 Commit: `test(core): add a save-time candidate calibration sweep over a labelled fixture`.
 
 ## 3. The lexical floor
 
@@ -38,7 +38,7 @@
 
   Observe the first assertion fail on the unchanged code.
 
-- [ ] 3.2 GREEN: declare `LEXICAL_CANDIDATE_FLOOR` in `save-time-candidates.ts`, beside `VEC_THRESHOLD`, at the value chosen in 2.6. Drop lexical pool rows below `opts.lexicalFloor ?? LEXICAL_CANDIDATE_FLOOR` before the merge, ranking and cap. The vector and entity pools are untouched.
+- [ ] 3.2 GREEN: set `LEXICAL_CANDIDATE_FLOOR` to the value chosen in 2.6. The vector and entity pools are untouched.
 - [ ] 3.3 Add one test per `memory` delta scenario:
   - a below-floor lexical match takes no slot, and `candidatesDetected` counts only admitted rows;
   - a below-floor lexical target is still surfaced as `source: 'vec'`;

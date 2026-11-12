@@ -7,6 +7,8 @@ export const DISMISSAL_ANCESTRY_CAP = 10;
 
 export const VEC_THRESHOLD = 0.7;
 
+export const LEXICAL_CANDIDATE_FLOOR = 0;
+
 export const ENTITY_RARITY_THRESHOLD = 0.15;
 
 export const ENTITY_RARITY_MIN_LINKS = 5;
@@ -17,6 +19,8 @@ export interface CandidateOptions {
   perSaveMax: number;
   /** Test seam only — never read from the environment. */
   poolSize?: number;
+  /** Test seam only — never read from the environment. */
+  lexicalFloor?: number;
 }
 
 export interface SaveCandidate {
@@ -44,6 +48,7 @@ export function findSaveTimeCandidates(
   extractedEntities: ExtractedEntity[] = [],
 ): SaveCandidateResult {
   const poolSize = opts.poolSize ?? CANDIDATE_POOL_SIZE;
+  const lexicalFloor = opts.lexicalFloor ?? LEXICAL_CANDIDATE_FLOOR;
   const projectId = saved.projectId;
   if (projectId === null) return { candidates: [], detected: 0 };
 
@@ -84,9 +89,11 @@ export function findSaveTimeCandidates(
       limit: poolSize,
     });
     for (const r of ftsRows) {
+      const similarity = tokenContainment(queryTokens, tokenSet(`${r.title}\n\n${r.content}`));
+      if (similarity < lexicalFloor) continue;
       ftsPool.push({
         targetId: r.id,
-        similarity: tokenContainment(queryTokens, tokenSet(`${r.title}\n\n${r.content}`)),
+        similarity,
         source: 'fts',
         title: r.title,
         snippet: snippet(r.content, 200),
