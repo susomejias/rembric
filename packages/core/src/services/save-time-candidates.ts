@@ -1,6 +1,6 @@
-import { projectScope, type Memory, type Repositories } from '@rembric/db';
+import { projectScope, type Memory, type MemoryStatus, type Repositories } from '@rembric/db';
 
-import type { ExtractedEntity } from './entities.js';
+import { extractEntities, type ExtractedEntity } from './entities.js';
 import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
 
 export const DISMISSAL_ANCESTRY_CAP = 10;
@@ -14,6 +14,8 @@ export const ENTITY_RARITY_THRESHOLD = 0.15;
 export const ENTITY_RARITY_MIN_LINKS = 5;
 
 export const CANDIDATE_POOL_SIZE = 20;
+
+export const DRAIN_MAX_PAIR_CHARS = 64_000;
 
 export interface CandidateOptions {
   perSaveMax: number;
@@ -191,4 +193,107 @@ export function findSaveTimeCandidates(
 function snippet(content: string, max: number): string {
   if (content.length <= max) return content;
   return content.slice(0, max - 1) + '…';
+}
+
+export type ChannelVerdict = 'admitted' | 'not_admitted' | 'unknown';
+
+export type PairEvaluation =
+  | { kind: 'unreadable' }
+  | { kind: 'failed'; error: string }
+  | { kind: 'retired'; sourceStatus: MemoryStatus; targetStatus: MemoryStatus }
+  | { kind: 'oversized' }
+  | {
+      kind: 'channels';
+      lexical: ChannelVerdict;
+      vector: ChannelVerdict;
+      entity: ChannelVerdict;
+      lexicalSimilarity: number;
+      vectorSimilarity: number | null;
+    };
+
+export interface EvaluatePairOptions {
+  vectorIndexCurrent: boolean;
+  /** Test seam only. */
+  extract?: (title: string, content: string) => ExtractedEntity[];
+}
+
+/** Rank-free: no pool, MATCH term selection, exclusion ids or cap, so it admits a superset of detection. */
+export function evaluatePair(
+  repos: Pick<Repositories, 'memory' | 'vectors' | 'entities'>,
+  projectId: string,
+  sourceId: string,
+  targetId: string,
+  opts: EvaluatePairOptions,
+): PairEvaluation {
+  try {
+    const rows = repos.memory.findBoundedEndpoints({
+      projectId,
+      ids: [sourceId, targetId],
+      maxChars: DRAIN_MAX_PAIR_CHARS,
+    });
+    const source = rows.find((r) => r.id === sourceId);
+    const target = rows.find((r) => r.id === targetId);
+    if (!source || !target) return { kind: 'unreadable' };
+    if (source.status !== 'active' || target.status !== 'active') {
+      return { kind: 'retired', sourceStatus: source.status, targetStatus: target.status };
+    }
+    if (
+      source.title === null ||
+      source.content === null ||
+      target.title === null ||
+      target.content === null
+    ) {
+      return { kind: 'oversized' };
+    }
+    const sourceText = { title: source.title, content: source.content };
+    const targetText = { title: target.title, content: target.content };
+
+    const lexicalSimilarity = lexicalOverlap(tokenSet(sourceText.content), targetText);
+
+    let vectorSimilarityValue: number | null = null;
+    if (opts.vectorIndexCurrent) {
+      const distance = repos.vectors.pairCosineDistance(projectId, sourceId, targetId);
+      if (distance !== null) vectorSimilarityValue = vectorSimilarity(distance);
+    }
+
+    return {
+      kind: 'channels',
+      lexical: lexicalAdmits(lexicalSimilarity) ? 'admitted' : 'not_admitted',
+      vector:
+        vectorSimilarityValue === null
+          ? 'unknown'
+          : vectorAdmits(vectorSimilarityValue)
+            ? 'admitted'
+            : 'not_admitted',
+      entity: entityVerdict(repos, sourceId, targetId, sourceText, targetText, opts),
+      lexicalSimilarity,
+      vectorSimilarity: vectorSimilarityValue,
+    };
+  } catch (err) {
+    return { kind: 'failed', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function entityVerdict(
+  repos: Pick<Repositories, 'entities'>,
+  sourceId: string,
+  targetId: string,
+  source: { title: string; content: string },
+  target: { title: string; content: string },
+  opts: EvaluatePairOptions,
+): ChannelVerdict {
+  const key = (e: { kind: string; value: string }) => `${e.kind}\u0000${e.value}`;
+  const stored = repos.entities.findEntitiesForMemories([sourceId, targetId]);
+  const sourceKeys = new Set((stored.get(sourceId) ?? []).map(key));
+  const targetKeys = new Set((stored.get(targetId) ?? []).map(key));
+  const shares = () => [...targetKeys].some((k) => sourceKeys.has(k));
+  if (shares()) return 'admitted';
+  const extract = opts.extract ?? extractEntities;
+  try {
+    for (const e of extract(source.title, source.content)) sourceKeys.add(key(e));
+    for (const e of extract(target.title, target.content)) targetKeys.add(key(e));
+  } catch {
+    return 'unknown';
+  }
+  return shares() ? 'admitted' : 'not_admitted';
 }
