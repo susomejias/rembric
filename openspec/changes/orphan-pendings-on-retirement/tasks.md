@@ -37,9 +37,9 @@
 
 ## 8. Verification
 
-- [ ] 8.1 Run `pnpm run typecheck`, `pnpm run lint` and the touched tests for every commit
-- [ ] 8.2 Run `pnpm --filter @rembric/web build`, then the full `pnpm test`
-- [ ] 8.3 Run `openspec validate orphan-pendings-on-retirement --strict`, `pnpm run check:delta-freshness` and `pnpm run check:spec-crossrefs`
+- [x] 8.1 Run `pnpm run typecheck`, `pnpm run lint` and the touched tests for every commit
+- [x] 8.2 Run `pnpm --filter @rembric/web build`, then the full `pnpm test`
+- [x] 8.3 Run `openspec validate orphan-pendings-on-retirement --strict`, `pnpm run check:delta-freshness` and `pnpm run check:spec-crossrefs`
 - [ ] 8.4 **OPERATOR-ONLY:** run `measurements/retired-verdicts.mts` against a backup copy of the production database (never the live file) and record the aggregate counts in `measurements/README.md` (design Open Question 1)
 
 ## 9. Archive-time coordination
