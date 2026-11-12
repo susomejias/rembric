@@ -1,0 +1,7 @@
+# save-time detection latency — floor 0.00 vs 0.60 (statement-level instrument, not end-to-end)
+instrument: findSaveTimeCandidates wall clock (performance.now), read path only, no writes; 20000 memories (corpus:build generator, seed 1); 40 probes × 50 rounds, 5 warm-up rounds discarded, rotating arm order
+paired median (floor-0.60 − a): -0.0064 ms (p25 -0.1712, p75 0.1640)
+paired median (b − a), identical arms: 0.0153 ms (p25 -0.1665, p75 0.1657)
+floor-0.00 (a): detected candidates summed over timed calls 40000
+floor-0.60: detected candidates summed over timed calls 38900
+floor-0.00 (b): detected candidates summed over timed calls 40000
