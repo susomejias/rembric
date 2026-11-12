@@ -89,13 +89,13 @@
 
 ## 6. Verification and delivery
 
-- [ ] 6.1 Run `pnpm run typecheck`, `pnpm run lint` and `pnpm test`, all green.
-- [ ] 6.2 Run `openspec validate add-save-time-lexical-floor --strict`, `node scripts/check-delta-freshness.mjs` and `node scripts/check-spec-crossrefs.mjs`, all green.
-- [ ] 6.3 Local smoke against the dev server (`pnpm run dev`, following the `rembric-smoke-tests` skill). Through MCP `memory.save` in a throwaway project:
+- [x] 6.1 Run `pnpm run typecheck`, `pnpm run lint` and `pnpm test`. All green except `apps/plugin/.pi-plugin/plugin.test.ts › registers exactly one tool per registerTool call site in the server`, which fails identically on the base commit (24 tools discovered, 25 expected) and is outside this change.
+- [x] 6.2 Run `openspec validate add-save-time-lexical-floor --strict`, `node scripts/check-delta-freshness.mjs` and `node scripts/check-spec-crossrefs.mjs`, all green.
+- [x] 6.3 Local smoke against the dev server (`pnpm run dev`, following the `rembric-smoke-tests` skill). Through MCP `memory.save` in a throwaway project:
   - an unrelated save returns no `source: 'fts'` candidate;
   - a near-duplicate save returns its match.
 
   Record the result in `measurements/smoke.md`.
 
-- [ ] 6.4 Confirm `git ls-files openspec/changes/add-save-time-lexical-floor/measurements` holds `sweep.txt`, `README.md`, `mutation.txt`, `save-latency.mjs`, `save-latency.txt` and `smoke.md`, and that no scratch path remains in the worktree.
+- [x] 6.4 Confirm `git ls-files openspec/changes/add-save-time-lexical-floor/measurements` holds `sweep.txt`, `README.md`, `mutation.txt`, `save-latency.mts`, `save-latency.txt`, `save-latency-run1.txt`, `detect-latency.mts`, `detect-latency.txt` and `smoke.md`, and that no scratch path remains in the worktree.
 - [ ] 6.5 Push and open the pull request: an English title and description, linking issue #453. This step is the user's decision.
