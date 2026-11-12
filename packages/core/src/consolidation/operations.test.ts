@@ -133,6 +133,48 @@ describe('undoOp / undoRun', () => {
     expect(reverted!.revertedAt).not.toBeNull();
   });
 
+  it('reverts a merge whose successor took an original topic_key: the original is reactivated, not skipped', () => {
+    const scope = projectScope(projectId);
+    const a = memoryService.save(
+      { type: 'user', title: 'a', content: 'a', topicKey: 'conventions/naming' },
+      scope,
+    );
+    const b = memoryService.save({ type: 'user', title: 'b', content: 'b' }, scope);
+    repos.memory.markSupersededMany([a.id, b.id]);
+    const mergedId = `merged-${a.id}`;
+    repos.memory.insert({
+      id: mergedId,
+      scope: 'project',
+      projectId,
+      type: 'user',
+      title: 'merged',
+      content: 'merged',
+      tags: [],
+      status: 'active',
+      replaces: [a.id, b.id],
+      createdAt: clock.value,
+      lastSeenAt: clock.value,
+      topicKey: 'conventions/naming',
+    });
+    const opId = `op-${a.id}`;
+    repos.consolidation.insertOp({
+      id: opId,
+      runId,
+      opType: 'merge',
+      affectedIds: [a.id, b.id],
+      createdId: mergedId,
+      reasoning: 'agent merge',
+      appliedAt: clock.value,
+    });
+
+    const result = undoOp(repos, db.handle.db, opId);
+
+    expect(result.skipped).toEqual([]);
+    expect(memoryService.unsafeGetById(a.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(b.id)!.status).toBe('active');
+    expect(memoryService.unsafeGetById(mergedId)!.status).toBe('archived');
+  });
+
   it('reverts a historical merge: predecessors active again, merged-into archived', () => {
     const { aId, bId, mergedId, opId } = seedHistoricalMerge();
 
