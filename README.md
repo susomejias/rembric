@@ -282,11 +282,11 @@ Applied to every bearer-authenticated surface (`/mcp`, `/api`, `/healthz`, `/adm
 
 Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
 
-| Variable                  | Default | Description                                                                                                                                     |
-| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` disables surfacing (pending rows are still inserted and re-surface via `memory.context`). |
-| `CANDIDATE_VEC_THRESHOLD` | `0.85`  | Cosine-similarity floor on the embedding match. Range `0..1`. Lower = more candidates, more noise.                                              |
-| `CANDIDATE_FTS_THRESHOLD` | `0.4`   | BM25-derived score floor on the FTS5 match. Range `0..1`.                                                                                       |
+| Variable                  | Default | Description                                                                                                          |
+| ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` turns save-time detection off: no candidates, no pending rows. |
+
+This is the only setting. The similarity thresholds behind it are compile-time constants calibrated for the bundled embedding model, not configuration: see [`docs/embeddings.md`](docs/embeddings.md#engine-constants-not-configuration).
 
 </details>
 

@@ -1715,6 +1715,14 @@ describe('MCP protocol conformance', () => {
     expect(save).toContain('CANDIDATES_PER_SAVE_MAX');
     expect(save).not.toMatch(/pass\s+`?candidatesDetected/i);
     expect(save).not.toMatch(/candidates_limit|candidates_max/i);
+
+    expect(save).not.toMatch(/configured similarity threshold/i);
+    expect(save).toMatch(/shared rare identifier like a file path or URL/);
+    expect(save).toMatch(/may share little wording/);
+    expect(save).toMatch(/lower bound/);
+    expect(save).toContain('judgmentId');
+    expect(save).toContain('memory.search');
+    expect(save).toContain('memory.compare');
   });
 
   describe('descriptions agree with what the tools do', () => {
@@ -1738,7 +1746,7 @@ describe('MCP protocol conformance', () => {
       ['memory.session_start', 1103],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1780],
+      ['memory.save', 1884],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
