@@ -17,6 +17,7 @@ export type DomainErrorCode =
   | 'token_expired'
   | 'admin_token_required'
   | 'conflict'
+  | 'fingerprint_mismatch'
   | 'id_collision'
   | 'prompt_not_found'
   | 'prompt_scope_mismatch'
