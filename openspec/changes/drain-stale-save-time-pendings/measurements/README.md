@@ -160,6 +160,25 @@ Selection order also changes the end-to-end numbers:
 - With the bound on, a 1 MB pair costs 0.51 ms (status and length only) and is kept as `fail-safe:content-too-large`. **Control:** a 1.3 KB noise pair still drains.
 - The reverted-op lookup for a 1 000-id batch scans `consolidation_ops`, which has no index on `created_id`: 0.19 ms at 1 000 ops, 0.54 ms at 10 000 and 3.74 ms at 100 000.
 
+## The shipped drain against the prototype (`validate-shipped.mts`)
+
+The same fixture and corpus validations, re-run through the shipped step: `ConsolidationRunner.runScope`, with decay and deadline orphaning neutralized so only the drain writes, `vectorIndexCurrent` true, and the shipped bounds and wall clock. Per-pair reasons come from `evaluatePair` and `drainDisposition`, the functions the step calls, and every pair's relation status and journal prefix are checked against them. The prototype's independent recomputation (`verifyDrain`) re-derives every decision from raw reads.
+
+| validation                         | prototype v3                                          | shipped step                                           | file                              |
+| ---------------------------------- | ----------------------------------------------------- | ------------------------------------------------------ | --------------------------------- |
+| fixture, production arm            | 225 → 207 drained, 18 kept (lexical 8, vector 10)     | 225 → 207 drained, 18 kept (lexical 8, vector 10)      | `fixture-drain-shipped.txt`       |
+| fixture false drains               | 0 (17/17 labelled pairs kept)                         | 0 (17/17 labelled pairs kept)                          | `fixture-drain-shipped.txt`       |
+| fixture, per-class table           | see `fixture-drain.txt`                               | identical, row for row                                 | `fixture-drain-shipped.txt`       |
+| fixture superset at the 0.60 floor | 18 written, 18 kept, 0 extra                          | 18 written, 18 kept, 0 extra                           | `fixture-drain-shipped.txt`       |
+| independent recomputation          | 0 mismatches                                          | 0 mismatches over 225 + 295 pairs                      | both shipped files                |
+| undo                               | 207 reverted, 207/207 clean, next pass excludes 207   | 207 reverted, 207/207 clean, next run examines only 18 | `fixture-drain-shipped.txt`       |
+| fixture, lexical-only arm          | 0 drained, 225 kept (213 vector unknown)              | 0 drained, 225 kept (213 vector unknown)               | `fixture-drain-shipped.txt`       |
+| no model inference                 | 225/225 identical, `memory_vec` 51 → 51, load refused | 225/225 identical, `memory_vec` 51 → 51, load refused  | `fixture-no-embedder-shipped.txt` |
+| retrieval corpus                   | 241 drained (235 rules, 6 retired), 54 kept by vector | 241 drained (235 rules, 6 retired), 54 kept by vector  | `corpus-drain-shipped.txt`        |
+| corpus superset at the 0.60 floor  | 54/54, 0 extra                                        | 54/54, 0 extra                                         | `corpus-drain-shipped.txt`        |
+
+The shipped entity channel unions each endpoint's stored links with its fresh extraction (design D2), where the prototype compared stored with stored and fresh with fresh. The union can only add keeps; on both data sets it changed no decision.
+
 ## Prototype figures measured on a backup copy (design D11)
 
 These figures come from the parent's prototype run on a BACKUP COPY of a real installation's database, never the live file. Only aggregate figures are recorded: no content, titles, project names or identifiers. They are prototype figures; the committed measurements in this directory are the evidence for the constants.

@@ -1,0 +1,67 @@
+# stale pending drain — SHIPPED step on the labelled save-time fixture
+fixture: 24 base memories, 27 labelled saves; saved through runPostSaveSteps with lexicalFloor 0 (pre-floor behaviour), per-save cap 5
+drain: ConsolidationRunner.runScope, run until every pending pair was examined once; decay and deadline orphaning neutralized (no threshold reached), vectorIndexCurrent true, the shipped DRAIN_ROW_CAP, DRAIN_BUDGET_MS and wall clock
+per-pair reasons: core.evaluatePair + core.drainDisposition, the functions the step calls; scratch root /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain-impl.FY40aZOKZz/validate
+
+embedding model: onnx-community/gte-multilingual-base
+
+## validation 1 — production arm (real embedder)
+pendings before: 225
+runs in the pass: 2 (148/137 88/70 examined/drained)
+drained: 207 (rules 207, retired endpoint 0)
+kept: 18 (by first admitting channel or unknown reason: lexical 8, vector 10)
+mechanics: relation status and journal prefix match the predicted disposition for every pair — mismatches 0
+
+by pair class (source kind -> target kind): pending / drained / kept
+  base -> base                               90   90    0
+  contradiction -> base                      10    5    5
+  contradiction -> contradiction              2    2    0
+  contradiction -> expanded-rewrite          11   11    0
+  contradiction -> near-duplicate             2    1    1
+  expanded-rewrite -> base                   13    9    4
+  expanded-rewrite -> expanded-rewrite        3    3    0
+  expanded-rewrite -> near-duplicate          4    4    0
+  near-duplicate -> base                     34   26    8
+  near-duplicate -> near-duplicate            6    6    0
+  unrelated -> base                          23   23    0
+  unrelated -> contradiction                  1    1    0
+  unrelated -> expanded-rewrite              14   14    0
+  unrelated -> near-duplicate                 7    7    0
+  unrelated -> unrelated                      5    5    0
+
+labelled pairs (save -> its expected base item) pending before the drain: 17 of 17
+FALSE DRAINS (a labelled pair not kept): 0
+  pending  nd-port -> b-port                  lexical
+  pending  nd-orm -> b-orm                    lexical
+  pending  nd-node -> b-node                  lexical
+  pending  nd-backup -> b-backup              lexical
+  pending  nd-rate -> b-rate                  lexical
+  pending  nd-es-reviews -> b-es-reviews      lexical
+  pending  nd-flags -> b-flags                lexical
+  pending  nd-user-lang -> b-user-lang        lexical
+  pending  er-logs -> b-logs                  vector
+  pending  er-docker -> b-docker              vector
+  pending  er-retry -> b-retry                vector
+  pending  er-es-deploy -> b-es-deploy        vector
+  pending  c-session -> b-auth                vector
+  pending  c-env -> b-env                     vector
+  pending  c-flaky -> b-flaky                 vector
+  pending  c-flags -> b-flags                 vector
+  pending  c-cache -> b-cache                 vector
+
+### independent recomputation (the prototype verifyDrain: own tokenizer, float64 cosine, raw entity links, fresh extraction)
+pairs checked 225; recomputed rules drain 207, retired drain 0, keep 18; mismatches 0; max cosine delta 7.6e-7; pairs within 1e-4 of the vector threshold 0
+
+### superset check against the shipped floor (same fixture saved at lexicalFloor 0.60)
+pending pairs written at 0.60: 18; kept by the drain: 18; written at 0.60 but NOT kept: 0; kept but not written at 0.60: 0
+
+### undo through the dashboard's service path (first run op by op with undoOp, the rest with undoRun)
+ops reverted 207 (expected 207); kept verdicts reported 0
+drained rows back to a clean pending state: 207/207
+the next shipped run after the undo examines 18 pairs, the never-drained ones (undo is final for the drain: undone rows are excluded inside the selection); drained over the next 13 runs: 0
+
+## validation 1 — lexical-only arm (no embedder, so no stored vectors)
+pendings before: 225
+drained: 0 (rules 0, retired endpoint 0)
+kept: 225 (by first admitting channel or unknown reason: entity 4, lexical 8, unknown:vector 213)
+mechanics mismatches 0
