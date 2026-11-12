@@ -22,6 +22,7 @@ export * from './services/errors.js';
 export * from './services/extractor-rules.js';
 export * from './services/hybrid-search.js';
 export * from './services/memory.js';
+export * from './services/memory-merge.js';
 export * from './services/oauth-areq.js';
 export * from './services/oauth.js';
 export * from './services/projects.js';
