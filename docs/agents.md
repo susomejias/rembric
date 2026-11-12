@@ -57,7 +57,7 @@ A widened read changes nothing about where writes go: `memory.save` on the same 
 
 ## Reading prior context
 
-`memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, memories relevant to the work at hand (`relevantMemories[]`, ranked against `focus` or a server-derived seed), pending judgments, and memories needing review for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display.
+`memory.context` is the cheap awareness payload an agent reads at session start: recent sessions, memories, prompts, memories relevant to the work at hand (`relevantMemories[]`, ranked against `focus` or a server-derived seed), pending judgments, and memories needing review for the scope. Every text field it returns is bounded to a short snippet (≤350 chars) so the block stays token-light — a session `summary`, a prompt's `content`, and memory/relation snippets are all truncated for display. One exception: when a recent session's `## Unfinished+why` section lists pending work, that session's `summary` snippet shows that section instead of the opening, bounded at 600 chars, so pending work reaches the next conversation.
 
 Two of its lists ask the agent to act, and they are deliberately different shapes:
 

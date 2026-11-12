@@ -3,7 +3,12 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { hasAnyHeading, mergeSummarySections, parseSummarySections } from '@rembric/core';
+import {
+  hasAnyHeading,
+  mergeSummarySections,
+  parseSummarySections,
+  pendingSection,
+} from '@rembric/core';
 
 // Co-located with the module it reads: the services directory is this one.
 const DOMAIN_SERVICES_DIR = new URL('./', import.meta.url);
@@ -120,6 +125,40 @@ describe('hasAnyHeading', () => {
 
   it('ignores a `##` line inside a fenced code block', () => {
     expect(hasAnyHeading('```\n## not a heading\n```')).toBe(false);
+  });
+});
+
+describe('pendingSection', () => {
+  it('returns the Unfinished+why heading and its trimmed body', () => {
+    const doc =
+      '## Goal\nShip it\n\n## Unfinished+why\n\n- push PR: user decides\n\n## Files\na.ts';
+    expect(pendingSection(doc)).toBe('## Unfinished+why\n- push PR: user decides');
+  });
+
+  it('is null when the summary has no Unfinished+why section', () => {
+    expect(pendingSection('## Goal\nShip it\n## Files\na.ts')).toBeNull();
+  });
+
+  it('is null when the section has no body', () => {
+    expect(pendingSection('## Goal\nShip it\n## Unfinished+why\n\n## Files\na.ts')).toBeNull();
+  });
+
+  it.each(['none', 'None.', 'nothing', 'n/a', 'N/A', 'nada', 'Ninguna', 'ninguno.', '—', '-'])(
+    'is null when the body only says nothing is pending (%s)',
+    (body) => {
+      expect(pendingSection(`## Goal\nShip it\n## Unfinished+why\n${body}\n`)).toBeNull();
+    },
+  );
+
+  it('keeps a body that starts with "none" but lists leftovers', () => {
+    const doc = '## Unfinished+why\nNone blocking; install.sh still modified, undecided.';
+    expect(pendingSection(doc)).toBe(
+      '## Unfinished+why\nNone blocking; install.sh still modified, undecided.',
+    );
+  });
+
+  it('ignores an Unfinished+why line inside a fenced code block', () => {
+    expect(pendingSection('## Goal\n```\n## Unfinished+why\nx\n```')).toBeNull();
   });
 });
 
