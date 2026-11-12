@@ -14,6 +14,8 @@ import {
 import slugify from 'slugify';
 import { ulid } from 'ulid';
 
+import { orphanPendingOnRetirement } from '../consolidation/operations.js';
+
 import { DomainError } from './errors.js';
 import {
   hybridSearch,
@@ -33,6 +35,7 @@ import {
   mergeFingerprint,
   toOriginalView,
 } from './memory-merge.js';
+import { RelationsService } from './relations.js';
 import {
   type DerivedReview,
   deriveReviewState,
@@ -173,6 +176,12 @@ export class MemoryService {
 
       if (supersededByTopicKey) {
         this.repos.memory.markSuperseded(supersededByTopicKey.id);
+        orphanPendingOnRetirement(this.repos, this.relationsService(), {
+          retiredIds: [supersededByTopicKey.id],
+          status: 'superseded',
+          cause: 'topic_key revision',
+          at: ts,
+        });
       }
 
       const inserted = this.repos.memory.insert({
@@ -514,11 +523,18 @@ export class MemoryService {
     const ts = this.now();
     this.tx.transaction(() => {
       this.repos.memory.markArchived(id, ts);
-      this.journalMaintenanceOp(ts, {
+      const { runId } = this.journalMaintenanceOp(ts, {
         opType: 'agent_memory_archive',
         affectedIds: [id],
         reasoning: AGENT_MEMORY_ARCHIVE_REASONING,
         summary: { kind: 'agent_memory_archive', archived: 1 },
+      });
+      orphanPendingOnRetirement(this.repos, this.relationsService(), {
+        retiredIds: [id],
+        status: 'archived',
+        cause: 'archive',
+        at: ts,
+        runId,
       });
     });
   }
@@ -570,7 +586,7 @@ export class MemoryService {
       if (!inserted) {
         throw new DomainError('conflict', 'memory.merge: insert did not return a row');
       }
-      const opId = this.journalMaintenanceOp(ts, {
+      const { runId, opId } = this.journalMaintenanceOp(ts, {
         opType: 'merge',
         affectedIds: successor.replaces,
         createdId: inserted.id,
@@ -578,6 +594,13 @@ export class MemoryService {
           input.source?.tokenName ?? 'unknown'
         }'`,
         summary: { kind: 'agent_memory_merge', merged: successor.replaces.length },
+      });
+      orphanPendingOnRetirement(this.repos, this.relationsService(), {
+        retiredIds: successor.replaces,
+        status: 'superseded',
+        cause: 'merge',
+        at: ts,
+        runId,
       });
       return { memory: inserted, opId, preview };
     });
@@ -708,7 +731,7 @@ export class MemoryService {
       warnings.push({
         code: 'pending_judgments',
         ids: touched,
-        message: `${pending.length} pending judgment(s) touch these originals; they stay pending`,
+        message: `${pending.length} pending judgment(s) touch these originals; the merge closes them as orphaned, and undoing it restores them`,
       });
     }
     const retyped = originals.filter((m) => m.type !== successor.type);
@@ -731,7 +754,7 @@ export class MemoryService {
       reasoning: string;
       summary: Record<string, unknown>;
     },
-  ): string {
+  ): { runId: string; opId: string } {
     const runId = ulid(ts.getTime());
     this.repos.consolidation.insertRun({
       id: runId,
@@ -750,7 +773,11 @@ export class MemoryService {
       reasoning: op.reasoning,
       appliedAt: ts,
     });
-    return opId;
+    return { runId, opId };
+  }
+
+  private relationsService(): RelationsService {
+    return new RelationsService(this.repos, this.tx, this.now);
   }
 
   countPurgeableDisconnectedArchived(): number {

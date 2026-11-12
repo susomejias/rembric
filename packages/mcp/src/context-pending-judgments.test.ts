@@ -246,6 +246,10 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
       { type: 'project', title: 'A on t', content: 'a on t', topicKey: 't' },
       defaultScope,
     ).memory;
+    const b = memory.saveWithTopicKey(
+      { type: 'project', title: 'B on t', content: 'b on t', topicKey: 't' },
+      defaultScope,
+    ).memory;
     for (let i = 0; i < 5; i += 1) {
       const target = memory.save(
         { type: 'project', title: `x${i}`, content: `x${i}` },
@@ -253,10 +257,6 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
       );
       pendingBetween(a.id, target.id, 3 * ORPHAN_AFTER_MS - i);
     }
-    const b = memory.saveWithTopicKey(
-      { type: 'project', title: 'B on t', content: 'b on t', topicKey: 't' },
-      defaultScope,
-    ).memory;
     const target = memory.save({ type: 'project', title: 'y', content: 'y' }, defaultScope);
     const live = pendingBetween(b.id, target.id, 2 * ORPHAN_AFTER_MS);
     return { a: a.id, b: b.id, live };
@@ -276,17 +276,14 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
     expect(payload.pendingJudgmentsTotal).toBe(1);
   });
 
-  it('a withheld pair stays reachable and closable through its annotation', async () => {
+  it('a withheld pair that predates orphaning at retirement stays reachable and closable through its annotation', async () => {
     const a = memory.saveWithTopicKey(
       { type: 'project', title: 'A on u', content: 'a on u', topicKey: 'u' },
       defaultScope,
     ).memory;
     const counterpart = memory.save({ type: 'project', title: 'z', content: 'z' }, defaultScope);
     const jid = pendingBetween(a.id, counterpart.id, 3 * ORPHAN_AFTER_MS);
-    memory.saveWithTopicKey(
-      { type: 'project', title: 'B on u', content: 'b on u', topicKey: 'u' },
-      defaultScope,
-    );
+    repos.memory.markSuperseded(a.id);
     expect(repos.memory.unsafeGetById(a.id)?.status).toBe('superseded');
     expect(repos.memory.unsafeGetById(counterpart.id)?.status).toBe('active');
 
@@ -323,8 +320,8 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
   it('an aged pair whose target was archived is withheld on the same terms', async () => {
     const source = memory.save({ type: 'project', title: 's', content: 's' }, defaultScope);
     const target = memory.save({ type: 'project', title: 't', content: 't' }, defaultScope);
-    pendingBetween(source.id, target.id, 2 * ORPHAN_AFTER_MS);
     memory.archive(target.id, defaultScope);
+    pendingBetween(source.id, target.id, 2 * ORPHAN_AFTER_MS);
 
     expect(repos.memory.unsafeGetById(target.id)?.status).toBe('archived');
 
@@ -332,6 +329,30 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
 
     expect(payload.pendingJudgments).toEqual([]);
     expect(payload.pendingJudgmentsTotal).toBe(0);
+  });
+
+  it('archiving through the memory.archive tool closes the pair instead of withholding it', async () => {
+    const source = memory.save({ type: 'project', title: 'keeps', content: 'keeps' }, defaultScope);
+    const target = memory.save({ type: 'project', title: 'goes', content: 'goes' }, defaultScope);
+    const jid = pendingBetween(source.id, target.id, 2 * ORPHAN_AFTER_MS);
+    const control = memory.save(
+      { type: 'project', title: 'other', content: 'other' },
+      defaultScope,
+    );
+    const kept = pendingBetween(source.id, control.id, 2 * ORPHAN_AFTER_MS);
+
+    const archived = decode(
+      await runWithContext(makeContext(adminToken), () => handlers.archive({ id: target.id })),
+    );
+
+    expect(archived.isError).toBe(false);
+    expect(repos.relations.findByJudgmentId(jid)).toMatchObject({
+      status: 'orphaned',
+      markedByKind: 'consolidator',
+    });
+    expect(repos.relations.findByJudgmentId(kept)?.status).toBe('pending');
+    const { payload } = decode(await callContext({ judgments: 50 }));
+    expect((payload.pendingJudgments as PendingEntry[]).map((r) => r.judgmentId)).toEqual([kept]);
   });
 
   it('an explicit size does not readmit a pair withheld for a retired endpoint', async () => {
@@ -344,8 +365,8 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
         { type: 'project', title: `dead-tgt-${i}`, content: `dead-tgt-${i}` },
         defaultScope,
       );
-      pendingBetween(source.id, target.id, 0);
       memory.archive(target.id, defaultScope);
+      pendingBetween(source.id, target.id, 0);
     }
     const live = seedPending('adjudicable', 0);
 

@@ -10,10 +10,10 @@
 
 ## 3. Orphan at retirement (stored-data unit)
 
-- [ ] 3.1 Write `packages/core/src/consolidation/retirement.test.ts` and observe it RED: one test per retirement path of design D5 (the pending row is `orphaned` and journaled in the expected run, with one timestamp), one rollback test per path (a failing `orphan_promote` insert leaves the memory's status, the relation and the journal untouched), the other-endpoint-retired case, the no-run case and the four distinct reasoning prefixes
-- [ ] 3.2 Implement `orphanPendingOnRetirement` and `RETIREMENT_ORPHAN_REASON` in `operations.ts` and call the helper from every path of design D5, so `pnpm vitest run packages/core/src/consolidation/retirement.test.ts` is GREEN
-- [ ] 3.3 Update the `memory.merge` warning `pending_judgments` and the `memory.merge` tool description (design D8)
-- [ ] 3.4 Adapt the existing tests whose setups retired an endpoint through a service and expected the pair to stay pending, so they build a row that predates this change through a repository-level flip, and list them in the commit message
+- [x] 3.1 Write `packages/core/src/consolidation/retirement.test.ts` and observe it RED: one test per retirement path of design D5 (the pending row is `orphaned` and journaled in the expected run, with one timestamp), one rollback test per path (a failing `orphan_promote` insert leaves the memory's status, the relation and the journal untouched), the other-endpoint-retired case, the no-run case and the four distinct reasoning prefixes
+- [x] 3.2 Implement `orphanPendingOnRetirement` and `RETIREMENT_ORPHAN_REASON` in `operations.ts` and call the helper from every path of design D5, so `pnpm vitest run packages/core/src/consolidation/retirement.test.ts` is GREEN
+- [x] 3.3 Update the `memory.merge` warning `pending_judgments` and the `memory.merge` tool description (design D8)
+- [x] 3.4 Adapt the existing tests whose setups retired an endpoint through a service and expected the pair to stay pending, so they build a row that predates this change through a repository-level flip, and list them in the commit message
 
 ## 4. Undo symmetry (stored-data unit)
 

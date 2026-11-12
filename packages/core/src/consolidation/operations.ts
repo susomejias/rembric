@@ -7,7 +7,70 @@ import {
 } from '@rembric/db';
 import { ulid } from 'ulid';
 
+import { RelationsService } from '../services/relations.js';
+
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
+
+export const RETIREMENT_ORPHAN_REASON = 'endpoint retired at retirement';
+
+export type RetirementCause =
+  | 'topic_key revision'
+  | 'supersedes verdict'
+  | 'merge'
+  | 'archive'
+  | 'decay'
+  | 'merge undo';
+
+export interface RetirementInput {
+  retiredIds: readonly string[];
+  status: 'superseded' | 'archived';
+  cause: RetirementCause;
+  /** The retirement's own timestamp, stamped on every orphaning and journal op it makes. */
+  at: Date;
+  /** The run of the retirement's own journal op; omitted, a maintenance run opens when there is something to orphan. */
+  runId?: string;
+}
+
+/** Runs inside the retiring transaction: a failure here fails the retirement. */
+export function orphanPendingOnRetirement(
+  repos: ConsolidationDeps,
+  relations: Pick<RelationsService, 'orphan'>,
+  input: RetirementInput,
+): number {
+  const rows = repos.relations.listPendingTouchingAny(input.retiredIds);
+  if (rows.length === 0) return 0;
+  let runId = input.runId;
+  if (runId === undefined) {
+    runId = ulid(input.at.getTime());
+    repos.consolidation.insertRun({
+      id: runId,
+      startedAt: input.at,
+      finishedAt: input.at,
+      scope: 'maintenance',
+      summary: JSON.stringify({ kind: 'retirement_orphan', orphaned: rows.length }),
+    });
+  }
+  const retired = new Set(input.retiredIds);
+  for (const row of rows) {
+    const side = retired.has(row.sourceId)
+      ? retired.has(row.targetId)
+        ? 'source and target'
+        : 'source'
+      : 'target';
+    const reasoning = `${RETIREMENT_ORPHAN_REASON}: ${side} ${input.status} by ${input.cause}`;
+    relations.orphan(row.judgmentId, reasoning, input.at);
+    recordOrphanPromote(repos, {
+      runId,
+      judgmentId: row.judgmentId,
+      sourceId: row.sourceId,
+      targetId: row.targetId,
+      relation: null,
+      reasoning,
+      appliedAt: input.at,
+    });
+  }
+  return rows.length;
+}
 
 export const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
   'merge',
@@ -86,6 +149,13 @@ export function applyDecay(
       affectedIds: input.ids,
       reasoning: input.reasoning,
       appliedAt: now,
+    });
+    orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+      retiredIds: input.ids,
+      status: 'archived',
+      cause: 'decay',
+      at: now,
+      runId: input.runId,
     });
   });
 
@@ -167,6 +237,12 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
       // The successor may hold an original's topic_key slot; free it before reactivating.
       if (op.opType === 'merge' && op.createdId) {
         repos.memory.archiveOne(op.createdId);
+        orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+          retiredIds: [op.createdId],
+          status: 'archived',
+          cause: 'merge undo',
+          at: now,
+        });
       }
       const reactivatable: string[] = [];
       for (const row of repos.memory.unsafeGetByIds(op.affectedIds)) {

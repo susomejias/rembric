@@ -2011,6 +2011,17 @@ describe('MCP protocol conformance', () => {
     })) as ToolResult;
     expect(archived.isError).toBeFalsy();
 
+    expect(await doctorPending()).toBe(doctorWithPair - 1);
+    expect(await statsPending()).toBe(0);
+    expect(await contextPending()).toBe(0);
+
+    services.db.raw
+      .prepare(
+        `INSERT INTO memory_relations (id, judgment_id, source_id, target_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'pending', ?)`,
+      )
+      .run('01TESTRELDIVERGENCE000002', 'jdg-divergence-legacy', sourceId, targetId, Date.now());
+
     expect(await doctorPending()).toBe(doctorWithPair);
     expect(await statsPending()).toBe(0);
     expect(await contextPending()).toBe(0);

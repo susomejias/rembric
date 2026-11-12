@@ -9,6 +9,8 @@ import {
 } from '@rembric/db';
 import { ulid } from 'ulid';
 
+import { orphanPendingOnRetirement } from '../consolidation/operations.js';
+
 import { DomainError } from './errors.js';
 import { RANK_WINDOW_CEILING } from './hybrid-search.js';
 import { RedactionTally } from './secret-redaction.js';
@@ -117,7 +119,7 @@ export function compareAnnotations(a: AnnotationKey, b: AnnotationKey): number {
 
 export class RelationsService {
   constructor(
-    private readonly repos: Pick<Repositories, 'relations' | 'memory'>,
+    private readonly repos: Pick<Repositories, 'relations' | 'memory' | 'consolidation'>,
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -212,7 +214,7 @@ export class RelationsService {
 
       // 2. Side effect for `supersedes`: target → superseded, source.replaces += target.id.
       if (input.relation === 'supersedes') {
-        this.applySupersedesSideEffect(existing.sourceId, existing.targetId);
+        this.applySupersedesSideEffect(existing.sourceId, existing.targetId, ts);
       }
       return next;
     });
@@ -266,7 +268,7 @@ export class RelationsService {
           );
         }
         if (applySideEffect) {
-          this.applySupersedesSideEffect(input.sourceId, input.targetId);
+          this.applySupersedesSideEffect(input.sourceId, input.targetId, ts);
         }
         return next;
       });
@@ -292,7 +294,7 @@ export class RelationsService {
         throw new DomainError('conflict', 'relations.compare: insert returned no row');
       }
       if (applySideEffect) {
-        this.applySupersedesSideEffect(input.sourceId, input.targetId);
+        this.applySupersedesSideEffect(input.sourceId, input.targetId, ts);
       }
       return row;
     });
@@ -398,7 +400,7 @@ export class RelationsService {
     }
   }
 
-  private applySupersedesSideEffect(sourceId: string, targetId: string): void {
+  private applySupersedesSideEffect(sourceId: string, targetId: string, at: Date): void {
     const source = this.repos.memory.findScopeTupleById(sourceId);
     if (!source) {
       throw new DomainError('memory_not_found', `relations.judge: source ${sourceId} disappeared`);
@@ -426,6 +428,12 @@ export class RelationsService {
 
     this.repos.memory.markSuperseded(targetId);
     this.repos.memory.setReplaces(sourceId, nextReplaces);
+    orphanPendingOnRetirement(this.repos, this, {
+      retiredIds: [targetId],
+      status: 'superseded',
+      cause: 'supersedes verdict',
+      at,
+    });
   }
 }
 

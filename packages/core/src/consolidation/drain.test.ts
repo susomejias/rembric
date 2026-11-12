@@ -511,10 +511,7 @@ describe('drain — retired endpoints', () => {
     ).memory;
     const other = remember('unrelated counterpart words', { vector: null });
     const supersededSource = pending(first.id, other.id);
-    memorySvc.saveWithTopicKey(
-      { type: 'project', title: 'Auth model', content: 'auth via tokens', topicKey: 'auth' },
-      scope,
-    );
+    repos.memory.markSuperseded(first.id);
     const archivedTarget = drainablePair();
     repos.memory.archiveOne(archivedTarget.targetId);
 

@@ -444,10 +444,10 @@ describe('RelationsRepository scoped pending reads', () => {
 
   function seedTopicKeyRevision(): { a: string; b: string; live: string } {
     const a = save('A on t', 't');
+    const b = save('B on t', 't');
     for (let i = 0; i < 5; i += 1) {
       pendingAt(a, save(`x${i}`), new Date(1_000 + i));
     }
-    const b = save('B on t', 't');
     const live = pendingAt(b, save('y'), new Date(9_000));
     return { a, b, live };
   }
@@ -461,8 +461,8 @@ describe('RelationsRepository scoped pending reads', () => {
         .memory.id;
 
     const a = inProject('A on p', 'p');
-    const dead = pendingAt(a, inProject('pa'), new Date(1_000));
     const b = inProject('B on p', 'p');
+    const dead = pendingAt(a, inProject('pa'), new Date(1_000));
     const live = pendingAt(b, inProject('pb'), new Date(9_000));
     pendingAt(save('G on t', 'g'), save('gt'), new Date(2_000));
 
@@ -490,9 +490,9 @@ describe('RelationsRepository scoped pending reads', () => {
 
   it('withholds an archived target from both the page and the total', () => {
     const deadTarget = save('dead target');
+    memories.archive(deadTarget, defaultProjectScope(t.handle));
     pendingAt(save('live source'), deadTarget, new Date(1_000));
     const live = pendingAt(save('s'), save('t'), new Date(2_000));
-    memories.archive(deadTarget, defaultProjectScope(t.handle));
 
     expect(repos.memory.unsafeGetById(deadTarget)?.status).toBe('archived');
 
