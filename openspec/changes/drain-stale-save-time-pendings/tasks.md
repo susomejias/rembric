@@ -175,7 +175,7 @@ The prototype measurements already in `measurements/` (`drain-prototype.mts` and
 
 ## 8. Documentation
 
-- [ ] 8.1 Search `docs/` and `README.md` for descriptions of the consolidation sweep's steps, and add the drain step: its rule, the retired-endpoint drain, the fail-safe, and undo. Done when every sweep description that `grep -rln "consolidation" docs README.md` finds names the drain step.
+- [x] 8.1 Search `docs/` and `README.md` for descriptions of the consolidation sweep's steps, and add the drain step: its rule, the retired-endpoint drain, the fail-safe, and undo. Done when every sweep description that `grep -rln "consolidation" docs README.md` finds names the drain step.
 
 ## 9. Measured cost per drain step and per sweep call
 

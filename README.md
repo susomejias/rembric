@@ -240,7 +240,7 @@ The engine is code, not configuration: there is no model selector, no threshold 
 
 ### Consolidation sweep
 
-Deterministic — decay + deadline orphaning, no LLM, no cron. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21/0.22 vars (`CONSOLIDATION_*`, `OPENAI_*`, `LLM_PROVIDER`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`) are ignored with a boot warning.
+Deterministic — decay, deadline orphaning and the stale pending drain; no LLM, no cron. The drain orphans a pending judgment that no current save-time channel would create (lexical overlap below the floor, stored vectors below the similarity threshold, no shared entity), and one whose endpoint was superseded or archived. It reads stored vectors only, never the model, keeps any pair it cannot evaluate, works in bounded batches, and journals every drain so it can be undone; an undone pair is never drained again. Runs on session start (throttled to one run per scope per 6h) and on demand via the dashboard or `POST /admin/consolidation/run`. Pre-0.21/0.22 vars (`CONSOLIDATION_*`, `OPENAI_*`, `LLM_PROVIDER`, `EMBEDDING_*`, `CANDIDATE_*_THRESHOLD`) are ignored with a boot warning.
 
 | Variable                      | Default      | Description                                                                                                                |
 | ----------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------- |
@@ -439,7 +439,7 @@ Four load-bearing invariants:
 - **Append-only**: rows are never deleted; `content` never updated. Lifecycle is `status` flips + `replaces` links. Every consolidation op is reversible. An agent MAY retire a memory at the user's explicit request via `memory.archive` (a reversible, journaled `active → archived` flip, scoped to the connection — no successor link, distinct from a `topic_key`/`memory.judge_batch` supersede); physical purge stays operator-only in `/dashboard/maintenance`.
 - **Project scoping by construction**: every memory is attached to exactly one `project_id`. Consolidation, relations and every write never cross scope. One read may, and only when asked: `memory.search({across_projects: true})` reads the projects the connection's token is authorized to read and names them in `searchedProjects[]` — opt-in, read-only, and a compile error on any write path. See [docs/agents.md](./docs/agents.md#searching-across-projects).
 - **Convergent topics via `topic_key`**: on `memory.save`, the previously-active row in the same `(scope, project_id, topic_key)` is auto-superseded atomically.
-- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them, unless an endpoint has been retired since — those are withheld from the agent queue and left to the sweep. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay + deadline orphaning.
+- **Fresh-context judgment**: candidate conflicts surface at save time (`candidates[]`); the agent that produced the conflict judges it. Aged pendings re-surface in `memory.context` until an agent closes them, unless an endpoint has been retired since — those are withheld from the agent queue and left to the sweep. The deterministic sweep (no LLM, no cron — runs on session start) only handles decay, deadline orphaning and the stale pending drain, which retires pending pairs the current save-time rules would never create.
 
 Memory also exposes a **derived review state** alongside decay: a `needs_review` flag on `memory.search` / `memory.get_batch` rows (and a `needsReview[]` list in `memory.context`) for active memories whose per-type shelf life elapsed without re-affirmation. It is computed at read time — no column, no sweep — and is cleared by re-affirming with `memory.confirm_batch` (not by merely reading). See [docs/relations.md](./docs/relations.md) for the relation taxonomy and the review axis.
 
@@ -540,7 +540,7 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
    │  │   embedder: gte-multilingual-base, ONNX q8, loaded at boot       │  │
    │  │   embedding drain worker      → fills memory_vec                 │  │
    │  │   entity backfill worker      → fills entities/memory_entities   │  │
-   │  │   deterministic sweep: decay + deadline orphaning (no LLM/cron)  │  │
+   │  │   deterministic sweep: decay · deadline · stale drain (no LLM)   │  │
    │  └─────────────────────────────────────────────────────────────────┘  │
    └───────────────────────────────────────────────────────────────────────┘
 ```
