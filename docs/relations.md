@@ -17,10 +17,12 @@ The `memory_relations` table records the judgment graph between memories. Each r
     pending ─────────────▶ judged ─────────▶ (terminal)
         │
         ▼
-    orphaned ────────────▶ (terminal — re-judging not allowed)
+    orphaned ────────────▶ (terminal, except a late verdict after a retirement orphaning: back to judged)
 ```
 
 A row stays `pending` until an agent closes it via `memory.judge_batch({ judgments: [{ judgmentId, relation }] })`. After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) it re-surfaces in `memory.context.pendingJudgments[]` so any later session can judge it with fresh context, while BOTH endpoints are still `active`. After `JUDGMENT_ORPHAN_DEADLINE_MS` (default 14 days) the deterministic sweep marks it `orphaned` (journaled, undoable). `memory.compare` writes `status='judged'` directly with no preceding pending phase.
+
+A verdict sent for a row that a retirement orphaned (a live `orphan_promote` op with the `endpoint retired at retirement` prefix) is accepted and moves it to `judged`, so a `judge_batch` that supersedes S→T and then judges T→U still succeeds. A row orphaned by the deadline or a drain is refused with `conflict`, and so is a `supersedes` verdict while either endpoint is not `active`. Undoing the retirement keeps such a late verdict.
 
 ### Closed when a memory is retired
 

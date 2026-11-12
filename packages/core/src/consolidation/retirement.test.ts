@@ -19,6 +19,7 @@ import {
   ProjectsService,
   RelationsService,
   RETIREMENT_ORPHAN_REASON,
+  findSaveTimeCandidates,
   undoOp,
   undoRun,
 } from '@rembric/core';
@@ -787,5 +788,164 @@ describe('undo symmetry — undoing a retirement restores what it orphaned', () 
     expect([rel(p1).status, rel(p2).status]).toEqual(['pending', 'pending']);
     expect(result.reverted).toHaveLength(2);
     expect(status(a.id)).toBe('superseded');
+  });
+});
+
+describe('a late verdict on a judgment orphaned by a retirement', () => {
+  const agent = { actor: 'agent', kind: 'agent' } as const;
+
+  it('judge_batch: S→T supersedes then T→U related both succeed and T→U ends judged', () => {
+    const s = save('s');
+    const t = save('t');
+    const u = save('u');
+    const st = pending(s.id, t.id);
+    const tu = pending(t.id, u.id);
+
+    relations.judgeInScope(st, scope, { relation: 'supersedes', ...agent });
+    expect(status(t.id)).toBe('superseded');
+    expectRetirementOrphan(tu);
+
+    clock.advance(1_000);
+    const late = relations.judgeInScope(tu, scope, {
+      relation: 'related',
+      reason: 'late',
+      confidence: 0.8,
+      ...agent,
+    });
+
+    expect(late).toMatchObject({
+      status: 'judged',
+      relation: 'related',
+      reason: 'late',
+      markedByKind: 'agent',
+      markedByActor: 'agent',
+    });
+    expect(rel(tu)).toMatchObject({ status: 'judged', relation: 'related' });
+  });
+
+  it('a verdict in the same millisecond as the orphaning is still stamped after it', () => {
+    const s = save('s');
+    const t = save('t');
+    const u = save('u');
+    const st = pending(s.id, t.id);
+    const tu = pending(t.id, u.id);
+    relations.judge(st, { relation: 'supersedes', ...agent });
+    const orphanedAt = opFor(tu).appliedAt.getTime();
+
+    relations.judge(tu, { relation: 'related', ...agent });
+
+    expect(rel(tu).judgedAt!.getTime()).toBeGreaterThan(orphanedAt);
+  });
+
+  it('a late not_conflict is honoured by the dismissal suppression on the next revision', () => {
+    const x = save('shared dedup marker');
+    const y = save('shared dedup marker two');
+    const base = save('shared dedup marker base', 'dedup/late');
+    const px = pending(base.id, x.id);
+    pending(base.id, y.id);
+    clock.advance(1_000);
+    const { memory: revised } = memory.saveWithTopicKey(
+      {
+        type: 'project',
+        title: 'shared dedup marker revised',
+        content: 'shared dedup marker revised body',
+        topicKey: 'dedup/late',
+      },
+      scope,
+    );
+    expectRetirementOrphan(px);
+
+    clock.advance(1_000);
+    relations.judge(px, { relation: 'not_conflict', ...agent });
+    expect(rel(px)).toMatchObject({ status: 'judged', relation: 'not_conflict' });
+
+    const ids = findSaveTimeCandidates(repos, revised, { perSaveMax: 10 }).candidates.map(
+      (c) => c.targetId,
+    );
+    expect(ids).not.toContain(x.id);
+    expect(ids).toContain(y.id);
+  });
+
+  it('a deadline-orphaned relation is still refused', () => {
+    const live = new RelationsService(repos, db.handle.db);
+    const a = save('a');
+    const b = save('b');
+    const aged = live.createPending({ sourceId: a.id, targetId: b.id }).judgmentId;
+    db.handle.raw
+      .prepare('UPDATE memory_relations SET created_at = ? WHERE judgment_id = ?')
+      .run(Date.now() - 10 * DAY, aged);
+    backdateLastSeen(a.id, 0);
+    backdateLastSeen(b.id, 0);
+    sweepRunner(live, { orphanDeadlineMs: DAY }).runScope({ projectId: scope.projectId });
+    expect(opFor(aged).reasoning).toMatch(/^orphaned: unjudged after/);
+
+    expect(() => live.judge(aged, { relation: 'related', ...agent })).toThrow(/already 'orphaned'/);
+    expect(rel(aged).status).toBe('orphaned');
+  });
+
+  it('a drain-orphaned relation is still refused', () => {
+    const live = new RelationsService(repos, db.handle.db);
+    const b = save('b');
+    const c = save('c');
+    const legacy = live.createPending({ sourceId: c.id, targetId: b.id }).judgmentId;
+    repos.memory.markSuperseded(c.id);
+    backdateLastSeen(b.id, 0);
+    sweepRunner(live, { orphanDeadlineMs: DAY }).runScope({ projectId: scope.projectId });
+    expect(opFor(legacy).reasoning).toContain(DRAIN_RETIRED_REASON);
+
+    expect(() => live.judge(legacy, { relation: 'related', ...agent })).toThrow(
+      /already 'orphaned'/,
+    );
+    expect(rel(legacy).status).toBe('orphaned');
+  });
+
+  it('a supersedes verdict on a retired endpoint is still refused and leaves the row orphaned', () => {
+    const s = save('s');
+    const t = save('t');
+    const u = save('u');
+    const st = pending(s.id, t.id);
+    const tu = pending(t.id, u.id);
+    relations.judge(st, { relation: 'supersedes', ...agent });
+
+    expect(() => relations.judge(tu, { relation: 'supersedes', ...agent })).toThrow(/not active/);
+    expect(rel(tu).status).toBe('orphaned');
+    expect(status(u.id)).toBe('active');
+  });
+
+  it('a retirement orphaning already reverted does not make the row judgeable', () => {
+    const m = save('m');
+    const x = save('x');
+    const p = pending(m.id, x.id);
+    memory.archive(m.id, scope);
+    const archive = opsOfType('agent_memory_archive')[0]!;
+    undoOp(repos, db.handle.db, archive.id);
+    expect(rel(p).status).toBe('pending');
+    db.handle.raw
+      .prepare("UPDATE memory_relations SET status = 'orphaned' WHERE judgment_id = ?")
+      .run(p);
+
+    expect(() => relations.judge(p, { relation: 'related', ...agent })).toThrow(
+      /already 'orphaned'/,
+    );
+  });
+
+  it('undoing the retirement afterwards keeps the late verdict', () => {
+    const s = save('s');
+    const t = save('t');
+    const u = save('u');
+    const st = pending(s.id, t.id);
+    const tu = pending(t.id, u.id);
+    relations.judge(st, { relation: 'supersedes', ...agent });
+    clock.advance(1_000);
+    relations.judge(tu, { relation: 'related', ...agent });
+
+    const retiringOp = allOps().find((o) => o.opType === 'orphan_promote' && o.createdId === tu)!;
+    const result = undoOp(repos, db.handle.db, retiringOp.id);
+
+    expect(rel(tu)).toMatchObject({ status: 'judged', relation: 'related' });
+    expect(result.keptVerdicts).toEqual([
+      { judgmentId: tu, status: 'judged', relation: 'related' },
+    ]);
+    expect(opById(retiringOp.id).revertedAt).not.toBeNull();
   });
 });

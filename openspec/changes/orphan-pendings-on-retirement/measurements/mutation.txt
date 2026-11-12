@@ -459,3 +459,33 @@ exit 0
    1 of 1 NOT caught
    exit 1
    b9604674 added the historical-run test, which catches it (above).
+
+# late verdict on a retirement-orphaned judgment — mutation check
+Spec: packages/core/src/consolidation/retirement.test.ts, describe "a late verdict on a judgment orphaned by a retirement".
+Command form: node scripts/mutate.mjs --file <file> --spec packages/core/src/consolidation/retirement.test.ts --workspace packages/core --mutation <find> --with <replace>
+Every case turned at least one named test red; no mutation survived. Files restored byte for byte.
+
+### acceptance condition removed (packages/core/src/services/relations.ts)
+find:    existing.status !== 'pending' && lateOrphaning === undefined
+replace: existing.status !== 'pending'
+CAUGHT by 5: judge_batch supersedes-then-related; same-millisecond stamp; late not_conflict suppression; supersedes on a retired endpoint stays refused and orphaned; undo keeps the late verdict
+
+### retirement-prefix restriction removed (relations.ts)
+find:    op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true
+replace: true
+CAUGHT by 2: a deadline-orphaned relation is still refused; a drain-orphaned relation is still refused
+
+### prefix restriction bypassed, any live orphan op accepted (relations.ts)
+find:    this.retirementOrphaning(judgmentId)
+replace: this.repos.consolidation.listLiveOrphanPromoteOps(judgmentId)[0]
+CAUGHT by 2: the same deadline and drain tests
+
+### same-millisecond stamp bump weakened (relations.ts)
+find:    now.getTime() <= lateOrphaning.appliedAt.getTime()
+replace: now.getTime() < lateOrphaning.appliedAt.getTime()
+CAUGHT by 1: a verdict in the same millisecond as the orphaning is still stamped after it
+
+### reverted ops no longer excluded (packages/db/src/repositories/consolidation-repository.ts)
+find:    isNull(consolidationOps.revertedAt) in listLiveOrphanPromoteOps
+replace: (deleted)
+CAUGHT by 1: a retirement orphaning already reverted does not make the row judgeable

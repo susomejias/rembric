@@ -9,7 +9,10 @@ import {
 } from '@rembric/db';
 import { ulid } from 'ulid';
 
-import { orphanPendingOnRetirement } from '../consolidation/operations.js';
+import {
+  orphanPendingOnRetirement,
+  RETIREMENT_ORPHANING_PREFIX,
+} from '../consolidation/operations.js';
 
 import { DomainError } from './errors.js';
 import { RANK_WINDOW_CEILING } from './hybrid-search.js';
@@ -182,29 +185,35 @@ export class RelationsService {
     judgmentId: string,
     input: JudgeInput,
   ): MemoryRelation {
-    if (existing.status !== 'pending') {
+    const lateOrphaning =
+      existing.status === 'orphaned' ? this.retirementOrphaning(judgmentId) : undefined;
+    if (existing.status !== 'pending' && lateOrphaning === undefined) {
       throw new DomainError(
         'conflict',
         `relations.judge: judgmentId ${judgmentId} is already '${existing.status}'`,
       );
     }
 
-    const ts = this.now();
+    const now = this.now();
+    const ts =
+      lateOrphaning !== undefined && now.getTime() <= lateOrphaning.appliedAt.getTime()
+        ? new Date(lateOrphaning.appliedAt.getTime() + 1)
+        : now;
     const updated = this.tx.transaction(() => {
       // 1. Transition relation → judged.
-      const next = this.repos.relations.markJudged(
-        existing.id,
-        {
-          relation: input.relation,
-          reason: input.reason ?? null,
-          evidence: input.evidence ?? null,
-          confidence: input.confidence ?? null,
-          markedByKind: input.kind,
-          markedByActor: input.actor,
-          judgedAt: ts,
-        },
-        { requirePending: true },
-      );
+      const verdict = {
+        relation: input.relation,
+        reason: input.reason ?? null,
+        evidence: input.evidence ?? null,
+        confidence: input.confidence ?? null,
+        markedByKind: input.kind,
+        markedByActor: input.actor,
+        judgedAt: ts,
+      };
+      const next =
+        lateOrphaning !== undefined
+          ? this.repos.relations.markJudgedFromOrphaned(existing.id, verdict)
+          : this.repos.relations.markJudged(existing.id, verdict, { requirePending: true });
       if (!next) {
         throw new DomainError(
           'conflict',
@@ -219,6 +228,12 @@ export class RelationsService {
       return next;
     });
     return updated;
+  }
+
+  private retirementOrphaning(judgmentId: string) {
+    return this.repos.consolidation
+      .listLiveOrphanPromoteOps(judgmentId)
+      .find((op) => op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true);
   }
 
   compareInScope(

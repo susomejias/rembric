@@ -73,6 +73,20 @@ export class ConsolidationRepository {
       .flatMap((r) => (r.createdId === null ? [] : [r.createdId]));
   }
 
+  listLiveOrphanPromoteOps(judgmentId: string): ConsolidationOp[] {
+    return this.db
+      .select()
+      .from(consolidationOps)
+      .where(
+        and(
+          eq(consolidationOps.opType, 'orphan_promote'),
+          eq(consolidationOps.createdId, judgmentId),
+          isNull(consolidationOps.revertedAt),
+        ),
+      )
+      .all();
+  }
+
   adminLatestRun(): Pick<ConsolidationRun, 'startedAt' | 'summary'> | undefined {
     return this.db
       .select({ startedAt: consolidationRuns.startedAt, summary: consolidationRuns.summary })

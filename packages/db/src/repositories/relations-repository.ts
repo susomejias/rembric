@@ -194,6 +194,15 @@ export class RelationsRepository {
       .get();
   }
 
+  markJudgedFromOrphaned(id: string, verdict: JudgedVerdict): MemoryRelation | undefined {
+    return this.db
+      .update(memoryRelations)
+      .set({ ...verdict, status: 'judged' as const })
+      .where(and(eq(memoryRelations.id, id), eq(memoryRelations.status, 'orphaned')))
+      .returning()
+      .get();
+  }
+
   markOrphanedPending(
     judgmentId: string,
     set: { reason?: string; markedByKind: MarkedByKind; judgedAt: Date },
