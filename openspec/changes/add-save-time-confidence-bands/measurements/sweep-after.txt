@@ -1,0 +1,66 @@
+# rembric save-time calibration sweep
+fixture: 24 base memories, 27 labelled saves; per-save cap 5; embedding model onnx-community/gte-multilingual-base
+
+## arm: lexical-only (instrument: pending rows written by the production curation path; queue depth = total over every labelled save)
+          floor       near-dup       expanded     contradict unrel fts/save unrel vec/save unrel ent/save    queue depth     admissible
+           0.00            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+           0.05            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+           0.10            8/8            4/4            5/5           5.00           0.00           0.00            132             no
+           0.15            8/8            4/4            5/5           4.60           0.00           0.00            110             no
+           0.20            8/8            4/4            5/5           3.30           0.00           0.00             78             no
+           0.25            8/8            4/4            5/5           3.20           0.00           0.00             64             no
+           0.30            8/8            2/4            4/5           1.80           0.00           0.00             39             no
+           0.35            8/8            0/4            4/5           1.00           0.00           0.00             27             no
+           0.40            8/8            0/4            4/5           0.60           0.00           0.00             19             no
+           0.45            8/8            0/4            3/5           0.30           0.00           0.00             15             no
+           0.50            8/8            0/4            3/5           0.10           0.00           0.00             13             no
+           0.55            8/8            0/4            3/5           0.00           0.00           0.00             12            yes
+           0.60            8/8            0/4            3/5           0.00           0.00           0.00             12            yes
+           0.65            8/8            0/4            3/5           0.00           0.00           0.00             12            yes
+           0.70            8/8            0/4            3/5           0.00           0.00           0.00             12            yes
+           0.75            7/8            0/4            3/5           0.00           0.00           0.00             11             no
+           0.80            5/8            0/4            3/5           0.00           0.00           0.00              9             no
+           0.85            4/8            0/4            3/5           0.00           0.00           0.00              8             no
+           0.90            3/8            0/4            3/5           0.00           0.00           0.00              7             no
+           0.95            2/8            0/4            3/5           0.00           0.00           0.00              6             no
+
+## arm: production (instrument: pending rows written by the production curation path; queue depth = total over every labelled save)
+          floor       near-dup       expanded     contradict unrel fts/save unrel vec/save unrel ent/save    queue depth     admissible
+           0.00            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+           0.05            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+           0.10            8/8            4/4            5/5           5.00           0.00           0.00            132             no
+           0.15            8/8            4/4            5/5           4.60           0.00           0.00            110             no
+           0.20            8/8            4/4            5/5           3.30           0.00           0.00             78             no
+           0.25            8/8            4/4            5/5           3.20           0.00           0.00             64             no
+           0.30            8/8            4/4            5/5           1.80           0.00           0.00             42             no
+           0.35            8/8            4/4            5/5           1.00           0.00           0.00             32             no
+           0.40            8/8            4/4            5/5           0.60           0.00           0.00             24             no
+           0.45            8/8            4/4            5/5           0.30           0.00           0.00             21             no
+           0.50            8/8            4/4            5/5           0.10           0.00           0.00             19             no
+           0.55            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.60            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.65            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.70            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.75            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.80            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.85            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.90            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+           0.95            8/8            4/4            5/5           0.00           0.00           0.00             18            yes
+
+admissible plateau (both arms): 0.55–0.70 (width 0.15)
+chosen floor (plateau midpoint on the grid): 0.60
+
+## secondary series (not gating) — pending rows written while ingesting the retrieval corpus, production arm
+floor 0.00: 289
+floor 0.60: 54
+
+## confidence bands — production arm, floor 0.60, per-save cap 5, 37 saves (the 27 labelled saves above, then 10 related)
+instrument: pending rows written and related rows returned by the production curation path; "off" = bands seam disabled, every admitted pair pending
+class                     saves  pending off   pending on         high       middle  related low  target hi/mid/low/miss
+near-duplicate                8            8            8            8            0            0                 8/0/0/0
+expanded-rewrite              4            4            4            2            2            0                 2/2/0/0
+contradiction                 5            6            6            2            4            0                 2/3/0/0
+related                      10           18            8            1            7           10                 1/2/6/1
+unrelated                    10            0            0            0            0            0                       -
+queue depth over 37 saves: bands off 36, bands on 26 (0.97 -> 0.70 per save)
+retrieval corpus ingest, pending rows at floor 0.60: bands off 54, bands on 16
