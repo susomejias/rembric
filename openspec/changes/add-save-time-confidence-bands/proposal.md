@@ -11,7 +11,7 @@ Every admitted save-time candidate becomes a pending judgment, and most of them 
   - **High band.** A cosine of at least `0.85`, whatever else admitted the pair.
   - **Middle band.** Every other admitted pair, including an entity-only pair whose cosine is unknown because either memory has no vector.
 - **Low band.** The pair writes no `memory_relations` row and receives no `judgmentId`. The save response reports it in a new `related[]` array: the candidate shape without `judgmentId`, in the same ranked order, bounded by the same `CANDIDATES_PER_SAVE_MAX`. A low-band pair takes no candidate slot.
-- **High band.** The pair still writes a pending row and appears in `candidates[]`. Its target id is also listed in a new `convergeWith[]` array, which steers the agent to converge the two memories with `memory.merge` or a `supersedes` verdict and to reuse the target's `topic_key`.
+- **High band.** The pair still writes a pending row and appears in `candidates[]`. Its `judgmentId` is also listed in a new `convergeWith[]` array. That array is an advisory steer toward converging the two memories with `memory.merge` or a `supersedes` verdict, reusing the target's `topic_key`. A judgment id names the pair, so it stays unambiguous across the learnings of one `memory.capture_passive`.
 - **Middle band.** Unchanged: a pending row and a `candidates[]` entry.
 - `candidatesDetected` counts only middle- and high-band pairs ranked before the cap, so `candidatesDetected > candidates.length` still means truncation and a high count still points at `topic_key` convergence. Low-band pairs are not counted.
 - `judgmentRequired` keeps its meaning: `candidates.length > 0`.

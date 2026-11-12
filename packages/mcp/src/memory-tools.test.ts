@@ -400,13 +400,13 @@ describe('memory.save and memory.merge — confidence bands', () => {
     return { low, high };
   }
 
-  it('memory.save reports low-band pairs in related[] and high-band targets in convergeWith[]', async () => {
+  it('memory.save reports low-band pairs in related[] and high-band judgment ids in convergeWith[]', async () => {
     const h = bandHandlers(vectors());
     const { low, high } = await seedLowAndHigh(h);
     const r = parseText<BandPayload>(await save(h, 'Probe', PROBE));
 
     expect(r.candidates.map((c) => c.targetId)).toEqual([high]);
-    expect(r.convergeWith).toEqual([high]);
+    expect(r.convergeWith).toEqual([r.candidates[0]!.judgmentId]);
     expect(r.related.map((x) => x.targetId)).toEqual([low]);
     expect(r.related[0]).not.toHaveProperty('judgmentId');
     expect(r.judgmentRequired).toBe(true);
@@ -437,7 +437,7 @@ describe('memory.save and memory.merge — confidence bands', () => {
     );
 
     expect(r.candidates.map((c) => c.targetId)).toEqual([high]);
-    expect(r.convergeWith).toEqual([high]);
+    expect(r.convergeWith).toEqual([r.candidates[0]!.judgmentId]);
     expect(r.related.map((x) => x.targetId)).toEqual([low]);
     expect(r.candidatesDetected).toBe(1);
     expect(pendingRowsFor(r.id)).toBe(1);

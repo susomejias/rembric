@@ -72,7 +72,7 @@ mutation: opts.bands === false
     × save-time bands through the curation path > with bands disabled every admitted pair is a pending candidate (the sweep baseline)
 baseline: src/services/save-time-candidate-bands.test.ts
   green
-mutation: if (c.band === 'high') convergeWith.push(c.targetId);
+mutation: if (c.band === 'high') convergeWith.push(c.targetId);   [superseded: the line now pushes row.judgmentId; see the follow-up section]
   CAUGHT by 1:
     × save-time bands through the curation path > a middle-band pair is a pending candidate exactly as before, with no steer
 mutation: related = found.related.map(view);
@@ -105,3 +105,37 @@ mutation: related.push(...saved.related);
 mutation: convergeWith.push(...saved.convergeWith);
   CAUGHT by 1:
     × memory.capture_passive — handler-level (fix-audited-defects) > reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty
+
+## Follow-up: convergeWith carries judgment ids
+
+Cases (find -> replace):
+1. save-curation.ts  if (c.band === 'high') convergeWith.push(row.judgmentId);  ->  push(c.targetId)  [judgment id replaced by target id]
+2. save-curation.ts  same line  ->  convergeWith.push(row.judgmentId);  [high-band condition removed]
+3. memory-tools.ts   convergeWith: r.convergeWith,  ->  target ids of the first candidates
+4. observability-tools.ts  convergeWith.push(...saved.convergeWith);  ->  push the matching target ids instead
+5. observability-tools.ts  same line  ->  removed
+
+baseline: src/services/save-time-candidate-bands.test.ts
+  green
+mutation: if (c.band === 'high') convergeWith.push(row.judgmentId);
+  CAUGHT by 1:
+    × save-time bands through the curation path > a high-band pair still writes a pending row and convergeWith names its judgment id
+mutation: if (c.band === 'high') convergeWith.push(row.judgmentId);
+  CAUGHT by 1:
+    × save-time bands through the curation path > a middle-band pair is a pending candidate exactly as before, with no steer
+baseline: src/memory-tools.test.ts -t "confidence bands"
+  green
+mutation: convergeWith: r.convergeWith,
+  CAUGHT by 2:
+    × memory.save and memory.merge — confidence bands > memory.save reports low-band pairs in related[] and high-band judgment ids in convergeWith[]
+    × memory.save and memory.merge — confidence bands > a memory.merge commit reports related[] and convergeWith[] exactly as memory.save does
+baseline: src/observability-tools.test.ts -t "convergeWith"
+  green
+mutation: convergeWith.push(...saved.convergeWith);
+  CAUGHT by 2:
+    × memory.capture_passive — handler-level (fix-audited-defects) > reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty
+    × memory.capture_passive — handler-level (fix-audited-defects) > convergeWith names each pair by judgment id, so two learnings near one target stay distinct
+mutation: convergeWith.push(...saved.convergeWith);
+  CAUGHT by 2:
+    × memory.capture_passive — handler-level (fix-audited-defects) > reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty
+    × memory.capture_passive — handler-level (fix-audited-defects) > convergeWith names each pair by judgment id, so two learnings near one target stay distinct

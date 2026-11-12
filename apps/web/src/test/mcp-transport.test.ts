@@ -1733,7 +1733,9 @@ describe('MCP protocol conformance', () => {
     expect(save).toContain('memory.compare');
 
     expect(save).toMatch(/`related\[\]`: weaker matches, nothing to judge/);
-    expect(save).toMatch(/`convergeWith\[\]` lists candidates likely restating this fact/);
+    expect(save).toMatch(
+      /`convergeWith\[\]` holds judgmentIds of candidates likely restating this fact \(advisory\)/,
+    );
     expect(save).toContain('memory.merge');
     expect(save).not.toMatch(/often a real contradiction/);
   });
@@ -1759,7 +1761,7 @@ describe('MCP protocol conformance', () => {
       ['memory.session_start', 1103],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1868],
+      ['memory.save', 1891],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);

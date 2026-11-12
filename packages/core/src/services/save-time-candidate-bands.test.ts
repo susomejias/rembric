@@ -180,13 +180,13 @@ describe('save-time bands through the curation path', () => {
     expect(pendingRow(out.id, target.id)).toBeUndefined();
   });
 
-  it('a high-band pair still writes a pending row and is named in convergeWith', async () => {
+  it('a high-band pair still writes a pending row and convergeWith names its judgment id', async () => {
     const target = seed('Scheduler port', 'scheduler binds port 8781', { cosine: 0.92 });
     const out = await saveProbe('the job runner listens on a non-default socket');
 
     expect(out.candidates.map((c) => c.targetId)).toEqual([target.id]);
     expect(out.candidates[0]!.judgmentId).toBe(pendingRow(out.id, target.id)?.judgmentId);
-    expect(out.convergeWith).toEqual([target.id]);
+    expect(out.convergeWith).toEqual([out.candidates[0]!.judgmentId]);
     expect(out.related).toEqual([]);
   });
 

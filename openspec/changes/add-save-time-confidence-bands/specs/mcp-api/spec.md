@@ -101,7 +101,9 @@ Save-time pairs are classified into confidence bands (see the `memory` capabilit
 `memory.save` and a committed `memory.merge` SHALL return two arrays beside `candidates[]`:
 
 - **`related: Array<RelatedMemory>`** holds the low-band pairs. `RelatedMemory` is the `Candidate` shape without `judgmentId`: `targetId`, `title`, `snippet`, `similarity`, `source`, `topicKey`, and `entityValue` for an entity-sourced pair. The pairs SHALL be in the detection's ranked order, at most `CANDIDATES_PER_SAVE_MAX` of them. No pending row exists for them, and nothing about them needs judging.
-- **`convergeWith: string[]`** holds the target ids of the high-band entries of `candidates[]`: pairs similar enough in meaning that the two memories likely state the same fact. Each such entry SHALL keep its `judgmentId` and pending row.
+- **`convergeWith: string[]`** holds the `judgmentId`s of the high-band entries of `candidates[]`: pairs similar enough in meaning that the two memories likely state the same fact. Each id SHALL name exactly one `candidates[]` entry, and the agent maps it to that entry. A judgment id names the pair, not just the target, so it stays unambiguous when several learnings of one `memory.capture_passive` resemble the same memory. Each such entry SHALL keep its `judgmentId` and pending row.
+
+The convergence steer SHALL be advisory. A high-band pair can still be related rather than the same fact, so the agent decides, and the pending row survives whatever it decides. Neither the response nor a description SHALL present `convergeWith[]` as a verdict.
 
 Both arrays SHALL be present on every successful `memory.save` response and on every `memory.merge` commit, empty when nothing qualifies. A `memory.merge` preview SHALL carry neither, as it carries no `candidates`. `judgmentRequired` SHALL remain `candidates.length > 0`. The `Candidate` object SHALL NOT gain a field.
 
@@ -112,7 +114,7 @@ Every tool returning the arrays SHALL declare them in its `outputSchema`.
 The `memory.save` description SHALL state:
 
 1. that `related[]` entries carry no `judgmentId` and need no judgment;
-2. that `convergeWith[]` names candidates that likely restate the saved fact;
+2. that `convergeWith[]` holds the `judgmentId`s of candidates that likely restate the saved fact, and that the steer is advisory;
 3. what to do with them: `memory.merge`, or a `supersedes` verdict with the target's `topic_key` reused.
 
 The `memory.capture_passive` description SHALL name both arrays and refer to `memory.save` for their meaning. Both obligations SHALL be satisfied within `DESCRIPTION_MAX_LENGTH`. The clauses reclaimed to fit them SHALL be named by the change that removes them.
@@ -127,7 +129,7 @@ The `memory.capture_passive` description SHALL name both arrays and refer to `me
 
 - **GIVEN** an existing memory whose pair with the just-saved row is high-band
 - **WHEN** `memory.save` returns
-- **THEN** `candidates` SHALL contain it with a `judgmentId` backed by a pending row, `convergeWith` SHALL contain its id, and `judgmentRequired` SHALL be `true`
+- **THEN** `candidates` SHALL contain it with a `judgmentId` backed by a pending row, `convergeWith` SHALL contain that `judgmentId`, and `judgmentRequired` SHALL be `true`
 
 #### Scenario: Both arrays are present when empty
 
@@ -147,8 +149,14 @@ The `memory.capture_passive` description SHALL name both arrays and refer to `me
 - **THEN** `related` and `convergeWith` SHALL report those pairs as `memory.save` would
 - **AND** a capture whose learnings pair with nothing SHALL carry none of `candidates`, `related` or `convergeWith`
 
+#### Scenario: Two learnings near one memory stay distinct in `convergeWith`
+
+- **GIVEN** a passive capture whose two learnings each pair high-band with the same existing memory
+- **WHEN** `memory.capture_passive` returns
+- **THEN** `convergeWith` SHALL hold two distinct ids, each naming exactly one `candidates[]` entry for that memory
+
 #### Scenario: The description teaches the two arrays within the cap
 
 - **WHEN** an MCP client reads the `memory.save` description from a real `tools/list` response
-- **THEN** it SHALL name `related[]` as matches with nothing to judge and `convergeWith[]` as likely restatements to converge with `memory.merge` or a `supersedes` verdict
+- **THEN** it SHALL name `related[]` as matches with nothing to judge and `convergeWith[]` as the advisory `judgmentId`s of likely restatements to converge with `memory.merge` or a `supersedes` verdict
 - **AND** its length SHALL remain at most `DESCRIPTION_MAX_LENGTH`
