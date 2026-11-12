@@ -298,11 +298,11 @@ export class RelationsService {
     });
   }
 
-  orphan(judgmentId: string, reason: string): MemoryRelation {
+  orphan(judgmentId: string, reason: string, judgedAt: Date = this.now()): MemoryRelation {
     const updated = this.repos.relations.markOrphanedPending(judgmentId, {
       reason,
       markedByKind: 'consolidator',
-      judgedAt: this.now(),
+      judgedAt,
     });
     if (!updated) {
       throw new DomainError(
