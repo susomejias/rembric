@@ -694,6 +694,29 @@ describe('undo symmetry — undoing a retirement restores what it orphaned', () 
     ]);
   });
 
+  it('undoing one decay of a run shared with another restores only the judgments it orphaned', () => {
+    const m1 = save('m1');
+    const m2 = save('m2');
+    const x = save('x');
+    const p1 = pending(m1.id, x.id);
+    const p2 = pending(x.id, m2.id);
+    const runId = decayRun();
+    const { opId: first } = applyDecay(repos, db.handle.db, {
+      runId,
+      ids: [m1.id],
+      reasoning: 'a',
+    });
+    applyDecay(repos, db.handle.db, { runId, ids: [m2.id], reasoning: 'b' });
+
+    const result = undoOp(repos, db.handle.db, first);
+
+    expect([status(m1.id), status(m2.id)]).toEqual(['active', 'archived']);
+    expect([rel(p1).status, rel(p2).status]).toEqual(['pending', 'orphaned']);
+    expect(result.alsoReverted).toEqual([opFor(p1).id]);
+    expect(result.keptOrphaned).toEqual([]);
+    expect(opById(opFor(p2).id).revertedAt).toBeNull();
+  });
+
   it('control: a topic_key revision’s orphaning is undone on its own and no memory changes', () => {
     const a = save('a', 't');
     const x = save('x');

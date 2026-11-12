@@ -124,9 +124,11 @@ export interface UndoRunResult {
 
 const RETIREMENT_ORPHANING_PREFIX = `orphaned: ${RETIREMENT_ORPHAN_REASON}: `;
 
-function isRetirementOrphaning(op: ConsolidationOp): boolean {
+function isRetirementOrphaning(op: ConsolidationOp, retiredIds: ReadonlySet<string>): boolean {
   return (
-    op.opType === 'orphan_promote' && op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true
+    op.opType === 'orphan_promote' &&
+    op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true &&
+    op.affectedIds.some((id) => retiredIds.has(id))
   );
 }
 
@@ -335,8 +337,9 @@ function restoreRetirementOrphanings(
   now: Date,
   out: Pick<UndoResult, 'skipped' | 'keptVerdicts' | 'keptOrphaned' | 'alsoReverted'>,
 ): void {
+  const retiredIds = new Set(retirement.affectedIds);
   for (const linked of repos.consolidation.listActiveOps(retirement.runId)) {
-    if (!isRetirementOrphaning(linked)) continue;
+    if (!isRetirementOrphaning(linked, retiredIds)) continue;
     const rel = linked.createdId ? repos.relations.findByJudgmentId(linked.createdId) : undefined;
     if (rel && !writtenSinceOp(rel, linked)) {
       const rows = new Map(
@@ -364,11 +367,13 @@ export function undoRun(
   const skipped: SkippedRow[] = [];
   const keptVerdicts: KeptVerdict[] = [];
   const keptOrphaned: KeptOrphaned[] = [];
-  // The run's retirement undoes its own orphanings, after reactivating their endpoints.
-  const retirementInRun = ops.some((op) => REACTIVATE_UNDO_OP_TYPES.has(op.opType));
+  // A retirement in the run undoes its own orphanings, after reactivating their endpoints.
+  const retiredInRun = new Set(
+    ops.filter((op) => REACTIVATE_UNDO_OP_TYPES.has(op.opType)).flatMap((op) => op.affectedIds),
+  );
   // Reverse order so dependent ops unwind cleanly.
   for (const op of [...ops].reverse()) {
-    if (retirementInRun && isRetirementOrphaning(op)) continue;
+    if (isRetirementOrphaning(op, retiredInRun)) continue;
     const result = undoOp(repos, tx, op.id);
     reverted.push(op.id, ...result.alsoReverted);
     skipped.push(...result.skipped);
