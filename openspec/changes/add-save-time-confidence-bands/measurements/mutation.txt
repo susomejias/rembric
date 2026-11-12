@@ -1,0 +1,107 @@
+# Mutation check — confidence bands
+
+Each case is applied to the pristine file by scripts/mutate.mjs, which restores it byte-verified. Every case turned at least one test red.
+
+Commands (one per file; every --mutation/--with pair listed below is one case):
+
+node scripts/mutate.mjs --workspace packages/core --file packages/core/src/services/save-time-candidates.ts --spec src/services/save-time-candidate-bands.test.ts --mutation '<find>' --with '<replace>' ...
+node scripts/mutate.mjs --workspace packages/core --file packages/core/src/services/save-curation.ts --spec src/services/save-time-candidate-bands.test.ts ...
+node scripts/mutate.mjs --workspace packages/db --file packages/db/src/repositories/vectors-repository.ts --spec src/repositories/vectors-repository.test.ts ...
+node scripts/mutate.mjs --workspace packages/mcp --file packages/mcp/src/memory-tools.ts --spec src/memory-tools.test.ts -t 'confidence bands' ...
+node scripts/mutate.mjs --workspace packages/mcp --file packages/mcp/src/observability-tools.ts --spec src/observability-tools.test.ts -t 'related' ...
+
+baseline: src/services/save-time-candidate-bands.test.ts
+  green
+mutation: vec < CANDIDATE_LOW_BAND_CEILING
+  CAUGHT by 1:
+    × classifyCandidateBand > a pair only the dense channel admits is low below the low-band ceiling and middle from it
+mutation: export const CANDIDATE_LOW_BAND_CEILING = 0.75;
+  CAUGHT by 3:
+    × classifyCandidateBand > a pair only the dense channel admits is low below the low-band ceiling and middle from it
+    × save-time bands through the curation path > a low-band pair writes no pending row and is reported in related[] without a judgmentId
+    × save-time bands through the curation path > related[] is bounded by the same per-save maximum
+mutation: vec >= CANDIDATE_HIGH_BAND_FLOOR
+  CAUGHT by 1:
+    × classifyCandidateBand > is high from the high-band floor on, whichever channels admitted the pair
+mutation: export const CANDIDATE_HIGH_BAND_FLOOR = 0.85;
+  CAUGHT by 1:
+    × save-time bands through the curation path > a high-band pair still writes a pending row and is named in convergeWith
+mutation: if (entity) return dense ? 'middle' : 'low';
+  CAUGHT by 1:
+    × classifyCandidateBand > an entity-only pair is low below VEC_THRESHOLD, middle at it, and middle when the cosine is unknown
+mutation: const dense = vec !== null && vec >= VEC_THRESHOLD;
+  CAUGHT by 2:
+    × classifyCandidateBand > a pair only the dense channel admits is low below the low-band ceiling and middle from it
+    × classifyCandidateBand > an entity-only pair is low below VEC_THRESHOLD, middle at it, and middle when the cosine is unknown
+mutation: if (lexical || vec === null) return 'middle';
+  CAUGHT by 2:
+    × classifyCandidateBand > an entity-only pair is low below VEC_THRESHOLD, middle at it, and middle when the cosine is unknown
+    × save-time bands through the curation path > an entity-only pair whose target has no vector stays middle
+mutation: if (lexical || vec === null) return 'middle';
+  CAUGHT by 1:
+    × classifyCandidateBand > a lexically admitted pair is never low
+mutation: if (!dense && !lexical && !entity) return null;
+  CAUGHT by 1:
+    × classifyCandidateBand > a pair no channel admits has no band
+mutation: const judged = all.filter((c) => c.band !== 'low');
+  CAUGHT by 5:
+    × save-time bands through the curation path > a low-band pair writes no pending row and is reported in related[] without a judgmentId
+    × save-time bands through the curation path > an entity-only pair below VEC_THRESHOLD is related, still labelled with its entity
+    × save-time bands through the curation path > an entity target outside the dense pool is classified by its exact cosine
+    × save-time bands through the curation path > a low-band pair takes no candidate slot and is not counted
+    × save-time bands through the curation path > related[] is bounded by the same per-save maximum
+mutation: candidates: judged.slice(0, opts.perSaveMax),
+  CAUGHT by 1:
+    × save-time bands through the curation path > a low-band pair takes no candidate slot and is not counted
+mutation: detected: judged.length,
+  CAUGHT by 2:
+    × save-time bands through the curation path > a low-band pair writes no pending row and is reported in related[] without a judgmentId
+    × save-time bands through the curation path > a low-band pair takes no candidate slot and is not counted
+mutation: related: all.filter((c) => c.band === 'low').slice(0, opts.perSaveMax)…
+  CAUGHT by 1:
+    × save-time bands through the curation path > related[] is bounded by the same per-save maximum
+mutation: if (vecRows.length > 0 && unknown.length > 0) {
+  CAUGHT by 2:
+    × save-time bands through the curation path > an entity target outside the dense pool is classified by its exact cosine
+    × save-time bands through the curation path > looks up a cosine only for targets outside the dense pool, and not at all without vectors
+mutation: if (vecRows.length > 0 && unknown.length > 0) {
+  CAUGHT by 1:
+    × save-time bands through the curation path > looks up a cosine only for targets outside the dense pool, and not at all without vectors
+mutation: opts.bands === false
+  CAUGHT by 1:
+    × save-time bands through the curation path > with bands disabled every admitted pair is a pending candidate (the sweep baseline)
+baseline: src/services/save-time-candidate-bands.test.ts
+  green
+mutation: if (c.band === 'high') convergeWith.push(c.targetId);
+  CAUGHT by 1:
+    × save-time bands through the curation path > a middle-band pair is a pending candidate exactly as before, with no steer
+mutation: related = found.related.map(view);
+  CAUGHT by 5:
+    × save-time bands through the curation path > a low-band pair writes no pending row and is reported in related[] without a judgmentId
+    × save-time bands through the curation path > an entity-only pair below VEC_THRESHOLD is related, still labelled with its entity
+    × save-time bands through the curation path > an entity target outside the dense pool is classified by its exact cosine
+    × save-time bands through the curation path > a low-band pair takes no candidate slot and is not counted
+    × save-time bands through the curation path > related[] is bounded by the same per-save maximum
+baseline: src/repositories/vectors-repository.test.ts
+  green
+mutation: WHERE v.partition_key = ${partitionKeyFor(opts.scope.projectId)}
+  CAUGHT by 1:
+    × VectorsRepository > cosineDistances > returns the exact distance to each named in-scope target that has a vector
+baseline: src/memory-tools.test.ts -t "confidence bands"
+  green
+mutation: related: r.related,
+  CAUGHT by 2:
+    × memory.save and memory.merge — confidence bands > memory.save reports low-band pairs in related[] and high-band targets in convergeWith[]
+    × memory.save and memory.merge — confidence bands > a memory.merge commit reports related[] and convergeWith[] exactly as memory.save does
+mutation: convergeWith: r.convergeWith,
+  CAUGHT by 2:
+    × memory.save and memory.merge — confidence bands > memory.save reports low-band pairs in related[] and high-band targets in convergeWith[]
+    × memory.save and memory.merge — confidence bands > a memory.merge commit reports related[] and convergeWith[] exactly as memory.save does
+baseline: src/observability-tools.test.ts -t "related"
+  green
+mutation: related.push(...saved.related);
+  CAUGHT by 1:
+    × memory.capture_passive — handler-level (fix-audited-defects) > reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty
+mutation: convergeWith.push(...saved.convergeWith);
+  CAUGHT by 1:
+    × memory.capture_passive — handler-level (fix-audited-defects) > reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty

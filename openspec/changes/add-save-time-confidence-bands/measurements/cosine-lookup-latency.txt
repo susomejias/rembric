@@ -1,0 +1,7 @@
+# cosineDistances latency (statement level, not end-to-end)
+instrument: performance.now() around one call; 400 rounds after 20 warm-up rounds; 40 target ids per lookup; random unit vectors
+
+1000 memories: cosineDistances(40 ids)  p50 0.333 ms, p95 0.376 ms
+1000 memories: knnCandidates(limit 20)  p50 0.309 ms, p95 0.343 ms  [reference series]
+20000 memories: cosineDistances(40 ids)  p50 0.599 ms, p95 0.673 ms
+20000 memories: knnCandidates(limit 20)  p50 2.651 ms, p95 2.720 ms  [reference series]
