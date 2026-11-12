@@ -1,0 +1,54 @@
+# retirement-path cost — LABEL=before
+# instrument: wall clock of one public entry-point call per retirement (warm; 5 warm-up calls dropped; REPS=40)
+# k = pending judgments attached to each retired memory before the call; "pending left" = pending rows still touching the retired memories after the measured calls (VERIFICATION READ, undo rows: the archived successor)
+# host: Apple M5 · darwin 25.6.0 · node v22.23.0
+| memories | path | k | n | median ms | p95 ms | pending left |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 1000 | topic_key revision (saveWithTopicKey) | 0 | 31 | 0.627 | 1.321 | 7 |
+| 1000 | supersedes verdict (RelationsService.judge) | 0 | 31 | 0.306 | 0.795 | 5 |
+| 1000 | memory.archive (MemoryService.archive) | 0 | 31 | 0.256 | 0.400 | 2 |
+| 1000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 31 | 0.608 | 3.173 | 12 |
+| 1000 | decay of 1 (applyDecay) | 0 | 31 | 0.128 | 0.171 | 2 |
+| 1000 | undo of memory.archive (undoOp) | 0 | 31 | 0.225 | 0.938 | 0 |
+| 1000 | undo of decay (undoOp) | 0 | 31 | 0.206 | 0.250 | 0 |
+| 1000 | undo of merge, successor archived (undoOp) | 0 | 31 | 0.302 | 0.557 | 0 |
+| 1000 | topic_key revision (saveWithTopicKey) | 3 | 31 | 0.533 | 3.563 | 98 |
+| 1000 | supersedes verdict (RelationsService.judge) | 3 | 31 | 0.299 | 2.957 | 97 |
+| 1000 | memory.archive (MemoryService.archive) | 3 | 31 | 0.209 | 0.352 | 97 |
+| 1000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 31 | 0.534 | 0.742 | 193 |
+| 1000 | decay of 1 (applyDecay) | 3 | 31 | 0.149 | 0.230 | 98 |
+| 1000 | undo of memory.archive (undoOp) | 3 | 31 | 0.183 | 0.667 | 0 |
+| 1000 | undo of decay (undoOp) | 3 | 31 | 0.180 | 0.349 | 0 |
+| 1000 | undo of merge, successor archived (undoOp) | 3 | 31 | 0.263 | 0.726 | 93 |
+| 20000 | topic_key revision (saveWithTopicKey) | 0 | 40 | 0.415 | 0.838 | 6 |
+| 20000 | supersedes verdict (RelationsService.judge) | 0 | 40 | 0.303 | 0.411 | 6 |
+| 20000 | memory.archive (MemoryService.archive) | 0 | 40 | 0.197 | 0.229 | 7 |
+| 20000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 40 | 0.470 | 1.348 | 13 |
+| 20000 | decay of 1 (applyDecay) | 0 | 40 | 0.110 | 0.139 | 4 |
+| 20000 | undo of memory.archive (undoOp) | 0 | 40 | 0.168 | 0.231 | 0 |
+| 20000 | undo of decay (undoOp) | 0 | 40 | 0.165 | 0.191 | 0 |
+| 20000 | undo of merge, successor archived (undoOp) | 0 | 40 | 0.248 | 0.810 | 0 |
+| 20000 | topic_key revision (saveWithTopicKey) | 3 | 40 | 0.416 | 1.890 | 128 |
+| 20000 | supersedes verdict (RelationsService.judge) | 3 | 40 | 0.305 | 0.382 | 123 |
+| 20000 | memory.archive (MemoryService.archive) | 3 | 40 | 0.183 | 0.251 | 126 |
+| 20000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 40 | 0.494 | 1.083 | 250 |
+| 20000 | decay of 1 (applyDecay) | 3 | 40 | 0.143 | 0.215 | 123 |
+| 20000 | undo of memory.archive (undoOp) | 3 | 40 | 0.167 | 0.276 | 0 |
+| 20000 | undo of decay (undoOp) | 3 | 40 | 0.172 | 0.244 | 0 |
+| 20000 | undo of merge, successor archived (undoOp) | 3 | 40 | 0.265 | 4.941 | 120 |
+| 50000 | topic_key revision (saveWithTopicKey) | 0 | 40 | 0.534 | 5.473 | 2 |
+| 50000 | supersedes verdict (RelationsService.judge) | 0 | 40 | 0.418 | 3.030 | 8 |
+| 50000 | memory.archive (MemoryService.archive) | 0 | 40 | 0.191 | 0.839 | 12 |
+| 50000 | memory.merge commit of 2 (MemoryService.commitMerge) | 0 | 40 | 0.456 | 4.933 | 10 |
+| 50000 | decay of 1 (applyDecay) | 0 | 40 | 0.122 | 0.279 | 7 |
+| 50000 | undo of memory.archive (undoOp) | 0 | 40 | 0.152 | 0.177 | 0 |
+| 50000 | undo of decay (undoOp) | 0 | 40 | 0.159 | 0.230 | 0 |
+| 50000 | undo of merge, successor archived (undoOp) | 0 | 40 | 0.242 | 0.414 | 0 |
+| 50000 | topic_key revision (saveWithTopicKey) | 3 | 40 | 0.403 | 6.675 | 125 |
+| 50000 | supersedes verdict (RelationsService.judge) | 3 | 40 | 0.438 | 3.532 | 127 |
+| 50000 | memory.archive (MemoryService.archive) | 3 | 40 | 0.198 | 1.241 | 123 |
+| 50000 | memory.merge commit of 2 (MemoryService.commitMerge) | 3 | 40 | 0.493 | 1.109 | 252 |
+| 50000 | decay of 1 (applyDecay) | 3 | 40 | 0.144 | 1.057 | 125 |
+| 50000 | undo of memory.archive (undoOp) | 3 | 40 | 0.150 | 0.166 | 0 |
+| 50000 | undo of decay (undoOp) | 3 | 40 | 0.155 | 0.189 | 0 |
+| 50000 | undo of merge, successor archived (undoOp) | 3 | 40 | 0.239 | 5.188 | 120 |
