@@ -71,3 +71,5 @@ apps/web/test-results.json
 docker-compose.lan.yml
 # Local Pi runtime state
 .atl/
+# Local ODD feature logbooks; never committed
+odd/
