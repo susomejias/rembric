@@ -11,6 +11,18 @@ import { ulid } from 'ulid';
 
 import { DomainError } from './errors.js';
 import { RANK_WINDOW_CEILING } from './hybrid-search.js';
+import { RedactionTally } from './secret-redaction.js';
+
+function redactVerdictText<T extends { reason?: string; evidence?: unknown }>(
+  input: T,
+  redactions: RedactionTally,
+): T {
+  return {
+    ...input,
+    ...(input.reason !== undefined && { reason: redactions.redact(input.reason) }),
+    ...(input.evidence !== undefined && { evidence: redactions.redactJson(input.evidence) }),
+  };
+}
 
 export interface CreatePendingInput {
   sourceId: string;
@@ -130,7 +142,11 @@ export class RelationsService {
     return row;
   }
 
-  judge(judgmentId: string, input: JudgeInput): MemoryRelation {
+  judge(
+    judgmentId: string,
+    input: JudgeInput,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MemoryRelation {
     const existing = this.repos.relations.findByJudgmentId(judgmentId);
     if (!existing) {
       throw new DomainError(
@@ -138,10 +154,15 @@ export class RelationsService {
         `relations.judge: judgmentId ${judgmentId} not found`,
       );
     }
-    return this.applyJudgment(existing, judgmentId, input);
+    return this.applyJudgment(existing, judgmentId, redactVerdictText(input, redactions));
   }
 
-  judgeInScope(judgmentId: string, scope: Scope, input: JudgeInput): MemoryRelation {
+  judgeInScope(
+    judgmentId: string,
+    scope: Scope,
+    input: JudgeInput,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MemoryRelation {
     const existing = this.repos.relations.findByJudgmentIdInScope(judgmentId, {
       projectId: scope.projectId,
     });
@@ -151,7 +172,7 @@ export class RelationsService {
         `relations.judge: judgmentId ${judgmentId} not found in this scope`,
       );
     }
-    return this.applyJudgment(existing, judgmentId, input);
+    return this.applyJudgment(existing, judgmentId, redactVerdictText(input, redactions));
   }
 
   private applyJudgment(
@@ -198,7 +219,11 @@ export class RelationsService {
     return updated;
   }
 
-  compareInScope(input: CompareInput, scope: Scope): MemoryRelation {
+  compareInScope(
+    input: CompareInput,
+    scope: Scope,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MemoryRelation {
     for (const id of [input.sourceId, input.targetId]) {
       const tuple = this.repos.memory.findScopeTupleById(id);
       if (!tuple || !memoryMatchesScope(tuple, scope)) {
@@ -208,10 +233,11 @@ export class RelationsService {
         );
       }
     }
-    return this.compare(input);
+    return this.compare(input, redactions);
   }
 
-  compare(input: CompareInput): MemoryRelation {
+  compare(sent: CompareInput, redactions: RedactionTally = new RedactionTally()): MemoryRelation {
+    const input = redactVerdictText(sent, redactions);
     this.assertSameScope(input.sourceId, input.targetId);
 
     const existing = this.repos.relations.findBySourceAndTarget(input.sourceId, input.targetId);

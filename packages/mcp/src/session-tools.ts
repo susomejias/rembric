@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
+import { RedactionTally, SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { ProjectResolutionSource, SessionRouter } from '@rembric/core';
@@ -17,6 +17,7 @@ import {
   unresolvableSlugError,
 } from './_shared.js';
 import { errToMcp, itemError, mcpError, type ErrorReportingDeps } from './errors.js';
+import { REDACTION_NOTE, redactionsField, redactionsOutput } from './redactions.js';
 import { batchResult, ok } from './result.js';
 
 export const sessionStartSchema = {
@@ -31,7 +32,11 @@ export const sessionEndSchema = {
 
 export const sessionSummarySchema = {
   sessionId: z.string().min(1).optional(),
-  summary: z.string().min(1).max(SUMMARY_MAX_CHARS, `summary must be ≤${SUMMARY_MAX_CHARS} chars`),
+  summary: z
+    .string()
+    .min(1)
+    .max(SUMMARY_MAX_CHARS, `summary must be ≤${SUMMARY_MAX_CHARS} chars`)
+    .describe(REDACTION_NOTE),
   title: z.string().min(1).max(100).optional(),
 };
 
@@ -94,6 +99,7 @@ export const sessionStartOutput = {
   title: z.string().nullable(),
   reused: z.boolean(),
   agent: z.string(),
+  redactions: redactionsOutput,
 };
 
 export const sessionEndOutput = {
@@ -112,6 +118,7 @@ export const sessionSummaryOutput = {
   titleFinal: z.boolean(),
   applied: z.boolean(),
   discardReason: z.string().optional(),
+  redactions: redactionsOutput,
 };
 
 export const sessionResumeOutput = {
@@ -229,18 +236,22 @@ async function handleSessionStart(
       }) ?? deps.agentSessions.findSoleActiveForReuse({ tokenId: ctx.token.id, projectId });
   }
   let reused = false;
+  const redactions = new RedactionTally();
   if (session) {
     reused = true;
     deps.agentSessions.touchActivity(session.id);
   } else {
     try {
-      session = deps.agentSessions.start({
-        tokenId: ctx.token.id,
-        projectId,
-        agent: args.agent ?? 'unknown',
-        description: args.description ?? null,
-        cwd: typeof process === 'undefined' ? null : process.cwd(),
-      });
+      session = deps.agentSessions.start(
+        {
+          tokenId: ctx.token.id,
+          projectId,
+          agent: args.agent ?? 'unknown',
+          description: args.description ?? null,
+          cwd: typeof process === 'undefined' ? null : process.cwd(),
+        },
+        redactions,
+      );
     } catch (err) {
       return errToMcp(err, deps.logInternalError);
     }
@@ -263,6 +274,7 @@ async function handleSessionStart(
     title: session.title,
     reused,
     agent: session.agent,
+    ...redactionsField(redactions),
   });
 }
 
@@ -318,12 +330,17 @@ async function handleSessionSummary(
   const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {
-    const { row: updated, applied } = deps.agentSessions.writeSummary(sessionId, {
-      tokenId: ctx.token.id,
-      summary: args.summary,
-      title: args.title,
-      final: true,
-    });
+    const redactions = new RedactionTally();
+    const { row: updated, applied } = deps.agentSessions.writeSummary(
+      sessionId,
+      {
+        tokenId: ctx.token.id,
+        summary: args.summary,
+        title: args.title,
+        final: true,
+      },
+      redactions,
+    );
     return ok({
       ok: true,
       sessionId: updated.id,
@@ -333,6 +350,7 @@ async function handleSessionSummary(
       titleFinal: updated.titleFinal,
       applied,
       ...(applied === false && { discardReason: 'terminal_final' }),
+      ...(applied && redactionsField(redactions)),
     });
   } catch (err) {
     return errToMcp(err, deps.logInternalError);

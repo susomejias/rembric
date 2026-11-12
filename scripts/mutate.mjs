@@ -9,7 +9,11 @@
  * its backup before the process exits, on every path including a crash.
  *
  *   node scripts/mutate.mjs --file <path> --spec <vitest path> \
- *     --mutation '<find>' --with '<replace>' [--mutation … --with …] [-t <filter>]
+ *     --mutation '<find>' --with '<replace>' [--mutation … --with …] [-t <filter>] \
+ *     [--workspace <dir>]
+ *
+ * `--workspace` names the package whose vitest project owns the spec
+ * (default `apps/web`); a spec under `packages/core` needs `packages/core`.
  *
  * `--mutation` and `--with` are separate flags rather than one delimited
  * string because every plausible delimiter (`=>` above all) occurs in the
@@ -24,15 +28,14 @@ import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, relative, resolve } from 'node:path';
 
 const REPO = resolve(import.meta.dirname, '..');
-/** The workspace whose vitest project owns the suites these mutations target. */
-const WORKSPACE = resolve(REPO, 'apps/web');
 
 function parseArgs(argv) {
-  const out = { mutations: [], filter: null, file: null, spec: null };
+  const out = { mutations: [], filter: null, file: null, spec: null, workspace: 'apps/web' };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--file') out.file = argv[(i += 1)];
     else if (a === '--spec') out.spec = argv[(i += 1)];
+    else if (a === '--workspace') out.workspace = argv[(i += 1)];
     else if (a === '--mutation') {
       if (argv[i + 2] !== '--with') {
         throw new Error(`--mutation must be followed by --with: ${argv[i + 1]}`);
@@ -47,6 +50,10 @@ function parseArgs(argv) {
   }
   return out;
 }
+
+const args = parseArgs(process.argv.slice(2));
+/** The workspace whose vitest project owns the suites these mutations target. */
+const WORKSPACE = resolve(REPO, args.workspace);
 
 /** Vitest exits non-zero on failure, so a throw here means "something went red". */
 function runSpec(spec, filter) {
@@ -76,7 +83,6 @@ function failedTestNames(output) {
   return [...output.matchAll(/^\s+×\s+(.+?)(?:\s+\d+ms)?$/gm)].map((m) => m[1].trim());
 }
 
-const args = parseArgs(process.argv.slice(2));
 const target = resolve(REPO, args.file);
 const backup = `${target}.mutate-backup`;
 copyFileSync(target, backup);

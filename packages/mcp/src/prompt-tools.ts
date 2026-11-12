@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { type PromptsService } from '@rembric/core';
+import { type PromptsService, RedactionTally } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
@@ -15,6 +15,7 @@ import {
   resolveSessionId,
 } from './_shared.js';
 import { errToMcp, type ErrorReportingDeps } from './errors.js';
+import { redactionsField, redactionsOutput } from './redactions.js';
 import { ok } from './result.js';
 
 export const savePromptSchema = {
@@ -58,6 +59,7 @@ export const savePromptOutput = {
   id: z.string(),
   createdAt: z.string(),
   replaces: z.array(z.string()).optional(),
+  redactions: redactionsOutput,
 };
 
 export const searchPromptsOutput = {
@@ -110,15 +112,19 @@ async function handleSavePrompt(
     return errToMcp(err, deps.logInternalError);
   }
   try {
-    const row = deps.prompts.save({
-      content: args.content,
-      sessionId,
-      projectId: scope.projectId,
-      agent: ctx.token.name,
-      title: args.title,
-      tags: args.tags ?? null,
-      replaces: args.replaces ?? null,
-    });
+    const redactions = new RedactionTally();
+    const row = deps.prompts.save(
+      {
+        content: args.content,
+        sessionId,
+        projectId: scope.projectId,
+        agent: ctx.token.name,
+        title: args.title,
+        tags: args.tags ?? null,
+        replaces: args.replaces ?? null,
+      },
+      redactions,
+    );
     const response: {
       ok: true;
       id: string;
@@ -128,7 +134,7 @@ async function handleSavePrompt(
     if (row.replaces && row.replaces.length > 0) {
       response.replaces = row.replaces;
     }
-    return ok(response);
+    return ok({ ...response, ...redactionsField(redactions) });
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }

@@ -4,3 +4,4 @@ export { doctorReport } from './doctor.js';
 export { defaultProject, defaultProjectScope, seedProject } from './default-project.js';
 export { TestClock } from './clock.js';
 export { FakeEmbedder } from './embedder.js';
+export * from './fake-secrets.js';

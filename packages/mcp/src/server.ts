@@ -62,6 +62,7 @@ import {
   searchPromptsOutput,
   searchPromptsSchema,
 } from './prompt-tools.js';
+import { REDACTION_NOTE } from './redactions.js';
 import {
   buildRelationsHandlers,
   compareOutput,
@@ -116,6 +117,10 @@ export interface CreateMcpServerOptions {
 }
 
 export const DESCRIPTION_MAX_LENGTH = 1900;
+
+function withRedactionNote(description: string): string {
+  return `${description} ${REDACTION_NOTE}`;
+}
 
 const SAVE_DESCRIPTION =
   'Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a short ≤100-char label of what this memory is about — written as a scannable headline, not the cwd), content, tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix). Optional: topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this update is the LATEST take on an evolving topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the previous active row in that slot is auto-superseded atomically. The response includes `candidates[]` when the save matches existing memories above the configured similarity threshold; close each pending judgment with memory.judge_batch while the context is fresh. `candidatesDetected` counts the matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5) trimmed the list: a lower bound on how many memories resemble this one, not a scope total, and no request argument raises it. Only `candidates[]` entries carry `judgmentId`s, so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key) instead of judging many pairs. The remainder stays reachable via memory.search and recordable per pair with memory.compare.';
@@ -207,7 +212,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.save',
     {
-      description: SAVE_DESCRIPTION,
+      description: withRedactionNote(SAVE_DESCRIPTION),
       inputSchema: memorySaveSchema,
       outputSchema: memorySaveOutput,
       annotations: WRITE_ANNOTATIONS('Save memory'),
@@ -237,7 +242,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.confirm_batch',
     {
-      description: CONFIRM_DESCRIPTION,
+      description: withRedactionNote(CONFIRM_DESCRIPTION),
       inputSchema: memoryConfirmSchema,
       outputSchema: memoryConfirmOutput,
       annotations: WRITE_ANNOTATIONS('Confirm memory'),
@@ -257,7 +262,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.merge',
     {
-      description: MERGE_DESCRIPTION,
+      description: withRedactionNote(MERGE_DESCRIPTION),
       inputSchema: memoryMergeSchema,
       outputSchema: memoryMergeOutput,
       annotations: WRITE_ANNOTATIONS('Merge memories'),
@@ -303,8 +308,9 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.session_start',
     {
-      description:
+      description: withRedactionNote(
         "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode/Pi providers POST to the sessions endpoint). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt, title, reused, agent }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session; `agent` is the resolved session's own attribution and, when `reused:true`, MAY differ from the `agent` you passed — it is never overwritten, so it reports whose session you are now writing into. Once a session is active on this connection, do NOT call this again — memory.save, memory.confirm_batch and memory.session_summary attach to it automatically.",
+      ),
       inputSchema: sessionStartSchema,
       outputSchema: sessionStartOutput,
       annotations: WRITE_ANNOTATIONS('Start session'),
@@ -382,8 +388,9 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.capture_passive',
     {
-      description:
+      description: withRedactionNote(
         'Bulk-save learnings. Required: tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix), applied to every learning. Extract numbered/bulleted items from a "## Key Learnings" (or "### Key Learnings", colon optional, case-insensitive) section in the given text and save each as a separate memory (type=reference) through the same curation pipeline as memory.save — topic_key handling, inline embedding, save-time candidate detection. When no such section is found, `saved` is 0 and `reason` explains why; this is NOT the same as success. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. The response may include `candidates[]` if any captured learning conflicts with an existing memory — judge them with memory.judge_batch. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).',
+      ),
       inputSchema: capturePassiveSchema,
       outputSchema: capturePassiveOutput,
       annotations: WRITE_ANNOTATIONS('Capture learnings'),
@@ -393,8 +400,9 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.save_prompt',
     {
-      description:
+      description: withRedactionNote(
         'Persist a REUSABLE prompt for the active session/project so future sessions can read it via memory.context.recentPrompts (and so the operator can browse them at /dashboard/prompts). This is a curated library, not a log: do NOT call it routinely, and never once per session as a matter of course. Call it only when the user explicitly asks for a prompt to be saved, or hands you text that is plainly a reusable artifact (a template, a standing instruction, a wording they will want to run again). A first message is NOT eligible merely because it states a goal — that is every first message. Decisions, fixes and discoveries go to memory.save; what happened in a session goes to memory.session_summary. When in doubt, do not call this. REQUIRED fields: content (verbatim text, ≤20k chars) AND title (≤100 chars, scannable label for retrieval lists — a prompt without a title is not searchable in practice). Optional: tags (string[] for categorical filtering — fed into the FTS5 index alongside content), replaces (id of a predecessor prompt to atomically refine — the old row is soft-deleted and the new row links via `replaces[]`), sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). When the refined predecessor does not exist, is in another scope, or is already deleted, the call is rejected with `prompt_not_found` / `prompt_scope_mismatch` / `prompt_already_deleted`.',
+      ),
       inputSchema: savePromptSchema,
       outputSchema: savePromptOutput,
       annotations: WRITE_ANNOTATIONS('Save prompt'),
@@ -511,8 +519,9 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.judge_batch',
     {
-      description:
+      description: withRedactionNote(
         'Close pending judgments from memory.save.candidates[] with { judgments: [{ judgmentId, relation, reason?, confidence?, evidence? }, ...] } (1–20). No scalar arguments or date selection. Relation: supersedes/conflicts_with/related/compatible/scoped/not_conflict. Ordered independent transactions; preserve duplicate IDs and inspect every results[] entry. A failed item does not roll back others. Malformed nested entries reject the whole request before mutations. Supersedes atomically flips the target memory and links its successor. Returns { ok, results }; mixed success is not an MCP error. If all items fail, ok:false and MCP isError:true retain every result (not_found if all missing/foreign, otherwise batch_failed). Judge while context is fresh, never on invented IDs.',
+      ),
       inputSchema: judgeSchema,
       outputSchema: judgeOutput,
       annotations: WRITE_ANNOTATIONS('Judge memories'),
@@ -522,8 +531,9 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.compare',
     {
-      description:
+      description: withRedactionNote(
         'Proactively record a verdict on two arbitrary memories without a preceding save. Idempotent: re-calling with the same (memoryIdA, memoryIdB) pair updates the existing row. Use when independent analysis finds two memories that are related or contradict; for save-time candidates use memory.judge_batch instead.',
+      ),
       inputSchema: compareSchema,
       outputSchema: compareOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Compare memories'),

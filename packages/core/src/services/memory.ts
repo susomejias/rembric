@@ -40,6 +40,7 @@ import {
   reviewTtlEntries,
   type ReviewState,
 } from './review.js';
+import { RedactionTally } from './secret-redaction.js';
 import { assertNoNul, sliceWithoutSplittingSurrogatePair } from './strings.js';
 
 const ARCHIVED_MEMORY_PURGE_REASONING = 'operator purge of disconnected archived memories';
@@ -145,8 +146,12 @@ export class MemoryService {
     return m;
   }
 
-  saveWithTopicKey(input: SaveMemoryInput, scope: Scope): SaveResult {
-    const { title, tags, topicKey } = validateSaveFields(input);
+  saveWithTopicKey(
+    input: SaveMemoryInput,
+    scope: Scope,
+    redactions: RedactionTally = new RedactionTally(),
+  ): SaveResult {
+    const { title, content, tags, topicKey } = validateSaveFields(input, 'memory.save', redactions);
 
     const ts = this.now();
     const id = ulid(ts.getTime());
@@ -176,7 +181,7 @@ export class MemoryService {
         projectId: scope.projectId,
         type: input.type,
         title,
-        content: input.content,
+        content,
         tags,
         status: 'active',
         replaces: replacesPrefix,
@@ -439,17 +444,22 @@ export class MemoryService {
     return { memories: ordered, ...verdict };
   }
 
-  confirm(id: string, scope: Scope, opts: ConfirmOptions = {}): { headTruncated: boolean } {
+  confirm(
+    id: string,
+    scope: Scope,
+    opts: ConfirmOptions = {},
+    redactions: RedactionTally = new RedactionTally(),
+  ): { headTruncated: boolean } {
+    assertConfirmOptions(opts);
+    return this.confirmValidated(id, scope, withRedactedReason(opts, redactions));
+  }
+
+  private confirmValidated(
+    id: string,
+    scope: Scope,
+    opts: ConfirmOptions,
+  ): { headTruncated: boolean } {
     const verdict = opts.verdict ?? 'affirm';
-    if (verdict === 'refute') {
-      if (!opts.reason || opts.reason.trim().length === 0) {
-        throw new DomainError(
-          'invalid_input',
-          'memory.confirm_batch: verdict=refute requires a non-empty reason',
-        );
-      }
-      assertNoNul('memory.confirm_batch', 'reason', opts.reason);
-    }
     const found = this.unsafeGetById(id);
     if (!found || !memoryMatchesScope(found, scope)) {
       throw new DomainError('memory_not_found', `memory.confirm_batch: id=${id} not found`);
@@ -474,12 +484,16 @@ export class MemoryService {
     ids: readonly string[],
     scope: Scope,
     opts: ConfirmOptions = {},
+    redactions: RedactionTally = new RedactionTally(),
   ): { confirmed: number; headTruncated: boolean } {
     const unique = [...new Set(ids)];
+    if (unique.length === 0) return { confirmed: 0, headTruncated: false };
+    assertConfirmOptions(opts);
+    const redacted = withRedactedReason(opts, redactions);
     return this.tx.transaction(() => {
       let headTruncated = false;
       for (const id of unique) {
-        const result = this.confirm(id, scope, opts);
+        const result = this.confirmValidated(id, scope, redacted);
         headTruncated = headTruncated || result.headTruncated;
       }
       return { confirmed: unique.length, headTruncated };
@@ -509,14 +523,23 @@ export class MemoryService {
     });
   }
 
-  previewMerge(input: MergeMemoriesInput, scope: Scope): MergePreview {
-    return this.planMerge(input, scope);
+  previewMerge(
+    input: MergeMemoriesInput,
+    scope: Scope,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MergePreview {
+    return this.planMerge(input, scope, redactions);
   }
 
-  commitMerge(input: MergeMemoriesInput, scope: Scope, fingerprint: string): MergeResult {
+  commitMerge(
+    input: MergeMemoriesInput,
+    scope: Scope,
+    fingerprint: string,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MergeResult {
     const ts = this.now();
     return this.tx.transaction((): MergeResult => {
-      const preview = this.planMerge(input, scope);
+      const preview = this.planMerge(input, scope, redactions);
       if (preview.fingerprint !== fingerprint) {
         throw new DomainError(
           'fingerprint_mismatch',
@@ -560,7 +583,11 @@ export class MemoryService {
     });
   }
 
-  private planMerge(input: MergeMemoriesInput, scope: Scope): MergePreview {
+  private planMerge(
+    input: MergeMemoriesInput,
+    scope: Scope,
+    redactions: RedactionTally,
+  ): MergePreview {
     const ids = [...input.ids];
     if (ids.length < MERGE_MIN_IDS || ids.length > MERGE_MAX_IDS) {
       throw new DomainError(
@@ -571,7 +598,7 @@ export class MemoryService {
     if (new Set(ids).size !== ids.length) {
       throw new DomainError('invalid_input', 'memory.merge: ids must be distinct');
     }
-    const fields = validateSaveFields(input, 'memory.merge');
+    const fields = validateSaveFields(input, 'memory.merge', redactions);
 
     const byId = new Map(this.unsafeGetByIds(ids).map((m) => [m.id, m]));
     const missing = ids.filter((id) => {
@@ -629,7 +656,7 @@ export class MemoryService {
     const successor: MergeSuccessorView = {
       type: input.type,
       title: fields.title,
-      content: input.content,
+      content: fields.content,
       tags: fields.tags,
       topicKey,
       replaces: ids,
@@ -817,10 +844,30 @@ function clampLimit(limit: number | undefined): number {
   return Math.floor(limit);
 }
 
+function assertConfirmOptions(opts: ConfirmOptions): void {
+  if ((opts.verdict ?? 'affirm') !== 'refute') return;
+  if (!opts.reason || opts.reason.trim().length === 0) {
+    throw new DomainError(
+      'invalid_input',
+      'memory.confirm_batch: verdict=refute requires a non-empty reason',
+    );
+  }
+  assertNoNul('memory.confirm_batch', 'reason', opts.reason);
+}
+
+function withRedactedReason(opts: ConfirmOptions, redactions: RedactionTally): ConfirmOptions {
+  return typeof opts.reason === 'string'
+    ? { ...opts, reason: redactions.redact(opts.reason) }
+    : opts;
+}
+
+const TOPIC_KEY_MAX_CHARS = 128;
+
 export function validateSaveFields(
   input: Pick<SaveMemoryInput, 'title' | 'content' | 'tags' | 'topicKey'>,
-  op = 'memory.save',
-): { title: string; tags: string[]; topicKey: string | null } {
+  op: string,
+  redactions: RedactionTally,
+): { title: string; content: string; tags: string[]; topicKey: string | null } {
   if (input.content.trim().length === 0) {
     throw new DomainError('invalid_input', `${op}: content must be non-empty`);
   }
@@ -833,18 +880,22 @@ export function validateSaveFields(
     );
   }
   assertNoNul(op, 'title', title);
+  const tags = normalizeTags(input.tags ?? [], op, redactions);
+  const topicKey = normalizeTopicKey(input.topicKey, op);
   return {
-    title,
-    tags: normalizeTags(input.tags ?? [], op),
-    topicKey: normalizeTopicKey(input.topicKey, op),
+    title: redactions.redactWithin(title, TITLE_MAX_CHARS),
+    content: redactions.redact(input.content),
+    tags,
+    topicKey: topicKey === null ? null : redactions.redactWithin(topicKey, TOPIC_KEY_MAX_CHARS),
   };
 }
 
-function normalizeTags(tags: readonly string[], op: string): string[] {
+function normalizeTags(tags: readonly string[], op: string, redactions: RedactionTally): string[] {
   return [
     ...new Set(
-      tags.map((tag) => {
-        assertNoNul(op, 'tags', tag);
+      tags.map((sent) => {
+        assertNoNul(op, 'tags', sent);
+        const tag = redactions.redact(sent);
         const normalized = slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), {
           lower: true,
           strict: true,
@@ -862,8 +913,11 @@ function normalizeTopicKey(input: string | null | undefined, op: string): string
   if (input == null) return null;
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
-  if (trimmed.length > 128) {
-    throw new DomainError('invalid_input', `${op}: topic_key exceeds 128 characters`);
+  if (trimmed.length > TOPIC_KEY_MAX_CHARS) {
+    throw new DomainError(
+      'invalid_input',
+      `${op}: topic_key exceeds ${TOPIC_KEY_MAX_CHARS} characters`,
+    );
   }
   assertNoNul(op, 'topic_key', trimmed);
   return trimmed;
