@@ -186,9 +186,11 @@ describe('MemoryService merge preview', () => {
     const a = seed('a');
     const b = seed('b');
 
-    expect(
-      domainErrorOf(() => memory.previewMerge(mergeInput([a, b], { content: '  ' }), scope)).code,
-    ).toBe('invalid_input');
+    const err = domainErrorOf(() =>
+      memory.previewMerge(mergeInput([a, b], { content: '  ' }), scope),
+    );
+    expect(err.code).toBe('invalid_input');
+    expect(err.message).toBe('memory.merge: content must be non-empty');
   });
 });
 
@@ -333,6 +335,20 @@ describe('MemoryService merge confirm', () => {
     expect((err.details as { preview: { warnings: { code: string }[] } }).preview.warnings).toEqual(
       [expect.objectContaining({ code: 'pending_judgments' })],
     );
+    expect([a, b].map(status)).toEqual(['active', 'active']);
+    expect(opRows()).toEqual([]);
+  });
+
+  it('writes nothing when another pending judgment touches an already-warned original', () => {
+    const a = seed('a');
+    const b = seed('b');
+    relations.createPending({ sourceId: seed('first'), targetId: b });
+    const { fingerprint } = memory.previewMerge(mergeInput([a, b]), scope);
+    relations.createPending({ sourceId: seed('second'), targetId: b });
+
+    const err = domainErrorOf(() => memory.commitMerge(mergeInput([a, b]), scope, fingerprint));
+
+    expect(err.code).toBe('fingerprint_mismatch');
     expect([a, b].map(status)).toEqual(['active', 'active']);
     expect(opRows()).toEqual([]);
   });

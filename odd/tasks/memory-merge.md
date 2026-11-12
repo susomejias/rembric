@@ -20,12 +20,12 @@ Branch: `feat/memory-merge` (worktree `rembric-worktrees/feat-450-memory-merge`)
 
 ## Tasks
 
-| ID  | Specs                    | Route  | Status                                         | Commit         |
-| --- | ------------------------ | ------ | ---------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
-| T1  | S1-S12                   | inline | done                                           | 084edb43       | OpenSpec change `add-memory-merge` (proposal, design, delta specs `mcp-api` + `consolidation`, tasks) |
-| T2  | S11                      | inline | done: RED (original skipped) then GREEN        | e7563e2f       | `undoOp` merge ordering fix + regression test                                                         |
-| T3  | S2-S8                    | inline | done: 20 tests, 14/14 mutations caught         | 11faee79       | `MemoryService` merge preview/commit + journal + tests                                                |
-| T4  | S1, S4, S7, S9, S10, S12 | inline | done: wire tests, 4/4 handler mutations caught | pending commit | `memory.merge` MCP tool, catalog wiring, docs, e2e undo test                                          |
+| ID  | Specs                    | Route  | Status                                         | Commit   |
+| --- | ------------------------ | ------ | ---------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| T1  | S1-S12                   | inline | done                                           | 084edb43 | OpenSpec change `add-memory-merge` (proposal, design, delta specs `mcp-api` + `consolidation`, tasks) |
+| T2  | S11                      | inline | done: RED (original skipped) then GREEN        | e7563e2f | `undoOp` merge ordering fix + regression test                                                         |
+| T3  | S2-S8                    | inline | done: 20 tests, 14/14 mutations caught         | 11faee79 | `MemoryService` merge preview/commit + journal + tests                                                |
+| T4  | S1, S4, S7, S9, S10, S12 | inline | done: wire tests, 4/4 handler mutations caught | 6ca3149d | `memory.merge` MCP tool, catalog wiring, docs, e2e undo test                                          |
 
 Route evidence: no Writer trigger — units depend on each other (T4 on T3), so they are not independent parallel units.
 
@@ -37,3 +37,4 @@ Route evidence: no Writer trigger — units depend on each other (T4 on T3), so 
 - L4: run scope switched from `project:<id>` to `maintenance` — a `project:<id>` run satisfies the sweep throttle `recentRunExists` and would skip that project's next sweep (pinned by a test).
 - L5 (user, 2026-11-12): "revisa si hay que actualizar o implementar algo en los plugins" → verified: no client keeps a tool allowlist (all discover via `tools/list`; Pi maps `.`→`_` dynamically); only prose mentions tools. No plugin change, to avoid an unrequested plugin release.
 - L6: RDD off (global); native review not applicable.
+- L7: independent verifier: no blockers; its runtime probes hung on an open MCP client handle, so its verdicts are static. Advisory A1 reproduced (RED): a second pending judgment on an already-warned original did not change the fingerprint — fixed by hashing each warning's message (it carries the count). A2: merge validation errors said `memory.save:` — `validateSaveFields` now takes the op name (default `memory.save`, so save messages are unchanged). A4 (undo archives an already-superseded successor) predates this change at e555921a: advisory only.
