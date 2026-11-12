@@ -6,6 +6,7 @@ import {
   DEFAULT_SEARCH_LIMIT,
   MERGE_MAX_IDS,
   MERGE_MIN_IDS,
+  pendingSection,
   type MergeMemoriesInput,
   type MemoryService,
   type SaveMemoryInput,
@@ -1222,7 +1223,15 @@ async function handleMerge(
 }
 
 const CONTEXT_SNIPPET_CHARS = 350;
+const CONTEXT_PENDING_CHARS = 600;
 const NEEDS_REVIEW_MAX = 3;
+
+function sessionSnippet(summary: string): string {
+  const pending = pendingSection(summary);
+  return pending === null
+    ? snippet(summary, CONTEXT_SNIPPET_CHARS)
+    : snippet(pending, CONTEXT_PENDING_CHARS);
+}
 
 /** Small and separate from `memoriesLimit` so enabling relevance never halves the recency channel (design.md Open Questions). */
 export const RELEVANCE_LIMIT = 5;
@@ -1291,7 +1300,7 @@ async function handleContext(
       endedAt: s.endedAt,
       status: s.status,
       title: s.titleFinal ? s.title : null,
-      summary: s.summary && s.summaryFinal ? snippet(s.summary, CONTEXT_SNIPPET_CHARS) : null,
+      summary: s.summary && s.summaryFinal ? sessionSnippet(s.summary) : null,
     }));
 
   const recentMemories = deps.repos.memory

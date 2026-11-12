@@ -85,6 +85,20 @@ export function hasAnyHeading(doc: string): boolean {
   return parseSummarySections(doc).some((s) => s.key !== '');
 }
 
+const PENDING_SECTION_KEY = 'unfinished+why';
+const NOTHING_PENDING_RE = /^(?:none|nothing|n\/a|nada|ninguna|ninguno|—|-)\.?$/i;
+
+export function pendingSection(doc: string): string | null {
+  const section = parseSummarySections(doc).find((s) => s.key === PENDING_SECTION_KEY);
+  if (!section?.headingLine) return null;
+  const body = section.body
+    .map((line) => line.text + line.term)
+    .join('')
+    .trim();
+  if (body.length === 0 || NOTHING_PENDING_RE.test(body)) return null;
+  return `${section.headingLine.text.trim()}\n${body}`;
+}
+
 function splitCoreAndGap(section: SummarySection): { core: string; gap: string } {
   if (section.body.length === 0) {
     if (!section.headingLine) return { core: '', gap: '' };

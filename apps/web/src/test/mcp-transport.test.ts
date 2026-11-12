@@ -1733,7 +1733,7 @@ describe('MCP protocol conformance', () => {
     });
 
     it.each([
-      ['memory.context', 1444],
+      ['memory.context', 1521],
       ['memory.search_prompts', 428],
       ['memory.session_start', 1103],
       ['memory.doctor', 603],
@@ -3121,6 +3121,61 @@ describe('MCP protocol conformance', () => {
 
     await client.callTool({ name: 'memory.session_end', arguments: {} });
     await client.close();
+  });
+
+  async function contextSummaryFor(summary: string): Promise<string | null | undefined> {
+    const client = await connect();
+    const started = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'rembric-test', description: 'pending work session' },
+    })) as ToolResult;
+    const { sessionId } = readJson(started) as { sessionId: string };
+    const summarised = (await client.callTool({
+      name: 'memory.session_summary',
+      arguments: { summary, title: 'Pending work' },
+    })) as ToolResult;
+    expect(summarised.isError).toBeFalsy();
+
+    const ctx = (await client.callTool({
+      name: 'memory.context',
+      arguments: { sessions: 25 },
+    })) as ToolResult;
+    const ctxPayload = readJson(ctx) as {
+      recentSessions: { id: string; summary: string | null }[];
+    };
+    await client.callTool({ name: 'memory.session_end', arguments: {} });
+    await client.close();
+    return ctxPayload.recentSessions.find((s) => s.id === sessionId)?.summary;
+  }
+
+  it('memory.context shows the Unfinished+why section instead of the opening, under the wider bound', async () => {
+    const pending = `- ${'p'.repeat(480)}`;
+    const summary = `## Goal\n${'g'.repeat(400)}\n\n## Unfinished+why\n${pending}\n\n## Files\na.ts`;
+
+    const seen = await contextSummaryFor(summary);
+
+    expect(seen).toBe(`## Unfinished+why\n${pending}`);
+    expect(seen!.length).toBeGreaterThan(350);
+  });
+
+  it('memory.context truncates a long Unfinished+why section to ≤600 chars', async () => {
+    const summary = `## Goal\nShort goal\n\n## Unfinished+why\n- ${'q'.repeat(900)}\n\n## Files\na.ts`;
+
+    const seen = await contextSummaryFor(summary);
+
+    expect(seen!.startsWith('## Unfinished+why\n- qqq')).toBe(true);
+    expect(seen!.length).toBe(600);
+    expect(seen!.endsWith('…')).toBe(true);
+  });
+
+  it('memory.context keeps the opening snippet when Unfinished+why says nothing is pending', async () => {
+    const summary = `## Goal\n${'g'.repeat(400)}\n\n## Unfinished+why\nnone\n\n## Files\na.ts`;
+
+    const seen = await contextSummaryFor(summary);
+
+    expect(seen!.startsWith('## Goal\nggg')).toBe(true);
+    expect(seen!.length).toBe(350);
+    expect(seen!.endsWith('…')).toBe(true);
   });
 
   it('memory.context emits null for a content-bearing session with no summary', async () => {
