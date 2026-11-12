@@ -175,11 +175,17 @@ The percentages are the drain design's D4 figures, measured on the same backup c
   - the successor already ran its own save-time detection when it was saved, so carrying forward duplicates work into a queue the owner wants smaller.
 - **Display-only filtering in the dashboard.** Rejected: it changes what is shown, not what the table holds.
 
-### D10 — What could be lost: a late dismissal
+### D10 — A late verdict is accepted
 
-Only `supersedes` is refused on a retired pair. A `not_conflict` dismissal could still be recorded through a `judgmentId` an agent obtained earlier, and the memory capability carries it forward to later revisions through the `replaces` ancestry. After this change, that `memory.judge` returns `conflict`, because the row is already `orphaned`. `memory.compare` can still record the other verdicts in place, but never `not_conflict`.
+Only `supersedes` is refused on a retired pair. A verdict could still be recorded through a `judgmentId` an agent obtained earlier, and a `not_conflict` dismissal is carried forward to later revisions through the `replaces` ancestry. As first written, this change made that `memory.judge` fail with `conflict`, because the row was already `orphaned`.
 
-The agent queue already withholds these pairs, so this should not happen in practice. The issue asks for a measurement of how many verdicts were ever recorded on a pair after one of its endpoints retired. `measurements/retired-verdicts.mts` is that count, read-only, aggregates only, with a control that inserts one known case into a scratch copy. It ran on the synthetic corpus. The owner runs it on a backup copy of the production database (task 8.4). The mcp-api requirement "A `supersedes` verdict MUST be refused when either endpoint is no longer active" stays literally true: no endpoint check is added for the other verdicts, and a pending row with a retired endpoint (one that predates this change, or one an operator restored) remains closable.
+`measurements/retired-verdicts.mts`, run on the owner's real database (aggregates only), measured the cost: 1.84% of all historical verdicts (265 of 14 377) were recorded after one endpoint retired. 150 of those came within 60 s, typically in the same `memory.judge_batch`: S→T `supersedes`, then T→U `related`. 83 of the 265 are `not_conflict`, and those dismissals carry forward to later topic revisions.
+
+**Decision (owner): accept the late verdict.** A verdict for a relation orphaned BY A RETIREMENT moves it from `orphaned` to `judged` and is applied exactly as for a pending row. "Orphaned by a retirement" is a non-reverted `orphan_promote` op whose `created_id` is the `judgmentId` and whose reasoning starts with `orphaned: endpoint retired at retirement: ` (`RETIREMENT_ORPHANING_PREFIX`). Deadline and drain orphanings stay terminal, and a `supersedes` verdict still requires both endpoints `active` (the existing guard in `applySupersedesSideEffect`).
+
+- **Repository methods.** `ConsolidationRepository.listLiveOrphanPromoteOps(judgmentId)` and `RelationsRepository.markJudgedFromOrphaned`, which requires `status = 'orphaned'` and sits next to `markJudged`. The service decides on the prefix, so no SQL leaves `packages/db`.
+- **Undo.** The existing guard (`judged_at` later than `applied_at` keeps the verdict and reports it in `keptVerdicts`) already covers it. A late verdict in the same millisecond as the orphaning would look untouched, so the new `judged_at` is at least `applied_at + 1 ms`.
+- **Alternative rejected:** leaving the row orphaned and recording the verdict with `memory.compare`. It cannot record `not_conflict` and loses the pair's `judgmentId` handle.
 
 ### D11 — Coordination with the parent changes and `add-memory-merge`
 
@@ -192,7 +198,7 @@ The agent queue already withholds these pairs, so this should not happen in prac
 
 - **[Risk] A future retirement path skips the helper.** → The D7 scan fails on any call site of a flip method whose function does not call the helper, and on any new flip method in a repository. Its controls prove it detects a removed call.
 - **[Risk] A failure in the orphaning fails a user's save, archive, merge or verdict.** → It is the same failure surface as the journal insert those paths already make in the same transaction (D3). The per-path rollback tests pin that nothing is half-applied.
-- **[Risk] An agent loses a late `not_conflict` dismissal on a retired pair.** → The queue never offered such pairs. The retired-verdicts count measures it, the synthetic run is recorded, and the production run is the owner's task (D10).
+- **[Risk] An agent loses a late `not_conflict` dismissal on a retired pair.** → Measured at 83 of 14 377 historical verdicts on the owner's database. A verdict on a retirement-orphaned judgment is accepted (D10); deadline and drain orphanings stay terminal.
 - **[Trade-off] Each `topic_key` revision, judged `supersedes` or merge undo that has pending judgments adds a `maintenance` run to `/dashboard/consolidation`.** → Accepted because each run is a reversible unit of the journal, as the archive and merge runs already are. A retirement with nothing to orphan adds none.
 - **[Trade-off] A pair restored by a retirement undo is never drained again by the drain.** → Accepted because it follows from the drain's own "undo is final" rule. The deadline step and a later retirement still close it.
 - **[Trade-off] Retirement paths do slightly more work.** → Accepted. Measured per path at 1 000, 20 000 and 50 000 memories (`measurements/README.md`, task 7.2), the added median is 0.01–0.07 ms when there is nothing to orphan and about 0.08 ms per orphaned row, flat across corpus sizes; a merge undo, which orphans the successor's rows and restores the originals', adds about 1 ms for nine rows.
@@ -205,6 +211,6 @@ The agent queue already withholds these pairs, so this should not happen in prac
 
 ## Open Questions
 
-1. **Production count of late verdicts.** Does the retired-verdicts count on a production backup show any verdict recorded after an endpoint retired (D10)? A non-zero count is the case for reconsidering the change for `not_conflict`.
+1. **Production count of late verdicts.** Answered: 265 of 14 377 (1.84%), 83 of them `not_conflict`. The change accepts them (D10).
 2. **`add-memory-merge` archive order.** Confirm `add-memory-merge` archives before this change, so the merge requirement's "left as they are" sentence can be MODIFIED here (D11).
 3. **Maintenance-run volume.** Should frequent `retirement_orphan` runs be grouped or filtered in the consolidation list later? This is not in scope.

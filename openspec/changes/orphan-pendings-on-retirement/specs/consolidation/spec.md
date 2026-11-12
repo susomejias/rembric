@@ -162,3 +162,44 @@ The operator surface SHALL show which relations an undo left orphaned and why, b
 - **GIVEN** a `topic_key` revision that superseded A and orphaned A→X into a `retirement_orphan` run
 - **WHEN** the operator undoes that `orphan_promote` op
 - **THEN** A→X SHALL return to `pending`, A SHALL remain `superseded`, and no memory SHALL change status
+
+### Requirement: A late verdict on a judgment orphaned by a retirement MUST be accepted
+
+A verdict sent through `memory.judge` or `memory.judge_batch` for a relation whose `status` is `orphaned` SHALL be accepted when the relation was orphaned by a retirement, and SHALL then be applied exactly as for a `pending` row. A relation was orphaned by a retirement when a non-reverted `orphan_promote` op has the relation's `judgmentId` as `created_id` and a reasoning that starts with `orphaned: endpoint retired at retirement: `.
+
+Accepting SHALL move the relation from `orphaned` to `judged` with the verdict's `relation`, `reason`, `evidence`, `confidence`, kind and actor, in one conditional update that requires `status = 'orphaned'`. The new `judged_at` SHALL be later than the orphaning op's `applied_at`, so that the undo of that op keeps the verdict and reports it in `keptVerdicts` (see "Undoing an orphaning MUST NOT overwrite a verdict written after it").
+
+The following SHALL still be refused with `conflict`, as before:
+
+- a relation orphaned by the deadline step or by a drain (rules or retired-endpoint), and a relation whose retirement orphaning was undone;
+- a `supersedes` verdict while either endpoint is not `active`, which leaves the relation `orphaned`.
+
+#### Scenario: A late verdict on a retirement-orphaned judgment is accepted
+
+- **GIVEN** a judgment S→T and a judgment T→U, both pending, and one `memory.judge_batch` that judges S→T `supersedes` and then T→U `related`
+- **WHEN** the batch runs
+- **THEN** S→T SHALL supersede T, which orphans T→U at that retirement, and T→U SHALL then be `judged` with relation `related`, with both verdicts reported as successes
+
+#### Scenario: A late `not_conflict` dismissal is honoured at the next revision
+
+- **GIVEN** an active memory B holding `topic_key = 'k'` with a pending pair B→X, a later save with `topic_key = 'k'` that retired B and orphaned B→X, and a late `not_conflict` verdict on B→X
+- **WHEN** the next save with `topic_key = 'k'` computes its candidates
+- **THEN** X SHALL NOT be offered as a candidate, through the `replaces` ancestry
+
+#### Scenario: A deadline-orphaned or drain-orphaned judgment is still refused
+
+- **GIVEN** a judgment orphaned by the deadline step, and another orphaned by the stale-endpoint drain
+- **WHEN** an agent sends a verdict for each
+- **THEN** both SHALL fail with `conflict: already 'orphaned'` and stay `orphaned`
+
+#### Scenario: A `supersedes` verdict on a retired endpoint is still refused
+
+- **GIVEN** a retirement-orphaned judgment T→U where T is `superseded`
+- **WHEN** an agent sends `supersedes` for it
+- **THEN** it SHALL fail with `conflict`, T→U SHALL stay `orphaned` and U SHALL stay `active`
+
+#### Scenario: Undoing the retirement keeps the late verdict
+
+- **GIVEN** a retirement-orphaned judgment that later received a verdict
+- **WHEN** the operator undoes its `orphan_promote` op
+- **THEN** the verdict SHALL be kept, the op SHALL be marked reverted, and the result SHALL list it in `keptVerdicts`

@@ -122,7 +122,7 @@ export interface UndoRunResult {
   keptOrphaned: KeptOrphaned[];
 }
 
-const RETIREMENT_ORPHANING_PREFIX = `orphaned: ${RETIREMENT_ORPHAN_REASON}: `;
+export const RETIREMENT_ORPHANING_PREFIX = `orphaned: ${RETIREMENT_ORPHAN_REASON}: `;
 
 function isRetirementOrphaning(op: ConsolidationOp, retiredIds: ReadonlySet<string>): boolean {
   return (

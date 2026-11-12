@@ -42,6 +42,13 @@
 - [x] 8.3 Run `openspec validate orphan-pendings-on-retirement --strict`, `pnpm run check:delta-freshness` and `pnpm run check:spec-crossrefs`
 - [ ] 8.4 **OPERATOR-ONLY:** run `measurements/retired-verdicts.mts` against a backup copy of the production database (never the live file) and record the aggregate counts in `measurements/README.md` (design Open Question 1)
 
+## 8b. Late verdict (design D10)
+
+- [x] 8b.1 Accept a verdict on a retirement-orphaned judgment: `RelationsRepository.markJudgedFromOrphaned`, `ConsolidationRepository.listLiveOrphanPromoteOps`, `RelationsService.applyJudgment`
+- [x] 8b.2 Tests: `judge_batch` supersedes then related, late `not_conflict` suppression, deadline and drain orphanings still refused, `supersedes` on a retired endpoint still refused, undo keeps the late verdict
+- [x] 8b.3 Mutation check for the acceptance condition and the retirement prefix, recorded in `measurements/mutation.txt`
+- [x] 8b.4 Update design D10, the consolidation spec delta and `docs/relations.md`
+
 ## 9. Archive-time coordination
 
 - [ ] 9.1 **ARCHIVE-TIME:** archive this change after `add-save-time-lexical-floor` and `drain-stale-save-time-pendings`
