@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BASE64,
   BASE64URL,
   DIGITS,
   fakeChars as fake,
@@ -217,6 +218,32 @@ describe('RedactionTally', () => {
     expect(tally.list()).toEqual([{ kind: 'github_token', count: 2 }]);
   });
 
+  it('redacts object keys and key-value pairs inside JSON', () => {
+    const tally = new RedactionTally();
+    const token = `ghp_${fake(36, 44)}`;
+    const out = tally.redactJson({ [token]: 'seen in the CI log', db: { password: 'hunter22' } });
+    expect(JSON.stringify(out)).not.toContain(token);
+    expect(JSON.stringify(out)).not.toContain('hunter22');
+    expect(out).toEqual({
+      '[REDACTED:github_token]': 'seen in the CI log',
+      db: { password: '[REDACTED:assigned_secret]' },
+    });
+  });
+
+  it('keeps JSON valid when a key block spans several strings', () => {
+    const block = pemBlock('PRIVATE KEY', 45).split('\n');
+    const out = new RedactionTally().redactJson([[block[0]], ...block.slice(1).map((l) => [l])]);
+    expect(JSON.stringify(out)).not.toContain(block[1]);
+  });
+
+  it('handles deeply nested JSON without overflowing the stack', () => {
+    let deep: unknown = `ghp_${fake(36, 46)}`;
+    for (let i = 0; i < 4_000; i++) deep = { child: deep };
+    expect(JSON.stringify(new RedactionTally().redactJson(deep))).toContain(
+      '[REDACTED:github_token]',
+    );
+  });
+
   it('cuts a value lengthened past its cap and never keeps the secret', () => {
     const title = `${'a'.repeat(80)} password="hunter22"`;
     expect(title).toHaveLength(100);
@@ -307,6 +334,24 @@ const FALSE_POSITIVE_CORPUS: readonly string[] = [
   'tokens.project_id SHALL be NULL for `*` tokens',
   '`memory.save` returns `{ id, candidates[] }` and judgmentRequired',
   'export PATH=$HOME/.local/bin:$PATH',
+  "fetch(url, { credentials: 'same-origin' })",
+  'z.object({ password: "Required" })',
+  "errors = { password: 'mismatch' }",
+  'REFRESH_TOKEN = "refresh_token"',
+  'ClientCredentials = "client_credentials"',
+  'CLIENT_SECRET = "client_secret"',
+  '{ "login.password": "Passwort", "confirmPassword": "Bestätigen" }',
+  'existingSecret: "postgres-credentials"',
+  'imagePullSecret: "registry-credentials"',
+  'df["msg"].str.contains(pat="timeout|refused")',
+  'lexer.push({ token: "IDENTIFIER" })',
+  'docker buildx build --secret=id=npmrc,src=$HOME/.npmrc .',
+  'export SLACK_BOT_TOKEN=xoxb-test-token',
+  'git clone https://oauth2:PERSONAL_ACCESS_TOKEN@gitlab.com/group/repo.git',
+  'twine upload --repository-url https://__token__:API_TOKEN@upload.pypi.org/legacy/',
+  'client = OpenAI(api_key="test-api-key")',
+  'GITHUB_TOKEN=TODO_FILL_ME_IN',
+  'API_KEY=fixme-before-release',
 ];
 
 describe('redactSecrets — false-positive corpus', () => {
@@ -316,7 +361,8 @@ describe('redactSecrets — false-positive corpus', () => {
 });
 
 describe('redactSecrets — linear on pathological input', () => {
-  const SIZE = 200_000;
+  const SIZE = 1_600_000;
+  const BUDGET_MS = 1_500;
   const repeat = (unit: string) => unit.repeat(Math.ceil(SIZE / unit.length));
   const inputs: [string, string][] = [
     ['PEM headers without END', repeat('-----BEGIN PRIVATE KEY-----\n')],
@@ -336,7 +382,82 @@ describe('redactSecrets — linear on pathological input', () => {
     ['authorization chain', repeat('Authorization: Bearer ')],
   ];
 
-  it.each(inputs)('%s', (_label, input) => {
-    expect(redactSecrets(input).text.length).toBeGreaterThan(0);
+  inputs.push(
+    [
+      'PEM headers with distinct labels',
+      Array.from({ length: 47_000 }, (_, i) => `-----BEGIN K${i} PRIVATE KEY-----\n`).join(''),
+    ],
+    [
+      'PEM headers each followed by a far END',
+      `${'-----BEGIN PRIVATE KEY-----\n'.repeat(590)}-----END PRIVATE KEY-----\n`.repeat(100),
+    ],
+  );
+
+  it.each(inputs)('%s, within the time budget', (_label, input) => {
+    expect(input.length).toBeGreaterThanOrEqual(SIZE);
+    const started = performance.now();
+    redactSecrets(input);
+    expect(performance.now() - started).toBeLessThan(BUDGET_MS);
+  });
+});
+
+const KEY_LINES = (seed: number) => [fake(64, seed, BASE64), fake(64, seed + 1, BASE64)];
+
+const PEM_VARIANTS: [string, string, string[]][] = (() => {
+  const pgp = KEY_LINES(61);
+  const js = KEY_LINES(62);
+  const slashes = [fake(64, 63), fake(64, 64)].map(
+    (l) => `${l.slice(0, 20)}/${l.slice(21, 42)}/${l.slice(43)}`,
+  );
+  const quoted = KEY_LINES(64);
+  const commented = KEY_LINES(65);
+  return [
+    [
+      'PGP armor headers',
+      `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2.2.27 (GNU/Linux)\nComment: backup\n\n${pgp.join('\n')}\n=AbCd\n-----END PGP PRIVATE KEY BLOCK-----`,
+      pgp,
+    ],
+    [
+      'JS string concatenation',
+      `const key =\n  "-----BEGIN PRIVATE KEY-----\\n" +\n  "${js[0]}\\n" +\n  "${js[1]}\\n" +\n  "-----END PRIVATE KEY-----\\n";`,
+      js,
+    ],
+    [
+      'JSON with escaped slashes',
+      `{"key":"-----BEGIN PRIVATE KEY-----\\n${slashes.map((l) => l.replaceAll('/', '\\/')).join('\\n')}\\n-----END PRIVATE KEY-----\\n"}`,
+      slashes.flatMap((l) => l.split('/')),
+    ],
+    [
+      'markdown blockquote',
+      `> -----BEGIN PRIVATE KEY-----\n> ${quoted.join('\n> ')}\n> -----END PRIVATE KEY-----`,
+      quoted,
+    ],
+    [
+      'comment line in the body',
+      `-----BEGIN PRIVATE KEY-----\n# rotated 2026-11-01 by ops\n${commented.join('\n')}\n-----END PRIVATE KEY-----`,
+      commented,
+    ],
+  ];
+})();
+
+describe('redactSecrets — whole private keys in real-world wrappers', () => {
+  it.each(PEM_VARIANTS)('%s', (_label, input, keyMaterial) => {
+    const { text, redactions } = redactSecrets(input);
+    for (const fragment of keyMaterial) expect(text).not.toContain(fragment);
+    expect(redactions).toEqual([{ kind: 'private_key', count: 1 }]);
+  });
+});
+
+describe('redactSecrets — opaque tokens are never mistaken for placeholders', () => {
+  const token = 'adV9Xwo5gc6XXXE1zxa2Y_sW9kcD4i55ll5NwbhhTY4';
+  const forms: [string, string][] = [
+    ['authorization header', `Authorization: Bearer ${token}`],
+    ['env assignment', `REMBRIC_TOKEN=${token}`],
+    ['query parameter', `GET /mcp?token=${token}`],
+    ['JSON pair', `{"token": "${token}"}`],
+  ];
+
+  it.each(forms)('%s', (_label, input) => {
+    expect(redactSecrets(input).text).not.toContain(token);
   });
 });

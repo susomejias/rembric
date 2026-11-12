@@ -81,40 +81,70 @@ function regexDetector(
 const TRAILING_PUNCTUATION = new Set(['.', ',', ':', '!', '?']);
 
 const PEM_HEADER = /-----BEGIN ((?:[A-Z0-9]+ )*)PRIVATE KEY( BLOCK)?-----/g;
+const PEM_FOOTER = /-----END ((?:[A-Z0-9]+ )*)PRIVATE KEY( BLOCK)?-----/g;
 const PEM_BODY_TOKEN = /(?:\s|\\[nr])+([A-Za-z0-9+/=]{16,})/y;
-const PEM_BODY_CHARSET = /^(?:[A-Za-z0-9+/=\s:,-]|\\[nr])*$/;
-const PEM_KEY_RUN = /[A-Za-z0-9+/=]{40,}/;
+const PEM_BASE64_RUN = /[A-Za-z0-9+/=]{16,}/g;
+const PEM_INVISIBLE = /\s|\\[nr]/g;
 const PEM_BODY_MAX = 16_384;
+const PEM_MIN_KEY_CHARS = 64;
+const PEM_MIN_COVERAGE = 0.6;
+
+function pemLabel(match: RegExpExecArray): string {
+  return `${match[1] ?? ''}|${match[2] ?? ''}`;
+}
+
+function looksLikeKeyBody(body: string): boolean {
+  let covered = 0;
+  for (const run of body.matchAll(PEM_BASE64_RUN)) covered += run[0].length;
+  const visible = body.replace(PEM_INVISIBLE, '').length;
+  return covered >= PEM_MIN_KEY_CHARS && covered >= visible * PEM_MIN_COVERAGE;
+}
+
+function truncatedKeyEnd(text: string, headerEnd: number): number | null {
+  let end = headerEnd;
+  let sawKeyRun = false;
+  PEM_BODY_TOKEN.lastIndex = headerEnd;
+  for (let token = PEM_BODY_TOKEN.exec(text); token; token = PEM_BODY_TOKEN.exec(text)) {
+    end = PEM_BODY_TOKEN.lastIndex;
+    if ((token[1] ?? '').length >= 40) sawKeyRun = true;
+  }
+  return sawKeyRun ? end : null;
+}
 
 function* findPrivateKeys(text: string): Iterable<Span> {
-  const nextEndByMarker = new Map<string, number>();
+  const headers = [...text.matchAll(PEM_HEADER)];
+  if (headers.length === 0) return;
+  const footersByLabel = new Map<string, { start: number; end: number }[]>();
+  for (const footer of text.matchAll(PEM_FOOTER)) {
+    const list = footersByLabel.get(pemLabel(footer)) ?? [];
+    list.push({ start: footer.index, end: footer.index + footer[0].length });
+    footersByLabel.set(pemLabel(footer), list);
+  }
+  const footerCursor = new Map<string, number>();
   let consumedTo = 0;
-  for (const header of text.matchAll(PEM_HEADER)) {
+  for (const [i, header] of headers.entries()) {
     const start = header.index;
     if (start < consumedTo) continue;
     const headerEnd = start + header[0].length;
-    const endMarker = `-----END ${header[1] ?? ''}PRIVATE KEY${header[2] ?? ''}-----`;
-    let endIndex = nextEndByMarker.get(endMarker);
-    if (endIndex === undefined || (endIndex !== -1 && endIndex < headerEnd)) {
-      endIndex = text.indexOf(endMarker, headerEnd);
-      nextEndByMarker.set(endMarker, endIndex);
-    }
-    if (endIndex !== -1 && endIndex - headerEnd <= PEM_BODY_MAX) {
-      const body = text.slice(headerEnd, endIndex);
-      if (PEM_BODY_CHARSET.test(body) && PEM_KEY_RUN.test(body)) {
-        consumedTo = endIndex + endMarker.length;
-        yield { start, end: consumedTo };
-      }
+    const nextHeader = headers[i + 1]?.index ?? text.length;
+    const label = pemLabel(header);
+    const footers = footersByLabel.get(label) ?? [];
+    let cursor = footerCursor.get(label) ?? 0;
+    while (cursor < footers.length && footers[cursor]!.start < headerEnd) cursor += 1;
+    footerCursor.set(label, cursor);
+    const footer = footers[cursor];
+    if (
+      footer !== undefined &&
+      footer.start <= nextHeader &&
+      footer.start - headerEnd <= PEM_BODY_MAX &&
+      looksLikeKeyBody(text.slice(headerEnd, footer.start))
+    ) {
+      consumedTo = footer.end;
+      yield { start, end: consumedTo };
       continue;
     }
-    let end = headerEnd;
-    let sawKeyRun = false;
-    PEM_BODY_TOKEN.lastIndex = headerEnd;
-    for (let token = PEM_BODY_TOKEN.exec(text); token; token = PEM_BODY_TOKEN.exec(text)) {
-      end = PEM_BODY_TOKEN.lastIndex;
-      if ((token[1] ?? '').length >= 40) sawKeyRun = true;
-    }
-    if (sawKeyRun) {
+    const end = truncatedKeyEnd(text, headerEnd);
+    if (end !== null) {
       consumedTo = end;
       yield { start, end };
     }
@@ -128,11 +158,14 @@ function providerDetector(kind: SecretKind, pattern: RegExp): Detector {
 }
 
 const PLACEHOLDER_HINT =
-  /example|placeholder|your|redacted|changeme|change[-_]me|dummy|sample|xxx|replace[-_]?me|insert[-_]?here/i;
+  /(?<![A-Za-z0-9])(?:example|placeholder|your|redacted|changeme|change[-_]me|dummy|sample|todo|fixme|replace[-_]?me|insert[-_]?here|x{3,})/i;
 const REFERENCE_START = /^[$%<{[(@*~/.#]/;
 const TEMPLATE_MARK = /\.\.\.|…|\$\{|\{\{|\}\}/;
 const SINGLE_REPEATED_CHAR = /^(.)\1*$/;
 const DIGITS_ONLY = /^\d+$/;
+const HAS_DIGIT = /\d/;
+const HAS_LETTER = /[A-Za-z]/;
+const OPAQUE_MIXED_CASE_RUN = /^(?=.*[a-z])(?=.*[A-Z])[A-Za-z0-9+/=_-]{32,}$/;
 
 function isPlaceholderValue(value: string): boolean {
   return (
@@ -141,6 +174,10 @@ function isPlaceholderValue(value: string): boolean {
     SINGLE_REPEATED_CHAR.test(value) ||
     PLACEHOLDER_HINT.test(value)
   );
+}
+
+function isSecretShaped(value: string): boolean {
+  return (HAS_DIGIT.test(value) && HAS_LETTER.test(value)) || OPAQUE_MIXED_CASE_RUN.test(value);
 }
 
 const ASSIGNED_MIN_LENGTH = 8;
@@ -153,6 +190,7 @@ const CREDENTIAL_WORD_VALUE = /^(?:password|passwd|passphrase|secret|token|apike
 function isPlausibleAssignedValue(value: string): boolean {
   return (
     value.length >= ASSIGNED_MIN_LENGTH &&
+    isSecretShaped(value) &&
     !isPlaceholderValue(value) &&
     !DIGITS_ONLY.test(value) &&
     !LITERAL_WORD.test(value) &&
@@ -164,7 +202,7 @@ function isPlausibleAssignedValue(value: string): boolean {
 }
 
 const CREDENTIAL_WORD_SUFFIXES = ['password', 'passwd', 'passphrase', 'secret', 'apikey'];
-const CREDENTIAL_WORDS = new Set(['token', 'pat', 'credential', 'credentials']);
+const CREDENTIAL_WORDS = new Set(['token', 'credential', 'credentials']);
 const CREDENTIAL_WORD_PAIRS = new Set([
   'api key',
   'access key',
@@ -231,6 +269,7 @@ function acceptAssigned(
 
 const URL_PASSWORD_WORD = /^(?:password|passwd|pass|pwd|pw|secret)$/i;
 const URL_PASSWORD_MIN_LENGTH = 3;
+const ENV_NAME_REFERENCE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
 
 function acceptUrlPassword(secret: string, match: RegExpExecArray): boolean {
   return (
@@ -238,8 +277,13 @@ function acceptUrlPassword(secret: string, match: RegExpExecArray): boolean {
     secret !== match.groups?.['user'] &&
     !isPlaceholderValue(secret) &&
     !DIGITS_ONLY.test(secret) &&
-    !URL_PASSWORD_WORD.test(secret)
+    !URL_PASSWORD_WORD.test(secret) &&
+    !ENV_NAME_REFERENCE.test(secret)
   );
+}
+
+function acceptCredential(secret: string): boolean {
+  return isSecretShaped(secret) && !isPlaceholderValue(secret);
 }
 
 const DETECTORS: readonly Detector[] = [
@@ -265,7 +309,7 @@ const DETECTORS: readonly Detector[] = [
     'aws_access_key_id',
     /(?<![A-Za-z0-9])(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}(?![A-Za-z0-9])/dg,
   ),
-  providerDetector('slack_token', /(?<![A-Za-z0-9_-])xox[abposr]-[A-Za-z0-9-]{10,}/dg),
+  providerDetector('slack_token', /(?<![A-Za-z0-9_-])xox[abposr]-\d+-[A-Za-z0-9-]{8,}/dg),
   providerDetector(
     'stripe_secret_key',
     /(?<![A-Za-z0-9_])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}/dg,
@@ -276,7 +320,7 @@ const DETECTORS: readonly Detector[] = [
   regexDetector(
     'authorization_header',
     /(?<![A-Za-z0-9-])(?:proxy-)?authorization["']?\s{0,8}[:=]\s{0,8}["']?(?:bearer|basic|token|bot)\s{1,8}(?<secret>[A-Za-z0-9._~+/=-]{16,})/dgi,
-    { accept: (secret) => !isPlaceholderValue(secret) },
+    { accept: acceptCredential },
   ),
   regexDetector(
     'url_password',
@@ -330,14 +374,38 @@ export class RedactionTally {
   }
 
   redactJson(value: unknown): unknown {
+    const serialized = value === undefined ? undefined : JSON.stringify(value);
+    if (serialized === undefined) return value;
+    const pass = new RedactionTally();
+    const redacted = pass.redact(serialized);
+    if (redacted === serialized) return value;
+    try {
+      const parsed: unknown = JSON.parse(redacted);
+      this.absorb(pass);
+      return parsed;
+    } catch {
+      return this.redactJsonStructure(value);
+    }
+  }
+
+  private redactJsonStructure(value: unknown): unknown {
     if (typeof value === 'string') return this.redact(value);
-    if (Array.isArray(value)) return value.map((item) => this.redactJson(item));
+    if (Array.isArray(value)) return value.map((item) => this.redactJsonStructure(item));
     if (value !== null && typeof value === 'object') {
       return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, this.redactJson(item)]),
+        Object.entries(value).map(([key, item]) => [
+          this.redact(key),
+          this.redactJsonStructure(item),
+        ]),
       );
     }
     return value;
+  }
+
+  private absorb(other: RedactionTally): void {
+    for (const [kind, count] of other.counts) {
+      this.counts.set(kind, (this.counts.get(kind) ?? 0) + count);
+    }
   }
 
   list(): Redaction[] {
