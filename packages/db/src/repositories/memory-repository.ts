@@ -102,7 +102,7 @@ export class MemoryRepository {
       topicKey: string | null;
     }>(
       sql`
-        SELECT m.id AS id, memory_fts.rank AS rank, m.title AS title, m.content AS content,
+        SELECT m.id AS id, bm25(memory_fts) AS rank, m.title AS title, m.content AS content,
                m.topic_key AS topicKey
         FROM memory_fts
           JOIN memory m ON m.rowid = memory_fts.rowid
@@ -111,7 +111,7 @@ export class MemoryRepository {
           AND ${scopeWhere(projectScope(opts.projectId), 'm')}
           AND m.status = 'active'
           AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
-        ORDER BY rank
+        ORDER BY bm25(memory_fts)
         LIMIT ${opts.limit}
       `,
     );

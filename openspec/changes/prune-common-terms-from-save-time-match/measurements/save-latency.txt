@@ -1,37 +1,31 @@
-# memory.save latency — before/after pruning common terms from the save-time MATCH
-instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5
-paired design: each round saves the SAME probe text through all three arms, in rotating order, in one process against one database; 20 warm-up rounds discarded, 300 rounds
-arms: 'unpruned' passes commonTermRatio: null (today's statement, no term-statistics read); 'pruned' passes nothing (shipped behaviour)
-statistic: median of per-round paired differences with a 2000-resample bootstrap 95% interval
-corpora: the corpus:build generator (default args, seed 1) and the realistic-vocabulary control (corpora.mts); probes are 80%-prefix and reversed rewrites of memories in the largest project
+# memory.save latency — the base commit against this change
+instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5; all values in ms
+paired design: each round saves the SAME probe text through all four arms, in rotating order, in one process against one database; 10 warm-up rounds discarded, 200 rounds
+arms: 'before' = the base commit's statement (ORDER BY rank, replayed verbatim) with pruning off; 'after' = this change as shipped; 'pruning only' = pruning with the base statement; (b) repeats (a) as the noise band
+statistic: median of per-round paired differences against 'before (a)', with a 2000-resample bootstrap 95% interval
+corpora: the skewed generator and skewed realistic control (corpora.mts); the saving project holds 2%, 20% or 60% of all rows; probes are 80%-prefix and reversed rewrites of its memories
 
-generator   1000 unpruned (a)  p50   12.856 ms  p90   15.715 ms  pending rows  1500
-generator   1000 pruned        p50   10.028 ms  p90   14.966 ms  pending rows  1500
-generator   1000 unpruned (b)  p50   12.841 ms  p90   15.803 ms  pending rows  1500
-generator   1000 paired median (pruned − a) -2.885 ms [95% -3.030, -2.686]; identical arms (b − a) -0.016 ms [95% -0.130, 0.120]
+generator-skew   1000  2%  p50 before   13.59 after   11.53 pruning-only   11.98  p90 before   18.63 after   16.17  | paired: after−a -2.20 [-2.34, -2.07]  pruning-only−a -2.03 [-2.16, -1.77]  b−a -0.05 [-0.12, 0.03]
+generator-skew   1000 20%  p50 before   11.40 after    8.53 pruning-only    8.59  p90 before   14.47 after   12.02  | paired: after−a -3.05 [-3.17, -2.92]  pruning-only−a -2.85 [-3.03, -2.51]  b−a -0.07 [-0.18, 0.00]
+generator-skew   1000 60%  p50 before   11.64 after    8.87 pruning-only    9.02  p90 before   14.24 after   12.38  | paired: after−a -2.88 [-3.07, -2.61]  pruning-only−a -2.53 [-2.72, -2.26]  b−a -0.11 [-0.20, -0.04]
 
-generator  20000 unpruned (a)  p50   50.996 ms  p90   57.753 ms  pending rows  1500
-generator  20000 pruned        p50   17.991 ms  p90   57.629 ms  pending rows  1500
-generator  20000 unpruned (b)  p50   50.849 ms  p90   59.103 ms  pending rows  1500
-generator  20000 paired median (pruned − a) -31.445 ms [95% -32.742, -30.030]; identical arms (b − a) -0.005 ms [95% -0.167, 0.106]
+generator-skew  20000  2%  p50 before   49.50 after   14.33 pruning-only   15.38  p90 before   64.60 after   25.09  | paired: after−a -35.33 [-36.01, -34.54]  pruning-only−a -33.46 [-34.66, -31.55]  b−a -0.05 [-0.16, 0.15]
+generator-skew  20000 20%  p50 before   52.34 after   16.79 pruning-only   17.50  p90 before   56.59 after   30.27  | paired: after−a -33.26 [-34.47, -30.94]  pruning-only−a -32.13 [-33.78, -29.49]  b−a -0.08 [-0.18, 0.06]
+generator-skew  20000 60%  p50 before   61.80 after   25.85 pruning-only   26.23  p90 before   74.00 after   50.87  | paired: after−a -34.58 [-36.59, -32.62]  pruning-only−a -34.63 [-35.92, -31.46]  b−a -0.10 [-0.27, 0.10]
 
-generator  50000 unpruned (a)  p50  108.429 ms  p90  128.053 ms  pending rows  1500
-generator  50000 pruned        p50   30.022 ms  p90  125.334 ms  pending rows  1500
-generator  50000 unpruned (b)  p50  108.690 ms  p90  128.896 ms  pending rows  1500
-generator  50000 paired median (pruned − a) -77.536 ms [95% -79.683, -74.958]; identical arms (b − a) -0.058 ms [95% -0.312, 0.274]
+generator-skew  50000  2%  p50 before  109.28 after   22.03 pruning-only   24.71  p90 before  116.23 after   54.13  | paired: after−a -80.06 [-84.76, -74.96]  pruning-only−a -77.75 [-83.00, -72.45]  b−a 0.14 [-0.09, 0.32]
+generator-skew  50000 20%  p50 before  127.20 after   44.68 pruning-only   47.23  p90 before  203.63 after  104.78  | paired: after−a -88.78 [-92.08, -86.61]  pruning-only−a -86.80 [-89.90, -81.69]  b−a -0.25 [-0.50, 0.30]
+generator-skew  50000 60%  p50 before  154.68 after   61.33 pruning-only   63.69  p90 before  227.52 after  140.54  | paired: after−a -92.46 [-94.64, -87.83]  pruning-only−a -90.71 [-92.90, -83.84]  b−a 0.07 [-0.29, 0.60]
 
-realistic   1000 unpruned (a)  p50    2.294 ms  p90    3.308 ms  pending rows  1273
-realistic   1000 pruned        p50    2.038 ms  p90    3.089 ms  pending rows  1243
-realistic   1000 unpruned (b)  p50    2.264 ms  p90    3.219 ms  pending rows  1257
-realistic   1000 paired median (pruned − a) -0.227 ms [95% -0.280, -0.173]; identical arms (b − a) 0.004 ms [95% -0.024, 0.028]
+realistic-skew   1000  2%  p50 before    3.19 after    2.47 pruning-only    2.92  p90 before    4.08 after    2.96  | paired: after−a -0.76 [-0.83, -0.71]  pruning-only−a -0.30 [-0.35, -0.22]  b−a 0.02 [-0.00, 0.03]
+realistic-skew   1000 20%  p50 before    2.83 after    2.24 pruning-only    2.52  p90 before    3.64 after    2.92  | paired: after−a -0.67 [-0.73, -0.60]  pruning-only−a -0.44 [-0.54, -0.35]  b−a -0.00 [-0.06, 0.04]
+realistic-skew   1000 60%  p50 before    2.84 after    2.38 pruning-only    2.63  p90 before    3.73 after    2.95  | paired: after−a -0.49 [-0.53, -0.39]  pruning-only−a -0.25 [-0.34, -0.20]  b−a -0.01 [-0.06, 0.03]
 
-realistic  20000 unpruned (a)  p50   18.181 ms  p90   24.655 ms  pending rows  1075
-realistic  20000 pruned        p50   12.185 ms  p90   16.710 ms  pending rows  1081
-realistic  20000 unpruned (b)  p50   18.287 ms  p90   23.797 ms  pending rows  1080
-realistic  20000 paired median (pruned − a) -5.922 ms [95% -6.485, -5.338]; identical arms (b − a) -0.095 ms [95% -0.269, 0.073]
+realistic-skew  20000  2%  p50 before   20.42 after    6.40 pruning-only   12.24  p90 before   23.93 after    8.01  | paired: after−a -14.07 [-14.40, -13.81]  pruning-only−a -8.62 [-9.18, -8.23]  b−a -0.02 [-0.11, 0.08]
+realistic-skew  20000 20%  p50 before   17.98 after    5.84 pruning-only    9.44  p90 before   21.53 after    8.32  | paired: after−a -11.82 [-12.20, -11.61]  pruning-only−a -7.85 [-8.48, -7.21]  b−a 0.02 [-0.04, 0.08]
+realistic-skew  20000 60%  p50 before   13.98 after    6.74 pruning-only    9.41  p90 before   17.47 after    8.53  | paired: after−a -7.36 [-7.63, -7.10]  pruning-only−a -5.03 [-5.57, -4.47]  b−a 0.03 [-0.04, 0.06]
 
-realistic  50000 unpruned (a)  p50   39.340 ms  p90   49.529 ms  pending rows  1061
-realistic  50000 pruned        p50   25.334 ms  p90   34.157 ms  pending rows  1080
-realistic  50000 unpruned (b)  p50   39.795 ms  p90   49.674 ms  pending rows  1068
-realistic  50000 paired median (pruned − a) -14.157 ms [95% -15.217, -12.777]; identical arms (b − a) -0.040 ms [95% -0.171, 0.139]
+realistic-skew  50000  2%  p50 before   34.49 after    8.98 pruning-only   21.04  p90 before   39.95 after   10.82  | paired: after−a -25.08 [-25.78, -24.51]  pruning-only−a -13.34 [-16.47, -12.30]  b−a -0.01 [-0.09, 0.08]
+realistic-skew  50000 20%  p50 before   34.10 after   10.15 pruning-only   18.82  p90 before   45.86 after   13.77  | paired: after−a -24.68 [-25.06, -24.10]  pruning-only−a -17.29 [-17.90, -16.85]  b−a 0.04 [-0.05, 0.14]
+realistic-skew  50000 60%  p50 before   44.14 after   20.13 pruning-only   27.93  p90 before   57.04 after   25.69  | paired: after−a -25.38 [-26.12, -24.13]  pruning-only−a -17.65 [-19.04, -15.83]  b−a -0.00 [-0.18, 0.14]
 

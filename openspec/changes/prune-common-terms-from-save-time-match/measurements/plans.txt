@@ -1,0 +1,68 @@
+# Save-time lexical statement shapes — cost by project share, and fidelity to shape A
+instrument: statement wall clock (performance.now), p50 of 3 warm repetitions per probe, then p50 over 10 probes; one instrument for every cell
+probes: the 10 most recent active memories of the target project, used verbatim as the saved text (each is indexed and excluded from its own results)
+corpora: the skewed generator (corpus:build --skew) and the skewed realistic control; project shares 2% / 20% / 60% of all rows (corpora.mts SHARE_SLOTS)
+expressions: unpruned = sanitizeFtsQuery(content, 16 terms); pruned = the shipped pruneCommonTokens expression
+shapes:
+  A     today: ORDER BY rank, which FTS5 consumes (plan INDEX 32:M3), so it scores and sorts every match of every project
+  B     this change: ORDER BY bm25(memory_fts), so the join filters first and bm25 runs on in-project matches only (the production repository call)
+  B2    B plus +rowid IN (the project rowids from the covering scope index), so out-of-project matches skip the memory row lookup
+  E1    simulated derived-index change: a project_id column in the FTS table, AND-ed into the MATCH, rank = bm25(1,1,1,0)
+  E2    simulated derived-index change: an FTS table holding only the target project rows (idf over the project only)
+  floor FTS5 iterating the match set alone (count(*), no join, no bm25), for reference
+fidelity: "ids+scores" = identical (id, score) top-20 to A; "ids" = identical id order only
+
+## generator-skew, 1000 rows
+  share  2% (   20 rows) unpruned  A 2.54 ms (10/10)  B 0.89 ms (10/10)  B2 0.78 ms (10/10)  E1 0.87 ms (0/10)  E2 0.22 ms (0/1)  floor 0.42 ms
+  share  2% (   20 rows) pruned    A 0.34 ms (10/10)  B 0.20 ms (10/10)  B2 0.17 ms (10/10)  E1 0.23 ms (8/10)  E2 0.07 ms (8/9)  floor 0.17 ms
+  share 20% (  200 rows) unpruned  A 2.35 ms (10/10)  B 1.03 ms (10/10)  B2 0.86 ms (10/10)  E1 1.20 ms (0/6)  E2 0.72 ms (0/2)  floor 0.39 ms
+  share 20% (  200 rows) pruned    A 0.45 ms (10/10)  B 0.26 ms (10/10)  B2 0.23 ms (10/10)  E1 0.34 ms (8/10)  E2 0.21 ms (8/8)  floor 0.23 ms
+  share 60% (  600 rows) unpruned  A 2.41 ms (10/10)  B 1.47 ms (10/10)  B2 1.36 ms (10/10)  E1 1.86 ms (0/4)  E2 1.52 ms (0/5)  floor 0.45 ms
+  share 60% (  600 rows) pruned    A 0.36 ms (10/10)  B 0.21 ms (10/10)  B2 0.20 ms (10/10)  E1 0.29 ms (7/10)  E2 0.25 ms (7/9)  floor 0.18 ms
+  (x/y) = probes whose top-20 matched A as ids+scores / as ids
+
+## generator-skew, 20000 rows
+  share  2% (  400 rows) unpruned  A 42.46 ms (10/10)  B 11.64 ms (10/10)  B2 8.31 ms (10/10)  E1 15.24 ms (0/5)  E2 0.90 ms (0/6)  floor 4.63 ms
+  share  2% (  400 rows) pruned    A 1.75 ms (10/10)  B 0.91 ms (10/10)  B2 0.89 ms (10/10)  E1 3.38 ms (10/10)  E2 0.09 ms (10/10)  floor 0.91 ms
+  share 20% ( 4000 rows) unpruned  A 36.32 ms (10/10)  B 11.81 ms (10/10)  B2 10.60 ms (10/10)  E1 18.81 ms (0/2)  E2 7.55 ms (0/3)  floor 3.79 ms
+  share 20% ( 4000 rows) pruned    A 0.62 ms (10/10)  B 0.34 ms (10/10)  B2 0.50 ms (10/10)  E1 1.19 ms (9/9)  E2 0.33 ms (9/9)  floor 0.31 ms
+  share 60% (12000 rows) unpruned  A 34.03 ms (10/10)  B 18.60 ms (10/10)  B2 18.50 ms (10/10)  E1 31.95 ms (0/3)  E2 21.61 ms (0/10)  floor 3.98 ms
+  share 60% (12000 rows) pruned    A 1.50 ms (10/10)  B 0.79 ms (10/10)  B2 1.41 ms (10/10)  E1 2.99 ms (7/10)  E2 1.79 ms (7/10)  floor 0.76 ms
+  (x/y) = probes whose top-20 matched A as ids+scores / as ids
+
+## generator-skew, 50000 rows
+  share  2% ( 1000 rows) unpruned  A 88.04 ms (10/10)  B 35.61 ms (10/10)  B2 17.39 ms (10/10)  E1 29.30 ms (0/4)  E2 1.95 ms (0/5)  floor 10.02 ms
+  share  2% ( 1000 rows) pruned    A 4.84 ms (10/10)  B 2.48 ms (10/10)  B2 2.66 ms (10/10)  E1 8.32 ms (10/10)  E2 0.26 ms (10/10)  floor 2.49 ms
+  share 20% (10000 rows) unpruned  A 131.39 ms (10/10)  B 58.69 ms (10/10)  B2 35.99 ms (10/10)  E1 67.67 ms (0/0)  E2 25.42 ms (0/6)  floor 13.09 ms
+  share 20% (10000 rows) pruned    A 5.75 ms (10/10)  B 3.13 ms (10/10)  B2 3.90 ms (10/10)  E1 11.56 ms (5/9)  E2 2.56 ms (5/9)  floor 2.82 ms
+  share 60% (30000 rows) unpruned  A 150.81 ms (10/10)  B 101.02 ms (10/10)  B2 83.98 ms (10/10)  E1 133.92 ms (0/4)  E2 89.82 ms (0/10)  floor 16.94 ms
+  share 60% (30000 rows) pruned    A 5.73 ms (10/10)  B 2.93 ms (10/10)  B2 5.85 ms (10/10)  E1 11.32 ms (6/10)  E2 5.50 ms (6/10)  floor 2.95 ms
+  (x/y) = probes whose top-20 matched A as ids+scores / as ids
+
+## realistic-skew, 1000 rows
+  share  2% (   20 rows) unpruned  A 2.14 ms (10/10)  B 0.91 ms (10/10)  B2 0.72 ms (10/10)  E1 0.50 ms (0/10)  E2 0.24 ms (0/6)  floor 0.37 ms
+  share  2% (   20 rows) pruned    A 1.32 ms (10/10)  B 0.68 ms (10/10)  B2 0.50 ms (10/10)  E1 0.25 ms (0/10)  E2 0.18 ms (0/10)  floor 0.24 ms
+  share 20% (  200 rows) unpruned  A 1.76 ms (10/10)  B 0.97 ms (10/10)  B2 0.87 ms (10/10)  E1 0.62 ms (0/10)  E2 0.54 ms (0/7)  floor 0.34 ms
+  share 20% (  200 rows) pruned    A 1.05 ms (10/10)  B 0.66 ms (10/10)  B2 0.58 ms (10/10)  E1 0.29 ms (0/10)  E2 0.33 ms (0/7)  floor 0.23 ms
+  share 60% (  600 rows) unpruned  A 1.74 ms (10/10)  B 1.18 ms (10/10)  B2 1.24 ms (10/10)  E1 0.93 ms (0/10)  E2 0.88 ms (0/10)  floor 0.33 ms
+  share 60% (  600 rows) pruned    A 1.03 ms (10/10)  B 0.77 ms (10/10)  B2 0.77 ms (10/10)  E1 0.47 ms (0/10)  E2 0.49 ms (0/10)  floor 0.24 ms
+  (x/y) = probes whose top-20 matched A as ids+scores / as ids
+
+## realistic-skew, 20000 rows
+  share  2% (  400 rows) unpruned  A 18.62 ms (10/10)  B 5.22 ms (10/10)  B2 3.61 ms (10/10)  E1 5.21 ms (0/10)  E2 0.48 ms (0/10)  floor 1.83 ms
+  share  2% (  400 rows) pruned    A 10.65 ms (10/10)  B 3.74 ms (10/10)  B2 2.40 ms (10/10)  E1 3.16 ms (0/10)  E2 0.36 ms (0/10)  floor 1.15 ms
+  share 20% ( 4000 rows) unpruned  A 17.65 ms (10/10)  B 7.09 ms (10/10)  B2 6.94 ms (10/10)  E1 7.71 ms (0/10)  E2 3.62 ms (0/10)  floor 1.62 ms
+  share 20% ( 4000 rows) pruned    A 7.65 ms (10/10)  B 3.85 ms (10/10)  B2 3.39 ms (10/10)  E1 3.77 ms (0/10)  E2 1.73 ms (0/10)  floor 0.86 ms
+  share 60% (12000 rows) unpruned  A 19.49 ms (10/10)  B 12.60 ms (10/10)  B2 14.59 ms (10/10)  E1 16.00 ms (0/10)  E2 11.78 ms (0/10)  floor 1.81 ms
+  share 60% (12000 rows) pruned    A 10.04 ms (10/10)  B 7.23 ms (10/10)  B2 9.32 ms (10/10)  E1 8.27 ms (0/10)  E2 5.51 ms (0/10)  floor 0.89 ms
+  (x/y) = probes whose top-20 matched A as ids+scores / as ids
+
+## realistic-skew, 50000 rows
+  share  2% ( 1000 rows) unpruned  A 53.75 ms (10/10)  B 15.39 ms (10/10)  B2 10.51 ms (10/10)  E1 14.96 ms (0/10)  E2 1.23 ms (0/10)  floor 4.67 ms
+  share  2% ( 1000 rows) pruned    A 20.34 ms (10/10)  B 7.29 ms (10/10)  B2 3.79 ms (10/10)  E1 5.40 ms (0/10)  E2 0.54 ms (0/10)  floor 1.76 ms
+  share 20% (10000 rows) unpruned  A 39.88 ms (10/10)  B 16.46 ms (10/10)  B2 16.65 ms (10/10)  E1 17.70 ms (0/10)  E2 8.68 ms (0/9)  floor 3.84 ms
+  share 20% (10000 rows) pruned    A 24.75 ms (10/10)  B 11.75 ms (10/10)  B2 11.30 ms (10/10)  E1 9.75 ms (0/10)  E2 5.20 ms (0/9)  floor 1.86 ms
+  share 60% (30000 rows) unpruned  A 40.18 ms (10/10)  B 23.90 ms (10/10)  B2 30.48 ms (10/10)  E1 33.76 ms (0/10)  E2 23.89 ms (0/10)  floor 3.64 ms
+  share 60% (30000 rows) pruned    A 19.42 ms (10/10)  B 13.34 ms (10/10)  B2 17.65 ms (10/10)  E1 16.88 ms (0/10)  E2 11.10 ms (0/10)  floor 1.82 ms
+  (x/y) = probes whose top-20 matched A as ids+scores / as ids
+

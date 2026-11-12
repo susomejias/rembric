@@ -17,7 +17,10 @@ const { CORPUS } = await import(
   new URL('../../../../packages/core/src/test-support/retrieval/corpus.ts', import.meta.url).href
 );
 
-export type CorpusName = 'generator' | 'realistic';
+export type CorpusName = 'generator' | 'realistic' | 'generator-skew' | 'realistic-skew';
+
+// Under the generator's skew, scope slot 0 holds 2% of rows, slot 1 60% and slot 2 20%.
+export const SHARE_SLOTS = { '2%': 0, '20%': 2, '60%': 1 } as const;
 
 // A base-corpus term found in at least this many of the 73 retrieval items (about 5%) is shared
 // verbatim by every copy; every rarer term gets a per-copy suffix, so copies share only those.
@@ -26,7 +29,7 @@ const PROJECT_COUNT = 6;
 
 export const quiet = { onMigrationProgress: () => {}, onStartupLog: () => {} };
 
-function buildRealistic(handle: { db: unknown }, size: number): void {
+function buildRealistic(handle: { db: unknown }, size: number, skew: boolean): void {
   const repos = createRepositories(handle.db);
   const projects = new ProjectsService(repos);
   const memory = new MemoryService(repos, handle.db);
@@ -54,7 +57,7 @@ function buildRealistic(handle: { db: unknown }, size: number): void {
       for (let i = start; i < Math.min(size, start + BATCH); i += 1) {
         const item = CORPUS[i % CORPUS.length];
         const copy = Math.floor(i / CORPUS.length);
-        const scope = scopes[scopeSlotFor(i, DEFAULT_ARGS.skew)];
+        const scope = scopes[scopeSlotFor(i, skew)];
         memory.save(
           {
             type: item.type,
@@ -74,14 +77,15 @@ export function cachedCorpus(cacheRoot: string, corpus: CorpusName, size: number
   mkdirSync(dir, { recursive: true });
   const handle = createDb({ dataDir: dir, ...quiet });
   try {
-    if (corpus === 'generator') {
+    const skew = corpus.endsWith('-skew');
+    if (corpus.startsWith('generator')) {
       buildCorpus({
         handle,
-        args: { ...DEFAULT_ARGS, dataDir: dir, memories: size },
+        args: { ...DEFAULT_ARGS, dataDir: dir, memories: size, skew },
         log: () => {},
       });
     } else {
-      buildRealistic(handle, size);
+      buildRealistic(handle, size, skew);
     }
     handle.raw.pragma('wal_checkpoint(TRUNCATE)');
   } finally {
@@ -98,5 +102,10 @@ export function freshCopy(cacheRoot: string, corpus: CorpusName, size: number): 
 }
 
 export function largestProjectSlug(corpus: CorpusName): string {
-  return corpus === 'generator' ? 'vol-shared' : 'real-shared';
+  return corpus.startsWith('generator') ? 'vol-shared' : 'real-shared';
+}
+
+export function slugForSlot(corpus: CorpusName, slot: number): string {
+  if (corpus.startsWith('generator')) return slot === 0 ? 'vol-shared' : `vol-${slot - 1}`;
+  return slot === 0 ? 'real-shared' : `real-${slot}`;
 }

@@ -20,3 +20,8 @@ pnpm eval, after
 
 control: the sweep run on the base commit's code is byte-identical to add-save-time-lexical-floor/measurements/sweep.txt (cmp: identical),
 so every line of sweep.diff is caused by this change, not by drift in the instrument
+
+after the query-plan change (searchBm25Candidates orders by bm25(memory_fts) instead of rank)
+  dump-ids sha256 670ec7c16c34e3805fbef1951524d071e4ce35bd66405599bf15d25b0dcf1f37 (identical)
+  pnpm eval: passed, hybrid P@8=0.212 R@8=0.975 MRR@8=0.900 (identical)
+  pnpm run eval:save-time: byte-identical to sweep.txt (cmp: identical)

@@ -72,3 +72,20 @@ All evidence lives under `openspec/changes/prune-common-terms-from-save-time-mat
 - [x] 5.1 `docs/embeddings.md`: update the detection diagram and the engine-constants table, and add one sentence on pruning.
 - [x] 5.2 Run the full `pnpm test` once.
 - [ ] 5.3 Commit: `perf(core): drop index-common terms from the save-time lexical match`.
+
+## 6. Score only the saving project's matches (owner request)
+
+- [x] 6.1 Record the owner's decision to keep every token in the fallback in `design.md` (D3).
+- [x] 6.2 Measure the statement shapes at 1 000, 20 000 and 50 000 rows, with the saving project at 2%, 20% and 60% of rows, on both corpora, with today's `(id, score)` list as the fidelity reference (`measurements/plans.txt`). The shapes:
+  - A, today;
+  - B, `ORDER BY bm25(memory_fts)`;
+  - B2, B plus a rowid set;
+  - E1, a project column in the FTS table;
+  - E2, an FTS table per project;
+  - a memory-driven join (`measurements/driven-and-rebuild.txt`).
+- [x] 6.3 RED: add a plan-shape test and a score-fidelity test for `searchBm25Candidates` in `memory-repository.perf.test.ts`. The plan test fails on the old statement.
+- [x] 6.4 GREEN: order by `bm25(memory_fts)`. Check that the sweep is byte-identical to the pruning-only run, that `dump-ids` is identical, and that `pnpm eval` passes.
+- [x] 6.5 Mutation (`measurements/mutation.txt`): reverting to the FTS5 rank column, weighting the scores, and weighting the order are each caught.
+- [x] 6.6 Re-measure end to end with four arms (`measurements/save-latency.txt`): before, after, pruning only, and before again.
+- [ ] 6.7 **Stop and report** before any derived-index migration (E2). That is an owner decision.
+- [ ] 6.8 Commit: `perf(db): score only the saving project's matches in the save-time lexical query`.
