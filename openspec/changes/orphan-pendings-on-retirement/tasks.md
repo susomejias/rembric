@@ -5,8 +5,8 @@
 
 ## 2. Repository read
 
-- [ ] 2.1 Add `RelationsRepository.listPendingTouchingAny(memoryIds)` returning the pending rows whose source or target is one of the ids, in `(created_at, judgment_id)` order, with a co-located test proving both sides are returned, non-pending rows are excluded and an empty input reads nothing (design D2)
-- [ ] 2.2 Record the statement's `EXPLAIN QUERY PLAN` in `measurements/README.md`, showing `memory_relations_source_status_idx` and `memory_relations_target_status_idx`
+- [x] 2.1 Add `RelationsRepository.listPendingTouchingAny(memoryIds)` returning the pending rows whose source or target is one of the ids, in `(created_at, judgment_id)` order, with a co-located test proving both sides are returned, non-pending rows are excluded and an empty input reads nothing (design D2)
+- [x] 2.2 Record the statement's `EXPLAIN QUERY PLAN` in `measurements/README.md`, showing `memory_relations_source_status_idx` and `memory_relations_target_status_idx`
 
 ## 3. Orphan at retirement (stored-data unit)
 

@@ -322,6 +322,93 @@ describe('RelationsRepository', () => {
       expect(repo.listNotConflictTargetsForSources([])).toEqual([]);
     });
   });
+
+  describe('listPendingTouchingAny', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(memory)
+        .values([mem('A', 'a'), mem('B', 'b'), mem('C', 'c'), mem('D', 'd')])
+        .run();
+      t.handle.db
+        .insert(memoryRelations)
+        .values([
+          rel({
+            id: 'P1',
+            judgmentId: 'JP1',
+            sourceId: 'A',
+            targetId: 'C',
+            createdAt: new Date(7),
+          }),
+          rel({
+            id: 'P2',
+            judgmentId: 'JP2',
+            sourceId: 'C',
+            targetId: 'A',
+            createdAt: new Date(5),
+          }),
+          rel({
+            id: 'P3',
+            judgmentId: 'JP3',
+            sourceId: 'B',
+            targetId: 'D',
+            createdAt: new Date(5),
+          }),
+          rel({
+            id: 'P4',
+            judgmentId: 'JP0',
+            sourceId: 'A',
+            targetId: 'B',
+            createdAt: new Date(5),
+          }),
+          rel({
+            id: 'P5',
+            judgmentId: 'JP5',
+            sourceId: 'A',
+            targetId: 'D',
+            status: 'judged',
+            relation: 'related',
+          }),
+          rel({ id: 'P6', judgmentId: 'JP6', sourceId: 'D', targetId: 'A', status: 'orphaned' }),
+          rel({ id: 'P7', judgmentId: 'JP7', sourceId: 'C', targetId: 'D' }),
+        ])
+        .run();
+    });
+
+    it('returns the pending rows on either side, in (created_at, judgment_id) order', () => {
+      expect(repo.listPendingTouchingAny(['A']).map((r) => r.judgmentId)).toEqual([
+        'JP0',
+        'JP2',
+        'JP1',
+      ]);
+    });
+
+    it('returns a row touching two of the ids once', () => {
+      expect(repo.listPendingTouchingAny(['A', 'B']).map((r) => r.judgmentId)).toEqual([
+        'JP0',
+        'JP2',
+        'JP3',
+        'JP1',
+      ]);
+    });
+
+    it('carries the pair, so the caller can journal it', () => {
+      expect(repo.listPendingTouchingAny(['B'])).toEqual([
+        { judgmentId: 'JP0', sourceId: 'A', targetId: 'B' },
+        { judgmentId: 'JP3', sourceId: 'B', targetId: 'D' },
+      ]);
+    });
+
+    it('control: judged and orphaned rows touching the id are left out', () => {
+      const ids = repo.listPendingTouchingAny(['D']).map((r) => r.judgmentId);
+      expect(ids).toEqual(['JP3', 'JP7']);
+      expect(ids).not.toContain('JP5');
+      expect(ids).not.toContain('JP6');
+    });
+
+    it('returns [] for empty input', () => {
+      expect(repo.listPendingTouchingAny([])).toEqual([]);
+    });
+  });
 });
 
 describe('RelationsRepository scoped pending reads', () => {
