@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.9](https://github.com/susomejias/rembric/compare/server-v0.30.8...server-v0.30.9) (2026-11-12)
+
+
+### Bug Fixes
+
+* **mcp:** answer 2026-07-28 requests with -32022 instead of HTTP 500 ([dd8be11](https://github.com/susomejias/rembric/commit/dd8be112f2e4e57dfe3b05f753cc064aca577d4c)), closes [#446](https://github.com/susomejias/rembric/issues/446) [#455](https://github.com/susomejias/rembric/issues/455)
+
 ## [0.30.8](https://github.com/susomejias/rembric/compare/server-v0.30.7...server-v0.30.8) (2026-11-04)
 
 
