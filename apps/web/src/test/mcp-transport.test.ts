@@ -1089,6 +1089,143 @@ describe('MCP protocol conformance', () => {
     expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1885);
   });
 
+  describe('memory.merge over the wire', () => {
+    const scope = () => projectScope(defaultProject(services.db).id);
+    const seedPair = (label: string) =>
+      ['one', 'two'].map(
+        (n) =>
+          services.memory.save(
+            {
+              type: 'project',
+              title: `${label} ${n}`,
+              content: `${label} ${n} part of the convention`,
+              topicKey: n === 'one' ? `merge-wire/${label}` : null,
+            },
+            scope(),
+          ).id,
+      );
+    const mergeArgs = (ids: string[]) => ({
+      ids,
+      type: 'project',
+      title: 'Whole convention',
+      content: 'Both parts of the convention, merged.',
+      tags: ['conventions'],
+    });
+    const call = async (client: Client, args: Record<string, unknown>) =>
+      (await client.callTool({ name: 'memory.merge', arguments: args })) as ToolResult;
+    const statusOf = (id: string) => services.memory.unsafeGetById(id)!.status;
+
+    it('previews without writing, refuses a stale fingerprint, and the matching one commits', async () => {
+      const client = await connect();
+      const ids = seedPair('commit');
+
+      const preview = await call(client, mergeArgs(ids));
+      expect(preview.isError).toBeFalsy();
+      const plan = preview.structuredContent as {
+        merged: boolean;
+        fingerprint: string;
+        successor: { topicKey: string | null; replaces: string[] };
+      };
+      expect(plan.merged).toBe(false);
+      expect(plan.successor).toMatchObject({ topicKey: 'merge-wire/commit', replaces: ids });
+      expect(ids.map(statusOf)).toEqual(['active', 'active']);
+
+      const stale = await call(client, { ...mergeArgs(ids), fingerprint: '0'.repeat(64) });
+      expect(stale.isError).toBe(true);
+      const mismatch = readJson(stale) as { code: string; preview: { fingerprint: string } };
+      expect(mismatch.code).toBe('fingerprint_mismatch');
+      expect(mismatch.preview.fingerprint).toBe(plan.fingerprint);
+      expect(ids.map(statusOf)).toEqual(['active', 'active']);
+
+      const committed = await call(client, { ...mergeArgs(ids), fingerprint: plan.fingerprint });
+      expect(committed.isError).toBeFalsy();
+      const result = committed.structuredContent as { merged: boolean; id: string; opId: string };
+      expect(result.merged).toBe(true);
+      expect(ids.map(statusOf)).toEqual(['superseded', 'superseded']);
+
+      const read = await client.callTool({ name: 'memory.get_batch', arguments: { ids } });
+      const { memories } = read.structuredContent as {
+        memories: { status: string; head: { id: string } }[];
+      };
+      expect(memories.map((m) => [m.status, m.head.id])).toEqual([
+        ['superseded', result.id],
+        ['superseded', result.id],
+      ]);
+      await client.close();
+    });
+
+    it('is undone by the dashboard undo service: originals active, successor archived', async () => {
+      const client = await connect();
+      const ids = seedPair('undo');
+      const { fingerprint } = (await call(client, mergeArgs(ids))).structuredContent as {
+        fingerprint: string;
+      };
+      const { id: successorId, opId } = (await call(client, { ...mergeArgs(ids), fingerprint }))
+        .structuredContent as { id: string; opId: string };
+
+      const undone = services.undoOp(opId);
+
+      expect(undone.skipped).toEqual([]);
+      expect(ids.map(statusOf)).toEqual(['active', 'active']);
+      expect(statusOf(successorId)).toBe('archived');
+      await client.close();
+    });
+
+    it('runs the successor through the save pipeline: its entities are linked', async () => {
+      const client = await connect();
+      const ids = seedPair('pipeline');
+      const args = {
+        ...mergeArgs(ids),
+        content: 'The convention lives in src/merge-wire/rules.ts.',
+      };
+      const { fingerprint } = (await call(client, args)).structuredContent as {
+        fingerprint: string;
+      };
+      const { id } = (await call(client, { ...args, fingerprint })).structuredContent as {
+        id: string;
+      };
+
+      const found = await client.callTool({
+        name: 'memory.search',
+        arguments: { entity: 'src/merge-wire/rules.ts' },
+      });
+      const { memories } = found.structuredContent as { memories: { id: string }[] };
+      expect(memories.map((m) => m.id)).toEqual([id]);
+      await client.close();
+    });
+
+    it('refuses an id outside the connection scope as not_found and writes nothing', async () => {
+      const client = await connect();
+      const [inScope] = seedPair('scope');
+      const foreignSlug = `merge-foreign-${Date.now()}`;
+      const foreignProject = services.projects.create({ slug: foreignSlug });
+      const foreign = services.memory.save(
+        { type: 'project', title: 'foreign', content: 'foreign' },
+        projectScope(foreignProject.id),
+      ).id;
+
+      const res = await call(client, mergeArgs([inScope!, foreign]));
+
+      expect(res.isError).toBe(true);
+      expect((readJson(res) as { code: string }).code).toBe('not_found');
+      expect([inScope!, foreign].map(statusOf)).toEqual(['active', 'active']);
+      await client.close();
+    });
+
+    it('description steers toward previewing and showing the plan before confirming', async () => {
+      const client = await connect();
+      const { tools } = await client.listTools();
+      const desc = tools.find((t) => t.name === 'memory.merge')?.description ?? '';
+
+      expect(desc).toMatch(/preview/i);
+      expect(desc).toMatch(/SHOW that plan to the user/);
+      expect(desc).toMatch(/never invent a fingerprint/i);
+      expect(desc).toMatch(/fingerprint_mismatch/);
+      expect(desc).toMatch(/undo from the dashboard/i);
+      await client.close();
+    });
+  });
+
   it('memory.archive description steers against autonomous retirement', async () => {
     const client = await connect();
     const { tools } = await client.listTools();
@@ -1989,6 +2126,7 @@ describe('MCP protocol conformance', () => {
       'memory.save',
       'memory.confirm_batch',
       'memory.archive',
+      'memory.merge',
       'memory.capture_passive',
       'memory.save_prompt',
       'memory.session_start',

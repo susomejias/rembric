@@ -142,6 +142,10 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
 
   tx.transaction(() => {
     if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
+      // The successor may hold an original's topic_key slot; free it before reactivating.
+      if (op.opType === 'merge' && op.createdId) {
+        repos.memory.archiveOne(op.createdId);
+      }
       const reactivatable: string[] = [];
       for (const row of repos.memory.unsafeGetByIds(op.affectedIds)) {
         const occupiedBy = topicSlotOccupiedBy(repos, row);
@@ -153,9 +157,6 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
       }
       repos.memory.reactivate(reactivatable);
       if (reactivatable.length > 0) repos.memory.touchLastSeenBatch(reactivatable, now);
-      if (op.opType === 'merge' && op.createdId) {
-        repos.memory.archiveOne(op.createdId);
-      }
     } else if (op.opType === 'orphan_promote' && op.createdId) {
       const rel = repos.relations.findByJudgmentId(op.createdId);
       if (rel) {

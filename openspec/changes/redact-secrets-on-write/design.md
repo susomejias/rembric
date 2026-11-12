@@ -21,6 +21,8 @@ The service layer is the one boundary MCP, HTTP and the dashboard all reach, and
 
 Order inside a write: the existing validation runs on the value AS SENT (emptiness, NUL, caps — every published contract is unchanged), then redaction, then the repository call. Server-composed text written into a redacted column is built from already-redacted input (the topic-key upsert reason quotes the redacted `topic_key`) or is a constant (the deadline-orphan reason).
 
+`memory.merge` (change `add-memory-merge`, merged into `main` while this change was open) writes a successor memory through the same `validateSaveFields` that `memory.save` uses, so the redaction lives there: it validates the fields as sent and returns them redacted. The merge preview therefore shows the user the text that will be stored, and its fingerprint — computed over that redacted successor — is identical when the confirm call recomputes it.
+
 ### D2 — A closed list of named detectors, applied in a fixed order
 
 | kind                   | shape                                                                                                                                                                                                                                                                                                                                                                                                                                                      |

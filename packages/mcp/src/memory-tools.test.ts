@@ -132,6 +132,19 @@ describe('memory.save — strict path scoping', () => {
     expect(parseText<{ code: string }>(r).code).toBe('project_archived');
   });
 
+  it("rejects a merge into an archived project with code 'project_archived'", async () => {
+    const scope = { kind: 'project', projectId: projectA.id } as const;
+    const ids = ['a', 'b'].map(
+      (t) => memory.save({ type: 'user', title: t, content: t }, scope).id,
+    );
+    projects.archive(projectA.id);
+    const r = await runWithContext(fakeContext(projectA), () =>
+      handlers.merge({ ids, type: 'user', title: 'm', content: 'm', tags: ['x'] }),
+    );
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('project_archived');
+  });
+
   it('rejects an empty title with code invalid_input', async () => {
     const r = await runWithContext(fakeContext(projectA), () =>
       Promise.resolve(handlers.save({ type: 'user', title: '', content: 'has content' })),

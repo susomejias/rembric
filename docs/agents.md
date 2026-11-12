@@ -89,6 +89,8 @@ Handle each `errors[]` entry beside the valid records. Missing/foreign/deleted s
 
 Mutations require reviewed explicit items: `memory.confirm_batch({ ids: [id], verdict: "affirm" })` or `memory.judge_batch({ judgments: [{ judgmentId, relation: "related" }] })`, with 1–20 submitted items and no date selectors. Confirmations are atomic; never split them automatically. Judgments are ordered independent transactions, keep duplicates and retain all results; an all-failed judgment batch sets MCP `isError: true`.
 
+`memory.merge` replaces 2–10 active memories with one new memory in a single reviewed step. Call it first without `fingerprint`: the preview writes nothing and returns the originals, the successor as it will be stored, `warnings[]` and a `fingerprint`. Show that plan to the user, then repeat the same call with the `fingerprint` to commit. If anything changed in between, nothing is merged and the error `fingerprint_mismatch` carries a fresh preview. The merge is journaled as one `merge` op that an operator can undo from the dashboard.
+
 The four original tool names and scalar arguments have no aliases. Upgrade the server and all five clients together through the installer; restart the client to rediscover tools. Roll back both components together if needed, keeping the normal database backup precautions. HTTP session lifecycle endpoints are unchanged.
 
 ## Validated configs
@@ -539,7 +541,7 @@ All five bundled plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi) re
 
 ## Server-side secret redaction
 
-Independently of `<private>` tags, and for every client — bundled plugin, plain MCP URL or a script calling `/api` — the server replaces credential-shaped text with a typed placeholder before it stores anything: memory titles, content, tags and `topic_key`; confirmation reasons; prompt content, titles and tags; judgment reasons and evidence; and session agent names, descriptions, titles and summaries. `GITHUB_TOKEN=ghp_…` is stored as `GITHUB_TOKEN=[REDACTED:github_token]`, and `postgres://app:s3cret@db/x` as `postgres://app:[REDACTED:url_password]@db/x`. The placeholder is what the full-text index, the entity index and the embedding see.
+Independently of `<private>` tags, and for every client — bundled plugin, plain MCP URL or a script calling `/api` — the server replaces credential-shaped text with a typed placeholder before it stores anything: memory titles, content, tags and `topic_key` (including the memory `memory.merge` writes, whose preview already shows the redacted text); confirmation reasons; prompt content, titles and tags; judgment reasons and evidence; and session agent names, descriptions, titles and summaries. `GITHUB_TOKEN=ghp_…` is stored as `GITHUB_TOKEN=[REDACTED:github_token]`, and `postgres://app:s3cret@db/x` as `postgres://app:[REDACTED:url_password]@db/x`. The placeholder is what the full-text index, the entity index and the embedding see.
 
 Detection is deterministic: a closed list of high-precision patterns, with no entropy heuristics. It covers provider-prefixed tokens (GitHub, GitLab, Anthropic, OpenAI, AWS access key ids, Slack, Stripe secret keys, Google API keys, npm, Hugging Face), PEM private keys, JWTs, `Authorization:` header credentials, passwords in URLs, and values assigned to credential-named keys (`DB_PASSWORD=…`, `--token=…`, `?access_token=…`, `"apiKey": "…"`). Placeholders and references such as `$GITHUB_TOKEN`, `${API_KEY}`, `<token>` or `sk-...` are left alone.
 

@@ -4,6 +4,9 @@ import { iterateEntityMatches } from '@rembric/core';
 import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';
 import {
   DEFAULT_SEARCH_LIMIT,
+  MERGE_MAX_IDS,
+  MERGE_MIN_IDS,
+  type MergeMemoriesInput,
   type MemoryService,
   type SaveMemoryInput,
   type SearchMemoriesInput,
@@ -251,6 +254,33 @@ export const memoryArchiveSchema = {
     .describe('The id of the active memory to retire. Must be in the connection’s scope.'),
 };
 
+export const memoryMergeSchema = {
+  ids: z
+    .array(z.string().min(1))
+    .min(MERGE_MIN_IDS)
+    .max(MERGE_MAX_IDS)
+    .describe(
+      `${MERGE_MIN_IDS}–${MERGE_MAX_IDS} distinct ids of active memories in this scope that the merged memory replaces.`,
+    ),
+  type: memorySaveSchema.type,
+  title: memorySaveSchema.title,
+  content: memorySaveSchema.content.describe(
+    'The complete merged memory: the originals stop surfacing in recall once it is committed.',
+  ),
+  tags: memorySaveSchema.tags,
+  topic_key: memorySaveSchema.topic_key.describe(
+    "Omit to keep the originals' single topic_key. Required when they hold different keys: name the one to keep.",
+  ),
+  sessionId: memorySaveSchema.sessionId,
+  fingerprint: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Omit to preview (nothing is written). Pass the `fingerprint` of a preview the user has seen to commit exactly that plan. Never invent one.',
+    ),
+};
+
 export const contextSchema = {
   sessions: z.number().int().min(0).max(CONTEXT_SESSIONS_MAX).optional(),
   prompts: z.number().int().min(0).max(CONTEXT_PROMPTS_MAX).optional(),
@@ -435,6 +465,42 @@ export const memoryArchiveOutput = {
   status: z.literal('archived'),
 };
 
+export const memoryMergeOutput = {
+  merged: z.boolean(),
+  originals: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      title: z.string(),
+      status: z.string(),
+      topicKey: z.string().nullable(),
+      tags: z.array(z.string()),
+      createdAt: z.string(),
+      contentPreview: z.string(),
+      contentTruncated: z.boolean(),
+      reviewState: z.string().nullable(),
+    }),
+  ),
+  successor: z.object({
+    type: z.string(),
+    title: z.string(),
+    content: z.string(),
+    tags: z.array(z.string()),
+    topicKey: z.string().nullable(),
+    replaces: z.array(z.string()),
+  }),
+  warnings: z.array(z.object({ code: z.string(), ids: z.array(z.string()), message: z.string() })),
+  fingerprint: z.string(),
+  id: z.string().optional(),
+  status: z.string().optional(),
+  createdAt: z.string().optional(),
+  opId: z.string().optional(),
+  candidates: z.array(candidate).optional(),
+  judgmentRequired: z.boolean().optional(),
+  candidatesDetected: z.number().optional(),
+  redactions: redactionsOutput,
+};
+
 export const contextOutput = {
   scope: z.string(),
   recentSessions: z.array(
@@ -548,6 +614,7 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
     get: handleGet.bind(null, deps),
     confirm: handleConfirm.bind(null, deps),
     archive: handleArchive.bind(null, deps),
+    merge: handleMerge.bind(null, deps),
     context: counted(deps, 'memory.context', handleContext.bind(null, deps)),
     timeline: handleTimeline.bind(null, deps),
   };
@@ -650,7 +717,15 @@ export async function saveMemoryWithCandidates(
     scope,
     redactions,
   );
+  const { candidates, candidatesDetected } = await runPostSaveSteps(deps, m, scope);
+  return { memory: m, supersededByTopicKey, candidates, candidatesDetected };
+}
 
+async function runPostSaveSteps(
+  deps: SaveWithCandidatesDeps,
+  m: Memory,
+  scope: Scope,
+): Promise<{ candidates: SaveTimeCandidateView[]; candidatesDetected: number }> {
   const extractedEntities: ExtractedEntity[] = extractEntities(m.title, m.content);
 
   let candidates: SaveTimeCandidateView[] = [];
@@ -690,7 +765,7 @@ export async function saveMemoryWithCandidates(
     }
   }
 
-  return { memory: m, supersededByTopicKey, candidates, candidatesDetected };
+  return { candidates, candidatesDetected };
 }
 
 async function handleSave(
@@ -1072,6 +1147,75 @@ async function handleArchive(deps: MemoryToolDeps, args: { id: string }) {
   } catch (err) {
     if (isDomainError(err) && err.code === 'memory_not_found') {
       return mcpError('not_found', 'memory not found');
+    }
+    return errToMcp(err, deps.logInternalError);
+  }
+}
+
+async function handleMerge(
+  deps: MemoryToolDeps,
+  args: {
+    ids: string[];
+    type: (typeof MEMORY_TYPES)[number];
+    title: string;
+    content: string;
+    tags: string[];
+    topic_key?: string;
+    sessionId?: string;
+    fingerprint?: string;
+  },
+) {
+  try {
+    const { scope, project } = await resolveEffectiveScope(deps);
+    assertAuthorized('write', scope, deps);
+    if (project) deps.projects.assertWritable(project.id);
+    const input: MergeMemoriesInput = {
+      ids: args.ids,
+      type: args.type,
+      title: args.title,
+      content: args.content,
+      tags: args.tags,
+      topicKey: args.topic_key ?? null,
+    };
+    const redactions = new RedactionTally();
+    if (args.fingerprint === undefined) {
+      return ok({
+        merged: false,
+        ...deps.memory.previewMerge(input, scope, redactions),
+        ...redactionsField(redactions),
+      });
+    }
+    const sessionId = resolveActiveSessionId(deps, scope.projectId, args.sessionId);
+    const {
+      memory: m,
+      opId,
+      preview,
+    } = deps.memory.commitMerge(
+      {
+        ...input,
+        source: { tokenName: getRequestContext().token.name, ...(sessionId ? { sessionId } : {}) },
+        sessionId,
+      },
+      scope,
+      args.fingerprint,
+      redactions,
+    );
+    const { candidates, candidatesDetected } = await runPostSaveSteps(deps, m, scope);
+    return ok({
+      merged: true,
+      ...preview,
+      id: m.id,
+      status: m.status,
+      createdAt: m.createdAt,
+      opId,
+      candidates,
+      judgmentRequired: candidates.length > 0,
+      candidatesDetected,
+      ...redactionsField(redactions),
+    });
+  } catch (err) {
+    if (isDomainError(err) && err.code === 'memory_not_found') {
+      return mcpError('not_found', err.message, err.details);
     }
     return errToMcp(err, deps.logInternalError);
   }

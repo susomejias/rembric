@@ -104,6 +104,7 @@ const WRITE_TOOLS = [
   'memory.compare',
   'memory.session_start',
   'memory.session_summary',
+  'memory.merge',
 ] as const;
 
 describe('secret redaction sweep — every write path through its real boundary', () => {
@@ -242,6 +243,18 @@ describe('secret redaction sweep — every write path through its real boundary'
         [secret('compare-evidence-key')]: 'seen in the CI log',
         list: [secret('compare-evidence')],
       },
+    });
+    const mergeArgs = {
+      ids: [responses['save_clean']['id'], duplicate['id']],
+      type: 'project',
+      title: `merged ${secret('merge-title')}`,
+      content: `kafka lag fixed; the consumer group used ${secret('merge-content')}`,
+      tags: ['kafka', secret('merge-tag')],
+    };
+    responses['merge_preview'] = await tool('memory.merge', mergeArgs);
+    responses['merge'] = await tool('memory.merge', {
+      ...mergeArgs,
+      fingerprint: responses['merge_preview']['fingerprint'],
     });
     await tool('memory.session_end', {});
     responses['summary_discarded'] = await tool('memory.session_summary', {
@@ -404,6 +417,10 @@ describe('secret redaction sweep — every write path through its real boundary'
     ]);
     expect(responses['confirm']!['redactions']).toEqual([{ kind: 'github_token', count: 1 }]);
     expect(responses['prompt']!['redactions']).toEqual([{ kind: 'github_token', count: 3 }]);
+    for (const key of ['merge_preview', 'merge']) {
+      expect(responses[key]!['redactions'], key).toEqual([{ kind: 'github_token', count: 3 }]);
+    }
+    expect(responses['merge']).toMatchObject({ merged: true });
     const [judged] = responses['judge']!['results'] as Record<string, unknown>[];
     expect(judged!['redactions']).toEqual([{ kind: 'github_token', count: 2 }]);
   });

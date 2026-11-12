@@ -23,6 +23,17 @@ import {
   type SearchVerdict,
 } from './hybrid-search.js';
 import {
+  MERGE_MAX_IDS,
+  MERGE_MIN_IDS,
+  type MergeMemoriesInput,
+  type MergePreview,
+  type MergeResult,
+  type MergeSuccessorView,
+  type MergeWarning,
+  mergeFingerprint,
+  toOriginalView,
+} from './memory-merge.js';
+import {
   type DerivedReview,
   deriveReviewState,
   REFUTED_PRIORITY_MS,
@@ -140,23 +151,7 @@ export class MemoryService {
     scope: Scope,
     redactions: RedactionTally = new RedactionTally(),
   ): SaveResult {
-    if (input.content.trim().length === 0) {
-      throw new DomainError('invalid_input', 'memory.save: content must be non-empty');
-    }
-    assertNoNul('memory.save', 'content', input.content);
-    if (input.title.trim().length === 0 || input.title.length > TITLE_MAX_CHARS) {
-      throw new DomainError(
-        'invalid_input',
-        `memory.save: title must be 1..${TITLE_MAX_CHARS} non-blank chars`,
-      );
-    }
-    assertNoNul('memory.save', 'title', input.title);
-    const tags = this.normalizeTags(input.tags ?? [], redactions);
-    const sentTopicKey = normalizeTopicKey(input.topicKey);
-    const title = redactions.redactWithin(input.title, TITLE_MAX_CHARS);
-    const content = redactions.redact(input.content);
-    const topicKey =
-      sentTopicKey === null ? null : redactions.redactWithin(sentTopicKey, TOPIC_KEY_MAX_CHARS);
+    const { title, content, tags, topicKey } = validateSaveFields(input, 'memory.save', redactions);
 
     const ts = this.now();
     const id = ulid(ts.getTime());
@@ -221,28 +216,6 @@ export class MemoryService {
 
       return { memory: inserted, supersededByTopicKey };
     });
-  }
-
-  private normalizeTags(tags: readonly string[], redactions: RedactionTally): string[] {
-    return [
-      ...new Set(
-        tags.map((sent) => {
-          assertNoNul('memory.save', 'tags', sent);
-          const tag = redactions.redact(sent);
-          const normalized = slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), {
-            lower: true,
-            strict: true,
-          });
-          if (normalized.length === 0) {
-            throw new DomainError(
-              'invalid_input',
-              'memory.save: tags must contain letters or numbers',
-            );
-          }
-          return normalized;
-        }),
-      ),
-    ];
   }
 
   get(id: string, scope: Scope): MemoryWithHistory | null {
@@ -550,15 +523,215 @@ export class MemoryService {
     });
   }
 
+  previewMerge(
+    input: MergeMemoriesInput,
+    scope: Scope,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MergePreview {
+    return this.planMerge(input, scope, redactions);
+  }
+
+  commitMerge(
+    input: MergeMemoriesInput,
+    scope: Scope,
+    fingerprint: string,
+    redactions: RedactionTally = new RedactionTally(),
+  ): MergeResult {
+    const ts = this.now();
+    return this.tx.transaction((): MergeResult => {
+      const preview = this.planMerge(input, scope, redactions);
+      if (preview.fingerprint !== fingerprint) {
+        throw new DomainError(
+          'fingerprint_mismatch',
+          'memory.merge: the originals or the merge arguments changed since that fingerprint was ' +
+            'issued, so nothing was merged. Show the fresh preview to the user and confirm with its ' +
+            'fingerprint.',
+          { preview },
+        );
+      }
+      const { successor } = preview;
+      this.repos.memory.markSupersededMany(successor.replaces);
+      const inserted = this.repos.memory.insert({
+        id: ulid(ts.getTime()),
+        scope: 'project',
+        projectId: scope.projectId,
+        type: successor.type,
+        title: successor.title,
+        content: successor.content,
+        tags: successor.tags,
+        status: 'active',
+        replaces: successor.replaces,
+        createdAt: ts,
+        lastSeenAt: ts,
+        source: input.source ?? null,
+        sessionId: input.sessionId ?? null,
+        topicKey: successor.topicKey,
+      });
+      if (!inserted) {
+        throw new DomainError('conflict', 'memory.merge: insert did not return a row');
+      }
+      const opId = this.journalMaintenanceOp(ts, {
+        opType: 'merge',
+        affectedIds: successor.replaces,
+        createdId: inserted.id,
+        reasoning: `agent merge of ${successor.replaces.length} memories by token '${
+          input.source?.tokenName ?? 'unknown'
+        }'`,
+        summary: { kind: 'agent_memory_merge', merged: successor.replaces.length },
+      });
+      return { memory: inserted, opId, preview };
+    });
+  }
+
+  private planMerge(
+    input: MergeMemoriesInput,
+    scope: Scope,
+    redactions: RedactionTally,
+  ): MergePreview {
+    const ids = [...input.ids];
+    if (ids.length < MERGE_MIN_IDS || ids.length > MERGE_MAX_IDS) {
+      throw new DomainError(
+        'invalid_input',
+        `memory.merge: ids must hold ${MERGE_MIN_IDS}..${MERGE_MAX_IDS} memories, got ${ids.length}`,
+      );
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw new DomainError('invalid_input', 'memory.merge: ids must be distinct');
+    }
+    const fields = validateSaveFields(input, 'memory.merge', redactions);
+
+    const byId = new Map(this.unsafeGetByIds(ids).map((m) => [m.id, m]));
+    const missing = ids.filter((id) => {
+      const m = byId.get(id);
+      return !m || !memoryMatchesScope(m, scope);
+    });
+    if (missing.length > 0) {
+      throw new DomainError(
+        'memory_not_found',
+        `memory.merge: ${missing.join(', ')} not found in this scope`,
+        { ids: missing },
+      );
+    }
+    const originals = ids.map((id) => byId.get(id) as Memory);
+    const retired = originals.filter((m) => m.status !== 'active');
+    if (retired.length > 0) {
+      throw new DomainError(
+        'conflict',
+        `memory.merge: only active memories can be merged; ${retired
+          .map((m) => `${m.id} is '${m.status}'`)
+          .join(', ')}`,
+        { ids: retired.map((m) => m.id) },
+      );
+    }
+
+    const heldKeys = [
+      ...new Set(originals.flatMap((m) => (m.topicKey === null ? [] : [m.topicKey]))),
+    ];
+    let topicKey = fields.topicKey;
+    if (topicKey === null) {
+      if (heldKeys.length > 1) {
+        throw new DomainError(
+          'conflict',
+          `memory.merge: the originals hold different topic_keys (${heldKeys.join(', ')}); ` +
+            'name the one the merged memory keeps in topic_key',
+          { topicKeys: heldKeys },
+        );
+      }
+      topicKey = heldKeys[0] ?? null;
+    } else {
+      const occupant = this.repos.memory.findActiveByTopicKey({
+        projectId: scope.projectId,
+        topicKey,
+      });
+      if (occupant && !ids.includes(occupant.id)) {
+        throw new DomainError(
+          'conflict',
+          `memory.merge: topic_key '${topicKey}' is held by active memory ${occupant.id}, which ` +
+            'is not in ids; add it to ids to merge it too, or choose another topic_key',
+          { occupiedBy: occupant.id },
+        );
+      }
+    }
+
+    const successor: MergeSuccessorView = {
+      type: input.type,
+      title: fields.title,
+      content: fields.content,
+      tags: fields.tags,
+      topicKey,
+      replaces: ids,
+    };
+    const reviews = this.reviewStateForMemories(originals);
+    const warnings = this.mergeWarnings(originals, successor, reviews);
+    return {
+      originals: originals.map((m) => toOriginalView(m, reviews.get(m.id)?.reviewState ?? null)),
+      successor,
+      warnings,
+      fingerprint: mergeFingerprint(originals, successor, warnings),
+    };
+  }
+
+  private mergeWarnings(
+    originals: readonly Memory[],
+    successor: MergeSuccessorView,
+    reviews: ReturnType<MemoryService['reviewStateForMemories']>,
+  ): MergeWarning[] {
+    const warnings: MergeWarning[] = [];
+    const dropped = originals.filter(
+      (m) => m.topicKey !== null && m.topicKey !== successor.topicKey,
+    );
+    if (dropped.length > 0) {
+      warnings.push({
+        code: 'topic_keys_dropped',
+        ids: dropped.map((m) => m.id),
+        message: `the merged memory does not keep topic_key ${[
+          ...new Set(dropped.map((m) => `'${m.topicKey}'`)),
+        ].join(', ')}`,
+      });
+    }
+    const stale = originals.filter((m) => reviews.get(m.id)?.reviewState === 'needs_review');
+    if (stale.length > 0) {
+      warnings.push({
+        code: 'needs_review',
+        ids: stale.map((m) => m.id),
+        message: 'these originals are past their re-verification date; check they still hold',
+      });
+    }
+    const ids = new Set(successor.replaces);
+    const pending = this.repos.relations
+      .listTouchingAny(successor.replaces)
+      .filter((r) => r.status === 'pending');
+    if (pending.length > 0) {
+      const touched = [
+        ...new Set(pending.flatMap((r) => [r.sourceId, r.targetId]).filter((id) => ids.has(id))),
+      ];
+      warnings.push({
+        code: 'pending_judgments',
+        ids: touched,
+        message: `${pending.length} pending judgment(s) touch these originals; they stay pending`,
+      });
+    }
+    const retyped = originals.filter((m) => m.type !== successor.type);
+    if (retyped.length > 0) {
+      warnings.push({
+        code: 'type_changed',
+        ids: retyped.map((m) => m.id),
+        message: `these originals are not of type '${successor.type}'`,
+      });
+    }
+    return warnings;
+  }
+
   private journalMaintenanceOp(
     ts: Date,
     op: {
       opType: ConsolidationOpType;
       affectedIds: string[];
+      createdId?: string;
       reasoning: string;
       summary: Record<string, unknown>;
     },
-  ): void {
+  ): string {
     const runId = ulid(ts.getTime());
     this.repos.consolidation.insertRun({
       id: runId,
@@ -567,15 +740,17 @@ export class MemoryService {
       scope: 'maintenance',
       summary: JSON.stringify(op.summary),
     });
+    const opId = ulid(ts.getTime());
     this.repos.consolidation.insertOp({
-      id: ulid(ts.getTime()),
+      id: opId,
       runId,
       opType: op.opType,
       affectedIds: op.affectedIds,
-      createdId: null,
+      createdId: op.createdId ?? null,
       reasoning: op.reasoning,
       appliedAt: ts,
     });
+    return opId;
   }
 
   countPurgeableDisconnectedArchived(): number {
@@ -688,16 +863,62 @@ function withRedactedReason(opts: ConfirmOptions, redactions: RedactionTally): C
 
 const TOPIC_KEY_MAX_CHARS = 128;
 
-function normalizeTopicKey(input: string | null | undefined): string | null {
+export function validateSaveFields(
+  input: Pick<SaveMemoryInput, 'title' | 'content' | 'tags' | 'topicKey'>,
+  op: string,
+  redactions: RedactionTally,
+): { title: string; content: string; tags: string[]; topicKey: string | null } {
+  if (input.content.trim().length === 0) {
+    throw new DomainError('invalid_input', `${op}: content must be non-empty`);
+  }
+  assertNoNul(op, 'content', input.content);
+  const { title } = input;
+  if (title.trim().length === 0 || title.length > TITLE_MAX_CHARS) {
+    throw new DomainError(
+      'invalid_input',
+      `${op}: title must be 1..${TITLE_MAX_CHARS} non-blank chars`,
+    );
+  }
+  assertNoNul(op, 'title', title);
+  const tags = normalizeTags(input.tags ?? [], op, redactions);
+  const topicKey = normalizeTopicKey(input.topicKey, op);
+  return {
+    title: redactions.redactWithin(title, TITLE_MAX_CHARS),
+    content: redactions.redact(input.content),
+    tags,
+    topicKey: topicKey === null ? null : redactions.redactWithin(topicKey, TOPIC_KEY_MAX_CHARS),
+  };
+}
+
+function normalizeTags(tags: readonly string[], op: string, redactions: RedactionTally): string[] {
+  return [
+    ...new Set(
+      tags.map((sent) => {
+        assertNoNul(op, 'tags', sent);
+        const tag = redactions.redact(sent);
+        const normalized = slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), {
+          lower: true,
+          strict: true,
+        });
+        if (normalized.length === 0) {
+          throw new DomainError('invalid_input', `${op}: tags must contain letters or numbers`);
+        }
+        return normalized;
+      }),
+    ),
+  ];
+}
+
+function normalizeTopicKey(input: string | null | undefined, op: string): string | null {
   if (input == null) return null;
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
   if (trimmed.length > TOPIC_KEY_MAX_CHARS) {
     throw new DomainError(
       'invalid_input',
-      `memory.save: topic_key exceeds ${TOPIC_KEY_MAX_CHARS} characters`,
+      `${op}: topic_key exceeds ${TOPIC_KEY_MAX_CHARS} characters`,
     );
   }
-  assertNoNul('memory.save', 'topic_key', trimmed);
+  assertNoNul(op, 'topic_key', trimmed);
   return trimmed;
 }

@@ -4,7 +4,7 @@
 
 The server SHALL run the secret scanner (`redactSecrets`, `packages/core/src/services/secret-redaction.ts`) inside the service layer, after the existing validation of the value as sent and before the repository write, on every agent- or client-supplied text field it persists:
 
-- `MemoryService.saveWithTopicKey`: `title`, `content`, each tag (before slug normalization) and `topic_key`;
+- `MemoryService.saveWithTopicKey`, and `previewMerge` / `commitMerge` for the merged successor (both go through `validateSaveFields`): `title`, `content`, each tag (before slug normalization) and `topic_key`;
 - `MemoryService.confirm` / `confirmMany`: the confirmation `reason`, for both verdicts;
 - `AgentSessionsService.start` / `ensure`: `agent` and `description`; `writeSummary` / `end`: `summary` and `title`; `reportTurn`: `title`;
 - `PromptsService.save`: `content`, `title` and each tag;
@@ -81,7 +81,7 @@ A matched span SHALL be replaced with `[REDACTED:<kind>]`. For `url_password`, `
 
 ### Requirement: The write MUST succeed and report what was redacted
 
-A redaction SHALL NOT fail the write. The MCP write tools (`memory.save`, `memory.capture_passive`, `memory.confirm_batch`, `memory.save_prompt`, `memory.compare`, `memory.session_start`, `memory.session_summary`) SHALL add `redactions: { kind, count }[]` to their response when at least one span was replaced in a value the write stored, aggregated over the call, with kinds in detector order — a `memory.session_summary` discarded as `terminal_final` stores nothing and SHALL report nothing; `memory.judge_batch` SHALL add it to each result item whose judgment was redacted. A response with nothing redacted SHALL be identical to the response without this requirement. The tools' output schemas SHALL declare the field as optional.
+A redaction SHALL NOT fail the write. The MCP write tools (`memory.save`, `memory.capture_passive`, `memory.confirm_batch`, `memory.save_prompt`, `memory.compare`, `memory.session_start`, `memory.session_summary`, and `memory.merge` for both its preview and its confirmed merge) SHALL add `redactions: { kind, count }[]` to their response when at least one span was replaced in a value the write stored, aggregated over the call, with kinds in detector order — a `memory.session_summary` discarded as `terminal_final` stores nothing and SHALL report nothing; `memory.judge_batch` SHALL add it to each result item whose judgment was redacted. A response with nothing redacted SHALL be identical to the response without this requirement. The tools' output schemas SHALL declare the field as optional.
 
 #### Scenario: memory.save reports its redactions
 
