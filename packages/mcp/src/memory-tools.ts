@@ -17,6 +17,7 @@ import {
   type RelationsService,
 } from '@rembric/core';
 import { findSaveTimeCandidates, type CandidateOptions } from '@rembric/core';
+import { RedactionTally } from '@rembric/core';
 import { getRequestContext, tryGetRequestContext } from '@rembric/core';
 import type { PromptsService } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
@@ -48,6 +49,7 @@ import {
   snippet,
 } from './_shared.js';
 import { errToMcp, isDomainError, itemError, mcpError, type ErrorReportingDeps } from './errors.js';
+import { redactionsField, redactionsOutput } from './redactions.js';
 import { batchResult, ok } from './result.js';
 
 /** An entry carries two snippets and two titles, ~2x a recentMemories row, so 50 costs about what `memories: 100` does. */
@@ -341,6 +343,7 @@ export const memorySaveOutput = {
   judgmentRequired: z.boolean(),
   /** Pre-cap detection count. Truncation is `candidatesDetected > candidates.length`. */
   candidatesDetected: z.number(),
+  redactions: redactionsOutput,
 };
 
 const expandedMemoryRow = memoryRow.extend({
@@ -423,6 +426,7 @@ export const memoryConfirmOutput = {
   confirmed: z.number(),
   /** True when resolving the supersedes-chain head stopped at its hop cap. */
   headTruncated: z.boolean().optional(),
+  redactions: redactionsOutput,
 };
 
 export const memoryArchiveOutput = {
@@ -634,13 +638,18 @@ export async function saveMemoryWithCandidates(
   deps: SaveWithCandidatesDeps,
   input: SaveMemoryInput,
   scope: Scope,
+  redactions: RedactionTally = new RedactionTally(),
 ): Promise<{
   memory: Awaited<ReturnType<MemoryService['save']>>;
   supersededByTopicKey: Awaited<ReturnType<MemoryService['save']>> | null;
   candidates: SaveTimeCandidateView[];
   candidatesDetected: number;
 }> {
-  const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(input, scope);
+  const { memory: m, supersededByTopicKey } = deps.memory.saveWithTopicKey(
+    input,
+    scope,
+    redactions,
+  );
 
   const extractedEntities: ExtractedEntity[] = extractEntities(m.title, m.content);
 
@@ -728,11 +737,12 @@ async function handleSave(
   try {
     if (activeProject) deps.projects.assertWritable(activeProject.id);
 
+    const redactions = new RedactionTally();
     const {
       memory: m,
       candidates,
       candidatesDetected,
-    } = await saveMemoryWithCandidates(deps, input, scope);
+    } = await saveMemoryWithCandidates(deps, input, scope, redactions);
 
     return ok({
       id: m.id,
@@ -741,6 +751,7 @@ async function handleSave(
       candidates,
       judgmentRequired: candidates.length > 0,
       candidatesDetected,
+      ...redactionsField(redactions),
     });
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
@@ -1027,13 +1038,24 @@ async function handleConfirm(
     const { scope } = await resolveEffectiveScope(deps);
     assertAuthorized('write', scope, deps);
     const sessionId = resolveActiveSessionId(deps, scope.projectId, args.sessionId) ?? undefined;
-    const { confirmed, headTruncated } = deps.memory.confirmMany(args.ids, scope, {
-      source: { tokenName: ctx.token.name },
-      sessionId,
-      verdict: args.verdict,
-      reason: args.reason,
+    const redactions = new RedactionTally();
+    const { confirmed, headTruncated } = deps.memory.confirmMany(
+      args.ids,
+      scope,
+      {
+        source: { tokenName: ctx.token.name },
+        sessionId,
+        verdict: args.verdict,
+        reason: args.reason,
+      },
+      redactions,
+    );
+    return ok({
+      ok: true,
+      confirmed,
+      ...(headTruncated ? { headTruncated } : {}),
+      ...redactionsField(redactions),
     });
-    return ok({ ok: true, confirmed, ...(headTruncated ? { headTruncated } : {}) });
   } catch (err) {
     if (isDomainError(err) && err.code === 'memory_not_found')
       return mcpError('not_found', 'memory not found');

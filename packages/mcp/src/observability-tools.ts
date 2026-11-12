@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { deriveTitle, type MemoryService } from '@rembric/core';
+import { deriveTitle, type MemoryService, RedactionTally } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
 import type { DoctorReport } from '@rembric/core';
@@ -24,6 +24,7 @@ import {
   saveMemoryWithCandidates,
   type SaveTimeCandidateView,
 } from './memory-tools.js';
+import { redactionsField, redactionsOutput } from './redactions.js';
 import { ok } from './result.js';
 
 export { parseRunSummary } from '@rembric/core';
@@ -80,6 +81,7 @@ export const capturePassiveOutput = {
   reason: z.string().optional(),
   /** Summed over the saves this capture performed; 0 when it extracted nothing. */
   candidatesDetected: z.number(),
+  redactions: redactionsOutput,
 };
 
 export interface ObservabilityToolDeps extends ErrorReportingDeps {
@@ -164,6 +166,7 @@ async function handleCapturePassive(
   }
   const ids: string[] = [];
   const candidates: SaveTimeCandidateView[] = [];
+  const redactions = new RedactionTally();
   let candidatesDetected = 0;
   try {
     for (const content of items) {
@@ -178,6 +181,7 @@ async function handleCapturePassive(
           sessionId: explicitSession,
         },
         scope,
+        redactions,
       );
       ids.push(saved.memory.id);
       candidates.push(...saved.candidates);
@@ -191,6 +195,7 @@ async function handleCapturePassive(
     ids,
     ...(candidates.length > 0 ? { candidates } : {}),
     candidatesDetected,
+    ...redactionsField(redactions),
   });
 }
 

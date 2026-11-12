@@ -29,7 +29,7 @@
 
 ## Supported agents
 
-Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. **Pi** ships no MCP client of its own, so its extension speaks MCP directly and discovers the tool surface at runtime — see [docs/agents.md](./docs/agents.md#pi-npm-package). **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
+Rembric works with any agent that speaks MCP or HTTP. First-class plugins handle session lifecycle + per-project path-scoping automatically, and redact `<private>…</private>` spans client-side before any transcript-derived text is uploaded (see [docs/agents.md](./docs/agents.md#private-content-redaction-private-tags)); everything else gets the same memory tools via a plain MCP URL. Whatever the client, the server stores credential-shaped text (API keys, tokens, private keys, passwords) as `[REDACTED:<kind>]` — see [docs/agents.md](./docs/agents.md#server-side-secret-redaction). **Pi** ships no MCP client of its own, so its extension speaks MCP directly and discovers the tool surface at runtime — see [docs/agents.md](./docs/agents.md#pi-npm-package). **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no static token) — see [docs/agents.md](./docs/agents.md#chatgpt-custom-mcp-connector-over-oauth).
 
 <table>
   <tr>

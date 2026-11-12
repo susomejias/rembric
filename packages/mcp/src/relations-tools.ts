@@ -1,5 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { type DomainError, type RelationsService, type RelationView } from '@rembric/core';
+import {
+  type DomainError,
+  RedactionTally,
+  type RelationsService,
+  type RelationView,
+} from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { SessionRouter } from '@rembric/core';
@@ -8,6 +13,7 @@ import { z } from 'zod';
 
 import { requireScope } from './_shared.js';
 import { errToMcp, isDomainError, itemError, mcpError, type ErrorReportingDeps } from './errors.js';
+import { redactionsField, redactionsOutput } from './redactions.js';
 import { batchResult, ok } from './result.js';
 import { suggestTopicKey, topicKeyPrefix } from './topic-key.js';
 
@@ -85,6 +91,7 @@ export const judgeOutput = {
       relation: z.string().optional(),
       status: z.string().optional(),
       judgedAt: z.string().optional(),
+      redactions: redactionsOutput,
       code: z.string().optional(),
       message: z.string().optional(),
       errorId: z.string().optional(),
@@ -97,6 +104,7 @@ export const compareOutput = {
   judgmentId: z.string(),
   relation: z.string(),
   status: z.string(),
+  redactions: redactionsOutput,
 };
 
 export interface RelationsToolDeps extends ErrorReportingDeps {
@@ -178,20 +186,27 @@ async function handleJudge(
   }
   const results = args.judgments.map((j) => {
     try {
-      const row = deps.relations.judgeInScope(j.judgmentId, scope, {
-        relation: j.relation,
-        reason: j.reason,
-        confidence: j.confidence,
-        evidence: j.evidence,
-        actor: ctx.token.name,
-        kind: 'agent',
-      });
+      const redactions = new RedactionTally();
+      const row = deps.relations.judgeInScope(
+        j.judgmentId,
+        scope,
+        {
+          relation: j.relation,
+          reason: j.reason,
+          confidence: j.confidence,
+          evidence: j.evidence,
+          actor: ctx.token.name,
+          kind: 'agent',
+        },
+        redactions,
+      );
       return {
         ok: true as const,
         judgmentId: row.judgmentId,
         relation: row.relation,
         status: row.status,
         judgedAt: row.judgedAt,
+        ...redactionsField(redactions),
       };
     } catch (err) {
       return {
@@ -231,6 +246,7 @@ async function handleCompare(
     return errToMcp(err, deps.logInternalError);
   }
   try {
+    const redactions = new RedactionTally();
     const row = deps.relations.compareInScope(
       {
         sourceId: args.memoryIdA,
@@ -243,12 +259,14 @@ async function handleCompare(
         kind: 'agent',
       },
       scope,
+      redactions,
     );
     return ok({
       ok: true,
       judgmentId: row.judgmentId,
       relation: row.relation,
       status: row.status,
+      ...redactionsField(redactions),
     });
   } catch (err) {
     if (isDomainError(err)) {

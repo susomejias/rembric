@@ -1598,10 +1598,10 @@ describe('MCP protocol conformance', () => {
     it.each([
       ['memory.context', 1444],
       ['memory.search_prompts', 428],
-      ['memory.session_start', 977],
+      ['memory.session_start', 1103],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1654],
+      ['memory.save', 1780],
       ['memory.stats', 242],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);

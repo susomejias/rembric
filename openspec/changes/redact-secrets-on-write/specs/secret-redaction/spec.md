@@ -89,12 +89,13 @@ Validation SHALL run on the value as sent, so every published length contract is
 
 ### Requirement: Write tool descriptions MUST state the behaviour in one line
 
-Each MCP tool listed in "The write MUST succeed and report what was redacted", and `memory.judge_batch`, SHALL carry one line stating that credential-shaped text is stored as `[REDACTED:<kind>]` and reported in `redactions`, and every description SHALL stay within `DESCRIPTION_MAX_LENGTH`.
+Each MCP tool listed in "The write MUST succeed and report what was redacted", and `memory.judge_batch`, SHALL carry one line stating that credential-shaped text is stored as `[REDACTED:<kind>]` and reported in `redactions`, and every description SHALL stay within `DESCRIPTION_MAX_LENGTH`. `memory.session_summary`'s description already sits within 32 characters of the ceiling and its wording is pinned by other requirements, so its line SHALL instead be the description of its `summary` argument, which `tools/list` returns with the tool; its description text SHALL be unchanged.
 
 #### Scenario: Descriptions carry the line within the ceiling
 
 - **WHEN** `tools/list` is read over the real transport
-- **THEN** each of those tools' descriptions SHALL contain `[REDACTED:` and be at most `DESCRIPTION_MAX_LENGTH` characters
+- **THEN** each of those tools' descriptions — for `memory.session_summary`, its `summary` argument's description — SHALL contain `[REDACTED:<kind>]`
+- **AND** every one of those descriptions SHALL be at most `DESCRIPTION_MAX_LENGTH` characters
 
 ### Requirement: Every persisted text column MUST be classified and the redacted ones proven
 

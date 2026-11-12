@@ -537,6 +537,14 @@ The proactive-save protocol embedded in `initialize.instructions` already tells 
 
 All five bundled plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi) redact `<private>…</private>` spans to `[REDACTED]` in every transcript-derived upload — session summaries, pre/post-compact snapshots, and derived titles — **before the payload leaves the client**. Matching is case-insensitive and spans newlines; each span closes at the first `</private>`, and an unclosed `<private>` redacts through end-of-text (fail closed). The server never sees the marked content and does not strip the tags itself, so clients connecting without a bundled plugin do not get this redaction.
 
+## Server-side secret redaction
+
+Independently of `<private>` tags, and for every client — bundled plugin, plain MCP URL or a script calling `/api` — the server replaces credential-shaped text with a typed placeholder before it stores anything: memory titles, content, tags and `topic_key`; confirmation reasons; prompt content, titles and tags; judgment reasons and evidence; and session agent names, descriptions, titles and summaries. `GITHUB_TOKEN=ghp_…` is stored as `GITHUB_TOKEN=[REDACTED:github_token]`, and `postgres://app:s3cret@db/x` as `postgres://app:[REDACTED:url_password]@db/x`. The placeholder is what the full-text index, the entity index and the embedding see.
+
+Detection is deterministic: a closed list of high-precision patterns, with no entropy heuristics. It covers provider-prefixed tokens (GitHub, GitLab, Anthropic, OpenAI, AWS access key ids, Slack, Stripe secret keys, Google API keys, npm, Hugging Face), PEM private keys, JWTs, `Authorization:` header credentials, passwords in URLs, and values assigned to credential-named keys (`DB_PASSWORD=…`, `--token=…`, `?access_token=…`, `"apiKey": "…"`). Placeholders and references such as `$GITHUB_TOKEN`, `${API_KEY}`, `<token>` or `sk-...` are left alone.
+
+The write still succeeds. MCP write tools add `redactions: [{ kind, count }]` to their response whenever they replaced something (`memory.judge_batch` adds it to each result). Rows written before this feature are not rewritten.
+
 ## Verifying
 
 After registering, ask the agent to list its tools — you should see the `memory.*` and `project.*` families. Save a test memory, then check `/dashboard/memories` for the row.

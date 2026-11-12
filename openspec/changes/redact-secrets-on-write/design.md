@@ -65,6 +65,8 @@ A placeholder can be longer than the span it replaces (an 8-character `assigned_
 
 Each service write method takes an optional `RedactionTally` collector as its last parameter; redaction is unconditional, the tally only records it, so a caller that omits it loses the report and never the protection. MCP write handlers pass a tally and add `redactions: { kind, count }[]` (kinds in the D2 order) to their response when it is non-empty; `memory.judge_batch` reports per result item, because each judgment carries its own reason. Responses with nothing redacted are byte-identical to today. HTTP session routes redact through the same services; their bodies do not change because no model reads them.
 
+Each write tool's description gains one line (`REDACTION_NOTE`, 125 characters). `memory.session_summary` is the exception: its description measured 1868 of the 1900-character `DESCRIPTION_MAX_LENGTH`, and with the line it measured 1994. Its wording is pinned phrase by phrase by other requirements and tests, so instead of condensing that prose (or raising the ceiling, which issue #447 rules out) the line becomes the description of its `summary` argument. `tools/list` returns that argument description with the tool, and the tool's response already echoes the stored, redacted `summary` and `title`.
+
 ### D6 — Coverage invariant: classification plus a real-boundary sweep
 
 A grep cannot prove that a value went through the scanner, so the invariant has two halves that only pass together:
