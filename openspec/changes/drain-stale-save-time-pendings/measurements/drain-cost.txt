@@ -1,0 +1,203 @@
+# stale pending drain — cost, rules v3 (stored links + re-extraction, retired endpoints drained, size bound, undo final)
+CAVEAT: vectors are deterministic pseudo-random unit vectors, NOT embeddings — no retrieval-quality, ranking, fusion or abstention claim may be drawn from this corpus (use `pnpm run eval`). The vocabulary is tiny, so lexical overlap is high and the keep/drain mix says nothing about correctness: this file measures cost only.
+model inference: excluded by construction — the drain only reads vectors already in memory_vec (fixture-drain no-embedder phase proves it) and no embedder is loaded in this process.
+corpus: pnpm run corpus:build generator (buildCorpus, seed 1) with --relations R; it writes R relations between random pairs of one scope slot (i % 6), 25% left pending, 5% orphaned, 70% judged. The drain is measured on scope vol-shared.
+settings: createDb defaults (WAL, synchronous NORMAL, 64 MB page cache, 256 MB mmap); every measurement runs on a copy-on-write clone of the built database, so each series starts from the same state.
+node v22.23.0, darwin/arm64; scratch /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY
+
+## 1000 memories, backlog ~600 (R = 14400)
+scope vol-shared: 167 memories, 625 pending; all scopes: judged 10271, orphaned 698, pending 3633; db 35.1 MB; build reused
+selection read, judgment_id order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.293  B=200 0.389  B=500 0.622  B=1000 0.636 ms
+  plan: SEARCH ms USING COVERING INDEX memory_scope_project_created_id_idx (scope=? AND project_id=?) | SEARCH r USING INDEX memory_relations_source_status_idx (source_id=? AND status=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR ORDER BY
+selection read, created_at order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.152  B=200 0.512  B=500 1.252  B=1000 1.573 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+control: both orders return identical batches over 40 consecutive cursor steps of 173 rows (wrapping): PASS
+drain runs, judgment_id order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50    13     12.3     14.7     16.4    0.239      20.7           19.1
+    200     4     42.2     47.9     47.9    0.212      48.7           56.5
+    500     2     53.9    111.8    111.8    0.224     110.6          134.7
+   1000     1    139.8    139.8    139.8      NaN     136.3          162.9
+drain runs, created_at order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50    13     10.4     13.6     15.3    0.223      11.7           18.4
+    200     4     41.9     46.1     46.1    0.210      45.9           55.5
+    500     2     54.0    110.4    110.4    0.221     108.4          132.5
+   1000     1    138.5    138.5    138.5      NaN     140.6          166.1
+control: every B and both orders drain the identical set of 421 rows: PASS
+
+## 1000 memories, backlog ~5000 (R = 120000)
+scope vol-shared: 167 memories, 4959 pending; all scopes: judged 84219, orphaned 5966, pending 30017; db 78.7 MB; build reused
+selection read, judgment_id order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 7.310  B=200 7.647  B=500 8.129  B=1000 8.962 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR ORDER BY
+selection read, created_at order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.169  B=200 0.543  B=500 1.304  B=1000 2.669 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+control: both orders return identical batches over 40 consecutive cursor steps of 173 rows (wrapping): PASS
+drain runs, judgment_id order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50   100     19.7     24.7     29.2    0.391      24.2           30.9
+    200    25     60.4     66.6     72.3    0.307      60.2           83.5
+    500    10    125.4    126.9    132.0    0.250     147.6          195.5
+   1000     5    239.4    243.4    243.4    0.240     259.4          297.5
+drain runs, created_at order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50   100     10.6     16.6     19.1    0.248      12.0           20.3
+    200    25     47.7     52.6     53.2    0.243      49.7           61.7
+    500    10    117.3    124.5    126.8    0.240     117.6          144.2
+   1000     5    237.3    243.8    243.8    0.237     230.0          286.9
+control: every B and both orders drain the identical set of 3330 rows: PASS
+batching, judgment_id order, B = 1000, time budget 50 ms (instrument: wall clock of one drain run): 30 runs for one pass over 4959 rows; stops budget 30
+  examined per run min/median/max 145/172/212; run ms median 50.2, WORST SINGLE RUN 55.3 ms
+  first runs: 150@51.9ms/budget, 167@50.4ms/budget, 181@50.0ms/budget, 173@50.1ms/budget … last: 145@50.8ms/budget, 212@50.1ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3330 rows): PASS
+batching, created_at order, B = 1000, time budget 50 ms (instrument: wall clock of one drain run): 26 runs for one pass over 4959 rows; stops budget 26
+  examined per run min/median/max 173/202/257; run ms median 50.1, WORST SINGLE RUN 55.2 ms
+  first runs: 184@50.1ms/budget, 216@50.1ms/budget, 194@50.1ms/budget, 215@50.1ms/budget … last: 207@50.2ms/budget, 257@50.2ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3330 rows): PASS
+batching, judgment_id order, B = 200, time budget 50 ms (instrument: wall clock of one drain run): 29 runs for one pass over 4959 rows; stops budget 26, cap 3
+  examined per run min/median/max 148/176/200; run ms median 50.1, WORST SINGLE RUN 54.6 ms
+  first runs: 150@50.7ms/budget, 171@50.0ms/budget, 179@50.2ms/budget, 148@50.1ms/budget … last: 200@47.0ms/cap, 200@45.7ms/cap
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3330 rows): PASS
+sweep callback, 2 scopes, judgment_id order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 90.8 ms, max 95.9 ms, pairs examined per callback 300
+sweep callback, 2 scopes, judgment_id order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 57.3 ms, max 59.5 ms, pairs examined per callback 151
+sweep callback, 6 scopes, judgment_id order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 278.2 ms, max 280.5 ms, pairs examined per callback 900
+sweep callback, 6 scopes, judgment_id order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 103.4 ms, max 110.2 ms, pairs examined per callback 155
+sweep callback, 2 scopes, created_at order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 71.4 ms, max 74.2 ms, pairs examined per callback 300
+sweep callback, 2 scopes, created_at order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 50.1 ms, max 52.8 ms, pairs examined per callback 204
+sweep callback, 6 scopes, created_at order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 215.5 ms, max 224.5 ms, pairs examined per callback 900
+sweep callback, 6 scopes, created_at order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 52.8 ms, max 58.0 ms, pairs examined per callback 217
+per-step cost (instrument: wall clock per call, warm, mean over 2000 pairs; write over 500): read both rows 0.013 ms, lexical 0.050 ms, pairwise cosine read 0.012 ms, stored entity read 0.047 ms, re-extraction of both endpoints 0.081 ms, orphan+journal transaction 0.137 ms
+
+## 20000 memories, backlog ~600 (R = 14400)
+scope vol-shared: 3334 memories, 625 pending; all scopes: judged 14071, orphaned 698, pending 3633; db 270.0 MB; build reused
+selection read, judgment_id order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 1.241  B=200 1.640  B=500 2.395  B=1000 2.418 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR ORDER BY
+selection read, created_at order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.189  B=200 0.657  B=500 1.688  B=1000 2.114 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+control: both orders return identical batches over 40 consecutive cursor steps of 173 rows (wrapping): PASS
+drain runs, judgment_id order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50    13     12.0     16.4     17.1    0.266      14.2           19.1
+    200     4     48.2     56.2     56.2    0.247      51.7           61.2
+    500     2     63.4    120.7    120.7    0.241     120.8          145.7
+   1000     1    150.2    150.2    150.2      NaN     151.2          179.8
+drain runs, created_at order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50    13     11.3     15.6     15.6    0.243      11.5           17.9
+    200     4     46.6     53.1     53.1    0.238      48.7           60.8
+    500     2     63.5    119.0    119.0    0.238     123.0          145.8
+   1000     1    150.4    150.4    150.4      NaN     154.4          182.0
+control: every B and both orders drain the identical set of 427 rows: PASS
+
+## 20000 memories, backlog ~5000 (R = 120000)
+scope vol-shared: 3334 memories, 4959 pending; all scopes: judged 88019, orphaned 5966, pending 30017; db 313.6 MB; build reused
+selection read, judgment_id order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 9.685  B=200 10.240  B=500 11.100  B=1000 12.309 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR ORDER BY
+selection read, created_at order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.228  B=200 0.744  B=500 1.758  B=1000 3.550 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+control: both orders return identical batches over 40 consecutive cursor steps of 173 rows (wrapping): PASS
+drain runs, judgment_id order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50   100     22.9     30.4     34.6    0.461      34.0           38.0
+    200    25     62.4     68.4     73.5    0.310      73.9           83.9
+    500    10    138.7    143.1    144.8    0.277     156.2          175.1
+   1000     5    265.6    278.2    278.2    0.267     278.0          330.1
+drain runs, created_at order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50   100     11.7     18.2     19.6    0.272      11.8           20.8
+    200    25     50.2     57.0     58.8    0.259      52.4           66.7
+    500    10    128.8    133.2    133.2    0.258     130.1          162.6
+   1000     5    256.5    261.4    261.4    0.256     253.6          322.2
+control: every B and both orders drain the identical set of 3414 rows: PASS
+batching, judgment_id order, B = 1000, time budget 50 ms (instrument: wall clock of one drain run): 35 runs for one pass over 4959 rows; stops budget 35
+  examined per run min/median/max 93/148/175; run ms median 50.1, WORST SINGLE RUN 55.4 ms
+  first runs: 147@50.0ms/budget, 124@50.1ms/budget, 138@50.2ms/budget, 125@50.1ms/budget … last: 151@55.0ms/budget, 175@50.1ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3414 rows): PASS
+batching, created_at order, B = 1000, time budget 50 ms (instrument: wall clock of one drain run): 28 runs for one pass over 4959 rows; stops budget 28
+  examined per run min/median/max 151/181/199; run ms median 50.2, WORST SINGLE RUN 56.6 ms
+  first runs: 171@50.0ms/budget, 190@50.1ms/budget, 179@50.2ms/budget, 184@50.1ms/budget … last: 164@50.2ms/budget, 181@50.0ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3414 rows): PASS
+batching, judgment_id order, B = 200, time budget 50 ms (instrument: wall clock of one drain run): 33 runs for one pass over 4959 rows; stops budget 33
+  examined per run min/median/max 122/150/186; run ms median 50.1, WORST SINGLE RUN 55.1 ms
+  first runs: 147@50.1ms/budget, 124@50.1ms/budget, 133@50.1ms/budget, 122@50.1ms/budget … last: 186@50.2ms/budget, 133@50.1ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3414 rows): PASS
+sweep callback, 2 scopes, judgment_id order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 100.3 ms, max 107.2 ms, pairs examined per callback 271
+sweep callback, 2 scopes, judgment_id order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 68.5 ms, max 69.4 ms, pairs examined per callback 136
+sweep callback, 6 scopes, judgment_id order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 299.1 ms, max 307.2 ms, pairs examined per callback 804
+sweep callback, 6 scopes, judgment_id order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 135.0 ms, max 137.3 ms, pairs examined per callback 140
+sweep callback, 2 scopes, created_at order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 77.3 ms, max 81.2 ms, pairs examined per callback 300
+sweep callback, 2 scopes, created_at order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 50.3 ms, max 56.6 ms, pairs examined per callback 198
+sweep callback, 6 scopes, created_at order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 234.6 ms, max 238.1 ms, pairs examined per callback 900
+sweep callback, 6 scopes, created_at order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 53.8 ms, max 56.6 ms, pairs examined per callback 193
+per-step cost (instrument: wall clock per call, warm, mean over 2000 pairs; write over 500): read both rows 0.013 ms, lexical 0.050 ms, pairwise cosine read 0.020 ms, stored entity read 0.051 ms, re-extraction of both endpoints 0.082 ms, orphan+journal transaction 0.148 ms
+
+## 50000 memories, backlog ~600 (R = 14400)
+scope vol-shared: 8334 memories, 625 pending; all scopes: judged 20071, orphaned 698, pending 3633; db 639.0 MB; build reused
+selection read, judgment_id order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 1.383  B=200 1.973  B=500 2.679  B=1000 2.766 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR ORDER BY
+selection read, created_at order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.204  B=200 0.760  B=500 1.925  B=1000 2.442 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+control: both orders return identical batches over 40 consecutive cursor steps of 173 rows (wrapping): PASS
+drain runs, judgment_id order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50    13     13.4     17.9     18.4    0.289      43.7           22.0
+    200     4     52.4     54.6     54.6    0.255      91.8           67.8
+    500     2     65.7    128.5    128.5    0.257     135.6          149.6
+   1000     1    162.7    162.7    162.7      NaN     165.1          192.9
+drain runs, created_at order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50    13     12.1     16.6     18.1    0.263      15.8           19.5
+    200     4     51.3     53.6     53.6    0.250      55.8           71.5
+    500     2     66.6    131.0    131.0    0.262     133.7          159.9
+   1000     1    161.5    161.5    161.5      NaN     165.8          192.3
+control: every B and both orders drain the identical set of 443 rows: PASS
+
+## 50000 memories, backlog ~5000 (R = 120000)
+scope vol-shared: 8334 memories, 4959 pending; all scopes: judged 94019, orphaned 5966, pending 30017; db 683.6 MB; build reused
+selection read, judgment_id order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 13.409  B=200 13.159  B=500 14.865  B=1000 17.577 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR ORDER BY
+selection read, created_at order (instrument: wall clock of one selection read, warm, median of 31 cursors): B=50 0.345  B=200 1.238  B=500 2.607  B=1000 4.825 ms
+  plan: SEARCH r USING INDEX memory_relations_status_created_idx (status=? AND created_at>?) | SEARCH ms USING INDEX sqlite_autoindex_memory_1 (id=?) | SEARCH mt USING INDEX sqlite_autoindex_memory_1 (id=?) | USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+control: both orders return identical batches over 40 consecutive cursor steps of 173 rows (wrapping): PASS
+drain runs, judgment_id order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50   100     34.5     45.4     51.3    0.714     174.0           59.0
+    200    25     79.8     92.0     95.9    0.401     164.8          124.5
+    500    10    163.0    180.8    223.6    0.346     311.4          209.2
+   1000     5    315.8    326.7    326.7    0.316     323.2          383.1
+drain runs, created_at order (instrument: wall clock of one drain run, performance.now, full evaluation of all channels incl. re-extraction when no stored entity is shared; warm = one untimed dry re-check of every pending pair first)
+      B  runs   median      p90      max  ms/pair  cold 1st  all-write max  (ms)
+     50   100     17.2     22.3     25.7    0.364      17.7           20.0
+    200    25     62.6     68.3     73.8    0.316      66.8           73.5
+    500    10    164.4    172.6    191.2    0.328     145.1          191.4
+   1000     5    300.3    307.7    307.7    0.299     300.1          363.2
+control: every B and both orders drain the identical set of 3307 rows: PASS
+batching, judgment_id order, B = 1000, time budget 50 ms (instrument: wall clock of one drain run): 77 runs for one pass over 4959 rows; stops budget 77
+  examined per run min/median/max 19/56/137; run ms median 50.2, WORST SINGLE RUN 55.1 ms
+  first runs: 48@50.2ms/budget, 38@50.1ms/budget, 39@50.1ms/budget, 33@50.1ms/budget … last: 39@50.2ms/budget, 42@50.2ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3307 rows): PASS
+batching, created_at order, B = 1000, time budget 50 ms (instrument: wall clock of one drain run): 38 runs for one pass over 4959 rows; stops budget 38
+  examined per run min/median/max 66/136/162; run ms median 50.2, WORST SINGLE RUN 54.5 ms
+  first runs: 140@52.0ms/budget, 139@50.1ms/budget, 135@51.3ms/budget, 143@50.2ms/budget … last: 66@50.5ms/budget, 110@50.1ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3307 rows): PASS
+batching, judgment_id order, B = 200, time budget 50 ms (instrument: wall clock of one drain run): 62 runs for one pass over 4959 rows; stops budget 62
+  examined per run min/median/max 30/74/137; run ms median 50.2, WORST SINGLE RUN 53.6 ms
+  first runs: 50@50.2ms/budget, 54@50.4ms/budget, 34@53.6ms/budget, 58@50.2ms/budget … last: 47@50.1ms/budget, 51@50.2ms/budget
+  every row examined exactly once before the cursor wrapped: PASS; drained set identical to the unbudgeted pass (3307 rows): PASS
+sweep callback, 2 scopes, judgment_id order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 100.5 ms, max 103.8 ms, pairs examined per callback 96
+sweep callback, 2 scopes, judgment_id order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 86.4 ms, max 89.1 ms, pairs examined per callback 54
+sweep callback, 6 scopes, judgment_id order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 304.6 ms, max 310.4 ms, pairs examined per callback 114
+sweep callback, 6 scopes, judgment_id order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 222.1 ms, max 229.7 ms, pairs examined per callback 62
+sweep callback, 2 scopes, created_at order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 88.6 ms, max 97.0 ms, pairs examined per callback 300
+sweep callback, 2 scopes, created_at order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 50.1 ms, max 50.8 ms, pairs examined per callback 166
+sweep callback, 6 scopes, created_at order, B = 150 per scope, 50 ms budget per scope (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 258.0 ms, max 264.6 ms, pairs examined per callback 900
+sweep callback, 6 scopes, created_at order, B = 150 per scope, one 50 ms budget shared by the call (runSweep, design D7) (instrument: wall clock of one sweep callback running the drain step for every scope in sequence; 2 untimed callbacks first, 8 timed): median 54.9 ms, max 61.8 ms, pairs examined per callback 184
+per-step cost (instrument: wall clock per call, warm, mean over 2000 pairs; write over 500): read both rows 0.014 ms, lexical 0.051 ms, pairwise cosine read 0.031 ms, stored entity read 0.056 ms, re-extraction of both endpoints 0.083 ms, orphan+journal transaction 0.145 ms
+
+## decision mix on the synthetic corpus (judgment_id order, B = 200) — context only, not a correctness result
+  1000 memories, backlog ~600: drained:drained:retired 227, drained:drained:stale 194, kept:entity 100, kept:lexical+entity 38, kept:lexical 66
+  1000 memories, backlog ~5000: drained:drained:retired 1781, drained:drained:stale 1549, kept:entity 817, kept:lexical+entity 286, kept:lexical 526
+  20000 memories, backlog ~600: drained:drained:retired 221, drained:drained:stale 206, kept:entity 87, kept:lexical+entity 36, kept:lexical 75
+  20000 memories, backlog ~5000: drained:drained:retired 1838, drained:drained:stale 1576, kept:entity 724, kept:lexical+entity 282, kept:lexical 539
+  50000 memories, backlog ~600: drained:drained:retired 248, drained:drained:stale 195, kept:entity 80, kept:lexical+entity 31, kept:lexical 71
+  50000 memories, backlog ~5000: drained:drained:retired 1736, drained:drained:stale 1571, kept:entity 766, kept:lexical+entity 300, kept:lexical 586

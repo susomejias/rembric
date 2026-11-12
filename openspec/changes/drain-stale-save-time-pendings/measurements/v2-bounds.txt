@@ -1,0 +1,45 @@
+# stale pending drain — per-pair bounds (rules v2, synthetic text)
+instrument: wall clock of one recheckPair call (performance.now), warm, median of 5 repetitions; columns split the same call into its steps
+texts: pseudo-random words; "identifiers" puts a path every 8th token so entity extraction has work; both endpoints get random vectors, so only lexical and entity work scale with size
+scratch /var/folders/9t/nx61d89j3y37qhtz675730nh0000gn/T/rembric-drain.ni9HfAQHTY/bounds
+
+body chars style       shape            rows  lexical  vector  stored  extract    TOTAL  (ms)
+      1300 prose       large->small     0.08     0.06    0.02    0.10     0.06     0.24
+      1300 prose       small->large     0.06     0.05    0.01    0.04     0.06     0.25
+      1300 prose       large->large     0.06     0.04    0.01    0.04     0.06     0.20
+     20000 prose       large->small     0.06     0.29    0.01    0.04     0.38     0.78
+     20000 prose       small->large     0.05     0.29    0.01    0.03     0.38     0.80
+     20000 prose       large->large     0.06     0.62    0.02    0.04     0.83     1.71
+     32000 prose       large->small     0.05     0.49    0.01    0.04     0.61     1.21
+     32000 prose       small->large     0.06     0.49    0.01    0.04     0.59     1.17
+     32000 prose       large->large     0.05     1.01    0.02    0.04     1.14     2.21
+    200000 prose       large->small     0.09     3.06    0.02    0.04     3.86     7.42
+    200000 prose       small->large     0.09     3.04    0.02    0.04     3.79     7.19
+    200000 prose       large->large     0.14     7.20    0.03    0.05     7.60    14.08
+   1000000 prose       large->small     0.20    18.64    0.05    0.06     3.82    23.53
+   1000000 prose       small->large     0.20    19.70    0.05    0.06     3.83    25.51
+   1000000 prose       large->large     0.33    42.99    0.08    0.08     7.62    50.06
+      1300 identifiers large->small     0.05     0.03    0.01    0.05     0.06     0.21
+      1300 identifiers small->large     0.05     0.04    0.01    0.04     0.07     0.21
+      1300 identifiers large->large     0.04     0.04    0.01    0.05     0.08     0.23
+     20000 identifiers large->small     0.05     0.32    0.02    0.19     0.56     1.17
+     20000 identifiers small->large     0.04     0.30    0.01    0.18     0.48     1.05
+     20000 identifiers large->large     0.04     0.61    0.02    0.35     0.92     2.03
+     32000 identifiers large->small     0.04     0.48    0.01    0.17     0.63     1.38
+     32000 identifiers small->large     0.04     0.47    0.01    0.17     0.63     1.37
+     32000 identifiers large->large     0.04     0.99    0.01    0.32     1.21     2.68
+    200000 identifiers large->small     0.07     3.10    0.02    0.17     2.94     6.41
+    200000 identifiers small->large     0.07     3.08    0.01    0.17     2.91     6.32
+    200000 identifiers large->large     0.10     6.53    0.02    0.32     5.82    13.66
+   1000000 identifiers large->small     0.19    19.02    0.04    0.21     3.14    22.21
+   1000000 identifiers small->large     0.19    18.43    0.04    0.20     3.09    22.53
+   1000000 identifiers large->large     0.33    38.66    0.07    0.54     6.11    41.71
+
+## size bound probe: maxContentChars = 32000 (title + content of either endpoint)
+1 MB source -> 1.3 KB target: recheck 0.16 ms (rows + vector only), decision kept (fail-safe:content-too-large)
+control (must drain): a 1.3 KB noise pair with the bound on -> drained (drained:stale)
+
+## per-run fixed read: judgment ids with a reverted drain op (instrument: wall clock of one read, median of 7)
+  consolidation_ops rows    1000: 0.05 ms (34 undone drain ids)
+  consolidation_ops rows   10000: 0.36 ms (334 undone drain ids)
+  consolidation_ops rows  100000: 3.67 ms (3334 undone drain ids)
