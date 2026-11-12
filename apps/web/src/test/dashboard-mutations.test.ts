@@ -766,6 +766,8 @@ describe('consolidation sweep and undo', () => {
       reverted: op.id,
       skipped: [],
       keptVerdicts: [],
+      alsoReverted: [],
+      keptOrphaned: [],
     });
     expect(guard.services.memory.unsafeGetById(id)?.status).toBe('active');
 

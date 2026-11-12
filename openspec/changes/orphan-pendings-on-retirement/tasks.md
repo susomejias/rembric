@@ -17,9 +17,9 @@
 
 ## 4. Undo symmetry (stored-data unit)
 
-- [ ] 4.1 Add the undo tests to `retirement.test.ts` and observe them RED: undoing an archive, a decay and a merge restores the orphaned judgments; a later verdict is kept; a judgment whose other endpoint is still retired stays orphaned and is reported; a run undo with a taken topic slot leaves the judgment orphaned; a run undo reverts every op exactly once; a `topic_key` revision's orphaning is undone on its own (design D6)
-- [ ] 4.2 Implement the linked restoration in `undoOp`, extract the `orphan_promote` undo branch, make `undoRun` leave linked ops to their retirement, and add `alsoReverted` and `keptOrphaned` to `UndoResult` and `UndoRunResult`, so the undo tests are GREEN and the existing `operations.test.ts` and `orphan-promotion.test.ts` pass unedited
-- [ ] 4.3 Add the kept-orphaned note to `apps/web/src/app/dashboard/consolidation/undo-messages.ts` with a test in `apps/web/src/test/dashboard-mutations.test.ts`
+- [x] 4.1 Add the undo tests to `retirement.test.ts` and observe them RED: undoing an archive, a decay and a merge restores the orphaned judgments; a later verdict is kept; a judgment whose other endpoint is still retired stays orphaned and is reported; a run undo with a taken topic slot leaves the judgment orphaned; a run undo reverts every op exactly once; a `topic_key` revision's orphaning is undone on its own (design D6)
+- [x] 4.2 Implement the linked restoration in `undoOp`, extract the `orphan_promote` undo branch, make `undoRun` leave linked ops to their retirement, and add `alsoReverted` and `keptOrphaned` to `UndoResult` (and `keptOrphaned` to `UndoRunResult`), so the undo tests are GREEN, the existing `operations.test.ts` and `orphan-promotion.test.ts` pass unedited, and the one dashboard test that pins the whole `UndoResult` gains the two empty fields
+- [x] 4.3 Add the kept-orphaned note to `apps/web/src/app/dashboard/consolidation/undo-messages.ts` with a test in `apps/web/src/test/dashboard/consolidation.test.tsx`, beside the kept-verdict note's
 
 ## 5. Enforcement
 

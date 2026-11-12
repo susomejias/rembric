@@ -1,5 +1,7 @@
 import {
+  type ConsolidationOp,
   type ConsolidationOpType,
+  type MemoryRelation,
   type RelationKind,
   type RelationStatus,
   type Repositories,
@@ -98,16 +100,38 @@ export interface KeptVerdict {
   relation: RelationKind | null;
 }
 
+/** A judgment a retirement undo left orphaned, because one of its endpoints is still retired. */
+export interface KeptOrphaned {
+  judgmentId: string;
+  retiredId: string;
+}
+
 export interface UndoResult {
   reverted: string;
   skipped: SkippedRow[];
   keptVerdicts: KeptVerdict[];
+  /** The retirement's own orphanings, reverted in the same undo. */
+  alsoReverted: string[];
+  keptOrphaned: KeptOrphaned[];
 }
 
 export interface UndoRunResult {
   reverted: string[];
   skipped: SkippedRow[];
   keptVerdicts: KeptVerdict[];
+  keptOrphaned: KeptOrphaned[];
+}
+
+const RETIREMENT_ORPHANING_PREFIX = `orphaned: ${RETIREMENT_ORPHAN_REASON}: `;
+
+function isRetirementOrphaning(op: ConsolidationOp): boolean {
+  return (
+    op.opType === 'orphan_promote' && op.reasoning?.startsWith(RETIREMENT_ORPHANING_PREFIX) === true
+  );
+}
+
+function writtenSinceOp(rel: MemoryRelation, op: ConsolidationOp): boolean {
+  return rel.judgedAt === null || rel.judgedAt.getTime() > op.appliedAt.getTime();
 }
 
 function topicSlotOccupiedBy(
@@ -231,6 +255,8 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
   const now = new Date();
   const skipped: SkippedRow[] = [];
   const keptVerdicts: KeptVerdict[] = [];
+  const keptOrphaned: KeptOrphaned[] = [];
+  const alsoReverted: string[] = [];
 
   tx.transaction(() => {
     if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
@@ -255,42 +281,77 @@ export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: st
       }
       repos.memory.reactivate(reactivatable);
       if (reactivatable.length > 0) repos.memory.touchLastSeenBatch(reactivatable, now);
-    } else if (op.opType === 'orphan_promote' && op.createdId) {
-      const rel = repos.relations.findByJudgmentId(op.createdId);
-      const writtenSinceOp =
-        rel !== undefined &&
-        (rel.judgedAt === null || rel.judgedAt.getTime() > op.appliedAt.getTime());
-      if (rel && writtenSinceOp) {
-        keptVerdicts.push({
-          judgmentId: rel.judgmentId,
-          status: rel.status,
-          relation: rel.relation,
-        });
-      } else if (rel) {
-        if (rel.relation === 'supersedes' && rel.status === 'judged') {
-          const [targetRow] = repos.memory.unsafeGetByIds([rel.targetId]);
-          const occupiedBy = targetRow ? topicSlotOccupiedBy(repos, targetRow) : null;
-          if (occupiedBy && targetRow?.topicKey) {
-            skipped.push({ id: targetRow.id, topicKey: targetRow.topicKey, occupiedBy });
-          } else {
-            repos.memory.reactivateOne(rel.targetId);
-          }
-          const replaces = repos.memory.findReplaces(rel.sourceId);
-          if (replaces) {
-            repos.memory.setReplaces(
-              rel.sourceId,
-              replaces.filter((id) => id !== rel.targetId),
-            );
-          }
-        }
-        repos.relations.resetToPending(rel.id);
-      }
+      restoreRetirementOrphanings(repos, op, now, {
+        skipped,
+        keptVerdicts,
+        keptOrphaned,
+        alsoReverted,
+      });
+    } else if (op.opType === 'orphan_promote') {
+      undoOrphaning(repos, op, skipped, keptVerdicts);
     }
 
     repos.consolidation.markReverted(opId, now);
   });
 
-  return { reverted: opId, skipped, keptVerdicts };
+  return { reverted: opId, skipped, keptVerdicts, alsoReverted, keptOrphaned };
+}
+
+function undoOrphaning(
+  repos: ConsolidationDeps,
+  op: ConsolidationOp,
+  skipped: SkippedRow[],
+  keptVerdicts: KeptVerdict[],
+): void {
+  const rel = op.createdId ? repos.relations.findByJudgmentId(op.createdId) : undefined;
+  if (!rel) return;
+  if (writtenSinceOp(rel, op)) {
+    keptVerdicts.push({ judgmentId: rel.judgmentId, status: rel.status, relation: rel.relation });
+    return;
+  }
+  if (rel.relation === 'supersedes' && rel.status === 'judged') {
+    const [targetRow] = repos.memory.unsafeGetByIds([rel.targetId]);
+    const occupiedBy = targetRow ? topicSlotOccupiedBy(repos, targetRow) : null;
+    if (occupiedBy && targetRow?.topicKey) {
+      skipped.push({ id: targetRow.id, topicKey: targetRow.topicKey, occupiedBy });
+    } else {
+      repos.memory.reactivateOne(rel.targetId);
+    }
+    const replaces = repos.memory.findReplaces(rel.sourceId);
+    if (replaces) {
+      repos.memory.setReplaces(
+        rel.sourceId,
+        replaces.filter((id) => id !== rel.targetId),
+      );
+    }
+  }
+  repos.relations.resetToPending(rel.id);
+}
+
+/** Restoring a pair whose endpoint stays retired would leave a pending row no agent can judge. */
+function restoreRetirementOrphanings(
+  repos: ConsolidationDeps,
+  retirement: ConsolidationOp,
+  now: Date,
+  out: Pick<UndoResult, 'skipped' | 'keptVerdicts' | 'keptOrphaned' | 'alsoReverted'>,
+): void {
+  for (const linked of repos.consolidation.listActiveOps(retirement.runId)) {
+    if (!isRetirementOrphaning(linked)) continue;
+    const rel = linked.createdId ? repos.relations.findByJudgmentId(linked.createdId) : undefined;
+    if (rel && !writtenSinceOp(rel, linked)) {
+      const rows = new Map(
+        repos.memory.unsafeGetByIds([rel.sourceId, rel.targetId]).map((m) => [m.id, m.status]),
+      );
+      const retiredId = [rel.sourceId, rel.targetId].find((id) => rows.get(id) !== 'active');
+      if (retiredId !== undefined) {
+        out.keptOrphaned.push({ judgmentId: rel.judgmentId, retiredId });
+        continue;
+      }
+    }
+    undoOrphaning(repos, linked, out.skipped, out.keptVerdicts);
+    repos.consolidation.markReverted(linked.id, now);
+    out.alsoReverted.push(linked.id);
+  }
 }
 
 export function undoRun(
@@ -302,14 +363,19 @@ export function undoRun(
   const reverted: string[] = [];
   const skipped: SkippedRow[] = [];
   const keptVerdicts: KeptVerdict[] = [];
+  const keptOrphaned: KeptOrphaned[] = [];
+  // The run's retirement undoes its own orphanings, after reactivating their endpoints.
+  const retirementInRun = ops.some((op) => REACTIVATE_UNDO_OP_TYPES.has(op.opType));
   // Reverse order so dependent ops unwind cleanly.
   for (const op of [...ops].reverse()) {
+    if (retirementInRun && isRetirementOrphaning(op)) continue;
     const result = undoOp(repos, tx, op.id);
-    reverted.push(op.id);
+    reverted.push(op.id, ...result.alsoReverted);
     skipped.push(...result.skipped);
     keptVerdicts.push(...result.keptVerdicts);
+    keptOrphaned.push(...result.keptOrphaned);
   }
-  return { reverted, skipped, keptVerdicts };
+  return { reverted, skipped, keptVerdicts, keptOrphaned };
 }
 
 export type { ConsolidationOpType };
