@@ -109,7 +109,7 @@ export function mergeFingerprint(
       m.topicKey,
       m.replaces,
     ]),
-    warnings: warnings.map((w) => [w.code, w.ids]),
+    warnings: warnings.map((w) => [w.code, w.ids, w.message]),
   });
   return createHash('sha256').update(canonical).digest('hex');
 }

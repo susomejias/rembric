@@ -571,7 +571,7 @@ export class MemoryService {
     if (new Set(ids).size !== ids.length) {
       throw new DomainError('invalid_input', 'memory.merge: ids must be distinct');
     }
-    const fields = validateSaveFields(input);
+    const fields = validateSaveFields(input, 'memory.merge');
 
     const byId = new Map(this.unsafeGetByIds(ids).map((m) => [m.id, m]));
     const missing = ids.filter((id) => {
@@ -819,40 +819,38 @@ function clampLimit(limit: number | undefined): number {
 
 export function validateSaveFields(
   input: Pick<SaveMemoryInput, 'title' | 'content' | 'tags' | 'topicKey'>,
+  op = 'memory.save',
 ): { title: string; tags: string[]; topicKey: string | null } {
   if (input.content.trim().length === 0) {
-    throw new DomainError('invalid_input', 'memory.save: content must be non-empty');
+    throw new DomainError('invalid_input', `${op}: content must be non-empty`);
   }
-  assertNoNul('memory.save', 'content', input.content);
+  assertNoNul(op, 'content', input.content);
   const { title } = input;
   if (title.trim().length === 0 || title.length > TITLE_MAX_CHARS) {
     throw new DomainError(
       'invalid_input',
-      `memory.save: title must be 1..${TITLE_MAX_CHARS} non-blank chars`,
+      `${op}: title must be 1..${TITLE_MAX_CHARS} non-blank chars`,
     );
   }
-  assertNoNul('memory.save', 'title', title);
+  assertNoNul(op, 'title', title);
   return {
     title,
-    tags: normalizeTags(input.tags ?? []),
-    topicKey: normalizeTopicKey(input.topicKey),
+    tags: normalizeTags(input.tags ?? [], op),
+    topicKey: normalizeTopicKey(input.topicKey, op),
   };
 }
 
-function normalizeTags(tags: readonly string[]): string[] {
+function normalizeTags(tags: readonly string[], op: string): string[] {
   return [
     ...new Set(
       tags.map((tag) => {
-        assertNoNul('memory.save', 'tags', tag);
+        assertNoNul(op, 'tags', tag);
         const normalized = slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), {
           lower: true,
           strict: true,
         });
         if (normalized.length === 0) {
-          throw new DomainError(
-            'invalid_input',
-            'memory.save: tags must contain letters or numbers',
-          );
+          throw new DomainError('invalid_input', `${op}: tags must contain letters or numbers`);
         }
         return normalized;
       }),
@@ -860,13 +858,13 @@ function normalizeTags(tags: readonly string[]): string[] {
   ];
 }
 
-function normalizeTopicKey(input: string | null | undefined): string | null {
+function normalizeTopicKey(input: string | null | undefined, op: string): string | null {
   if (input == null) return null;
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
   if (trimmed.length > 128) {
-    throw new DomainError('invalid_input', 'memory.save: topic_key exceeds 128 characters');
+    throw new DomainError('invalid_input', `${op}: topic_key exceeds 128 characters`);
   }
-  assertNoNul('memory.save', 'topic_key', trimmed);
+  assertNoNul(op, 'topic_key', trimmed);
   return trimmed;
 }
