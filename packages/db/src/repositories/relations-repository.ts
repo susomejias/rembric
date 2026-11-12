@@ -236,6 +236,28 @@ export class RelationsRepository {
       .all();
   }
 
+  listPendingTouchingAny(
+    memoryIds: readonly string[],
+  ): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
+    if (memoryIds.length === 0) return [];
+    const ids = [...memoryIds];
+    return this.db
+      .select({
+        judgmentId: memoryRelations.judgmentId,
+        sourceId: memoryRelations.sourceId,
+        targetId: memoryRelations.targetId,
+      })
+      .from(memoryRelations)
+      .where(
+        and(
+          eq(memoryRelations.status, 'pending'),
+          or(inArray(memoryRelations.sourceId, ids), inArray(memoryRelations.targetId, ids)),
+        ),
+      )
+      .orderBy(memoryRelations.createdAt, memoryRelations.judgmentId)
+      .all();
+  }
+
   listNotConflictTargetsForSources(sourceIds: readonly string[]): string[] {
     if (sourceIds.length === 0) return [];
     return this.db

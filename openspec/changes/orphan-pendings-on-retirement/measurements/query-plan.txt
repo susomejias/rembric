@@ -1,0 +1,24 @@
+vol-1000 select "judgment_id", "source_id", "target_id" from "memory_relations" where ("memory_relations"."status" = ? and ("memory_relations"."source_id" in (?, ?) or "memory_relations"."target_id" in (?, ?))) order by "memory_relations"."created_at", "memory_relations"."judgment_id"
+   MULTI-INDEX OR
+   INDEX 1
+   SEARCH memory_relations USING INDEX memory_relations_source_status_idx (source_id=? AND status=?)
+   INDEX 2
+   SEARCH memory_relations USING INDEX memory_relations_target_status_idx (target_id=? AND status=?)
+   USE TEMP B-TREE FOR ORDER BY
+   one-id read, warm, 2000 calls: median 0.0292 ms, p95 0.0411 ms
+vol-20000 select "judgment_id", "source_id", "target_id" from "memory_relations" where ("memory_relations"."status" = ? and ("memory_relations"."source_id" in (?, ?) or "memory_relations"."target_id" in (?, ?))) order by "memory_relations"."created_at", "memory_relations"."judgment_id"
+   MULTI-INDEX OR
+   INDEX 1
+   SEARCH memory_relations USING INDEX memory_relations_source_status_idx (source_id=? AND status=?)
+   INDEX 2
+   SEARCH memory_relations USING INDEX memory_relations_target_status_idx (target_id=? AND status=?)
+   USE TEMP B-TREE FOR ORDER BY
+   one-id read, warm, 2000 calls: median 0.0274 ms, p95 0.0334 ms
+vol-50000 select "judgment_id", "source_id", "target_id" from "memory_relations" where ("memory_relations"."status" = ? and ("memory_relations"."source_id" in (?, ?) or "memory_relations"."target_id" in (?, ?))) order by "memory_relations"."created_at", "memory_relations"."judgment_id"
+   MULTI-INDEX OR
+   INDEX 1
+   SEARCH memory_relations USING INDEX memory_relations_source_status_idx (source_id=? AND status=?)
+   INDEX 2
+   SEARCH memory_relations USING INDEX memory_relations_target_status_idx (target_id=? AND status=?)
+   USE TEMP B-TREE FOR ORDER BY
+   one-id read, warm, 2000 calls: median 0.0260 ms, p95 0.0275 ms
