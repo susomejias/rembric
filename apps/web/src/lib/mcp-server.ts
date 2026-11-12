@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 
+import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js';
 import {
+  classifyInboundRequest,
   createMcpHandler,
   isLegacyRequest,
+  UnsupportedProtocolVersionError,
   WebStandardStreamableHTTPServerTransport,
   type AuthInfo,
-  type McpRequestContext,
-  type McpServerFactory,
 } from '@modelcontextprotocol/server';
 import {
   EMBEDDING_MODEL_ID,
@@ -87,11 +88,12 @@ function buildSurface(services: Services): McpHttpSurface {
     console.error('[mcp] transport error', { message: error.message, stack: error.stack });
   };
 
-  // SAFETY: the single v1↔v2 SDK boundary — v2 transports drive the SDK 1.x `McpServer` through `connect`/`close`/`server` only.
-  const modernFactory = ((ctx: McpRequestContext) =>
-    buildServer(requestedSlugOf(ctx.requestInfo))) as unknown as McpServerFactory;
-
-  const modern = createMcpHandler(modernFactory, { legacy: 'reject', onerror: report });
+  const modern = createMcpHandler(
+    () => {
+      throw new Error('the 2026-07-28 era is not served');
+    },
+    { legacy: 'reject', onerror: report },
+  );
 
   const legacySessions = new Map<string, LegacySession>();
 
@@ -131,7 +133,7 @@ function buildSurface(services: Services): McpHttpSurface {
   return {
     async fetch(request, { authInfo, requestedSlug }) {
       if (await isLegacyRequest(request)) return serveLegacy(request, authInfo, requestedSlug);
-      return modern.fetch(request, { authInfo });
+      return (await modernEraRefusal(request)) ?? modern.fetch(request, { authInfo });
     },
     async close() {
       const closing = [...legacySessions.values()].flatMap(({ server, transport }) => [
@@ -154,14 +156,31 @@ async function isInitializePost(request: Request): Promise<boolean> {
   }
 }
 
-function requestedSlugOf(request: Request | undefined): string | null {
-  if (request === undefined) return null;
+async function modernEraRefusal(request: Request): Promise<Response | null> {
+  let body: unknown;
   try {
-    const segments = new URL(request.url).pathname.split('/').filter((s) => s.length > 0);
-    return segments[0] === 'mcp' ? (segments[1] ?? null) : null;
+    body = JSON.parse(await request.clone().text());
   } catch {
     return null;
   }
+  const outcome = classifyInboundRequest({
+    httpMethod: request.method,
+    protocolVersionHeader: request.headers.get('mcp-protocol-version') ?? undefined,
+    mcpMethodHeader: request.headers.get('mcp-method') ?? undefined,
+    mcpNameHeader: request.headers.get('mcp-name') ?? undefined,
+    body,
+  });
+  if (outcome.kind !== 'modern' || outcome.classification.era !== 'modern') return null;
+
+  const error = new UnsupportedProtocolVersionError({
+    supported: [...SUPPORTED_PROTOCOL_VERSIONS],
+    requested: outcome.classification.revision ?? 'unknown',
+  });
+  const id = outcome.messageKind === 'request' ? outcome.message.id : null;
+  return Response.json(
+    { jsonrpc: '2.0', id, error: { code: error.code, message: error.message, data: error.data } },
+    { status: 400 },
+  );
 }
 
 function logInternalError(err: unknown, context: string): string {
