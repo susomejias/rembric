@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.10](https://github.com/susomejias/rembric/compare/server-v0.30.9...server-v0.30.10) (2026-11-12)
+
+
+### Features
+
+* **core:** redact secrets on every persisted write path ([1e5c593](https://github.com/susomejias/rembric/commit/1e5c5935efb0abbc66cf1099b13f569aff230602))
+* **mcp:** add memory.merge with preview-then-confirm ([4589624](https://github.com/susomejias/rembric/commit/4589624d898edfa7089b2529d8197512de7530bb)), closes [#450](https://github.com/susomejias/rembric/issues/450)
+* **mcp:** report redactions on write responses ([1db9c67](https://github.com/susomejias/rembric/commit/1db9c677f6ecfabf78c5706def0f947040ba8686)), closes [#447](https://github.com/susomejias/rembric/issues/447)
+
+
+### Bug Fixes
+
+* redact before every server-side cut and never fail a merge on a placeholder ([b7f4df9](https://github.com/susomejias/rembric/commit/b7f4df9c04da58577fe7ecefd95c49887622665d)), closes [#447](https://github.com/susomejias/rembric/issues/447)
+
 ## [0.30.9](https://github.com/susomejias/rembric/compare/server-v0.30.8...server-v0.30.9) (2026-11-12)
 
 
