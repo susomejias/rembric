@@ -1,28 +1,27 @@
 name: Feature request
 description: Suggest a new capability, integration, or improvement
-title: 'feat: <one-line summary>'
+title: 'feat: '
 labels: ['enhancement']
 body:
   - type: markdown
     attributes:
       value: |
-        Before opening, please search existing issues. For non-trivial
-        behavioural changes (new MCP tool, new HTTP endpoint, new invariant),
-        the project goes through a spec-driven workflow under
-        `openspec/changes/`. A feature request here is the right first step;
-        if the maintainer agrees on direction, a follow-up OpenSpec change
-        will capture the proposal / design / specs / tasks.
+        Thanks for the idea! The most useful requests describe the **problem** you hit, not only the solution
+        you have in mind — that leaves room to find the design that fits Rembric's model (append-only memory,
+        project scoping, one implementation shared by every client).
+
+        Behaviour changes such as a new MCP tool or HTTP endpoint go through a spec-driven
+        [OpenSpec](https://github.com/susomejias/rembric/tree/main/openspec) change before implementation.
+        This issue is the right first step; the maintainer will follow up with the change if the direction is agreed.
 
   - type: textarea
     id: problem
     attributes:
-      label: Problem statement
-      description: |
-        What user-facing problem does this feature solve? Describe the situation
-        where you (or another operator / agent) hit a wall today.
+      label: Problem
+      description: What are you trying to do, and what gets in the way today? Concrete situations help most.
       placeholder: |
-        When I... I expected to be able to... but Rembric currently doesn't
-        support... so I had to work around it by...
+        When my agent works across two repos of the same product, it cannot recall decisions saved in the other one,
+        so I end up re-explaining …
     validations:
       required: true
 
@@ -30,50 +29,45 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: |
-        How would the feature work? Sketch the user-facing surface (new MCP
-        tool name + signature, new dashboard page, new env var, etc.).
+      description: How would it work from your side? A tool call, a dashboard page, a config option, an agent behaviour…
     validations:
       required: true
 
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered
-      description: |
-        What other approaches did you consider? Why are they worse than the
-        proposed solution?
-    validations:
-      required: false
-
-  - type: textarea
-    id: why_now
-    attributes:
-      label: Why now?
-      description: |
-        Why is this worth shipping in the near term vs. parked? What changes
-        downstream if it lands?
-    validations:
-      required: false
+      label: Alternatives and workarounds
+      description: What have you tried or considered, and why is it not enough?
 
   - type: dropdown
     id: surface
     attributes:
       label: Affected surface
-      description: Which surface does this feature touch?
       multiple: true
       options:
-        - MCP tools
-        - HTTP API
+        - MCP tools / memory behaviour
         - Dashboard
-        - Plugin (Claude Code)
-        - Plugin (Codex CLI)
-        - Plugin (Hermes Agent)
-        - CLI / dev workflow
-        - Docker image / distribution
-        - OpenSpec workflow
+        - HTTP API
+        - Agent plugin — Claude Code
+        - Agent plugin — Codex CLI
+        - Agent plugin — Hermes Agent
+        - Agent plugin — opencode
+        - Agent plugin — Pi
+        - Installer
+        - Docker image / deployment
         - Documentation
-        - Other
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to work on it?
+      options:
+        - 'No, just suggesting it'
+        - "Yes, I'd like to open a PR once the direction is agreed"
+        - 'Maybe, with some guidance'
     validations:
       required: true
 
@@ -82,7 +76,5 @@ body:
     attributes:
       label: Confirmations
       options:
-        - label: I searched existing issues and could not find a duplicate request.
-          required: true
-        - label: I understand that non-trivial behaviour changes go through an OpenSpec change before implementation.
+        - label: I searched [existing issues](https://github.com/susomejias/rembric/issues?q=is%3Aissue) and could not find a duplicate request.
           required: true

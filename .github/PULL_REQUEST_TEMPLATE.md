@@ -1,44 +1,44 @@
 <!--
-Thanks for opening a PR! Please walk through the checklist below before
-requesting review. The Conventional Commit title is enforced by commitlint,
-the test/lint/typecheck gates by Husky pre-commit + pre-push hooks, and the
-spec-driven workflow by reviewer judgement.
+Thanks for contributing! Please write the title and description in English.
+The PR title must be a Conventional Commit (`feat(scope): …`, `fix(scope): …`, `docs: …`):
+release-please builds the changelog and version bumps from it.
+Delete any section that does not apply.
 -->
 
 ## Summary
 
-<!-- 1-3 sentences. What does this change, and why? Link the issue or
-     OpenSpec change name if applicable. -->
+<!-- What changes and why, in 1–3 sentences. Describe the user-visible effect, not the diff. -->
 
-## OpenSpec change
+Closes #
 
-<!-- If this PR implements an OpenSpec change, name it here and link the
-     active directory: `openspec/changes/<name>/`. If not, write "N/A — small
-     fix / docs only". -->
+## How it was verified
 
-- Change name: `<name>` (or N/A)
+<!-- What you actually ran and observed. Reviewers will re-run these. -->
 
-## Test plan
+- [ ] `pnpm run lint` and `pnpm run typecheck` clean
+- [ ] `pnpm test` green (full suite)
+- [ ] Manual check against `pnpm run dev`: <!-- the scenario you tried and what you saw -->
 
-<!-- Bulleted checklist of what you ran locally and what reviewers should
-     run. Be specific: file paths, command flags, expected output. -->
+## Area-specific checks
 
-- [ ] `pnpm run lint` clean
-- [ ] `pnpm run typecheck` clean
-- [ ] `pnpm test` green (full suite, no `-t` narrowing)
-- [ ] `pnpm run build` clean
-- [ ] `openspec validate <change> --strict` clean (if applicable)
-- [ ] Manual smoke against `pnpm run dev:docker:up`: <describe the scenario>
+<!-- Tick the ones that apply and delete the rest. -->
+
+- [ ] **Dashboard UI** — before/after screenshots attached (desktop and mobile width).
+- [ ] **Agent plugin (`apps/plugin/`)** — [e2e walkthrough](https://github.com/susomejias/rembric/blob/main/.agents/skills/rembric-plugin-development/references/e2e-walkthrough.md) done for every affected client; no hand-edited version bump (release-please owns plugin versions).
+- [ ] **Installer / distribution** — `pnpm run e2e:installer` green and the [installer e2e playbook](https://github.com/susomejias/rembric/blob/main/.agents/skills/rembric-tui-installer-e2e/SKILL.md) run.
+- [ ] **New MCP tool, HTTP endpoint or load-bearing invariant** — implements OpenSpec change `openspec/changes/<name>/`.
+- [ ] **Database migration** — tested against an existing database, not only a fresh one.
+- [ ] **New or updated dependency** — follows the [npm security practices](https://github.com/susomejias/rembric/blob/main/.agents/skills/npm-security-best-practices/SKILL.md) (lockfile, build-script allow-list).
+
+## Upgrade notes
+
+<!-- Anything an operator must do or know when upgrading: breaking changes, new env vars,
+     migrations, config changes. Write "None" if nothing. -->
+
+None
 
 ## Checklist
 
-- [ ] Commit messages follow Conventional Commits (`feat:` / `fix:` / `docs:` / ...).
-- [ ] Changes are scoped: one conceptual change per PR.
-- [ ] New tests cover new behaviour; coverage gates still pass (≥90% stmts / ≥85% rest).
-- [ ] No new dependency added without consulting [`.agents/skills/npm-security-best-practices/SKILL.md`](../.agents/skills/npm-security-best-practices/SKILL.md).
-- [ ] Changes touching `apps/plugin/` carry **no** hand-edited version bump: release-please owns every version carrier and moves them in lock-step from the conventional-commit type.
-- [ ] No tokens, API keys, private hostnames, LAN IPs, or maintainer home-directory paths committed (see `openspec/config.yaml::rules.tasks`).
-- [ ] If this PR closes an issue, the body includes `Closes #<n>`.
-
-<!-- release-please picks up the commit prefix automatically; you do NOT need
-     to add a CHANGELOG entry yourself. -->
+- [ ] One conceptual change per PR; tests cover the new behaviour.
+- [ ] Docs / help text updated where behaviour, commands or config changed.
+- [ ] No tokens, API keys, private hostnames, LAN IPs or personal paths committed.
