@@ -2,11 +2,10 @@ import { createRepositories, projectScope, type Repositories, type Scope } from 
 
 import { type Embedder, embeddingQueryInput } from '../../embeddings/embedder.js';
 import { EmbeddingWorker } from '../../services/embedding-worker.js';
-import { extractEntities } from '../../services/entities.js';
 import { MemoryService, type SaveMemoryInput } from '../../services/memory.js';
 import { ProjectsService } from '../../services/projects.js';
 import { RelationsService } from '../../services/relations.js';
-import { findSaveTimeCandidates } from '../../services/save-time-candidates.js';
+import { runPostSaveSteps } from '../../services/save-curation.js';
 import { TestClock } from '../clock.js';
 import { createTestDb } from '../db.js';
 
@@ -42,30 +41,11 @@ async function saveThroughCuration(
   scope: Scope,
 ): Promise<ReturnType<MemoryService['saveWithTopicKey']>['memory']> {
   const { memory: saved } = deps.memory.saveWithTopicKey(input, scope);
-
-  const extracted = extractEntities(saved.title, saved.content);
-
-  try {
-    await deps.embedNow(saved.id, saved.title, saved.content, scope.projectId);
-    const found = findSaveTimeCandidates(
-      deps.repos,
-      saved,
-      { perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT },
-      extracted,
-    );
-    for (const candidate of found.candidates) {
-      deps.relations.createPending({ sourceId: saved.id, targetId: candidate.targetId });
-    }
-  } catch {
-    // Best-effort, as in the shipping wrapper: detection or embedding failure must not fail the save.
-  }
-
-  try {
-    deps.repos.entities.linkMemory(saved.id, scope.projectId, extracted, saved.createdAt);
-  } catch {
-    // Best-effort in the shipping wrapper too.
-  }
-
+  await runPostSaveSteps(
+    { ...deps, candidates: { perSaveMax: CANDIDATES_PER_SAVE_MAX_DEFAULT } },
+    saved,
+    scope,
+  );
   return saved;
 }
 
