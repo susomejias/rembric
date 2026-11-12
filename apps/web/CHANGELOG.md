@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.30.11](https://github.com/susomejias/rembric/compare/server-v0.30.10...server-v0.30.11) (2026-11-12)
+
+
+### Features
+
+* **core:** classify save-time candidates into confidence bands ([4711639](https://github.com/susomejias/rembric/commit/4711639015e82d2de50ab313b4f5bfd1b06e3a72)), closes [#467](https://github.com/susomejias/rembric/issues/467)
+* **core:** drain pending pairs that fall in the low confidence band ([ff1f91f](https://github.com/susomejias/rembric/commit/ff1f91fb1634a4fc1d469df2682c283cb78626e7))
+* **core:** drain stale save-time pending judgments in the consolidation sweep ([84f0b87](https://github.com/susomejias/rembric/commit/84f0b87f4b7e2405a1199fd2e86c0921afb5d0b7))
+* **core:** orphan a memory's pending judgments in the transaction that retires it ([7c137a2](https://github.com/susomejias/rembric/commit/7c137a21ad53f47109842d666b701432a9517839))
+* **core:** restore a retirement's orphaned judgments when the retirement is undone ([014d7bb](https://github.com/susomejias/rembric/commit/014d7bb7769d05409f4411106eefe66bc1d4370f))
+* **mcp:** convergeWith carries judgment ids ([9931f4d](https://github.com/susomejias/rembric/commit/9931f4d1846920e8667e3a489ef060dc1fcc80bc)), closes [#467](https://github.com/susomejias/rembric/issues/467)
+* **mcp:** show a session's pending Unfinished+why work in memory.context snippets ([cced5e6](https://github.com/susomejias/rembric/commit/cced5e6c9f6a3fa26cf84530a8c0c7901cb1768b)), closes [#451](https://github.com/susomejias/rembric/issues/451)
+
+
+### Bug Fixes
+
+* **core:** accept a late verdict on a judgment orphaned by retirement ([85c1c2b](https://github.com/susomejias/rembric/commit/85c1c2b3205bca075897699b0316fab819087410))
+* **core:** floor lexical save-time candidates so unrelated saves stop filling the judgment queue ([917a6b8](https://github.com/susomejias/rembric/commit/917a6b85f507e736c13ee9ddc200f02d9a0a3e99)), closes [#453](https://github.com/susomejias/rembric/issues/453)
+* **core:** keep a later verdict when undoing an orphaning ([a59a076](https://github.com/susomejias/rembric/commit/a59a076bc6768b6a5ca2ccd99f5907d26c0c8148))
+
+
+### Performance
+
+* **core:** drop index-common terms from the save-time lexical match ([eaf1c26](https://github.com/susomejias/rembric/commit/eaf1c26b35348acc98cc859e50082944f112a1a9))
+* **db:** score only the saving project's matches in the save-time lexical query ([68517fd](https://github.com/susomejias/rembric/commit/68517fd57486237513208d8633e4f9eb8ad94191))
+
+
+### Documentation
+
+* address the independent verification's advisories ([6c6e7ee](https://github.com/susomejias/rembric/commit/6c6e7ee4d9a7c90677f992dd67c86ddcb6543840)), closes [#453](https://github.com/susomejias/rembric/issues/453)
+* make save-time candidate thresholds match the code ([7774d5f](https://github.com/susomejias/rembric/commit/7774d5fecddf97c7ca1279f74f7f59b41cad85e6)), closes [#453](https://github.com/susomejias/rembric/issues/453)
+* **openspec:** mark the verified drain tasks and name the shared undo message ([2c5c0d1](https://github.com/susomejias/rembric/commit/2c5c0d1fb93406391418edf70f37110f4695e4b2))
+
 ## [0.30.10](https://github.com/susomejias/rembric/compare/server-v0.30.9...server-v0.30.10) (2026-11-12)
 
 
