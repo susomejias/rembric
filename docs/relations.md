@@ -66,5 +66,6 @@ Confirm with explicit `ids: [id, ...]`; judge with `judgments: [{ judgmentId, re
 | A row's `reviewState` is `needs_review` (still true) | `memory.confirm_batch` — records a confirmation, advancing the affirmation baseline                      |
 | A `needs_review` memory has changed                  | `memory.save({topic_key})` — supersedes the prior row                                                    |
 | `memory.context` returned `needsReview[]`            | resolve each: `memory.confirm_batch` / `memory.save({topic_key})` / `memory.judge_batch` if it conflicts |
+| Several memories each hold part of one fact          | `memory.merge({ids, …})` to preview, show the user, then the same call with `fingerprint` to commit      |
 
 > `needsReview` is a **separate axis** from the judgment graph above. The relations here are **pairwise** (conflicts between two memories, closed by `memory.judge_batch`). `needsReview` is **unary** time-based staleness — a single memory whose shelf life elapsed without re-affirmation — and it is **derived at read time** from `max(created_at, last confirmation) + per-type TTL`; it is never stored and never runs a sweep. It only overlaps the judgment graph when a stale memory turns out to contradict another, at which point the normal `memory.judge_batch` flow takes over.
