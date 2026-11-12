@@ -31,9 +31,9 @@
 
 ## 7. Evidence after code
 
-- [ ] 7.1 Run a mutation check for each path's helper call and for the undo restoration, and record it in `measurements/mutation.txt`; every mutation must turn a named test red
-- [ ] 7.2 Run `measurements/retirement-cost.mts` with `LABEL=after` on the same corpora, commit `measurements/retirement-cost-after.txt`, and state the added cost per path in `measurements/README.md`
-- [ ] 7.3 Write and run `measurements/drain-after-retirement.mts`: after retirements made through every path, the drain's retired-endpoint branch drains 0 pairs, while a control that retires the same memories by repository-level flips drains them
+- [x] 7.1 Run a mutation check for each path's helper call and for the undo restoration, and record it in `measurements/mutation.txt`; every mutation must turn a named test red
+- [x] 7.2 Run `measurements/retirement-cost.mts` with `LABEL=after` on the same corpora, commit `measurements/retirement-cost-after.txt`, and state the added cost per path in `measurements/README.md`
+- [x] 7.3 Write and run `measurements/drain-after-retirement.mts`: after retirements made through every path, the drain's retired-endpoint branch drains 0 pairs, while a control that retires the same memories by repository-level flips drains them
 
 ## 8. Verification
 

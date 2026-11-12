@@ -43,6 +43,8 @@ The `relations` parameter is typed `Pick<RelationsService, 'orphan'>`:
 - `MemoryService` passes a `RelationsService` it builds over its own repositories and transaction runner;
 - `applyDecay` and `undoOp` build one over theirs, so their published signatures do not change.
 
+That makes `relations.ts` and `operations.ts` import each other. The cycle is safe under ES modules because neither module reads the other's bindings while it evaluates: the helper is a hoisted function declaration, and `RelationsService` is only constructed inside function bodies.
+
 Alternatives considered:
 
 - **A second orphan-and-journal implementation in the helper**, writing `markOrphanedPending` and `insertOp` directly. Rejected: two paths that must stay identical drift, and the drain's guard depends on how `orphan` stamps `judged_at`.
@@ -193,7 +195,7 @@ The agent queue already withholds these pairs, so this should not happen in prac
 - **[Risk] An agent loses a late `not_conflict` dismissal on a retired pair.** → The queue never offered such pairs. The retired-verdicts count measures it, the synthetic run is recorded, and the production run is the owner's task (D10).
 - **[Trade-off] Each `topic_key` revision, judged `supersedes` or merge undo that has pending judgments adds a `maintenance` run to `/dashboard/consolidation`.** → Accepted because each run is a reversible unit of the journal, as the archive and merge runs already are. A retirement with nothing to orphan adds none.
 - **[Trade-off] A pair restored by a retirement undo is never drained again by the drain.** → Accepted because it follows from the drain's own "undo is final" rule. The deadline step and a later retirement still close it.
-- **[Trade-off] Retirement paths do slightly more work.** → Accepted. The added cost is one indexed read per retirement, plus one update and one insert per orphaned row; task 7.2 measures it per path at 1 000, 20 000 and 50 000 memories.
+- **[Trade-off] Retirement paths do slightly more work.** → Accepted. Measured per path at 1 000, 20 000 and 50 000 memories (`measurements/README.md`, task 7.2), the added median is 0.01–0.07 ms when there is nothing to orphan and about 0.08 ms per orphaned row, flat across corpus sizes; a merge undo, which orphans the successor's rows and restores the originals', adds about 1 ms for nine rows.
 - **[Risk] Undo ordering inside `undoRun` restores a pair whose endpoint the run's own retirement undo then leaves retired.** → `undoRun` leaves linked ops to their retirement's undo (D6), and a test pins it with a topic-slot skip.
 
 ## Migration Plan
