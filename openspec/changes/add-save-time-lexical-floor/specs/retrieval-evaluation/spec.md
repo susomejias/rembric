@@ -27,7 +27,7 @@ Every class except unrelated SHALL name the base memory it is expected to surfac
 
 - the labelled pairs surfaced, per class;
 - the pending rows written per unrelated save, split by candidate `source`;
-- the total pending rows written over all labelled saves. This total is the queue-depth instrument, named as such on every row of the output.
+- the total pending rows written over all labelled saves. This total is the queue-depth instrument, named as such in the output.
 
 The `0` grid point reproduces rank-only admission, so it SHALL be reported as the before-measurement of any floor value.
 

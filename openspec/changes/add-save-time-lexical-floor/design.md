@@ -133,7 +133,7 @@ The floor is one comparison against a number the channel already computes. No SQ
 - **Budget:** at every size, the added p50 SHALL be at or below that noise band.
 - **Fallback, written before measuring:** the change adds no work, so a regression outside the noise band means either the implementation added work (fix it) or the instrument is faulty (re-measure). It is never shipped as an accepted cost.
 
-The instrument is named on every row of the committed measurement and is never tabulated with the sweep's queue-depth series.
+The instrument is named in the header of every committed measurement file and is never tabulated with the sweep's queue-depth series.
 
 ### D6 — The description describes each channel truthfully
 

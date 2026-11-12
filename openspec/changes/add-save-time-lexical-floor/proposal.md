@@ -29,7 +29,7 @@ None.
 
 ### Modified Capabilities
 
-- `memory`: "Save-time lexical candidate scoring MUST increase with match quality" now admits a lexical candidate by rank position AND a calibrated floor on its reported overlap measure. "Retrieval and lifecycle constants MUST be named and bounded in one place" names `LEXICAL_CANDIDATE_FLOOR`, corrects the `CANDIDATE_POOL_SIZE` entry (the pool is no longer the whole lexical admission rule) and states the evidence a change to the floor must carry.
+- `memory`: "Save-time lexical candidate scoring MUST increase with match quality" now admits a lexical candidate by rank position AND a calibrated floor on its reported overlap measure. "Retrieval and lifecycle constants MUST be named and bounded in one place" names `LEXICAL_CANDIDATE_FLOOR`, corrects the `CANDIDATE_POOL_SIZE` entry (the pool is no longer the whole lexical admission rule) and states the evidence a change to the floor must carry. "Memory title MUST participate in both retrieval branches" rewords its one sentence that still described save-time admission as rank position alone.
 - `mcp-api`: adds a requirement that the `memory.save` description describe save-time detection truthfully, channel by channel.
 - `retrieval-evaluation`: adds a requirement for a reproducible save-time calibration sweep over a labelled fixture, reporting surfaced labelled pairs, noise from unrelated saves, and queue depth per N saves.
 
