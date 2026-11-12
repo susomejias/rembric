@@ -641,6 +641,10 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
     'adminDocumentCount',
     'adminQueryTermFrequencies',
   ],
+  'packages/core/src/services/save-time-candidates.ts': [
+    'adminDocumentCount',
+    'adminTokenTermFrequencies',
+  ],
 };
 
 describe('admin-method confinement invariant', () => {

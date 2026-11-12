@@ -6,7 +6,10 @@ export * as schema from './schema/index.js';
 export * from './schema/index.js';
 export * from './repositories/index.js';
 export * from './repositories/scope-clause.js';
-export type { QueryTermFrequencies } from './repositories/term-statistics-repository.js';
+export type {
+  QueryTermFrequencies,
+  TokenTermFrequency,
+} from './repositories/term-statistics-repository.js';
 export * from './diagnostics.js';
 export * as diagnostics from './diagnostics.js';
 export * from './data-loss-guard.js';

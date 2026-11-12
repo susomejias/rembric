@@ -19,7 +19,7 @@ export interface SaveTimeCandidateView {
 export interface PostSaveDeps {
   relations?: RelationsService;
   candidates?: CandidateOptions;
-  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
+  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities' | 'termStatistics'>;
   embedNow?: (
     memoryId: string,
     title: string,

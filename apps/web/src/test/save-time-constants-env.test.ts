@@ -35,12 +35,14 @@ describe('save-time candidate constants are not environment-configurable', () =>
     expect(envReadsOf('CANDIDATES_PER_SAVE_MAX').length).toBeGreaterThan(0);
   });
 
-  it.each(['CANDIDATE_POOL_SIZE', 'ENTITY_RARITY_MIN_LINKS', 'LEXICAL_CANDIDATE_FLOOR'])(
-    '%s is never read from the environment',
-    (name) => {
-      expect(envReadsOf(name)).toEqual([]);
-    },
-  );
+  it.each([
+    'CANDIDATE_POOL_SIZE',
+    'COMMON_TERM_DOCUMENT_RATIO',
+    'ENTITY_RARITY_MIN_LINKS',
+    'LEXICAL_CANDIDATE_FLOOR',
+  ])('%s is never read from the environment', (name) => {
+    expect(envReadsOf(name)).toEqual([]);
+  });
 });
 
 describe('the README documents only the save-time setting the server reads', () => {

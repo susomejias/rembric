@@ -99,7 +99,9 @@ memory.save (MCP)                            ← packages/mcp/src/memory-tools.t
    │
    ├─ findSaveTimeCandidates()               ← packages/core/src/services/save-time-candidates.ts
    │     ├─ vec pass  cosine kNN over memory_vec   (≥ VEC_THRESHOLD 0.70)
-   │     ├─ FTS5 pass BM25 lexical                 (top-poolSize by rank, then kept only if
+   │     ├─ FTS5 pass BM25 lexical                 (first 16 tokens, minus any token found in
+   │     │                                          ≥ COMMON_TERM_DOCUMENT_RATIO 0.5 of all rows;
+   │     │                                          top-poolSize by rank, then kept only if
    │     │                                          token containment ≥ LEXICAL_CANDIDATE_FLOOR
    │     │                                          0.60; reported similarity = that containment)
    │     ├─ entity pass shared rare identifier     (rarity-gated; no text-overlap floor)
@@ -129,12 +131,13 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 ## Engine constants (not configuration)
 
-| Constant                  | Value                                                  | Lives in                                             |
-| ------------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
-| Model + revision          | `onnx-community/gte-multilingual-base@2edbf5e`         | `packages/core/src/embeddings/model-identity.json`   |
-| Quantization / dims       | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `packages/core/src/embeddings/model-identity.json`   |
-| `VEC_THRESHOLD`           | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `packages/core/src/services/save-time-candidates.ts` |
-| `LEXICAL_CANDIDATE_FLOOR` | 0.60 (save-time sweep, `pnpm run eval:save-time`)      | `packages/core/src/services/save-time-candidates.ts` |
+| Constant                     | Value                                                  | Lives in                                             |
+| ---------------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| Model + revision             | `onnx-community/gte-multilingual-base@2edbf5e`         | `packages/core/src/embeddings/model-identity.json`   |
+| Quantization / dims          | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `packages/core/src/embeddings/model-identity.json`   |
+| `VEC_THRESHOLD`              | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `packages/core/src/services/save-time-candidates.ts` |
+| `LEXICAL_CANDIDATE_FLOOR`    | 0.60 (save-time sweep, `pnpm run eval:save-time`)      | `packages/core/src/services/save-time-candidates.ts` |
+| `COMMON_TERM_DOCUMENT_RATIO` | 0.5 (where FTS5's bm25 stops weighting a term)         | `packages/core/src/services/save-time-candidates.ts` |
 
 The lexical pass never thresholds raw bm25: bm25 is unbounded and depends on
 corpus size, so no fixed floor over it is stable. bm25 only orders the pool
@@ -146,5 +149,13 @@ save-time fixture holds in every deployment. Below it, a lexical match takes no
 slot and writes no pending judgment. Without it, one shared common word was
 enough to fill the per-save cap. The entity pass has no such floor on purpose:
 it exists for contradictions that share an identifier but little wording.
+
+Before ranking, the lexical pass drops each of its 16 tokens that appears in at
+least half of all memories, counted across every project
+(`COMMON_TERM_DOCUMENT_RATIO`). FTS5 already weights such a term at a constant
+`1e-6`, so dropping it barely moves the order; keeping it made FTS5 score and
+sort every row of every project on each save. A token FTS5 matches as a phrase
+(`two-space`, a file path) is never dropped, and when no remaining token could
+match another memory nothing is dropped at all.
 
 Changing any of these is an architectural change (OpenSpec), not tuning.

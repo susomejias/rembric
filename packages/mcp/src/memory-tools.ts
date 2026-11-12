@@ -593,7 +593,7 @@ export interface MemoryToolDeps extends ErrorReportingDeps {
   /** Optional — when present, controls candidate detection thresholds. */
   candidates?: CandidateOptions;
   /** Optional — repositories needed for save-time candidates + context/timeline reads. */
-  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
+  repos?: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities' | 'termStatistics'>;
   embedNow?: (
     memoryId: string,
     title: string,

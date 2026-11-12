@@ -87,7 +87,7 @@ export const capturePassiveOutput = {
 export interface ObservabilityToolDeps extends ErrorReportingDeps {
   memory: MemoryService;
   agentSessions: AgentSessionsService;
-  repos: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities'>;
+  repos: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities' | 'termStatistics'>;
   router: SessionRouter;
   projects: ProjectsService;
   doctor: () => DoctorReport;

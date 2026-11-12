@@ -1,0 +1,53 @@
+# memory.search lexical branch — investigation (unchanged by this change)
+queries: realistic control = the 28 retrieval-eval query texts; generator = the first 6 words of 28 memories of the largest project
+scope: the largest project; status active; rank window computeRankWindowSize(8, 0); the builder is uncapped on this path
+pruned prototype: pruneCommonTokens over the query tokens with the save-time ratio. A query is not an indexed row, so its "occurs elsewhere" test is looser than at save time
+
+## generator, 1000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 0.567 ms   pruned prototype 0.411 ms
+rows matched, p50 share:  unpruned 97.0%   pruned 96.8%; pruned expression empty for 0/28
+top-8 lexical ids identical: 17/28
+lookup p50 (already paid by the relevance gate on every non-empty search): 0.234 ms
+search p50 (MemoryService.search, no embedder): 3.657 ms
+
+## generator, 20000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 6.882 ms   pruned prototype 5.829 ms
+rows matched, p50 share:  unpruned 96.7%   pruned 96.6%; pruned expression empty for 0/28
+top-8 lexical ids identical: 17/28
+lookup p50 (already paid by the relevance gate on every non-empty search): 0.823 ms
+search p50 (MemoryService.search, no embedder): 13.304 ms
+
+## generator, 50000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 26.246 ms   pruned prototype 23.370 ms
+rows matched, p50 share:  unpruned 96.6%   pruned 96.5%; pruned expression empty for 0/28
+top-8 lexical ids identical: 16/28
+lookup p50 (already paid by the relevance gate on every non-empty search): 1.733 ms
+search p50 (MemoryService.search, no embedder): 32.399 ms
+
+## realistic, 1000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 0.344 ms   pruned prototype 0.268 ms
+rows matched, p50 share:  unpruned 90.0%   pruned 51.5%; pruned expression empty for 0/28
+top-8 lexical ids identical: 27/28
+lookup p50 (already paid by the relevance gate on every non-empty search): 0.123 ms
+search p50 (MemoryService.search, no embedder): 1.111 ms
+
+## realistic, 20000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 3.029 ms   pruned prototype 2.061 ms
+rows matched, p50 share:  unpruned 90.0%   pruned 51.4%; pruned expression empty for 0/28
+top-8 lexical ids identical: 27/28
+lookup p50 (already paid by the relevance gate on every non-empty search): 0.378 ms
+search p50 (MemoryService.search, no embedder): 4.062 ms
+
+## realistic, 50000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 7.778 ms   pruned prototype 4.958 ms
+rows matched, p50 share:  unpruned 90.0%   pruned 51.4%; pruned expression empty for 0/28
+top-8 lexical ids identical: 27/28
+lookup p50 (already paid by the relevance gate on every non-empty search): 0.762 ms
+search p50 (MemoryService.search, no embedder): 9.421 ms
+

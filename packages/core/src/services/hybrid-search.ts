@@ -454,8 +454,15 @@ export function tokenContainment(
   return hits / queryTokens.size;
 }
 
-export function sanitizeFtsQuery(query: string, opts?: { maxTerms?: number }): string {
+export function ftsQueryTokens(query: string, opts?: { maxTerms?: number }): string[] {
   const tokens = tokenizeWords(query);
-  const capped = opts?.maxTerms !== undefined ? tokens.slice(0, opts.maxTerms) : tokens;
-  return capped.map((t) => `"${t}"`).join(' OR ');
+  return opts?.maxTerms !== undefined ? tokens.slice(0, opts.maxTerms) : tokens;
+}
+
+export function joinFtsTokens(tokens: readonly string[]): string {
+  return tokens.map((t) => `"${t}"`).join(' OR ');
+}
+
+export function sanitizeFtsQuery(query: string, opts?: { maxTerms?: number }): string {
+  return joinFtsTokens(ftsQueryTokens(query, opts));
 }

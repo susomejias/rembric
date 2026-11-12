@@ -9,7 +9,7 @@ import {
 } from '@rembric/db';
 import { eq, sql } from 'drizzle-orm';
 import fc from 'fast-check';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
@@ -20,6 +20,7 @@ import {
   findSaveTimeCandidates,
   LEXICAL_CANDIDATE_FLOOR,
   runPostSaveSteps,
+  sanitizeFtsQuery,
   tokenContainment,
   tokenSet,
 } from '@rembric/core';
@@ -630,10 +631,14 @@ describe('findSaveTimeCandidates — lexical floor', () => {
     );
     const repos = createRepositories(db.handle.db);
 
-    const rankOnly = findSaveTimeCandidates(repos, saved, { perSaveMax: 5, lexicalFloor: 0 });
+    const rankOnly = findSaveTimeCandidates(repos, saved, {
+      perSaveMax: 5,
+      lexicalFloor: 0,
+      commonTermRatio: null,
+    });
     expect(rankOnly.detected).toBeGreaterThan(5);
 
-    const floored = findSaveTimeCandidates(repos, saved, { perSaveMax: 5 });
+    const floored = findSaveTimeCandidates(repos, saved, { perSaveMax: 5, commonTermRatio: null });
     expect(floored.candidates.map((c) => c.targetId)).toEqual([restating.id]);
     expect(floored.detected).toBe(1);
     for (const c of floored.candidates)
@@ -770,6 +775,129 @@ describe('findSaveTimeCandidates — lexical floor', () => {
     findSaveTimeCandidates(record(atZero), saved, { perSaveMax: 5, lexicalFloor: 0 });
     expect(atShipped.length).toBeGreaterThan(0);
     expect(atShipped).toEqual(atZero);
+  });
+});
+
+describe('findSaveTimeCandidates — common-term pruning', () => {
+  const FILLER_WORDS = ['amber', 'birch', 'cedar', 'dune', 'ember', 'fjord', 'grove', 'heath'];
+
+  function seed(contents: readonly string[]): string[] {
+    return contents.map(
+      (content, i) =>
+        memorySvc.save(
+          { type: 'project', title: `Seed ${FILLER_WORDS[i % 8]}`, content },
+          defaultProjectScope(db.handle),
+        ).id,
+    );
+  }
+
+  function saveProbe(content: string) {
+    return memorySvc.save(
+      { type: 'project', title: 'Probe heading', content },
+      defaultProjectScope(db.handle),
+    );
+  }
+
+  function detectRecordingMatch(
+    saved: ReturnType<typeof saveProbe>,
+    opts: { perSaveMax: number; commonTermRatio?: number | null } = { perSaveMax: 5 },
+  ) {
+    const repos = createRepositories(db.handle.db);
+    const spy = vi.spyOn(repos.memory, 'searchBm25Candidates');
+    const result = findSaveTimeCandidates(repos, saved, opts);
+    return { result, matchExprs: spy.mock.calls.map(([call]) => call.matchExpr) };
+  }
+
+  function documentFrequency(term: string): number | null | undefined {
+    return createRepositories(db.handle.db)
+      .termStatistics.adminQueryTermFrequencies(term)
+      .get(term);
+  }
+
+  function documentCount(): number {
+    return createRepositories(db.handle.db).termStatistics.adminDocumentCount();
+  }
+
+  it('omits a token present in at least half of the rows and keeps a rarer one', () => {
+    seed([
+      ...FILLER_WORDS.map((w) => `the ${w} ledger`),
+      'the zephyrkite manual covers kite repairs',
+    ]);
+    const saved = saveProbe('the zephyrkite');
+    expect(documentFrequency('the')! >= documentCount() / 2).toBe(true);
+
+    const { matchExprs } = detectRecordingMatch(saved);
+    expect(matchExprs).toEqual(['"zephyrkite"']);
+  });
+
+  it.each([
+    [5, '"zephyrkite"'],
+    [4, '"pivot" OR "zephyrkite"'],
+  ])(
+    'at %i of 10 rows the token is omitted only from exactly half upward',
+    (pivotRows, expected) => {
+      seed([
+        'zephyrkite marker',
+        ...Array.from({ length: pivotRows - 1 }, (_, i) => `pivot ${FILLER_WORDS[i]}`),
+        ...Array.from({ length: 9 - pivotRows }, (_, i) => `filler ${FILLER_WORDS[i]}`),
+      ]);
+      const saved = saveProbe('pivot zephyrkite');
+      expect(documentCount()).toBe(10);
+      expect(documentFrequency('pivot')).toBe(pivotRows);
+
+      expect(detectRecordingMatch(saved).matchExprs).toEqual([expected]);
+    },
+  );
+
+  it('a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity', () => {
+    seed(FILLER_WORDS.map((w) => `the ${w} ledger`));
+    const [target] = seed(['the zephyrkite manual covers kite repairs']);
+    const saved = saveProbe('the zephyrkite manual covers kite repair');
+
+    const pruned = detectRecordingMatch(saved);
+    const unpruned = detectRecordingMatch(saved, { perSaveMax: 5, commonTermRatio: null });
+    expect(pruned.matchExprs).not.toEqual(unpruned.matchExprs);
+    expect(unpruned.matchExprs).toEqual([sanitizeFtsQuery(saved.content, { maxTerms: 16 })]);
+
+    const hit = pruned.result.candidates.find((c) => c.targetId === target);
+    expect(hit?.source).toBe('fts');
+    expect(hit!.similarity).toBe(
+      unpruned.result.candidates.find((c) => c.targetId === target)!.similarity,
+    );
+  });
+
+  it('a save whose every token is common keeps the builder expression unchanged', () => {
+    seed(FILLER_WORDS.map((w) => `alpha beta gamma ${w}`));
+    const saved = saveProbe('alpha beta gamma');
+    for (const t of ['alpha', 'beta', 'gamma'])
+      expect(documentFrequency(t)! >= documentCount() / 2).toBe(true);
+
+    expect(detectRecordingMatch(saved).matchExprs).toEqual([
+      sanitizeFtsQuery(saved.content, { maxTerms: 16 }),
+    ]);
+  });
+
+  it('tokens found only in the saved text do not count as kept, so the common tokens stay', () => {
+    const [sharing] = seed([
+      'alpha beta',
+      ...FILLER_WORDS.slice(0, 3).map((w) => `alpha beta ${w}`),
+    ]);
+    const saved = saveProbe('alpha beta zzonlyhere');
+    expect(documentFrequency('zzonlyhere')).toBe(1);
+    expect(documentFrequency('alpha')! >= documentCount() / 2).toBe(true);
+
+    const { result, matchExprs } = detectRecordingMatch(saved);
+    expect(matchExprs).toEqual([sanitizeFtsQuery(saved.content, { maxTerms: 16 })]);
+    expect(result.candidates.find((c) => c.targetId === sharing)?.source).toBe('fts');
+  });
+
+  it('a multi-term token stays even when each of its terms is common', () => {
+    seed(['zephyrkite marker', ...FILLER_WORDS.map((w) => `two ${w} space`)]);
+    const saved = saveProbe('two-space zephyrkite');
+    for (const t of ['two', 'space'])
+      expect(documentFrequency(t)! >= documentCount() / 2).toBe(true);
+
+    expect(detectRecordingMatch(saved).matchExprs).toEqual(['"two-space" OR "zephyrkite"']);
   });
 });
 

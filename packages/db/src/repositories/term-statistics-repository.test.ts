@@ -89,3 +89,51 @@ describe('adminQueryTermFrequencies keys the read on the index own terms', () =>
     ]);
   });
 });
+
+describe('adminTokenTermFrequencies tokenises each token through the index tokenizer', () => {
+  it("returns every token's term instances in order, each with its document frequency", () => {
+    save('m1', 'στάσις apps core held');
+    save('m2', 'apps held');
+
+    expect(
+      repos.termStatistics.adminTokenTermFrequencies(['apps/core-12', 'στάσις', 'held']),
+    ).toEqual([
+      [
+        { term: 'apps', documentFrequency: 2 },
+        { term: 'core', documentFrequency: 1 },
+        { term: '12', documentFrequency: null },
+      ],
+      [{ term: 'στάσισ', documentFrequency: 1 }],
+      [{ term: 'held', documentFrequency: 2 }],
+    ]);
+  });
+
+  it('counts a token made of one repeated term as two instances', () => {
+    save('m1', 'ha');
+    expect(repos.termStatistics.adminTokenTermFrequencies(['ha-ha'])).toEqual([
+      [
+        { term: 'ha', documentFrequency: 1 },
+        { term: 'ha', documentFrequency: 1 },
+      ],
+    ]);
+  });
+
+  it('returns an empty list for a token the tokenizer yields no term for, and for no tokens', () => {
+    expect(repos.termStatistics.adminTokenTermFrequencies(['--', 'alpha'])).toEqual([
+      [],
+      [{ term: 'alpha', documentFrequency: null }],
+    ]);
+    expect(repos.termStatistics.adminTokenTermFrequencies([])).toEqual([]);
+  });
+
+  it('leaks no token between consecutive reads or into the per-text read', () => {
+    save('m1', 'alpha beta');
+    repos.termStatistics.adminTokenTermFrequencies(['alpha', 'beta', 'gamma']);
+    expect(repos.termStatistics.adminTokenTermFrequencies(['delta'])).toEqual([
+      [{ term: 'delta', documentFrequency: null }],
+    ]);
+    expect([...repos.termStatistics.adminQueryTermFrequencies('epsilon').keys()]).toEqual([
+      'epsilon',
+    ]);
+  });
+});

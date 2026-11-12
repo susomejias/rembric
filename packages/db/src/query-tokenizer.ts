@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 
 export const QUERY_TERMS_TABLE = 'rembric_query_terms';
 export const QUERY_TERMS_VOCAB_TABLE = 'rembric_query_terms_vocab';
+export const QUERY_TERMS_INSTANCE_TABLE = 'rembric_query_terms_instance';
 /** Anything but `temp` puts per-query writes into the WAL of an append-only store. */
 export const QUERY_TERMS_SCHEMA = 'temp';
 
@@ -84,6 +85,7 @@ export function deriveQueryTokenizerDdl(declaration: string): QueryTokenizerTabl
     statements: [
       `CREATE VIRTUAL TABLE ${QUERY_TERMS_SCHEMA}.${QUERY_TERMS_TABLE} USING fts5(${args})`,
       `CREATE VIRTUAL TABLE ${QUERY_TERMS_SCHEMA}.${QUERY_TERMS_VOCAB_TABLE} USING fts5vocab('${QUERY_TERMS_TABLE}','row')`,
+      `CREATE VIRTUAL TABLE ${QUERY_TERMS_SCHEMA}.${QUERY_TERMS_INSTANCE_TABLE} USING fts5vocab('${QUERY_TERMS_TABLE}','instance')`,
     ],
   };
 }

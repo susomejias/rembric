@@ -1,0 +1,47 @@
+--- add-save-time-lexical-floor/measurements/sweep.txt
++++ prune-common-terms-from-save-time-match/measurements/sweep.txt
+@@ -3,12 +3,12 @@
+ 
+ ## arm: lexical-only (instrument: pending rows written by the production curation path; queue depth = total over every labelled save)
+           floor       near-dup       expanded     contradict unrel fts/save unrel vec/save unrel ent/save    queue depth     admissible
+-           0.00            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+-           0.05            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+-           0.10            8/8            4/4            5/5           5.00           0.00           0.00            132             no
+-           0.15            8/8            4/4            5/5           4.60           0.00           0.00            110             no
+-           0.20            8/8            4/4            5/5           3.30           0.00           0.00             78             no
+-           0.25            8/8            4/4            5/5           3.20           0.00           0.00             64             no
++           0.00            8/8            4/4            5/5           4.80           0.00           0.00            133             no
++           0.05            8/8            4/4            5/5           4.80           0.00           0.00            133             no
++           0.10            8/8            4/4            5/5           4.80           0.00           0.00            130             no
++           0.15            8/8            4/4            5/5           4.40           0.00           0.00            108             no
++           0.20            8/8            4/4            5/5           3.10           0.00           0.00             76             no
++           0.25            8/8            4/4            5/5           3.00           0.00           0.00             62             no
+            0.30            8/8            2/4            4/5           1.80           0.00           0.00             39             no
+            0.35            8/8            0/4            4/5           1.00           0.00           0.00             27             no
+            0.40            8/8            0/4            4/5           0.60           0.00           0.00             19             no
+@@ -26,12 +26,12 @@
+ 
+ ## arm: production (instrument: pending rows written by the production curation path; queue depth = total over every labelled save)
+           floor       near-dup       expanded     contradict unrel fts/save unrel vec/save unrel ent/save    queue depth     admissible
+-           0.00            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+-           0.05            8/8            4/4            5/5           5.00           0.00           0.00            135             no
+-           0.10            8/8            4/4            5/5           5.00           0.00           0.00            132             no
+-           0.15            8/8            4/4            5/5           4.60           0.00           0.00            110             no
+-           0.20            8/8            4/4            5/5           3.30           0.00           0.00             78             no
+-           0.25            8/8            4/4            5/5           3.20           0.00           0.00             64             no
++           0.00            8/8            4/4            5/5           4.80           0.00           0.00            133             no
++           0.05            8/8            4/4            5/5           4.80           0.00           0.00            133             no
++           0.10            8/8            4/4            5/5           4.80           0.00           0.00            130             no
++           0.15            8/8            4/4            5/5           4.40           0.00           0.00            108             no
++           0.20            8/8            4/4            5/5           3.10           0.00           0.00             76             no
++           0.25            8/8            4/4            5/5           3.00           0.00           0.00             62             no
+            0.30            8/8            4/4            5/5           1.80           0.00           0.00             42             no
+            0.35            8/8            4/4            5/5           1.00           0.00           0.00             32             no
+            0.40            8/8            4/4            5/5           0.60           0.00           0.00             24             no
+@@ -51,5 +51,5 @@
+ chosen floor (plateau midpoint on the grid): 0.60
+ 
+ ## secondary series (not gating) — pending rows written while ingesting the retrieval corpus, production arm
+-floor 0.00: 289
++floor 0.00: 275
+ floor 0.60: 54
