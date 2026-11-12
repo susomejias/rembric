@@ -30,9 +30,9 @@ At 1 000, 20 000 and 50 000 memories, SQLite runs a `MULTI-INDEX OR`: `memory_re
 
 ## Mutation check (task 7.1)
 
-`mutation.txt`. 25 runs:
+`mutation.txt`. 26 runs:
 
-- each of the six path calls deleted, run against the core tests and against the invariant scan, plus the MCP tool test for `memory.archive`;
+- each of the six path calls deleted, run against the core tests and against the invariant scan, plus the MCP tool test and the dashboard action test for `memory.archive`;
 - in the undo: the restoration, its endpoint check, its reuse of the later-verdict guard, both halves of the link (prefix and retired memories), `undoRun`'s skip and its `reverted` list;
 - in the helper: the single timestamp and the retirement op's run;
 - the target side of the read, and the dashboard note.
