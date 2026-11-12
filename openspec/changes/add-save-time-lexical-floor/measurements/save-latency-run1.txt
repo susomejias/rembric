@@ -1,0 +1,20 @@
+# memory.save latency — before/after LEXICAL_CANDIDATE_FLOOR
+instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5
+arms interleaved in one process against one database, rotating order; 20 warm-up rounds discarded, 200 samples per arm
+corpus: pnpm run corpus:build generator (buildCorpus, default args, seed 1) at each size; probes are 80%-prefix and reversed rewrites of existing memories in vol-shared
+
+  1000 floor-0.00 (a)   p50    9.888 ms  p90   12.598 ms  pending rows  1000
+  1000 floor-0.60       p50    9.699 ms  p90   12.629 ms  pending rows  1000
+  1000 floor-0.00 (b)   p50    9.846 ms  p90   13.007 ms  pending rows  1000
+  1000 added p50 (floor − a) -0.188 ms; noise band |b − a| 0.042 ms; budget MET
+
+ 20000 floor-0.00 (a)   p50   47.702 ms  p90   51.567 ms  pending rows  1000
+ 20000 floor-0.60       p50   48.017 ms  p90   51.648 ms  pending rows  1000
+ 20000 floor-0.00 (b)   p50   47.653 ms  p90   51.632 ms  pending rows  1000
+ 20000 added p50 (floor − a) 0.315 ms; noise band |b − a| 0.049 ms; budget MISSED
+
+ 50000 floor-0.00 (a)   p50  107.785 ms  p90  118.062 ms  pending rows  1000
+ 50000 floor-0.60       p50  107.376 ms  p90  118.677 ms  pending rows  1000
+ 50000 floor-0.00 (b)   p50  107.531 ms  p90  118.240 ms  pending rows  1000
+ 50000 added p50 (floor − a) -0.410 ms; noise band |b − a| 0.255 ms; budget MET
+

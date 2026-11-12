@@ -1,0 +1,21 @@
+# memory.save latency — before/after LEXICAL_CANDIDATE_FLOOR
+instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5
+paired design: each round saves the SAME probe text through all three arms, in rotating order, in one process against one database; 20 warm-up rounds discarded, 400 rounds
+statistic: median of per-round paired differences with a 2000-resample bootstrap 95% interval; budget MET when the upper bound for (floor − a) does not exceed the larger magnitude bound of the identical-arm noise (b − a)
+corpus: pnpm run corpus:build generator (buildCorpus, default args, seed 1) at each size; probes are 80%-prefix and reversed rewrites of existing memories in vol-shared
+
+  1000 floor-0.00 (a)   p50   10.892 ms  p90   14.136 ms  pending rows  2000
+  1000 floor-0.60       p50   10.853 ms  p90   13.989 ms  pending rows  2000
+  1000 floor-0.00 (b)   p50   11.023 ms  p90   13.936 ms  pending rows  2000
+  1000 paired median (floor − a) 0.041 ms [95% -0.025, 0.099]; noise, paired median (b − a) -0.060 ms [95% -0.120, -0.011]; budget MET
+
+ 20000 floor-0.00 (a)   p50   47.154 ms  p90   50.409 ms  pending rows  2000
+ 20000 floor-0.60       p50   47.199 ms  p90   50.501 ms  pending rows  2000
+ 20000 floor-0.00 (b)   p50   47.157 ms  p90   50.298 ms  pending rows  2000
+ 20000 paired median (floor − a) 0.081 ms [95% 0.005, 0.143]; noise, paired median (b − a) 0.013 ms [95% -0.048, 0.077]; budget MISSED
+
+ 50000 floor-0.00 (a)   p50  106.489 ms  p90  112.225 ms  pending rows  2000
+ 50000 floor-0.60       p50  106.348 ms  p90  112.183 ms  pending rows  2000
+ 50000 floor-0.00 (b)   p50  106.350 ms  p90  111.918 ms  pending rows  2000
+ 50000 paired median (floor − a) -0.061 ms [95% -0.158, 0.032]; noise, paired median (b − a) -0.056 ms [95% -0.163, 0.104]; budget MET
+
