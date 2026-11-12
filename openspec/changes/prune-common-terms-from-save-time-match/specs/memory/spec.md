@@ -175,3 +175,29 @@ The pass ORs its capped builder tokens into one `MATCH`, and FTS5 ranks that mat
 
 - **WHEN** the environment schema and every MCP tool input schema are inspected
 - **THEN** `COMMON_TERM_DOCUMENT_RATIO` SHALL NOT be readable from the environment and SHALL NOT be settable per request
+
+### Requirement: The save-time lexical query MUST score only the saving project's matches
+
+The save-time lexical query SHALL order its pool by bm25 computed after the scope, status and exclusion filters have been applied, so that only rows that can enter the pool are scored and sorted. It SHALL NOT order by FTS5's `rank` column, because FTS5 consumes `ORDER BY rank` itself and then scores and sorts every match in every project before the query's own filters run.
+
+The scores and the order SHALL remain exactly those of default bm25 over the whole index. The statistics bm25 uses (the document total, each phrase's document count and the average row length) still cover every indexed row, so for the saving project's rows the returned `(id, score)` list SHALL be identical to the list FTS5 would produce by ranking every match. That identity is what keeps the save-time calibration sweep and the lexical floor valid without recalibration.
+
+What stays corpus-wide SHALL be stated rather than hidden:
+
+- FTS5 still walks the postings of the kept tokens in every project;
+- the join still looks up each matching row before the project filter can reject it;
+- bm25's inverse document frequencies are still counted over every project.
+
+These costs scale with the match set of the kept tokens, which "The save-time lexical `MATCH` MUST omit terms present in at least half of the index" bounds. They do not scale with the number of rows scored. Making them independent of other projects' rows requires an index restricted to one project. Such an index computes inverse document frequencies over that project alone, so it changes scores and order and needs its own calibration.
+
+#### Scenario: Out-of-project matches are not scored
+
+- **GIVEN** an index in which a save's kept tokens match rows in its own project and in other projects
+- **WHEN** the save-time lexical query runs
+- **THEN** its query plan SHALL apply the project filter before computing bm25, and SHALL NOT let FTS5 order the whole match set by rank
+
+#### Scenario: Scoring after the filter changes no score and no order
+
+- **GIVEN** a save whose kept tokens match more rows of its project than the pool holds
+- **WHEN** the save-time lexical query runs
+- **THEN** it SHALL return the same rows, in the same order and with the same scores, as ordering by FTS5's rank over every match and then keeping the project's rows

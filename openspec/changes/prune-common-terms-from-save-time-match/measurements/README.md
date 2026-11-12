@@ -17,6 +17,8 @@ pnpm --filter @rembric/core exec tsx ../../openspec/changes/prune-common-terms-f
 
 Both are built once per size (1 000, 20 000 and 50 000 rows) and copied before any script writes to them.
 
+The `-skew` variants of both corpora use the generator's skewed project assignment. One project holds 2% of the rows, one 20% and one 60% (`SHARE_SLOTS`). `plans.txt`, `save-latency.txt` and `driven-and-rebuild.txt` use them.
+
 ## `idf-clamp.txt` — why the ratio is 0.5
 
 **Instrument:** `bm25()` of one row matching one term in a temp FTS5 table, as the term's document share crosses one half.
@@ -24,6 +26,8 @@ Both are built once per size (1 000, 20 000 and 50 000 rows) and copied before a
 FTS5 returns exactly `-1e-6` from `n = N/2` upward, and `-ln((N − n + 0.5)/(n + 0.5))` below it. The table shows this for N = 10, 11, 1 000 and 50 000. The ratio is therefore derived, the comparison is inclusive, and the `>=` boundary is pinned by a test (see `mutation.txt`).
 
 ## `statement.txt` — the save-time statement, the lookup, and behaviour
+
+`statement.txt` isolates pruning. It was measured with the statement still ordered by `rank` (shape A); `plans.txt` measures both shapes.
 
 **Probes:** 30 memories of the largest project, saved as three classes:
 
@@ -72,26 +76,60 @@ The generator's long memories have 16 leading tokens all drawn from its 150-word
 
 **Phrases:** multi-term tokens whose terms are all common were 1 of 1 440 tokens (generator at 1 000 rows) and 0 everywhere else.
 
-## `save-latency.txt` — end to end
+## `plans.txt` — statement shapes, by project share (query plan vs schema)
 
-**Instrument:** paired `saveMemoryWithCandidates` wall clock, embedder not wired.
+**Instrument:** statement wall clock, p50 of 3 per probe, then p50 over 10 probes. Fidelity compares each shape's top-20 `(id, score)` list with today's (shape A).
 
-**Design:** three arms (unpruned (a), pruned, unpruned (b)) save the same probe text in rotating order, in one process against one database. The paired median difference has a bootstrap 95% interval. The identical-arm difference (b − a) is the noise band.
+**Corpora:** the skewed generator and the skewed realistic control, with the saving project holding 2%, 20% or 60% of the rows, at 1 000, 20 000 and 50 000 rows.
 
-| corpus    | rows   | unpruned p50 | pruned p50 | paired median (pruned − a), 95% | identical arms (b − a), 95% |
-| --------- | ------ | ------------ | ---------- | ------------------------------- | --------------------------- |
-| generator | 1 000  | 12.856 ms    | 10.028 ms  | −2.885 ms [−3.030, −2.686]      | −0.016 ms [−0.130, 0.120]   |
-| generator | 20 000 | 50.996 ms    | 17.991 ms  | −31.445 ms [−32.742, −30.030]   | −0.005 ms [−0.167, 0.106]   |
-| generator | 50 000 | 108.429 ms   | 30.022 ms  | −77.536 ms [−79.683, −74.958]   | −0.058 ms [−0.312, 0.274]   |
-| realistic | 1 000  | 2.294 ms     | 2.038 ms   | −0.227 ms [−0.280, −0.173]      | 0.004 ms [−0.024, 0.028]    |
-| realistic | 20 000 | 18.181 ms    | 12.185 ms  | −5.922 ms [−6.485, −5.338]      | −0.095 ms [−0.269, 0.073]   |
-| realistic | 50 000 | 39.340 ms    | 25.334 ms  | −14.157 ms [−15.217, −12.777]   | −0.040 ms [−0.171, 0.139]   |
+**Shapes:** A (today, `ORDER BY rank`), B (shipped, `ORDER BY bm25(memory_fts)`), B2, E1, E2 and the floor; see the file header and design D7.
 
-Every paired interval lies far outside its noise band, at every size including 1 000 rows. Adding the lookup did not cost the small corpus anything measurable; the save got faster there too.
+**Fidelity:** B matched A's ids and scores exactly in 360 of 360 probes. E1 and E2 never reproduced the scores.
 
-The p90 of the pruned generator arm stays at the unpruned level (125 ms at 50 000 rows). Those are the saves where the fallback fires, which keep today's cost.
+**Shipped cost (B + pruning), saving project at 2%:**
 
-The pending-row totals differ a little between arms on the realistic control. They also differ between the two identical arms (1 273 against 1 257 at 1 000 rows): with the arms rotating, each arm's save sees the earlier arms' saves of the same text. They are not a behaviour measurement; `statement.txt` is.
+- generator: 0.20, 0.91 and 2.48 ms;
+- realistic: 0.68, 3.74 and 7.29 ms.
+
+Today's (A, unpruned) at the same points:
+
+- generator: 2.54, 42.46 and 88.04 ms;
+- realistic: 2.14, 18.62 and 53.75 ms.
+
+It still grows with the rows in other projects. Only E2 (an FTS table per project, which changes scores) stays nearly flat: 0.07, 0.09 and 0.26 ms, and 0.18, 0.36 and 0.54 ms.
+
+## `driven-and-rebuild.txt` — the rejected memory-driven join, idf cost, rebuild time
+
+**Instruments:** single-run wall clock for the joins and builds; p50 of 5 for idf.
+
+- **Memory-driven join** (`memory CROSS JOIN memory_fts`), project at 2% of 50 000 generator rows: 5 195 ms unpruned and 711 ms pruned, against 41.2 ms and 2.45 ms for the shipped statement. FTS5 re-filters per outer row.
+- **idf cost:** bm25 on a single row of a term present in all 50 000 rows costs 0.716 ms, against 0.010 ms without bm25. FTS5 counts the term's documents on every scoring cursor.
+- **Rebuild:** `memory_fts` rebuild takes 1 146 ms (generator) and 277 ms (realistic) at 50 000 rows. Filling a temp FTS table with a project column took 934 ms and 243 ms. That is scale for the derived-index option, not a migration measurement.
+
+## `save-latency.txt` — end to end, the base commit against this change
+
+**Instrument:** paired `saveMemoryWithCandidates` wall clock, embedder not wired, 200 rounds.
+
+**Design:** four arms save the same text in rotating order:
+
+- **before:** the base commit's statement, replayed verbatim, with pruning off;
+- **after:** as shipped;
+- **pruning only:** pruning with the base statement;
+- **before (b):** a second copy of before, as the noise band.
+
+**p50, saving project at 2%** (before → after):
+
+| corpus    | 1 000         | 20 000        | 50 000         |
+| --------- | ------------- | ------------- | -------------- |
+| generator | 13.59 → 11.53 | 49.50 → 14.33 | 109.28 → 22.03 |
+| realistic | 3.19 → 2.47   | 20.42 → 6.40  | 34.49 → 8.98   |
+
+**At 50 000 rows, 20% and 60% shares** (before → after):
+
+- generator: 127.20 → 44.68 and 154.68 → 61.33;
+- realistic: 34.10 → 10.15 and 44.14 → 20.13.
+
+**Significance:** every after − before paired interval lies outside the b − a noise band; every b − a interval lies within [−0.50, 0.60] ms. The query-plan change contributes beyond pruning: on realistic at 50 000 rows and 2%, pruning only gives 21.04 ms against 8.98 ms for both. The generator's p90 stays higher, because saves where the fallback fires keep the full match set.
 
 ## `sweep.txt` and `sweep.diff` — save-time calibration sweep
 
@@ -106,7 +144,7 @@ The pending-row totals differ a little between arms on the realistic control. Th
 
 **Why:** a count at floor `f` counts rows with `similarity >= f`. Identical counts from 0.30 upward, with identical labelled-pair recall at every grid point, mean every row that disappeared had a similarity below 0.30. Those rows sat below the shipped floor anyway. They are rows that shared only common tokens with the save's leading tokens, which is what this change stops ranking.
 
-The admissible plateau (0.55–0.70) and the chosen floor (0.60) are unchanged.
+The admissible plateau (0.55–0.70) and the chosen floor (0.60) are unchanged. After the query-plan change (design D7), the sweep was rerun and is byte-identical to this `sweep.txt` (`retrieval-eval.txt`).
 
 ## `retrieval-eval.txt` — retrieval evaluation
 
@@ -148,4 +186,9 @@ The file also holds the RED run of the new tests on the code before the implemen
 
 ## What this change does not fix
 
-On the realistic control the pruned statement still matches 56–59% of rows, because tokens in 5–50% of rows are kept. The document-frequency read is itself linear in the frequencies it counts. Save-time cost is lower, but it still grows with rows in other projects. Making it independent of them needs a project-restricted lexical index or ranking after the project join, which is listed as an open question in the design.
+The shipped statement no longer scores or sorts other projects' matches, but two costs still grow with the rows in other projects:
+
+- FTS5 walks the kept tokens' postings in every project, and the join looks up each matching row before the project filter rejects it;
+- bm25 counts each phrase's documents over every project, and so does the pruning lookup.
+
+The saving project's share barely matters at the statement level. What grows is the index. Only a per-project index (E2) is near-flat, and it changes scores. Design D7 and its Open Questions leave that to the owner.

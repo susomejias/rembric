@@ -347,6 +347,63 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
   });
 
+  describe('searchBm25Candidates — scores only the saving project matches', () => {
+    function seedTwoProjects(): void {
+      seedProject(t.handle, 'p1', 'project-one');
+      const rows: NewMemory[] = [];
+      for (let i = 0; i < 30; i += 1) {
+        rows.push(
+          mem({
+            id: `in-${String(i).padStart(2, '0')}`,
+            title: i % 5 === 0 ? `canary pipeline ${i}` : `note ${i}`,
+            content: `the deploy ${'pipeline '.repeat(i % 4)}runs nightly ${i % 3 === 0 ? 'canary' : 'stable'} build ${i}`,
+          }),
+          mem({
+            id: `out-${String(i).padStart(2, '0')}`,
+            projectId: 'p1',
+            title: `other note ${i}`,
+            content: `the deploy pipeline of another team ${i}`,
+          }),
+        );
+      }
+      t.handle.db.insert(memory).values(rows).run();
+    }
+
+    const query = {
+      matchExpr: '"the" OR "deploy" OR "pipeline" OR "canary"',
+      excludeId: 'in-00',
+      projectId: 'p0',
+      excludeIds: ['in-01'],
+      limit: 20,
+    };
+
+    it('lets the join filter the matches before bm25 is computed, instead of FTS5 ranking every match', () => {
+      seedTwoProjects();
+      const plan = explainWhileRunning(t, () => repo.searchBm25Candidates(query)).join(' | ');
+      expect(plan).toContain('SEARCH m USING INTEGER PRIMARY KEY (rowid=?)');
+      expect(plan).toContain('USE TEMP B-TREE FOR ORDER BY');
+      expect(plan).not.toMatch(/memory_fts VIRTUAL TABLE INDEX 32:/);
+    });
+
+    it('returns the same rows, order and scores as FTS5 ranking every match', () => {
+      seedTwoProjects();
+      const reference = t.handle.raw
+        .prepare<[string], { id: string; rank: number }>(
+          `SELECT m.id AS id, memory_fts.rank AS rank
+           FROM memory_fts JOIN memory m ON m.rowid = memory_fts.rowid
+           WHERE memory_fts MATCH ? AND m.id NOT IN ('in-00', 'in-01')
+             AND m.scope = 'project' AND m.project_id = 'p0' AND m.status = 'active'
+           ORDER BY rank LIMIT 20`,
+        )
+        .all(query.matchExpr);
+      expect(reference).toHaveLength(20);
+      const got = repo.searchBm25Candidates(query);
+      expect(got.map((r) => r.id)).toEqual(reference.map((r) => r.id));
+      expect(got.map((r) => r.rank)).toEqual(reference.map((r) => r.rank));
+      expect(got.every((r) => r.id.startsWith('in-'))).toBe(true);
+    });
+  });
+
   describe('recentForContext expression index', () => {
     function planFor(scope: 'global' | 'project', projectId: string | null): string {
       const conds = [

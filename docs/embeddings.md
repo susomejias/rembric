@@ -158,4 +158,9 @@ sort every row of every project on each save. A token FTS5 matches as a phrase
 (`two-space`, a file path) is never dropped, and when no remaining token could
 match another memory nothing is dropped at all.
 
+The query then orders by `bm25(memory_fts)` rather than FTS5's `rank`
+column, so FTS5 scores only the saving project's matches instead of
+scoring and sorting every match in every project. The scores and order are
+identical either way, because bm25 still uses whole-index statistics.
+
 Changing any of these is an architectural change (OpenSpec), not tuning.

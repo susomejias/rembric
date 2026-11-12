@@ -54,3 +54,35 @@ RED before GREEN (same spec, -t 'common-term pruning', on the code before the im
    × findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
 ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
       Tests  3 failed | 4 passed | 40 skipped (47)
+
+# Mutation check — the save-time statement scores only in-project matches
+
+Command (3 cases, restore byte-verified by the script):
+node scripts/mutate.mjs --workspace packages/db --file packages/db/src/repositories/memory-repository.ts --spec src/repositories/memory-repository.perf.test.ts -t 'scores only the saving project' --mutation '<find>' --with '<replace>' ...
+
+cases (find -> replace):
+  1 FTS5 ranks every match again:  'ORDER BY bm25(memory_fts)' -> 'ORDER BY memory_fts.rank'
+  2 scores weighted:               'bm25(memory_fts) AS rank' -> 'bm25(memory_fts, 1.0, 1.0, 2.0) AS rank'
+  3 order weighted:                'ORDER BY bm25(memory_fts)' -> 'ORDER BY bm25(memory_fts, 1.0, 1.0, 2.0)'
+
+mutation:         ORDER BY bm25(memory_fts)
+  CAUGHT by 1:
+    × MemoryRepository — read-path performance (optimize-db-read-path) > searchBm25Candidates — scores only the saving project matches > lets the join filter the matches before bm25 is computed, instead of FTS5 ranking every match
+mutation: SELECT m.id AS id, bm25(memory_fts) AS rank, m.title
+  CAUGHT by 1:
+    × MemoryRepository — read-path performance (optimize-db-read-path) > searchBm25Candidates — scores only the saving project matches > returns the same rows, order and scores as FTS5 ranking every match
+mutation:         ORDER BY bm25(memory_fts)
+  CAUGHT by 1:
+    × MemoryRepository — read-path performance (optimize-db-read-path) > searchBm25Candidates — scores only the saving project matches > returns the same rows, order and scores as FTS5 ranking every match
+all 3 mutations caught; memory-repository.ts restored
+
+Equivalent mutants found on the way, recorded so nobody re-reports them as gaps:
+  - 'ORDER BY bm25(memory_fts)' -> 'ORDER BY rank' is NOT a regression: SQLite resolves 'rank' to the result alias 'bm25(memory_fts) AS rank' first, so the plan is unchanged.
+  - 'bm25(memory_fts) AS rank' -> 'memory_fts.rank AS rank' only changes how the 20 output scores are read; the order stays bm25(memory_fts), not consumed by FTS5, with identical values.
+  - The first version of the fidelity test gave every in-project row the same title terms, so case 3 survived; the titles now vary and case 3 is caught.
+
+RED before GREEN (the plan test on the code before the query change):
+   × MemoryRepository — read-path performance (optimize-db-read-path) > searchBm25Candidates — scores only the saving project matches > lets the join filter the matches before bm25 is computed, instead of FTS5 ranking every match
+     → expected 'SCAN memory_fts VIRTUAL TABLE INDEX 3…' to contain 'USE TEMP B-TREE FOR ORDER BY'
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 1 passed | 17 skipped (19)

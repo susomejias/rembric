@@ -35,7 +35,7 @@ FTS5's bm25 uses `idf = ln((N − n + 0.5) / (n + 0.5))` and replaces any `idf <
 
 - Interactive `memory.search` keeps its lexical branch unchanged. It is investigated in `measurements/search-path.txt`, and a change there would move every retrieval baseline, so it is a separate change.
 - The reported `similarity`, the floor and the pool size are not touched.
-- Making the save-time cost fully independent of other projects' rows. The residual growth is measured and recorded under Open Questions.
+- Making the save-time cost fully independent of other projects' rows. D7 measures what that takes: an index restricted to one project, which changes scores. The owner decides on it separately (Open Questions).
 
 ## Decisions
 
@@ -93,12 +93,47 @@ The trigger is term-level, as the owner phrased it ("when every term is common")
 
 Every restored token is common, so it is in at least `N/2` rows, and the fallback query is linear in `N` whatever the count. A smaller count only buys a constant factor: 11.8 ms for keep 1 against 92.6 ms for keep all on the generator at 50 000 rows, and 25.2 ms for keep 4 against 30.2 ms on the realistic control. In exchange, every count below 16 lost targets on the generator at every size, including keep 8. The fallback therefore keeps every token, and for these saves the expression is exactly today's.
 
+**Owner decision (2026-11-12):** keep every token in the fallback. The owner confirmed this after reviewing the table above.
+
 On the realistic control the fallback fired for 0 of 60 natural probes at every size. On the generator it fired for 14 to 18 of 60. Those are long memories whose first 16 tokens are all drawn from its 150-word vocabulary, which sits in nearly every row. Every synthetic all-common probe fires it, by construction.
 
 Alternatives considered:
 
 - **Keep the rarest K < 16 tokens.** Rejected by the table above.
 - **A result-based trigger: run the pruned query, and rerun unpruned when it returns no row.** It is exact about "empty", but it costs a second query, and it fires for every save whose rarer tokens match nothing in scope. That is the common case for a genuinely new memory. Rejected.
+
+### D7 — Score only the saving project's matches: order by `bm25(memory_fts)`, not by `rank`
+
+The owner asked for a further reduction: save-time cost should stop growing with rows in other projects. The preferred route was a query-plan change, with schema changes considered only if that fell short.
+
+Today's statement orders by FTS5's `rank` column. FTS5 consumes that order (plan `INDEX 32:M3`), so it computes bm25 for every match in every project and sorts them before the join's project filter runs. Ordering by the function `bm25(memory_fts)` instead leaves the order to SQLite (plan `INDEX 0:M3 … USE TEMP B-TREE FOR ORDER BY`). The join then filters first, and bm25 runs only on in-project matches.
+
+bm25's statistics still cover the whole index, so the scores are bit-identical. `measurements/plans.txt` checks the `(id, score)` top-20 against today's for every probe, in all 36 cells: 2 corpora × 3 sizes × 3 project shares × 2 expressions. It was identical in 360 of 360 probes. The save-time sweep is byte-identical to the pruning-only run.
+
+**Shapes measured** (`measurements/plans.txt`; statement p50 at 50 000 rows, saving project at 2% of rows, unpruned → pruned expression):
+
+| shape | what it is                                                          | generator      | realistic      | fidelity to today         |
+| ----- | ------------------------------------------------------------------- | -------------- | -------------- | ------------------------- |
+| A     | today, `ORDER BY rank`                                              | 88.0 → 4.84 ms | 53.8 → 20.3 ms | —                         |
+| **B** | `ORDER BY bm25(memory_fts)` (**shipped**)                           | 35.6 → 2.48 ms | 15.4 → 7.29 ms | identical ids and scores  |
+| B2    | B plus `+rowid IN (project rowids)`                                 | 17.4 → 2.66 ms | 10.5 → 3.79 ms | identical                 |
+| E1    | a project column in the FTS table, AND-ed into the `MATCH` (schema) | 29.3 → 8.32 ms | 15.0 → 5.40 ms | scores differ; ids differ |
+| E2    | an FTS table holding only the project's rows (schema)               | 1.95 → 0.26 ms | 1.23 → 0.54 ms | scores differ; ids differ |
+| floor | FTS5 iterating the match set alone                                  | 10.0 → 2.49 ms | 4.67 → 1.76 ms | —                         |
+
+**Why B:**
+
+- It is exact. It is cheaper than A in every cell, about 2× for the shipped pruned expression and 2.5–3.5× for the unpruned one that the fallback uses.
+- **B2** helps only when the project is small or the expression is unpruned. It costs more than B when the project is large, because materialising 30 000 rowids is not free (pruned at 60%: 5.85 against 2.93 ms on the generator).
+- **E1** is rejected. It is never cheaper than B for pruned expressions on the generator. Every score moves, because the project token adds one token to each row's length, which shifts bm25's length normalisation. On the generator the order changed too: for unpruned expressions at 20 000 and 50 000 rows, only 0 to 5 of 10 probes kept today's ids. On the realistic control the order held and only the scores moved. Its inverse document frequencies are still counted over every project.
+- **A memory-driven join** (`memory CROSS JOIN memory_fts … rowid = m.rowid`) is rejected (`measurements/driven-and-rebuild.txt`). FTS5 re-parses the `MATCH` for every outer row and recomputes bm25's idf per row, so the cost multiplies by the project's row count.
+
+**What B does not reach.** With the saving project at 2% of rows, the shipped statement still grows with the index:
+
+- generator: 0.20, 0.91 and 2.48 ms at 1 000, 20 000 and 50 000 rows;
+- realistic: 0.68, 3.74 and 7.29 ms.
+
+The causes are the kept tokens' postings, which are walked in every project, and the per-match row lookup. Only E2 is flat: 0.07, 0.09 and 0.26 ms, and 0.18, 0.36 and 0.54 ms. But E2 computes inverse document frequencies over the project, so scores and order change. That would need the save-time sweep and an owner decision on a per-project derived index. This change stops there (Open Questions).
 
 ### D4 — Where the specification text goes
 
@@ -107,6 +142,7 @@ Change `add-save-time-lexical-floor` is active and MODIFIES "Save-time lexical c
 This change therefore:
 
 - **ADDS** "The save-time lexical `MATCH` MUST omit terms present in at least half of the index". The requirement names its own constant and restates the constants rule for it: declared once, not configurable, not per request.
+- **ADDS** "The save-time lexical query MUST score only the saving project's matches" (D7). It requires bit-identical scores and states the costs that stay corpus-wide.
 - **MODIFIES** "`memory.save` MUST surface candidate conflicts at save-time". No other active change modifies it, and it must change: its builder paragraph says the lexical pass "SHALL NOT … drop tokens that are entirely non-ASCII", and frequency pruning drops any common token, whatever its script. The modified paragraph allows omission by frequency only, never by script, and keeps the non-empty guarantee.
 - **Leaves to a follow-up** folding `COMMON_TERM_DOCUMENT_RATIO` into the constants list. That should happen after both changes archive, so it has no archive-order dependency.
 
@@ -150,5 +186,5 @@ Each instrument is named in its output file and never tabulated with another:
 
 ## Open Questions
 
-- **Should save-time cost be made independent of other projects' rows?** That is the issue's stated expectation. Pruning removes the always-whole-index tokens, but two linear costs remain: the document-frequency read, and the match sets of tokens kept below `N/2`. Removing them needs a change of a different kind, such as a project-restricted lexical index or ranking after the project join. Each of those touches the schema or the query plan, and is for the owner to decide.
+- **Should the save-time lexical index become per-project (E2 in D7)?** It is the only shape measured whose cost is close to proportional to the saving project. It is a derived-index change, and its scores and order differ from today's because inverse document frequencies would be computed per project. Adopting it needs a migration, an upgrade test on a populated database, a rebuild-time measurement and a fresh save-time sweep. `measurements/driven-and-rebuild.txt` records the rebuild time of today's `memory_fts` at 50 000 rows for scale. Not started; awaiting the owner.
 - **The same question for interactive `memory.search`.** See `measurements/search-path.txt`.

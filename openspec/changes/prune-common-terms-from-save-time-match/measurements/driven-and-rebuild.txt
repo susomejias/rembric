@@ -1,0 +1,14 @@
+# Memory-driven join, idf cost, and rebuild time
+instruments: driven = single-run wall clock per probe (performance.now); idf = p50 of 5; build = single run
+
+## generator-skew, 50000 rows
+driven join, project at 2% (1000 rows), unpruned: with bm25 5195.1 ms, without bm25 367.3 ms; shipped statement 41.24 ms (median of 3 probes)
+driven join, project at 2% (1000 rows), pruned: with bm25 710.9 ms, without bm25 840.0 ms; shipped statement 2.45 ms (median of 3 probes)
+idf: one row, term '10' in 50000 rows: with bm25 0.716 ms, without 0.010 ms
+build: memory_fts 'rebuild' 1146 ms
+build: temp fts5 with a project_id column 934 ms
+
+## realistic-skew, 50000 rows
+build: memory_fts 'rebuild' 277 ms
+build: temp fts5 with a project_id column 243 ms
+
