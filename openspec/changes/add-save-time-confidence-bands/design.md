@@ -116,11 +116,11 @@ Alternatives considered:
 | -------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `candidates[]`       | middle- and high-band pairs, each with a `judgmentId` and a pending row (unchanged shape)                      | as today                                                                                                                                  |
 | `related[]`          | low-band pairs: the candidate shape without `judgmentId`, same ranked order, at most `CANDIDATES_PER_SAVE_MAX` | always on `memory.save` and on a `memory.merge` commit; on `memory.capture_passive` exactly when `candidates` is, that is, when non-empty |
-| `convergeWith[]`     | target ids of the high-band entries of `candidates[]`                                                          | same rule as `related[]`                                                                                                                  |
+| `convergeWith[]`     | `judgmentId`s of the high-band entries of `candidates[]`; an advisory steer                                    | same rule as `related[]`                                                                                                                  |
 | `judgmentRequired`   | `candidates.length > 0` (unchanged)                                                                            | as today                                                                                                                                  |
 | `candidatesDetected` | middle- and high-band pairs ranked before the cap (D5)                                                         | as today                                                                                                                                  |
 
-On `memory.capture_passive`, both arrays are concatenated across the learnings it saved, exactly as `candidates[]` is.
+On `memory.capture_passive`, both arrays are concatenated across the learnings it saved, exactly as `candidates[]` is. Each `convergeWith[]` id names exactly one `candidates[]` entry, which is how the agent finds the pair.
 
 Alternatives considered:
 
@@ -128,7 +128,7 @@ Alternatives considered:
 - **Keep low-band pairs in `candidates[]` without a `judgmentId`.** Rejected.
   - `candidates[]` means "close each with `memory.judge_batch`", and the output schema requires `judgmentId`.
   - An entry without one breaks both.
-- **`convergeWith[]` as judgment ids.** Considered, because on `memory.capture_passive` a target id does not say which learning it pairs with. Rejected, because the actions it steers toward take memory ids: `memory.merge` takes `ids`, and `topic_key` reuse is read from the target. `memory.save`, the primary path, has exactly one source. The `memory.capture_passive` ambiguity matches its existing `candidates[]`, which carries no source id either.
+- **`convergeWith[]` as target ids.** Proposed first, because the actions it steers toward take memory ids: `memory.merge` takes `ids`, and `topic_key` reuse is read from the target. Rejected by the maintainer's decision: when two learnings of one `memory.capture_passive` resemble the same memory, a target id appears twice and names neither pair. A judgment id names exactly one pair. The agent maps it to its `candidates[]` entry, which carries the `targetId` and `topicKey` the actions need, so nothing is lost.
 - **A top-level boolean such as `convergeSuggested`.** Rejected. It cannot say which pair is meant, and the published requirement already rejects companion booleans beside a list.
 
 The descriptions name both fields. To fit within `DESCRIPTION_MAX_LENGTH`, `memory.save` reclaims the following clauses. No requirement mandates them, and they are named here as the published description requirement asks:
@@ -142,7 +142,7 @@ The descriptions name both fields. To fit within `DESCRIPTION_MAX_LENGTH`, `memo
 - "instead of judging many pairs";
 - "stays reachable … and recordable", reworded to "is reachable …, recordable".
 
-The registered description is 1868 characters, including the redaction note.
+The `convergeWith[]` clause then grew to say that the array holds judgment ids and that the steer is advisory, which also cost "and reuse" (now "; reuse"). The registered description is 1891 characters, including the redaction note.
 
 ### D5 — Low-band pairs take no slot and are not counted
 
@@ -159,6 +159,8 @@ Alternatives considered:
 ### D6 — The high band keeps its pending row
 
 This is the maintainer's decision: high-band pairs are 72% actionable, the highest rate after the lexical band. The pair stays a judgment, and the steer only adds the cheaper action.
+
+The steer is **advisory**, and the spec and the description say so. A related, non-conflicting save can land in the high band: in the fixture, `r-reconnect-helper` shares an entity with its target at a cosine of 0.89. The maintainer accepted that cost because the pending row survives and the agent can judge the pair `related`.
 
 Alternatives considered:
 
@@ -210,12 +212,12 @@ Alternatives considered:
   - `related[]` still shows every such pair to the agent, with its source and shared entity.
   - `memory.compare` can record a verdict on one.
   - The pair stays re-derivable with `memory.search`.
-- **[Risk] The low-band ceiling sits close to a labelled contradiction in the fixture.** The fixture contradiction `c-cache` is admitted only by the dense channel, at a cosine of 0.751 with the compiled-in model. It stays middle by about 0.001; a ceiling of 0.76 would move it to related. → Mitigation: the ceiling is not tuned on the fixture (D8). The margin is recorded in the measurements so a future change to the ceiling or the model sees it.
+- **[Risk] The low-band ceiling sits close to a labelled contradiction in the fixture.** The fixture contradiction `c-cache` is admitted only by the dense channel, at a cosine of 0.751 with the compiled-in model. It stays middle by about 0.001; a ceiling of 0.76 would move it to related. → Mitigation: the maintainer decided to keep `CANDIDATE_LOW_BAND_CEILING = 0.75`, because the 3% actionable rate measured for `0.70–0.75` on real verdicts settles it and the fixture does not calibrate the ceiling (D8). The thin margin is recorded here and in the measurements so a future change to the ceiling or the model sees it.
 - **[Risk] A model change shifts the cosine distribution, and the bands stop meaning what the rates measured.** → Mitigation: the band constants are calibrated for the compiled-in model, as `VEC_THRESHOLD` is. The ADDED requirement states that changing the model or a band constant requires re-running the band-composition sweep and fresh verdict-rate evidence.
-- **[Trade-off] The high-band steer depends on the agent acting on it.** → Accepted because the pending row remains (D6). Nothing is lost when the steer is ignored.
+- **[Trade-off] The high-band steer is advisory and can be wrong.** A related pair can land high, and the agent may ignore a right steer. → Accepted by the maintainer, because the pending row remains (D6). Nothing is lost either way.
 - **[Trade-off] Middle-band entity pairs still lead the ranking and can fill the cap.** This covers pairs with an unknown cosine or a cosine of at least `VEC_THRESHOLD`. → Accepted. The low band removes the 1%-actionable entity-only pairs from the budget, which is most of the composition defect. Bounding the channel's share stays with `memory-entities`.
 - **[Trade-off] The extra read.** It costs at most about 0.6 ms at 20 000 memories for 40 ids, and runs only when vectors exist (D3). → Accepted, because without it the entity rule is inert.
-- **[Trade-off] The `memory.save` description has 32 characters of headroom left.** → Accepted, and recorded so the next change to that description plans its reclaim.
+- **[Trade-off] The `memory.save` description has 9 characters of headroom left.** → Accepted, and recorded so the next change to that description plans its reclaim.
 
 ## Migration Plan
 
@@ -225,7 +227,8 @@ Alternatives considered:
 
 ## Open Questions
 
-None blocking. These questions are for the maintainer:
+None. The maintainer answered the three questions this design raised:
 
-1. Should `convergeWith[]` carry judgment ids instead of target ids, so that `memory.capture_passive` can say which learning a near-duplicate pairs with (D4)?
-2. Is the fixture's 0.001 margin on `c-cache` a reason to revisit the 0.75 ceiling, or is the maintainer's 3% rate for that band the deciding evidence?
+1. `convergeWith[]` carries judgment ids (D4).
+2. `CANDIDATE_LOW_BAND_CEILING` stays 0.75: the 3% rate decides it, and the `c-cache` margin is recorded (Risks).
+3. A related pair landing in the high band is accepted, because the steer is advisory and the row survives (D6).

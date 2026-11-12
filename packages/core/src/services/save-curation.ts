@@ -37,7 +37,7 @@ export interface PostSaveDeps {
 export interface PostSaveResult {
   candidates: SaveTimeCandidateView[];
   related: RelatedMemoryView[];
-  /** Target ids of the high-band entries of `candidates`. */
+  /** Judgment ids of the high-band entries of `candidates`; advisory. */
   convergeWith: string[];
   candidatesDetected: number;
 }
@@ -65,7 +65,7 @@ export async function runPostSaveSteps(
           targetId: c.targetId,
         });
         candidates.push({ judgmentId: row.judgmentId, ...view(c) });
-        if (c.band === 'high') convergeWith.push(c.targetId);
+        if (c.band === 'high') convergeWith.push(row.judgmentId);
       }
     } catch {
       candidates = [];

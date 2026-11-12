@@ -102,8 +102,8 @@ export async function runSaveTimeArm(
         throw new Error(`save '${item.id}' expects unknown base item '${item.expects}'`);
       }
       const bandOf = (targetId: string): CandidateBand | null => {
-        if (convergeWith.includes(targetId)) return 'high';
-        if (candidates.some((c) => c.targetId === targetId)) return 'middle';
+        const pending = candidates.find((c) => c.targetId === targetId);
+        if (pending) return convergeWith.includes(pending.judgmentId) ? 'high' : 'middle';
         return related.some((r) => r.targetId === targetId) ? 'low' : null;
       };
       outcomes.push({

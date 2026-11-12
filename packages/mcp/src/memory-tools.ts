@@ -379,6 +379,7 @@ export const memorySaveOutput = {
   createdAt: z.string(),
   candidates: z.array(candidate),
   related: z.array(relatedMemory),
+  /** `judgmentId`s of the high-band entries of `candidates`; the steer is advisory. */
   convergeWith: z.array(z.string()),
   judgmentRequired: z.boolean(),
   /** Pre-cap detection count. Truncation is `candidatesDetected > candidates.length`. */

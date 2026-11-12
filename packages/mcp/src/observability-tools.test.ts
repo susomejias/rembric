@@ -332,7 +332,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
 
     const out = parse<{
       ids: string[];
-      candidates?: { targetId: string }[];
+      candidates?: { targetId: string; judgmentId: string }[];
       related?: Record<string, unknown>[];
       convergeWith?: string[];
       candidatesDetected: number;
@@ -342,7 +342,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
       ),
     );
     expect(out.candidates?.map((c) => c.targetId)).toEqual([high]);
-    expect(out.convergeWith).toEqual([high]);
+    expect(out.convergeWith).toEqual([out.candidates![0]!.judgmentId]);
     expect(out.related?.map((r) => r.targetId)).toEqual([low]);
     expect(out.related?.[0]).not.toHaveProperty('judgmentId');
     expect(out.candidatesDetected).toBe(1);
@@ -361,6 +361,52 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
     expect(quiet).not.toHaveProperty('candidates');
     expect(quiet).not.toHaveProperty('related');
     expect(quiet).not.toHaveProperty('convergeWith');
+  });
+
+  it('convergeWith names each pair by judgment id, so two learnings near one target stay distinct', async () => {
+    const unit = (weights: Record<number, number>) => {
+      const v = new Float32Array(768);
+      let norm = 0;
+      for (const [axis, w] of Object.entries(weights)) norm += (v[Number(axis)] = w) ** 2;
+      for (let i = 0; i < v.length; i++) v[i]! /= Math.sqrt(norm);
+      return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+    };
+    const first = 'the job runner listens on a non-default socket';
+    const second = 'our scheduler daemon avoids the usual http port';
+    const {
+      repos,
+      memory: mem,
+      handlers: h,
+    } = makeObservability(
+      db,
+      new Map([
+        [first, unit({ 0: 1 })],
+        [second, unit({ 0: 0.95, 4: 0.31 })],
+      ]),
+    );
+    const target = mem.save(
+      { type: 'project', title: 'Scheduler port', content: 'scheduler binds port 8781' },
+      defaultScope,
+    );
+    repos.vectors.insertEmbedding(
+      target.id,
+      unit({ 0: 0.92, 3: 0.39 }),
+      partitionKeyFor(target.projectId!),
+    );
+
+    const out = parse<{
+      candidates: { targetId: string; judgmentId: string }[];
+      convergeWith: string[];
+    }>(
+      await runWithContext(fakeContext(), () =>
+        h.capturePassive({ text: `## Key Learnings\n\n1. ${first}\n2. ${second}` }),
+      ),
+    );
+
+    const byJudgment = new Map(out.candidates.map((c) => [c.judgmentId, c.targetId]));
+    expect(new Set(out.convergeWith).size).toBe(out.convergeWith.length);
+    expect(out.convergeWith.every((id) => byJudgment.has(id))).toBe(true);
+    expect(out.convergeWith.filter((id) => byJudgment.get(id) === target.id)).toHaveLength(2);
   });
 });
 

@@ -112,7 +112,7 @@ memory.save (MCP)                            ← packages/mcp/src/memory-tools.t
    │     └─ cap CANDIDATES_PER_SAVE_MAX on middle+high; low capped separately
    │
    └─ response: candidates[] (middle+high, pending) → memory.judge_batch
-                convergeWith[] (high: likely the same fact) → memory.merge or supersedes
+                convergeWith[] (high: judgmentIds, advisory) → memory.merge or supersedes
                 related[] (low: no row, no judgmentId) → context only
 ```
 
@@ -175,8 +175,8 @@ Every admitted pair then gets a confidence band from `classifyCandidateBand`,
 which uses the pair's exact cosine and the channels that admitted it:
 
 - **High:** cosine ≥ `CANDIDATE_HIGH_BAND_FLOOR`. The pair is still a pending
-  candidate; `convergeWith[]` also names it, because the two memories likely
-  state the same fact.
+  candidate; `convergeWith[]` also lists its `judgmentId` as an advisory steer,
+  because the two memories likely state the same fact.
 - **Low:** admitted only by the vec pass with cosine below
   `CANDIDATE_LOW_BAND_CEILING`, or only by a shared entity with a known cosine
   below `VEC_THRESHOLD`. No pending row; the pair is returned in `related[]` and

@@ -57,3 +57,11 @@
 - [x] 5.1 `docs/relations.md` and `docs/embeddings.md` describe the bands, `related[]` and `convergeWith[]`.
 - [x] 5.2 Run `openspec validate add-save-time-confidence-bands --strict`, `node scripts/check-delta-freshness.mjs` and `node scripts/check-spec-crossrefs.mjs`, and record the results in `measurements/README.md`.
 - [x] 5.3 `pnpm run typecheck`, `pnpm run lint` and the full `pnpm test` are green after a fresh `pnpm --filter @rembric/web build`.
+
+## 6. Follow-up: `convergeWith[]` carries judgment ids
+
+- [x] 6.1 RED: in the core, `memory.save`, `memory.merge` and `memory.capture_passive` tests, expect `convergeWith` to hold the high-band candidate's `judgmentId`. Add a `memory.capture_passive` test where two learnings near one memory get two distinct ids. Observe 5 failures; the new test fails because target ids repeat.
+- [x] 6.2 GREEN: `runPostSaveSteps` pushes `row.judgmentId`, and the sweep maps a judgment id back to its candidate. Re-run the sweep; `sweep-after.txt` is unchanged.
+- [x] 6.3 Change the `mcp-api` and `memory` deltas, the proposal, the design (D4, D6, Risks, Open Questions), `docs/relations.md` and `docs/embeddings.md` to say "judgment ids" and "advisory".
+- [x] 6.4 The description states "holds judgmentIds of candidates likely restating this fact (advisory)". It is now 1891 characters, and the pinned length and substring in `mcp-transport.test.ts` are updated.
+- [x] 6.5 Run the mutation check on the wiring: target id substituted for judgment id, the high-band condition removed, and the MCP and capture aggregation. Every case is caught (`measurements/mutation.txt`, follow-up section).

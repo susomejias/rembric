@@ -131,7 +131,7 @@ Every pair the save-time detection admits SHALL be classified into exactly one c
 
 It SHALL also use the pair's cosine itself. The bands are:
 
-- **High:** a cosine of at least `CANDIDATE_HIGH_BAND_FLOOR = 0.85`, whichever channels admitted the pair. A high-band pair SHALL remain a candidate with a pending `memory_relations` row. The response SHALL additionally steer the agent toward converging the two memories (see the `mcp-api` capability).
+- **High:** a cosine of at least `CANDIDATE_HIGH_BAND_FLOOR = 0.85`, whichever channels admitted the pair. A high-band pair SHALL remain a candidate with a pending `memory_relations` row. The response SHALL additionally name the pair's judgment id in an advisory steer toward converging the two memories (see the `mcp-api` capability). The steer is advisory because a high-band pair can still be merely related, so the pending row SHALL survive whatever the agent decides.
 - **Low:** either of the following, but in neither case a pair the lexical channel admitted:
   - a pair admitted only by the dense channel, sharing no entity, with a cosine below `CANDIDATE_LOW_BAND_CEILING = 0.75`;
   - a pair admitted only by a shared entity whose cosine is known and below `VEC_THRESHOLD`.
@@ -165,7 +165,7 @@ A change to either constant, or to the compiled-in embedding model, SHALL carry 
 #### Scenario: The high-band floor itself is high, and keeps its row
 
 - **WHEN** a pair has a cosine exactly `CANDIDATE_HIGH_BAND_FLOOR`
-- **THEN** it SHALL be classified high, SHALL receive a pending row, and the response SHALL name its target among the convergence suggestions
+- **THEN** it SHALL be classified high, SHALL receive a pending row, and the response SHALL name that row's judgment id among the advisory convergence suggestions
 
 #### Scenario: An entity-only pair below `VEC_THRESHOLD` is low
 

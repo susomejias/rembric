@@ -111,14 +111,15 @@ Every case turned at least one named test red (`mutation.txt`). Each case below 
 
 **`save-curation.ts`:**
 
-| condition                             | mutation               |
-| ------------------------------------- | ---------------------- |
-| `convergeWith` only for the high band | every candidate pushed |
-| `related` assignment                  | removed                |
+| condition                              | mutation                 |
+| -------------------------------------- | ------------------------ |
+| `convergeWith` only for the high band  | every candidate pushed   |
+| `convergeWith` carries the judgment id | target id pushed instead |
+| `related` assignment                   | removed                  |
 
 **`vectors-repository.ts`:** the partition-key filter of `cosineDistances` was removed.
 
-**MCP wiring:**
+**MCP wiring** (re-run after `convergeWith` moved to judgment ids, with a capture case where two learnings resemble one memory):
 
 | file                     | condition                  | mutation    |
 | ------------------------ | -------------------------- | ----------- |
