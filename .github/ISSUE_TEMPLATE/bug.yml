@@ -1,29 +1,54 @@
 name: Bug report
-description: Report a defect in the Rembric server, dashboard, or plugins
-title: 'bug: <one-line summary>'
+description: Something in the Rembric server, dashboard, MCP tools, or an agent plugin is broken
+title: 'bug: '
 labels: ['bug']
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug report. Before opening, please
-        search existing issues to avoid duplicates. **Do not** report security
-        vulnerabilities here — see [SECURITY.md](../SECURITY.md) for the
-        private disclosure channel.
+        Thanks for reporting! The fields below are what we always end up asking for, so filling them in
+        usually means we can reproduce on the first try instead of going back and forth.
+
+        - **Security issue?** Do not open a public issue — use a [private security advisory](https://github.com/susomejias/rembric/security/advisories/new).
+        - **Install or upgrade failed?** Use the *Installation or upgrade problem* template instead.
+        - **Everything you paste here is public.** Redact tokens, private hostnames, LAN IPs and personal paths.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where do you see the problem? Pick "Not sure" rather than guessing.
+      options:
+        - MCP tools / memory behaviour
+        - Agent plugin (hooks, sessions, nudges)
+        - Dashboard
+        - Server startup / Docker container
+        - HTTP API
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A short description of the problem, including the exact error message if there is one.
+      placeholder: 'After upgrading the server, my MCP client cannot connect: every request to /mcp answers 500.'
+    validations:
+      required: true
 
   - type: textarea
     id: reproduction
     attributes:
-      label: Reproduction steps
+      label: Steps to reproduce
       description: |
-        Numbered steps to reproduce. Include exact commands, env vars, and any
-        relevant config. The ideal repro starts from a fresh `pnpm run dev:docker:up`
-        or `docker compose up`.
+        Numbered steps from a known starting point (fresh container, existing database, a specific agent prompt…).
+        Include the exact commands, tool calls, or dashboard pages involved.
       placeholder: |
-        1. `pnpm run dev:docker:up`
-        2. Authenticate against `/mcp/<slug>` with token X
-        3. Call `memory.save({...})`
-        4. Observe: response includes Y instead of Z
+        1. Start the container with `docker compose up -d` (fresh `./data` directory)
+        2. Connect Claude Code with the plugin installed by the TUI installer
+        3. Ask the agent to save a memory
+        4. See error …
     validations:
       required: true
 
@@ -31,80 +56,102 @@ body:
     id: expected
     attributes:
       label: Expected behaviour
-      description: What did you expect to happen?
     validations:
       required: true
 
-  - type: textarea
-    id: actual
+  - type: dropdown
+    id: regression
     attributes:
-      label: Actual behaviour
-      description: What actually happened? Include error messages or stack traces in code blocks.
+      label: Did this work before?
+      options:
+        - 'Yes — it worked in an earlier version (please name it below)'
+        - 'No — it has never worked for me'
+        - "I don't know / first time trying"
     validations:
       required: true
 
   - type: input
-    id: version
+    id: last_working_version
     attributes:
-      label: Rembric version
+      label: Last version where it worked
+      description: Only if it is a regression. Server and/or plugin version.
+      placeholder: 'server v0.28.8'
+
+  - type: input
+    id: server_version
+    attributes:
+      label: Server version
       description: |
-        Output of `curl -H "Authorization: Bearer $TOKEN" http://localhost:8787/healthz`,
-        the GHCR image tag you pulled, or the git commit SHA if running from source.
-      placeholder: 'v0.14.2  /  ghcr.io/susomejias/rembric:v0.14.2  /  commit abc1234'
+        Shown in the dashboard sidebar, returned by `/healthz`
+        (`curl -H "Authorization: Bearer $TOKEN" http://<host>:8787/healthz` → `{"ok":true,"version":"…"}`),
+        or the Docker image tag you run. Commit SHA if running from source.
+      placeholder: 'v0.30.8'
     validations:
       required: true
 
   - type: dropdown
     id: client
     attributes:
-      label: Client
-      description: Which MCP client surfaces the issue (if relevant)?
+      label: Agent / MCP client
+      description: Which client were you using when it happened?
       options:
         - Claude Code
         - Codex CLI
         - Hermes Agent
         - opencode
         - Pi
-        - Other MCP client
-        - Dashboard only
-        - Server-side / no client involved
-        - N/A
+        - Other MCP client (name it below)
+        - None — dashboard or server only
     validations:
       required: true
+
+  - type: input
+    id: client_version
+    attributes:
+      label: Client and plugin version
+      description: |
+        The client's own version (e.g. `claude --version`) and the Rembric plugin version.
+        The plugin is released separately from the server; re-running the installer shows the installed plugin version.
+        For "Other MCP client", name the client here.
+      placeholder: 'Claude Code 2.3.1, Rembric plugin 0.40.0'
 
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: OS + version, Docker version, Node version (if running outside Docker), any reverse proxy / load balancer in front of the server.
-      placeholder: |
-        macOS 15.4 (M2 Pro)
-        Docker Desktop 4.42.1
-        Node 22.13.0 (only if running pnpm start directly)
-        No reverse proxy
+      description: How and where the server runs. Most connection bugs depend on this.
+      value: |
+        - Install method: (TUI installer / manual docker compose / from source)
+        - Server host OS + arch:
+        - Docker version:
+        - Agent on the same machine as the server? (yes / no — LAN, Tailscale, VPN…)
+        - Reverse proxy in front? (none / nginx / Caddy / Traefik / …)
+        - Auth: (bearer token / OAuth)
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Logs
+      label: Logs and diagnostics
       description: |
-        Relevant server logs, MCP transcript snippets, or browser DevTools
-        console output. **Redact tokens, IPs, and personal paths before
-        pasting** — anything you paste here is public.
+        Server logs around the failure (`docker compose logs --tail 200 rembric`), the client-side error,
+        and, if your agent can still reach the server, the output of the `memory.doctor` tool.
+        **Redact tokens, hostnames, IPs and personal paths.**
       render: text
-    validations:
-      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots (dashboard bugs), workarounds you found, your own investigation, links.
 
   - type: checkboxes
     id: confirms
     attributes:
       label: Confirmations
       options:
-        - label: I searched existing issues and could not find a duplicate.
+        - label: I searched [existing issues](https://github.com/susomejias/rembric/issues?q=is%3Aissue) and the [troubleshooting guide](https://github.com/susomejias/rembric/blob/main/docs/troubleshooting.md).
           required: true
-        - label: I redacted any tokens, private hostnames, and personal paths from the logs above.
-          required: true
-        - label: I am not reporting a security vulnerability here (see SECURITY.md for that).
+        - label: I redacted tokens, private hostnames, IPs and personal paths from everything above.
           required: true

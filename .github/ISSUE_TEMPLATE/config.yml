@@ -3,6 +3,9 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/susomejias/rembric/security/advisories/new
     about: Report a security issue privately via GitHub Security Advisories. Do NOT open a public issue.
-  - name: Operator question / setup help
+  - name: Troubleshooting guide
     url: https://github.com/susomejias/rembric/blob/main/docs/troubleshooting.md
-    about: Common errors and recovery recipes. Check here before opening an issue.
+    about: Common errors and recovery recipes — many connection and startup problems are covered here.
+  - name: Connecting an agent
+    url: https://github.com/susomejias/rembric/blob/main/docs/agents.md
+    about: How each supported client connects to Rembric, and how to wire up another MCP client.

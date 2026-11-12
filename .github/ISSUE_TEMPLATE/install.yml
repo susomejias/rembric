@@ -1,0 +1,97 @@
+name: Installation or upgrade problem
+description: The installer, a plugin install, or a server upgrade failed or left things half-working
+title: 'install: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sorry it didn't go smoothly. Install problems almost always depend on the machine, the shell and the
+        exact step that failed, so please include the installer output — it is the single most useful thing.
+
+        Before opening, check the [troubleshooting guide](https://github.com/susomejias/rembric/blob/main/docs/troubleshooting.md)
+        and the [update notes](https://github.com/susomejias/rembric/blob/main/docs/updates.md).
+        **Everything you paste here is public** — redact tokens, hostnames, IPs and personal paths.
+
+  - type: dropdown
+    id: operation
+    attributes:
+      label: What were you doing?
+      options:
+        - First install of the server
+        - Installing an agent plugin
+        - Upgrading the server
+        - Upgrading a plugin
+        - Uninstalling
+    validations:
+      required: true
+
+  - type: dropdown
+    id: method
+    attributes:
+      label: Install method
+      options:
+        - TUI installer (curl … install.sh | sh)
+        - Manual docker compose
+        - Client's own plugin command (marketplace, pi install, …)
+        - From source (pnpm)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: clients
+    attributes:
+      label: Agent clients involved
+      multiple: true
+      options:
+        - Claude Code
+        - Codex CLI
+        - Hermes Agent
+        - opencode
+        - Pi
+        - None — server only
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_failed
+    attributes:
+      label: What failed?
+      description: Which step failed, what you expected, and what state you were left in.
+      placeholder: |
+        The installer finished the server step, then failed while installing the opencode plugin.
+        The server is running, but opencode does not list the Rembric tools.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Installer / command output
+      description: Full terminal output of the failing command, from the start. **Redact tokens and personal paths.**
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        - OS + version + arch:
+        - Shell:
+        - Docker version (if the server is involved):
+        - Versions before → target (server and/or plugin):
+        - Client version(s):
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched [existing issues](https://github.com/susomejias/rembric/issues?q=is%3Aissue) and could not find a duplicate.
+          required: true
+        - label: I redacted tokens, private hostnames, IPs and personal paths from everything above.
+          required: true
