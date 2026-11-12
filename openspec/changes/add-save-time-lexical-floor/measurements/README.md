@@ -5,7 +5,7 @@ Each file names its instrument. Rows from different instruments are never tabula
 ## `sweep.txt`: save-time calibration sweep
 
 - **Command:** `pnpm run eval:save-time`
-- **Fixture:** `packages/core/src/test-support/retrieval/save-time-fixture.ts`. It holds 24 base memories (English and Spanish, five memory types) and 27 labelled saves: 8 near-duplicates, 4 expanded rewrites, 5 contradictions and 10 unrelated saves.
+- **Fixture:** `packages/core/src/test-support/retrieval/save-time-fixture.ts`. It holds 24 base memories (English and Spanish, four memory types: procedural, project, reference and user) and 27 labelled saves: 8 near-duplicates, 4 expanded rewrites, 5 contradictions and 10 unrelated saves.
 - **Instrument:** pending rows written by the production curation path (`runPostSaveSteps`) for each labelled save, at per-save cap 5. "Queue depth" is the total over all 27 labelled saves.
 - **Determinism:** two consecutive runs produced byte-identical output.
 

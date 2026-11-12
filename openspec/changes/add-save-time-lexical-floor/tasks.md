@@ -25,7 +25,7 @@
 - [x] 2.4 Add tests:
   - the `0.00` grid point writes the same pending rows as rank-only admission;
   - two lexical-only runs on unchanged inputs produce identical output.
-- [x] 2.5 Run the sweep and commit its output as `openspec/changes/add-save-time-lexical-floor/measurements/sweep.txt`, naming the instrument on every row.
+- [x] 2.5 Run the sweep and commit its output as `openspec/changes/add-save-time-lexical-floor/measurements/sweep.txt`, naming the instrument in its header.
 - [x] 2.6 From that grid, choose `LEXICAL_CANDIDATE_FLOOR` as the midpoint of the admissible plateau, rounded to the grid, per design D4. Record the plateau and the reasoning in `measurements/README.md`.
 - [x] 2.7 **Stop and report** if no plateau at least `0.10` wide satisfies every criterion. In particular, report if the lexical-only arm cannot surface every near-duplicate while unrelated saves write zero lexical pending rows. That outcome is a **Needs your decision** result, never a hand-picked value.
 - [x] 2.8 Commit: `test(core): add a save-time candidate calibration sweep over a labelled fixture`.
@@ -65,7 +65,7 @@
 
   A first, unpaired run is kept as `save-latency-run1.txt`; see the measurements README for why it was replaced.
 
-- [x] 4.2 Commit the output as `measurements/save-latency.txt`, with the instrument named on every row. The paired run meets the budget at 1 000 and 50 000 rows. At 20 000 rows it misses the strict rule by 0.066 ms on the interval's upper bound, which is within the instrument's demonstrated resolution: identical arms differ by 0.060 ms at 1 000 rows.
+- [x] 4.2 Commit the output as `measurements/save-latency.txt`, with the instrument named in its header. The paired run meets the budget at 1 000 and 50 000 rows. At 20 000 rows it misses the strict rule by 0.066 ms on the interval's upper bound, which is within the instrument's demonstrated resolution: identical arms differ by 0.060 ms at 1 000 rows.
 - [x] 4.3 The 20 000-row miss was investigated rather than accepted. A statement-level instrument over the only changed code (`measurements/detect-latency.txt`) shows no added work: −0.0064 ms paired median against +0.0153 ms for identical arms. The measurements README records all three instruments and both readings.
 - [x] 4.4 Commit: `test(core): measure memory.save latency before and after the lexical floor`.
 

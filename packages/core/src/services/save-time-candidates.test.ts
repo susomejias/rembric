@@ -20,6 +20,8 @@ import {
   findSaveTimeCandidates,
   LEXICAL_CANDIDATE_FLOOR,
   runPostSaveSteps,
+  tokenContainment,
+  tokenSet,
 } from '@rembric/core';
 
 import { seedProject } from '../test-support/default-project.js';
@@ -682,6 +684,9 @@ describe('findSaveTimeCandidates — lexical floor', () => {
       },
       scope,
     );
+    expect(
+      tokenContainment(tokenSet(saved.content), tokenSet(`${target.title}\n\n${target.content}`)),
+    ).toBeLessThan(LEXICAL_CANDIDATE_FLOOR);
     repos.vectors.insertEmbedding(target.id, unitVector(3), partitionKeyFor(scope.projectId));
     repos.vectors.insertEmbedding(saved.id, unitVector(3), partitionKeyFor(scope.projectId));
 

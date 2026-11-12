@@ -286,7 +286,7 @@ Controls how `memory.save` surfaces conflict candidates to the agent for fresh-c
 | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
 | `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` turns save-time detection off: no candidates, no pending rows. |
 
-This is the only setting. The similarity thresholds behind it are compile-time constants calibrated for the bundled embedding model, not configuration: see [`docs/embeddings.md`](docs/embeddings.md#engine-constants-not-configuration).
+This is the only setting. The similarity thresholds behind it are compile-time constants, not configuration, each calibrated by a committed measurement: see [`docs/embeddings.md`](docs/embeddings.md#engine-constants-not-configuration).
 
 </details>
 

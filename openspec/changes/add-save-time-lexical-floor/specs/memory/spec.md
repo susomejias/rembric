@@ -209,3 +209,21 @@ That sweep obligation SHALL NOT be extended to `ENTITY_RARITY_THRESHOLD` by anal
 - **GIVEN** a swept floor value at which any labelled near-duplicate is not surfaced in the lexical-only arm
 - **WHEN** that value is proposed for `LEXICAL_CANDIDATE_FLOOR`
 - **THEN** it SHALL be rejected regardless of how few pending rows it writes
+
+### Requirement: Memory title MUST participate in both retrieval branches
+
+A memory's `title` SHALL contribute to `memory.search` on BOTH branches of hybrid retrieval, not merely as a display label:
+
+- **Lexical**: the FTS5 index (`memory_fts`) SHALL cover `title` in addition to `content` and `tags`, kept in sync by the same INSERT/UPDATE/DELETE triggers. The interactive search lexical branch SHALL rank with a BM25 column weighting that boosts `title` above `content` (`wTitle > wContent`), so a query matching a memory's title ranks it higher. Save-time candidate detection MAY keep default (unweighted) BM25 ranking — that ranking decides which rows enter the bounded pool before the lexical floor is applied (not an absolute bm25 threshold), so reweighting would silently change which rows are considered.
+- **Dense**: the per-memory embedding SHALL be computed from the concatenation of `title` and `content` (not `content` alone), so the curated headline shapes the stored vector and the query-vs-memory cosine similarity.
+
+#### Scenario: A title-only term ranks the memory lexically
+
+- **GIVEN** an `active` memory whose curated `title` contains a term that does NOT appear in its `content`
+- **WHEN** `memory.search` is called with a query containing that term
+- **THEN** the memory SHALL appear in the fused results via the FTS branch, surfaced by the title match
+
+#### Scenario: Title shapes the embedding
+
+- **WHEN** a memory's embedding is computed (inline at save or by the background drain)
+- **THEN** the embedded text SHALL be the memory's `title` concatenated with its `content`, not `content` alone
