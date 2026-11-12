@@ -1,0 +1,124 @@
+# Save-time lexical statement — unpruned vs pruned (COMMON_TERM_DOCUMENT_RATIO = 0.5)
+instruments (never tabulated together): statement = searchBm25Candidates wall clock (performance.now), p50 of 5 warm repetitions per probe, then p50 over probes;
+  lookup = adminDocumentCount + adminTokenTermFrequencies wall clock, same statistic; behaviour = findSaveTimeCandidates fts candidates, commonTermRatio null vs shipped
+probes: 30 active memories of the largest project, each saved (through MemoryService) as three probe classes:
+  prefix80   — the first 80% of its words + " probe <i>"; target = that source memory
+  reversed   — its words reversed + " probe <i>"; target = that source memory
+  commonOnly — only its words whose document frequency is >= N/2, saved twice; target = the first copy (byte-identical)
+the probe row is indexed before measuring, as on the save path; probes accumulate, so later probes see earlier ones
+no embeddings and no entity list are passed, so every candidate below is lexical
+
+## generator, 1000 rows (90 probes: 30 prefix80, 30 reversed, 30 commonOnly)
+statement p50 (unpruned → pruned) and rows matched p50 share (unpruned → pruned), per probe group:
+  natural, pruned    n=46     2.800 ms →    0.413 ms   100.0% →   0.2%
+  natural, fallback  n=14     2.398 ms →    2.433 ms    99.9% →  99.9%
+  commonOnly         n=30     2.274 ms →    2.306 ms   100.0% → 100.0%
+  all probes         n=90     2.469 ms →    1.139 ms   100.0% →   0.3%
+lookup p50 over all probes: 0.297 ms   (p90 0.573 ms)
+fallback fired:             44/90 probes (14/60 prefix80+reversed)
+multi-term tokens whose terms are all common: 1/1440 tokens
+lexical candidates (perSaveMax 50): unpruned 1587; lost 711, gained 0; probes differing 46/90
+target surfaced, unpruned:  prefix80 24/30, reversed 24/30, commonOnly 30/30
+target surfaced, pruned:    prefix80 24/30, reversed 24/30, commonOnly 30/30
+fallback size comparison on the 44 fallback probes (statement p50; target surfaced after the floor):
+  keep   1     0.307 ms   target 11/44
+  keep   2     0.463 ms   target 25/44
+  keep   4     0.665 ms   target 39/44
+  keep   8     1.147 ms   target 40/44
+  keep all     2.387 ms   target 40/44
+
+## generator, 20000 rows (90 probes: 30 prefix80, 30 reversed, 30 commonOnly)
+statement p50 (unpruned → pruned) and rows matched p50 share (unpruned → pruned), per probe group:
+  natural, pruned    n=42    37.875 ms →    1.805 ms    99.9% →   0.0%
+  natural, fallback  n=18    38.976 ms →   39.148 ms   100.0% → 100.0%
+  commonOnly         n=30    38.034 ms →   37.855 ms   100.0% → 100.0%
+  all probes         n=90    38.179 ms →   35.990 ms   100.0% →  99.9%
+lookup p50 over all probes: 2.539 ms   (p90 3.917 ms)
+fallback fired:             48/90 probes (18/60 prefix80+reversed)
+multi-term tokens whose terms are all common: 0/1440 tokens
+lexical candidates (perSaveMax 50): unpruned 1733; lost 746, gained 0; probes differing 41/90
+target surfaced, unpruned:  prefix80 23/30, reversed 22/30, commonOnly 30/30
+target surfaced, pruned:    prefix80 23/30, reversed 22/30, commonOnly 30/30
+fallback size comparison on the 48 fallback probes (statement p50; target surfaced after the floor):
+  keep   1     4.898 ms   target 5/48
+  keep   2     7.601 ms   target 8/48
+  keep   4    10.708 ms   target 24/48
+  keep   8    18.735 ms   target 36/48
+  keep all    38.684 ms   target 41/48
+
+## generator, 50000 rows (90 probes: 30 prefix80, 30 reversed, 30 commonOnly)
+statement p50 (unpruned → pruned) and rows matched p50 share (unpruned → pruned), per probe group:
+  natural, pruned    n=43    91.461 ms →    1.979 ms    99.9% →   0.0%
+  natural, fallback  n=17    95.083 ms →   98.960 ms   100.0% → 100.0%
+  commonOnly         n=30    92.535 ms →   92.403 ms   100.0% → 100.0%
+  all probes         n=90    92.473 ms →   89.609 ms   100.0% →  99.9%
+lookup p50 over all probes: 5.117 ms   (p90 8.966 ms)
+fallback fired:             47/90 probes (17/60 prefix80+reversed)
+multi-term tokens whose terms are all common: 0/1440 tokens
+lexical candidates (perSaveMax 50): unpruned 1755; lost 784, gained 0; probes differing 43/90
+target surfaced, unpruned:  prefix80 24/30, reversed 19/30, commonOnly 30/30
+target surfaced, pruned:    prefix80 24/30, reversed 19/30, commonOnly 30/30
+fallback size comparison on the 47 fallback probes (statement p50; target surfaced after the floor):
+  keep   1    11.817 ms   target 6/47
+  keep   2    18.363 ms   target 4/47
+  keep   4    26.500 ms   target 12/47
+  keep   8    46.263 ms   target 28/47
+  keep all    92.626 ms   target 38/47
+
+## realistic, 1000 rows (89 probes: 30 prefix80, 30 reversed, 29 commonOnly)
+statement p50 (unpruned → pruned) and rows matched p50 share (unpruned → pruned), per probe group:
+  natural, pruned    n=60     0.909 ms →    0.572 ms    93.1% →  55.8%
+  natural, fallback  n= 0            - →           -        - →      -
+  commonOnly         n=29     0.614 ms →    0.618 ms    94.5% →  94.5%
+  all probes         n=89     0.869 ms →    0.584 ms    93.1% →  65.7%
+lookup p50 over all probes: 0.153 ms   (p90 0.199 ms)
+fallback fired:             29/89 probes (0/60 prefix80+reversed)
+multi-term tokens whose terms are all common: 0/1086 tokens
+lexical candidates (perSaveMax 50): unpruned 780; lost 0, gained 0; probes differing 0/89
+target surfaced, unpruned:  prefix80 30/30, reversed 30/30, commonOnly 23/29
+target surfaced, pruned:    prefix80 30/30, reversed 30/30, commonOnly 23/29
+fallback size comparison on the 29 fallback probes (statement p50; target surfaced after the floor):
+  keep   1     0.290 ms   target 16/29
+  keep   2     0.441 ms   target 21/29
+  keep   4     0.576 ms   target 23/29
+  keep   8     0.636 ms   target 23/29
+  keep all     0.626 ms   target 23/29
+
+## realistic, 20000 rows (88 probes: 30 prefix80, 30 reversed, 28 commonOnly)
+statement p50 (unpruned → pruned) and rows matched p50 share (unpruned → pruned), per probe group:
+  natural, pruned    n=60    11.228 ms →    5.824 ms    92.8% →  58.5%
+  natural, fallback  n= 0            - →           -        - →      -
+  commonOnly         n=28     9.991 ms →   10.067 ms    92.8% →  92.8%
+  all probes         n=88    11.120 ms →    6.819 ms    92.8% →  65.7%
+lookup p50 over all probes: 0.660 ms   (p90 1.024 ms)
+fallback fired:             28/88 probes (0/60 prefix80+reversed)
+multi-term tokens whose terms are all common: 0/1081 tokens
+lexical candidates (perSaveMax 50): unpruned 981; lost 0, gained 0; probes differing 0/88
+target surfaced, unpruned:  prefix80 29/30, reversed 30/30, commonOnly 19/28
+target surfaced, pruned:    prefix80 29/30, reversed 30/30, commonOnly 19/28
+fallback size comparison on the 28 fallback probes (statement p50; target surfaced after the floor):
+  keep   1     4.268 ms   target 6/28
+  keep   2     7.151 ms   target 13/28
+  keep   4     9.329 ms   target 19/28
+  keep   8     9.896 ms   target 19/28
+  keep all    10.134 ms   target 19/28
+
+## realistic, 50000 rows (89 probes: 30 prefix80, 30 reversed, 29 commonOnly)
+statement p50 (unpruned → pruned) and rows matched p50 share (unpruned → pruned), per probe group:
+  natural, pruned    n=60    30.164 ms →   14.943 ms    94.3% →  58.6%
+  natural, fallback  n= 0            - →           -        - →      -
+  commonOnly         n=29    29.603 ms →   29.907 ms    94.3% →  94.3%
+  all probes         n=89    30.130 ms →   17.535 ms    94.3% →  65.7%
+lookup p50 over all probes: 1.607 ms   (p90 2.923 ms)
+fallback fired:             29/89 probes (0/60 prefix80+reversed)
+multi-term tokens whose terms are all common: 0/1110 tokens
+lexical candidates (perSaveMax 50): unpruned 1020; lost 0, gained 0; probes differing 0/89
+target surfaced, unpruned:  prefix80 29/30, reversed 30/30, commonOnly 26/29
+target surfaced, pruned:    prefix80 29/30, reversed 30/30, commonOnly 26/29
+fallback size comparison on the 29 fallback probes (statement p50; target surfaced after the floor):
+  keep   1    10.940 ms   target 13/29
+  keep   2    18.653 ms   target 21/29
+  keep   4    25.218 ms   target 26/29
+  keep   8    29.469 ms   target 26/29
+  keep all    30.156 ms   target 26/29
+

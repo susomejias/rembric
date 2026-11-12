@@ -101,10 +101,14 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
     const perHopProbes = statements.filter((s) =>
       /select "replaces" from "memory" where "id" = \?/i.test(s),
     );
+    const termStatistics = statements.filter((s) =>
+      /rembric_query_terms|^SELECT count\(\*\) AS n FROM memory$/.test(s),
+    );
     expect(ancestry).toHaveLength(1);
     expect(perHopProbes).toHaveLength(0);
-    expect(statements.length).toBeLessThanOrEqual(6);
-    expect(statements).toHaveLength(4);
+    expect(termStatistics).toHaveLength(4);
+    expect(statements.length - termStatistics.length).toBeLessThanOrEqual(6);
+    expect(statements).toHaveLength(8);
   });
 
   it('save-time detection on a plain save issues NO ancestry statement at all', () => {

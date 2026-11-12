@@ -1,7 +1,13 @@
-import { projectScope, type Memory, type MemoryStatus, type Repositories } from '@rembric/db';
+import {
+  projectScope,
+  type Memory,
+  type MemoryStatus,
+  type Repositories,
+  type TokenTermFrequency,
+} from '@rembric/db';
 
 import { extractEntities, type ExtractedEntity } from './entities.js';
-import { sanitizeFtsQuery, tokenContainment, tokenSet } from './hybrid-search.js';
+import { ftsQueryTokens, joinFtsTokens, tokenContainment, tokenSet } from './hybrid-search.js';
 
 export const DISMISSAL_ANCESTRY_CAP = 10;
 
@@ -17,12 +23,17 @@ export const CANDIDATE_POOL_SIZE = 20;
 
 export const DRAIN_MAX_PAIR_CHARS = 64_000;
 
+/** FTS5's bm25 clamps a term's idf to 1e-6 from exactly this share of indexed rows upward. */
+export const COMMON_TERM_DOCUMENT_RATIO = 0.5;
+
 export interface CandidateOptions {
   perSaveMax: number;
   /** Test seam only — never read from the environment. */
   poolSize?: number;
   /** Test seam only — never read from the environment. */
   lexicalFloor?: number;
+  /** Test seam only — never read from the environment; `null` turns pruning and its reads off. */
+  commonTermRatio?: number | null;
 }
 
 export interface SaveCandidate {
@@ -66,7 +77,7 @@ export interface SaveCandidateResult {
 }
 
 export function findSaveTimeCandidates(
-  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations' | 'entities'>,
+  repos: Pick<Repositories, 'memory' | 'vectors' | 'relations' | 'entities' | 'termStatistics'>,
   saved: Memory,
   opts: CandidateOptions,
   extractedEntities: ExtractedEntity[] = [],
@@ -102,7 +113,11 @@ export function findSaveTimeCandidates(
     .filter((c) => vectorAdmits(c.similarity));
 
   const queryTokens = tokenSet(saved.content);
-  const matchExpr = sanitizeFtsQuery(saved.content, { maxTerms: 16 });
+  const matchExpr = saveTimeMatchExpression(
+    repos.termStatistics,
+    saved.content,
+    opts.commonTermRatio === undefined ? COMMON_TERM_DOCUMENT_RATIO : opts.commonTermRatio,
+  );
   const ftsPool: SaveCandidate[] = [];
   if (matchExpr.length > 0) {
     const ftsRows = repos.memory.searchBm25Candidates({
@@ -188,6 +203,44 @@ export function findSaveTimeCandidates(
       Number(b.source === 'entity') - Number(a.source === 'entity') || b.similarity - a.similarity,
   );
   return { candidates: all.slice(0, opts.perSaveMax), detected: all.length };
+}
+
+export function saveTimeMatchExpression(
+  termStatistics: Pick<
+    Repositories['termStatistics'],
+    'adminDocumentCount' | 'adminTokenTermFrequencies'
+  >,
+  content: string,
+  commonTermRatio: number | null,
+): string {
+  const tokens = ftsQueryTokens(content, { maxTerms: 16 });
+  if (tokens.length === 0 || commonTermRatio === null) return joinFtsTokens(tokens);
+  return joinFtsTokens(
+    pruneCommonTokens(
+      tokens,
+      termStatistics.adminTokenTermFrequencies(tokens),
+      termStatistics.adminDocumentCount(),
+      commonTermRatio,
+    ),
+  );
+}
+
+export function pruneCommonTokens(
+  tokens: readonly string[],
+  termsByToken: readonly (readonly TokenTermFrequency[])[],
+  documentCount: number,
+  commonTermRatio: number,
+): string[] {
+  const kept: string[] = [];
+  let keptReachesAnotherRow = false;
+  tokens.forEach((token, i) => {
+    const frequencies = (termsByToken[i] ?? []).map((t) => t.documentFrequency ?? 0);
+    if (frequencies.length === 1 && frequencies[0]! >= commonTermRatio * documentCount) return;
+    kept.push(token);
+    // The saved row is already indexed, so a frequency of 1 is the saved row alone.
+    if (frequencies.length > 0 && Math.min(...frequencies) > 1) keptReachesAnotherRow = true;
+  });
+  return keptReachesAnotherRow ? kept : [...tokens];
 }
 
 function snippet(content: string, max: number): string {

@@ -1,0 +1,56 @@
+# Mutation check — common-term pruning (scripts/mutate.mjs)
+
+Command (7 cases, each applied to the pristine file; restore byte-verified by the script):
+
+node scripts/mutate.mjs --workspace packages/core --file packages/core/src/services/save-time-candidates.ts --spec src/services/save-time-candidates.test.ts --mutation '<find>' --with '<replace>' ...
+
+cases (find -> replace):
+  1 pruning condition removed:  'if (frequencies.length === 1 && frequencies[0]! >= commonTermRatio * documentCount) return;' -> ''
+  2 boundary weakened:           'frequencies[0]! >= commonTermRatio * documentCount' -> 'frequencies[0]! > commonTermRatio * documentCount'
+  3 fallback removed:            'return keptReachesAnotherRow ? kept : [...tokens];' -> 'return kept;'
+  4 phrases pruned too:          'frequencies.length === 1 && frequencies[0]! >=' -> 'frequencies.length > 0 && Math.min(...frequencies) >='
+  5 saved-row-only tokens kept:  'Math.min(...frequencies) > 1' -> 'Math.min(...frequencies) > 0'
+  6 constant moved:              'COMMON_TERM_DOCUMENT_RATIO = 0.5' -> 'COMMON_TERM_DOCUMENT_RATIO = 1'
+  7 seam default lost:           'opts.commonTermRatio === undefined ? COMMON_TERM_DOCUMENT_RATIO : opts.commonTermRatio' -> 'null'
+
+output (summary lines, verbatim):
+mutation:     if (frequencies.length === 1 && frequencies[0]! >= commonTermRatio…
+  CAUGHT by 3:
+    × findSaveTimeCandidates — common-term pruning > omits a token present in at least half of the rows and keeps a rarer one
+    × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+    × findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
+mutation: frequencies[0]! >= commonTermRatio * documentCount
+  CAUGHT by 1:
+    × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+mutation: return keptReachesAnotherRow ? kept : [...tokens];
+  CAUGHT by 6:
+    × findSaveTimeCandidates > surfaces FTS candidates for non-ASCII content (Unicode-aware MATCH builder)
+    × findSaveTimeCandidates > does not re-surface a target the new memory ancestry already judged not_conflict
+    × findSaveTimeCandidates > carries a not_conflict dismissal forward across two saves of the same topic
+    × findSaveTimeCandidates — lexical floor > a lexical match exactly at the floor is admitted
+    × findSaveTimeCandidates — common-term pruning > a save whose every token is common keeps the builder expression unchanged
+    × findSaveTimeCandidates — common-term pruning > tokens found only in the saved text do not count as kept, so the common tokens stay
+mutation: frequencies.length === 1 && frequencies[0]! >=
+  CAUGHT by 1:
+    × findSaveTimeCandidates — common-term pruning > a multi-term token stays even when each of its terms is common
+mutation: Math.min(...frequencies) > 1
+  CAUGHT by 3:
+    × findSaveTimeCandidates > does not re-surface a target the new memory ancestry already judged not_conflict
+    × findSaveTimeCandidates > carries a not_conflict dismissal forward across two saves of the same topic
+    × findSaveTimeCandidates — common-term pruning > tokens found only in the saved text do not count as kept, so the common tokens stay
+mutation: export const COMMON_TERM_DOCUMENT_RATIO = 0.5;
+  CAUGHT by 1:
+    × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+mutation: opts.commonTermRatio === undefined ? COMMON_TERM_DOCUMENT_RATIO : opts…
+  CAUGHT by 3:
+    × findSaveTimeCandidates — common-term pruning > omits a token present in at least half of the rows and keeps a rarer one
+    × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+    × findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
+all 7 mutations caught; save-time-candidates.ts restored
+
+RED before GREEN (same spec, -t 'common-term pruning', on the code before the implementation):
+   × findSaveTimeCandidates — common-term pruning > omits a token present in at least half of the rows and keeps a rarer one
+   × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+   × findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed | 4 passed | 40 skipped (47)

@@ -1,0 +1,37 @@
+# memory.save latency — before/after pruning common terms from the save-time MATCH
+instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5
+paired design: each round saves the SAME probe text through all three arms, in rotating order, in one process against one database; 20 warm-up rounds discarded, 300 rounds
+arms: 'unpruned' passes commonTermRatio: null (today's statement, no term-statistics read); 'pruned' passes nothing (shipped behaviour)
+statistic: median of per-round paired differences with a 2000-resample bootstrap 95% interval
+corpora: the corpus:build generator (default args, seed 1) and the realistic-vocabulary control (corpora.mts); probes are 80%-prefix and reversed rewrites of memories in the largest project
+
+generator   1000 unpruned (a)  p50   12.856 ms  p90   15.715 ms  pending rows  1500
+generator   1000 pruned        p50   10.028 ms  p90   14.966 ms  pending rows  1500
+generator   1000 unpruned (b)  p50   12.841 ms  p90   15.803 ms  pending rows  1500
+generator   1000 paired median (pruned − a) -2.885 ms [95% -3.030, -2.686]; identical arms (b − a) -0.016 ms [95% -0.130, 0.120]
+
+generator  20000 unpruned (a)  p50   50.996 ms  p90   57.753 ms  pending rows  1500
+generator  20000 pruned        p50   17.991 ms  p90   57.629 ms  pending rows  1500
+generator  20000 unpruned (b)  p50   50.849 ms  p90   59.103 ms  pending rows  1500
+generator  20000 paired median (pruned − a) -31.445 ms [95% -32.742, -30.030]; identical arms (b − a) -0.005 ms [95% -0.167, 0.106]
+
+generator  50000 unpruned (a)  p50  108.429 ms  p90  128.053 ms  pending rows  1500
+generator  50000 pruned        p50   30.022 ms  p90  125.334 ms  pending rows  1500
+generator  50000 unpruned (b)  p50  108.690 ms  p90  128.896 ms  pending rows  1500
+generator  50000 paired median (pruned − a) -77.536 ms [95% -79.683, -74.958]; identical arms (b − a) -0.058 ms [95% -0.312, 0.274]
+
+realistic   1000 unpruned (a)  p50    2.294 ms  p90    3.308 ms  pending rows  1273
+realistic   1000 pruned        p50    2.038 ms  p90    3.089 ms  pending rows  1243
+realistic   1000 unpruned (b)  p50    2.264 ms  p90    3.219 ms  pending rows  1257
+realistic   1000 paired median (pruned − a) -0.227 ms [95% -0.280, -0.173]; identical arms (b − a) 0.004 ms [95% -0.024, 0.028]
+
+realistic  20000 unpruned (a)  p50   18.181 ms  p90   24.655 ms  pending rows  1075
+realistic  20000 pruned        p50   12.185 ms  p90   16.710 ms  pending rows  1081
+realistic  20000 unpruned (b)  p50   18.287 ms  p90   23.797 ms  pending rows  1080
+realistic  20000 paired median (pruned − a) -5.922 ms [95% -6.485, -5.338]; identical arms (b − a) -0.095 ms [95% -0.269, 0.073]
+
+realistic  50000 unpruned (a)  p50   39.340 ms  p90   49.529 ms  pending rows  1061
+realistic  50000 pruned        p50   25.334 ms  p90   34.157 ms  pending rows  1080
+realistic  50000 unpruned (b)  p50   39.795 ms  p90   49.674 ms  pending rows  1068
+realistic  50000 paired median (pruned − a) -14.157 ms [95% -15.217, -12.777]; identical arms (b − a) -0.040 ms [95% -0.171, 0.139]
+

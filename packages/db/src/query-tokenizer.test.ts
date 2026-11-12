@@ -11,6 +11,7 @@ import {
   deriveQueryTokenizerDdl,
   inheritedFts5Arguments,
   QUERY_TERMS_TABLE,
+  QUERY_TERMS_INSTANCE_TABLE,
   QUERY_TERMS_VOCAB_TABLE,
   UnrecognisedFts5OptionError,
   type Repositories,
@@ -138,6 +139,7 @@ describe('the query-tokenising table on the real migrated schema', () => {
     expect(db.handle.queryTokenizer).toEqual([]);
     expect(tempObjects()).toContain(QUERY_TERMS_TABLE);
     expect(tempObjects()).toContain(QUERY_TERMS_VOCAB_TABLE);
+    expect(tempObjects()).toContain(QUERY_TERMS_INSTANCE_TABLE);
   });
 
   it('stores no text: the contentless declaration means there is no content shadow table', () => {
@@ -160,6 +162,7 @@ describe('the query-tokenising table on the real migrated schema', () => {
       .map((r) => r.name);
     expect(durable).not.toContain(QUERY_TERMS_TABLE);
     expect(durable).not.toContain(QUERY_TERMS_VOCAB_TABLE);
+    expect(durable).not.toContain(QUERY_TERMS_INSTANCE_TABLE);
     expect(durable).toContain('memory_fts_vocab');
 
     const ledger = db.handle.raw
@@ -169,7 +172,7 @@ describe('the query-tokenising table on the real migrated schema', () => {
     expect(ledger).toContain('0030_memory_fts_vocab.sql');
     expect(ledger.some((f) => f.includes('query_term'))).toBe(false);
 
-    for (const name of [QUERY_TERMS_TABLE, QUERY_TERMS_VOCAB_TABLE]) {
+    for (const name of [QUERY_TERMS_TABLE, QUERY_TERMS_VOCAB_TABLE, QUERY_TERMS_INSTANCE_TABLE]) {
       expect(ALL_TABLES).not.toContain(name);
       expect(SHADOW_TABLE_NAMES).not.toContain(name);
     }
