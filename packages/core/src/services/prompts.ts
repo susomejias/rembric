@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 
 import { DomainError } from './errors.js';
 import { sanitizeFtsQuery } from './hybrid-search.js';
+import { RedactionTally } from './secret-redaction.js';
 
 const PROMPT_TITLE_MAX_LENGTH = 100;
 const PROMPT_PURGE_REASONING = 'operator purge of soft-deleted prompts';
@@ -46,28 +47,34 @@ export class PromptsService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  save(input: SavePromptInput): Prompt {
-    if (input.content.trim().length === 0) {
+  save(sent: SavePromptInput, redactions: RedactionTally = new RedactionTally()): Prompt {
+    if (sent.content.trim().length === 0) {
       throw new DomainError('invalid_input', 'prompts.save: content must be non-empty');
     }
     if (
-      typeof input.title !== 'string' ||
-      input.title.length === 0 ||
-      input.title.length > PROMPT_TITLE_MAX_LENGTH
+      typeof sent.title !== 'string' ||
+      sent.title.length === 0 ||
+      sent.title.length > PROMPT_TITLE_MAX_LENGTH
     ) {
       throw new DomainError(
         'invalid_input',
         `prompts.save: title is required and must be 1..${PROMPT_TITLE_MAX_LENGTH} chars`,
       );
     }
-    if (input.tags) {
-      for (const tag of input.tags) {
+    if (sent.tags) {
+      for (const tag of sent.tags) {
         if (typeof tag !== 'string' || tag.length === 0) {
           throw new DomainError('invalid_input', 'prompts.save: tags must be non-empty strings');
         }
       }
     }
 
+    const input: SavePromptInput = {
+      ...sent,
+      content: redactions.redact(sent.content),
+      title: redactions.redactWithin(sent.title, PROMPT_TITLE_MAX_LENGTH),
+      tags: sent.tags ? sent.tags.map((tag) => redactions.redact(tag)) : sent.tags,
+    };
     if (input.replaces) {
       return this.saveWithReplaces(input, input.replaces);
     }

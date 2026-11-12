@@ -12,6 +12,7 @@ import { ulid } from 'ulid';
 import type { ExtractedEntity } from './entities.js';
 import { iterateEntityMatches } from './entity-relevance.js';
 import { DomainError } from './errors.js';
+import { RedactionTally } from './secret-redaction.js';
 import { evaluateSessionNudge, NOTICE_MAX_BYTES, type SessionNudgeRow } from './session-nudge.js';
 import {
   assertNoNul,
@@ -158,15 +159,13 @@ export class AgentSessionsService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  start(input: StartSessionInput): AgentSession {
+  start(input: StartSessionInput, redactions: RedactionTally = new RedactionTally()): AgentSession {
     const ts = this.now();
     const row = this.repos.agentSessions.insert({
       id: ulid(ts.getTime()),
       tokenId: input.tokenId,
       projectId: input.projectId,
-      agent: input.agent,
-      description: input.description ?? null,
-      title: computePlaceholderTitle(input.cwd ?? null, ts),
+      ...redactedIdentity(input, ts, redactions),
       startedAt: ts,
       endedAt: null,
       lastActivityAt: ts,
@@ -179,7 +178,10 @@ export class AgentSessionsService {
     return row;
   }
 
-  ensure(input: EnsureSessionInput): EnsureSessionResult {
+  ensure(
+    input: EnsureSessionInput,
+    redactions: RedactionTally = new RedactionTally(),
+  ): EnsureSessionResult {
     if (!SESSION_ID_RE.test(input.id)) {
       throw new DomainError(
         'invalid_input',
@@ -202,9 +204,7 @@ export class AgentSessionsService {
       id: input.id,
       tokenId: input.tokenId,
       projectId: input.projectId,
-      agent: input.agent,
-      description: input.description ?? null,
-      title: computePlaceholderTitle(input.cwd ?? null, ts),
+      ...redactedIdentity(input, ts, redactions),
       startedAt: ts,
       endedAt: null,
       lastActivityAt: ts,
@@ -257,14 +257,16 @@ export class AgentSessionsService {
 
   writeSummary(
     sessionId: string,
-    input: WriteSummaryInput,
+    sent: WriteSummaryInput,
+    redactions: RedactionTally = new RedactionTally(),
   ): { row: AgentSession; applied: boolean } {
-    if (input.summary !== undefined && input.summary.trim().length === 0) {
+    if (sent.summary !== undefined && sent.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.writeSummary: summary must be non-empty');
     }
-    if (input.summary !== undefined) assertNoNul('sessions.writeSummary', 'summary', input.summary);
-    assertSummaryWithinCap('sessions.writeSummary', input.summary);
-    assertTitleValid('sessions.writeSummary', input.title);
+    if (sent.summary !== undefined) assertNoNul('sessions.writeSummary', 'summary', sent.summary);
+    assertSummaryWithinCap('sessions.writeSummary', sent.summary);
+    assertTitleValid('sessions.writeSummary', sent.title);
+    const input = redactSummaryAndTitle(sent, redactions);
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -289,13 +291,18 @@ export class AgentSessionsService {
     return { row: this.updateActiveOrThrow(sessionId, set), applied: true };
   }
 
-  end(sessionId: string, input: EndSessionInput): { row: AgentSession; applied: boolean } {
-    if (input.summary !== undefined && input.summary.trim().length === 0) {
+  end(
+    sessionId: string,
+    sent: EndSessionInput,
+    redactions: RedactionTally = new RedactionTally(),
+  ): { row: AgentSession; applied: boolean } {
+    if (sent.summary !== undefined && sent.summary.trim().length === 0) {
       throw new DomainError('invalid_input', 'sessions.end: summary must be non-empty');
     }
-    if (input.summary !== undefined) assertNoNul('sessions.end', 'summary', input.summary);
-    assertSummaryWithinCap('sessions.end', input.summary);
-    assertTitleValid('sessions.end', input.title);
+    if (sent.summary !== undefined) assertNoNul('sessions.end', 'summary', sent.summary);
+    assertSummaryWithinCap('sessions.end', sent.summary);
+    assertTitleValid('sessions.end', sent.title);
+    const input = redactSummaryAndTitle(sent, redactions);
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -353,8 +360,13 @@ export class AgentSessionsService {
     return updated;
   }
 
-  reportTurn(sessionId: string, input: ReportTurnInput): ReportTurnResult {
-    assertTitleValid('sessions.reportTurn', input.title);
+  reportTurn(
+    sessionId: string,
+    sent: ReportTurnInput,
+    redactions: RedactionTally = new RedactionTally(),
+  ): ReportTurnResult {
+    assertTitleValid('sessions.reportTurn', sent.title);
+    const input = redactSummaryAndTitle(sent, redactions);
     const existing = this.getById(sessionId);
     if (!existing) {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
@@ -757,6 +769,36 @@ function precedenceSet(
   return {
     ...summarySet,
     ...(title.changed && { title: title.value, titleFinal: title.final }),
+  };
+}
+
+function redactedIdentity(
+  input: { agent: string; description?: string | null; cwd?: string | null },
+  ts: Date,
+  redactions: RedactionTally,
+): Pick<NewAgentSession, 'agent' | 'description' | 'title'> {
+  return {
+    agent: redactions.redact(input.agent),
+    description: input.description == null ? null : redactions.redact(input.description),
+    title: redactions.redactWithin(
+      computePlaceholderTitle(input.cwd ?? null, ts),
+      TITLE_MAX_LENGTH,
+    ),
+  };
+}
+
+function redactSummaryAndTitle<T extends { summary?: string; title?: string }>(
+  input: T,
+  redactions: RedactionTally,
+): T {
+  return {
+    ...input,
+    ...(input.summary !== undefined && {
+      summary: redactions.redactWithin(input.summary, SUMMARY_MAX_CHARS),
+    }),
+    ...(input.title !== undefined && {
+      title: redactions.redactWithin(input.title, TITLE_MAX_LENGTH),
+    }),
   };
 }
 
