@@ -288,6 +288,8 @@ Controls how `memory.save` surfaces conflict candidates to the agent for fresh-c
 
 This is the only setting. The similarity thresholds behind it are compile-time constants, not configuration, each calibrated by a committed measurement: see [`docs/embeddings.md`](docs/embeddings.md#engine-constants-not-configuration).
 
+The lexical pass reads a full-text index of the saving project only, so the cost of a save does not grow with other projects' memories. The first boot after upgrading builds one such index per project before serving (about 0.8 s at 50 000 memories). Each project adds a small per-write cost: see [the measured scale](docs/embeddings.md#cost-and-supported-scale-of-the-per-project-index).
+
 </details>
 
 ## Complete recall by date
@@ -421,7 +423,7 @@ Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashbo
 The dashboard exposes `/dashboard/maintenance` for three **irreversible**, **operator-triggered** physical purges. All are gated to dashboard sessions whose underlying token has scope `*` (admin):
 
 - **Purge empty sessions** — removes `ended` / `abandoned` session rows that have no summary, no manual title, no referencing memories / non-deleted prompts / confirmations, are not operator-soft-deleted, and ended over 1 hour ago. Soft-deleted prompts no longer block purge.
-- **Purge disconnected archived memories** — removes `archived` memory rows whose ids are referenced by NO other row in the graph (`memory.replaces`, `consolidation_ops.affected_ids` / `created_id`, `memory_relations.{source,target}_id`, `confirmations.memory_id`). The matching `memory_vec` and `memory_fts` shadow rows are dropped in the same transaction.
+- **Purge disconnected archived memories** — removes `archived` memory rows whose ids are referenced by NO other row in the graph (`memory.replaces`, `consolidation_ops.affected_ids` / `created_id`, `memory_relations.{source,target}_id`, `confirmations.memory_id`). The matching `memory_vec`, `memory_fts` and per-project lexical index rows are dropped in the same transaction.
 - **Purge deleted prompts** — removes `prompts` rows whose `deleted_at IS NOT NULL`. Covers both operator soft-deletes (from `/dashboard/prompts`) and refine supersedes (from `memory.save_prompt({ replaces })`). The matching `prompts_fts` shadow row is dropped in the same transaction.
 
 Each click shows a count and a confirmation modal. The deletion is journaled in `consolidation_ops` (`op_type = 'session_purge'`, `'archived_memory_purge'`, or `'prompt_purge'`) so the operator can audit what was removed even after the rows are gone. **Consolidation undo on operations whose rows have been purged returns a structured error** — the dashboard surfaces it inline naming the missing ids.
@@ -534,6 +536,7 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
    │  │   confirmations · memory_relations · entities · memory_entities  │  │
    │  │   consolidation_{runs,ops} · dashboard_sessions · oauth_*        │  │
    │  │   + memory_fts · prompts_fts (FTS5)  + memory_vec (sqlite-vec)   │  │
+   │  │   + memory_fts_p_<project> (FTS5, save-time lexical, per project)│  │
    │  └──────────────────────────────▲──────────────────────────────────┘  │
    │  ┌──────────────────────────────┴──────────────────────────────────┐  │
    │  │  In-process background work (no external services)              │  │

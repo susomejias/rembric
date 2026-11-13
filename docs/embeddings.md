@@ -99,8 +99,10 @@ memory.save (MCP)                            ← packages/mcp/src/memory-tools.t
    │
    ├─ findSaveTimeCandidates()               ← packages/core/src/services/save-time-candidates.ts
    │     ├─ vec pass  cosine kNN over memory_vec   (≥ VEC_THRESHOLD 0.70)
-   │     ├─ FTS5 pass BM25 lexical                 (first 16 tokens, minus any token found in
-   │     │                                          ≥ COMMON_TERM_DOCUMENT_RATIO 0.5 of all rows;
+   │     ├─ FTS5 pass BM25 lexical                 (the saving project's own index; first 16
+   │     │                                          tokens, minus any token found in
+   │     │                                          ≥ COMMON_TERM_DOCUMENT_RATIO 0.5 of the
+   │     │                                          project's rows;
    │     │                                          top-poolSize by rank, then kept only if
    │     │                                          token containment ≥ LEXICAL_CANDIDATE_FLOOR
    │     │                                          0.60; reported similarity = that containment)
@@ -149,7 +151,7 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 The lexical pass never thresholds raw bm25: bm25 is unbounded and depends on
 corpus size, so no fixed floor over it is stable. bm25 only orders the pool
-(`ORDER BY rank LIMIT poolSize`). Admission then takes a floor,
+(`ORDER BY bm25(…) LIMIT poolSize`). Admission then takes a floor,
 `LEXICAL_CANDIDATE_FLOOR`, over the reported `similarity`: the share of the
 saved text's distinct terms that the candidate also contains. That measure is
 unweighted and corpus-independent, so a value calibrated on the committed
@@ -158,18 +160,59 @@ slot and writes no pending judgment. Without it, one shared common word was
 enough to fill the per-save cap. The entity pass has no such floor on purpose:
 it exists for contradictions that share an identifier but little wording.
 
-Before ranking, the lexical pass drops each of its 16 tokens that appears in at
-least half of all memories, counted across every project
-(`COMMON_TERM_DOCUMENT_RATIO`). FTS5 already weights such a term at a constant
-`1e-6`, so dropping it barely moves the order; keeping it made FTS5 score and
-sort every row of every project on each save. A token FTS5 matches as a phrase
-(`two-space`, a file path) is never dropped, and when no remaining token could
-match another memory nothing is dropped at all.
+The lexical pass reads a per-project index, `memory_fts_p_<hex project id>`.
+That is an FTS5 table holding only the saving project's memories. Interactive
+search keeps using the global `memory_fts`. Each project's index is maintained
+by three triggers routed by `WHEN project_id = …`, created when the project is
+created. At boot, a reconciler builds any that are missing, rebuilds any whose
+DDL drifted, and drops those of deleted projects. So neither the statement nor
+its statistics read touches another project's postings. bm25's inverse
+document frequencies are computed over the saving project alone.
 
-The query then orders by `bm25(memory_fts)` rather than FTS5's `rank`
-column, so FTS5 scores only the saving project's matches instead of
-scoring and sorting every match in every project. The scores and order are
-identical either way, because bm25 still uses whole-index statistics.
+Before ranking, the lexical pass drops each of its 16 tokens that appears in at
+least half of the project's memories (`COMMON_TERM_DOCUMENT_RATIO`), using the
+index's own vocabulary and the project's row count. FTS5 already weights such a
+term at a constant `1e-6`, so dropping it barely moves the order, but keeping
+it made FTS5 rank every row that holds it. A token FTS5 matches as a phrase
+(`two-space`, a file path) is never dropped. When no remaining token could match
+another memory, nothing is dropped at all.
+
+### Cost and supported scale of the per-project index
+
+Measured at 50 000 memories, generator / realistic corpus. The files are under
+`openspec/changes/scope-save-time-lexical-index-per-project/measurements/`.
+
+- **Save:** with the saving project at 2% of the rows, the save-time statement
+  stays under 0.1 ms / 0.3 ms from 1 000 to 50 000 rows (`options.txt`). End to
+  end, without the embedder, the `memory.save` p50 went from 21.13 to 8.92 ms and
+  from 7.46 to 1.54 ms (`save-latency-impl.txt`).
+- **Storage:** the per-project indexes together are about as large as
+  `memory_fts`, +32.8 MB / +10.6 MB, so the lexical index storage roughly
+  doubles.
+- **Upgrade:** the first boot after upgrading builds every project's index
+  before serving, 0.80 s / 0.23 s, and grows the WAL by 34.5 MB / 10.7 MB.
+  The boot log reports it as `project lexical indexes: built N, dropped M (T ms)`.
+- **Writes and number of projects:** there is no cap. Each project adds nine
+  schema objects and one `WHEN` check per insert (`write-cost.txt`):
+
+  | projects              | insert (in a transaction) | connection open |
+  | --------------------- | ------------------------- | --------------- |
+  | 0 (before this index) | 0.031 / 0.015 ms          | 0.22 ms         |
+  | 6                     | 0.077 / 0.042 ms          | 0.36 ms         |
+  | 200                   | 0.102 / 0.073 ms          | 4.15 ms         |
+  | 1 000                 | 0.325 / 0.272 ms          | 42.63 ms        |
+
+- **Rollback to a release without this index:** the triggers keep maintaining
+  tables nothing reads. This is harmless, but it costs writes. To remove them,
+  with the server stopped, drop every `memory_fts_p_%` object, triggers first:
+
+  ```sql
+  SELECT 'DROP TRIGGER ' || name || ';' FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'memory_fts_p_%';
+  SELECT 'DROP TABLE '   || name || ';' FROM sqlite_master WHERE type = 'table'   AND name GLOB 'memory_fts_p_[0-9a-f]*' AND name NOT GLOB '*_data' AND name NOT GLOB '*_idx' AND name NOT GLOB '*_docsize' AND name NOT GLOB '*_config';
+  SELECT 'DROP VIEW '    || name || ';' FROM sqlite_master WHERE type = 'view'    AND name LIKE 'memory_fts_p_%';
+  ```
+
+  Run the statements these queries print.
 
 Every admitted pair then gets a confidence band from `classifyCandidateBand`,
 which uses the pair's exact cosine and the channels that admitted it:
