@@ -40,4 +40,4 @@
 - [x] 5.3 Upgrade on populated copies: boot reconciliation time and WAL growth (`measurements/implementation-gates.txt`)
 - [x] 5.4 Docs: `docs/embeddings.md` (save path, cost and supported scale, rollback cleanup), `docs/backup.md`, `docs/docker.md`, `README.md`
 - [x] 5.5 Dev-server smoke: a base-built database upgraded by this branch (`measurements/smoke.txt`)
-- [ ] 5.6 `pnpm test` is fully green. Blocked: `packages/core/src/services/ancestry-statements.test.ts` pins the old count statement's text, and that file is outside this change's authorised edit surface
+- [x] 5.6 `pnpm test` is fully green; `packages/core/src/services/ancestry-statements.test.ts` now pins the project-scoped count statement's text
