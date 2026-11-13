@@ -18,3 +18,6 @@ Each condition was weakened on its own; "red" names the tests that failed withou
 11 archive tx.transaction -> plain call                          red: a failure while journaling rolls back the archive and every orphaning
 12 unarchive restore call removed                                red: 5 tests (archive then unarchive; endpoint retired; second cycle; only the unarchived project; reconcile restore)
 13 archive orphaning limited to 0 rows                           red: 14 tests
+14 reconcile per-batch archived re-check -> true                red: stops closing a project that is unarchived between batches
+     (added after the independent verification found the race: an unarchive during the yield between
+      batches let later batches orphan judgments of a now-active project)
