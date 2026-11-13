@@ -57,3 +57,17 @@ A paired `saveMemoryWithCandidates` wall clock, using #469's design: 200 rounds 
 - The `PROTO` environment variable selects the option. This seam exists only in the scratch clone, never in production code.
 - **Control:** the patched clone with `PROTO` unset reproduces the base byte for byte.
 - **Sanity check:** each mode was also checked to create its tables and serve both a save-time candidate and a search from them.
+
+## Phase 2 — against the implementation
+
+The Phase 1 scripts above ran against the base commit `85c1c2b3`. `options.mts` reads `adminTokenTermFrequencies`, which Phase 2 removed, so it no longer runs against the shipped code. The files below measure the shipped code. They use the Phase 1 corpora, which the base commit built, so every first open is an upgrade.
+
+- **`implementation-gates.mts` → `implementation-gates.txt`.** Two instruments:
+  - the upgrade: the first and second `createDb`, with file sizes;
+  - prefix80 recall through `findSaveTimeCandidates`, with the shipped pruning and with pruning off.
+- **`save-latency-impl.mts` → `save-latency-impl.txt`.** The paired `memory.save` latency of the shipped code against the #469 status quo, which is replayed by wrapping the repositories.
+- **`red-green.txt`.** The RED runs (a stub module for the db suite; the base code for the two core tests) and the GREEN runs.
+- **`mutation.txt`.** 21 `scripts/mutate.mjs` cases, all caught.
+- **`smoke.txt`.** The dev-server smoke: base `main` boots a database holding two projects, then this branch boots the same database.
+
+`pnpm run eval:save-time` and the `pnpm eval` / `dump-ids.ts` gates are summarised in design D7. The sweep output equals `evals.txt`'s PROTO=b section. The ids sha256 equals the base's.

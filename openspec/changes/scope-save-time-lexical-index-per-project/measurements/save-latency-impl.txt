@@ -1,0 +1,32 @@
+# memory.save latency — status quo (d) against the Phase 2 implementation
+instrument: end-to-end saveMemoryWithCandidates wall clock (performance.now), embedder not wired, per-save cap 5; all values in ms
+paired design: each round saves the SAME probe text through all three arms, in rotating order, in one process against one database; 10 warm-up rounds discarded, 200 rounds
+arms: 'impl' = production repositories as shipped; 'd' = the #469 statement on memory_fts with global pruning statistics, replayed by wrapping; d (b) repeats d (a) as the noise band
+caveat: every arm runs with the per-project triggers installed (the boot reconciler built them), so every arm pays the extra write; write-cost.txt measures it separately
+statistic: median of per-round paired differences against 'd (a)', with a 2000-resample bootstrap 95% interval
+corpora: the skewed generator and skewed realistic control (corpora.mts); probes are 80%-prefix and reversed rewrites of the project's memories
+
+generator-skew   1000  2%  p50 d    9.36 impl    9.35  p90 d   13.34 impl   12.58  | paired: impl−d -0.18 [-0.28, -0.06]  noise d(b)−d(a) 0.03 [-0.03, 0.13]
+generator-skew   1000 20%  p50 d    7.59 impl    7.42  p90 d   10.63 impl    9.69  | paired: impl−d -0.09 [-0.23, 0.03]  noise d(b)−d(a) -0.11 [-0.18, 0.03]
+generator-skew   1000 60%  p50 d    7.76 impl    7.68  p90 d   11.35 impl   11.01  | paired: impl−d 0.05 [-0.07, 0.15]  noise d(b)−d(a) -0.10 [-0.20, 0.06]
+
+generator-skew  20000  2%  p50 d   12.13 impl    7.40  p90 d   19.54 impl   11.67  | paired: impl−d -4.98 [-5.64, -4.40]  noise d(b)−d(a) 0.11 [-0.06, 0.25]
+generator-skew  20000 20%  p50 d   15.71 impl   11.82  p90 d   27.11 impl   19.70  | paired: impl−d -3.84 [-4.78, -3.37]  noise d(b)−d(a) -0.05 [-0.19, 0.17]
+generator-skew  20000 60%  p50 d   20.83 impl   19.65  p90 d   41.33 impl   37.65  | paired: impl−d -1.76 [-2.01, -1.26]  noise d(b)−d(a) 0.12 [-0.06, 0.25]
+
+generator-skew  50000  2%  p50 d   21.13 impl    8.92  p90 d   46.95 impl   13.52  | paired: impl−d -12.75 [-13.32, -11.24]  noise d(b)−d(a) 0.11 [-0.07, 0.20]
+generator-skew  50000 20%  p50 d   28.91 impl   19.89  p90 d   66.23 impl   37.59  | paired: impl−d -10.10 [-10.92, -8.47]  noise d(b)−d(a) -0.05 [-0.30, 0.27]
+generator-skew  50000 60%  p50 d   44.60 impl   41.36  p90 d  101.76 impl   88.90  | paired: impl−d -3.62 [-4.61, -3.14]  noise d(b)−d(a) 0.22 [-0.16, 0.54]
+
+realistic-skew   1000  2%  p50 d    1.43 impl    1.30  p90 d    1.91 impl    1.68  | paired: impl−d -0.10 [-0.13, -0.08]  noise d(b)−d(a) 0.01 [-0.00, 0.03]
+realistic-skew   1000 20%  p50 d    1.30 impl    1.29  p90 d    1.82 impl    1.76  | paired: impl−d -0.00 [-0.05, 0.03]  noise d(b)−d(a) -0.02 [-0.04, 0.01]
+realistic-skew   1000 60%  p50 d    1.44 impl    1.44  p90 d    2.08 impl    1.88  | paired: impl−d -0.01 [-0.05, 0.02]  noise d(b)−d(a) 0.00 [-0.02, 0.02]
+
+realistic-skew  20000  2%  p50 d    3.52 impl    1.30  p90 d    4.26 impl    1.79  | paired: impl−d -2.23 [-2.32, -2.12]  noise d(b)−d(a) 0.03 [-0.02, 0.07]
+realistic-skew  20000 20%  p50 d    4.30 impl    2.37  p90 d    5.21 impl    3.17  | paired: impl−d -1.73 [-1.94, -1.59]  noise d(b)−d(a) -0.02 [-0.03, 0.02]
+realistic-skew  20000 60%  p50 d    5.84 impl    5.31  p90 d    7.08 impl    6.81  | paired: impl−d -0.53 [-0.59, -0.45]  noise d(b)−d(a) 0.01 [-0.03, 0.05]
+
+realistic-skew  50000  2%  p50 d    7.46 impl    1.54  p90 d    9.11 impl    2.07  | paired: impl−d -5.95 [-6.19, -5.50]  noise d(b)−d(a) 0.04 [0.01, 0.07]
+realistic-skew  50000 20%  p50 d    8.29 impl    4.64  p90 d   11.23 impl    6.34  | paired: impl−d -3.72 [-3.89, -3.53]  noise d(b)−d(a) 0.03 [-0.01, 0.08]
+realistic-skew  50000 60%  p50 d   13.37 impl   12.17  p90 d   16.65 impl   15.04  | paired: impl−d -1.18 [-1.27, -1.07]  noise d(b)−d(a) 0.04 [-0.01, 0.08]
+

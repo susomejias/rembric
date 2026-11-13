@@ -26,19 +26,19 @@ Constraints:
 - **Derived tables:** a derived table must be reproducible by a pinned recipe, and the invariants suite classifies every table in `sqlite_master`. That requirement is in `persistence`: "Every derived table MUST be reproducible from source tables by a pinned recipe".
 - **Sync by triggers:** "FTS5 sync SHALL be implemented via SQL triggers on the `memory` table".
 - **Migrations:** the migration runner applies only static `.sql` files.
-- **Project ids:** they are ULIDs (`ProjectsService.create`) or, for the default project made by migration 0031, 26 lowercase hex characters. Projects are archived, never deleted.
+- **Project ids:** they are ULIDs (`ProjectsService.create`) or, for the default project made by migration 0031, 26 lowercase hex characters. Test fixtures insert arbitrary ids (`p0`, `proj1`) directly into `projects`.
+- **Project deletion:** the product archives projects and never deletes them. The dev seed's `--reset` (`apps/web/src/scripts/seed-dev.ts`) deletes every project row and inserts a new default project with raw SQL.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Choose one index shape for which the save-time lexical cost depends on the saving project's size, not on other projects' rows. The choice rests on measurements, each from a named instrument.
-- State each option's effect on fidelity, migration, upgrade risk, storage and write cost.
+- The save-time lexical cost depends on the saving project's size, not on other projects' rows.
+- Phase 1 chose the shape from measurements, each from a named instrument. Phase 2 implements it and re-runs the gates against the shipped code.
 
 **Non-Goals:**
 
-- Phase 1 writes no migration and changes no production code. The prototypes live only under `measurements/`.
-- Changing `memory.search`. Option (a) measures it; a search change would be its own change, with its own retrieval re-baseline.
+- Changing `memory.search`. Option (a) was measured for it, and it stays out of scope (D1).
 - Changing `COMMON_TERM_DOCUMENT_RATIO`, `LEXICAL_CANDIDATE_FLOOR`, `CANDIDATE_POOL_SIZE` or the reported `similarity`.
 
 ## Options and measurements
@@ -160,125 +160,123 @@ Creating one project's index (view, table and three triggers) on an existing dat
 
 ## Decisions
 
-### D1 — Recommend option (b): a per-project index for save-time detection only
+### D1 — Option (b): a per-project index for save-time detection only (owner decision)
+
+The owner chose option (b), with pruning statistics read from the project's own index rather than the "bG" variant. This accepts three things:
+
+- per-project inverse document frequencies decide which 20 rows enter the pool;
+- the lexical-index storage roughly doubles;
+- a one-time rebuild runs at the first boot after upgrade.
 
 It is the only measured option that removes the save-time dependence on other projects' rows without moving search results:
 
-- With the saving project at 2%, the statement stays at 0.04–0.09 ms on the generator and 0.06–0.31 ms on the realistic control from 1 000 to 50 000 rows. The pruning read stays at or below about 1 ms.
-- The save-time sweep at the shipped floor is unchanged, `pnpm eval` is byte-identical, and every prefix80 target surfaced exactly as under (d).
+- With the saving project at 2%, the statement stays at 0.04–0.09 ms on the generator and 0.06–0.31 ms on the realistic control, from 1 000 to 50 000 rows. The pruning read stays at or below about 1 ms.
+- At the shipped floor the save-time sweep is unchanged, `pnpm eval` is byte-identical, and every prefix80 target surfaced exactly as under (d). Phase 2 re-ran these gates against the shipped code (D7).
 
-Its costs are real, and they are the open decisions:
-
-- the lexical index storage roughly doubles;
-- every insert pays one more FTS insert plus one `WHEN` check per project;
-- the schema grows by nine objects per project.
-
-Alternatives considered:
-
-- **(a) E2 for both paths.** It saves (b)'s storage and makes small-project search 10–37× faster, but:
-  - it moves 47 of 84 retrieval id lists;
-  - widened search keeps only 9–13 of 28 top-8 lists, because each table's bm25 scores sit on their own idf scale and are merged by raw rank;
-  - it makes the widened relevance-gate read 1.5–3.6× slower;
-  - the dashboard's unscoped search, `memory_fts_vocab` and the query tokenizer's DDL derivation would all need replacements.
-
-  Rejected for this change. It can follow as its own search change once (b)'s machinery exists, gated by a retrieval re-baseline.
-
-- **(c) E1.** It is never cheaper than (d) for the pruned statement on the generator (2.50 against 1.92 ms at 2%), and it leaves the pruning read global. Every row gains one token of length, which shifts bm25's length normalisation. Rejected again, as in #469.
-- **(d) Status quo.** Exact and free, but the 2% project's lookup grows from 0.23 to 7.64 ms on the generator, and the statement from 0.11 to 1.92 ms. Kept as the fallback if the owner declines (b)'s costs.
-- **bG** (per-project table, global pruning statistics). The statement is the same as (b)'s, but it keeps the 7.6 ms global lookup. Rejected.
+Option (a), which uses the same machinery for interactive search, stays out of scope. It is a possible follow-up: it would make small-project search 10–37× faster, but it moves 47 of 84 retrieval id lists and needs its own retrieval re-baseline.
 
 ### D2 — End-to-end figure
 
-`save-latency.txt`: a paired `saveMemoryWithCandidates` wall clock, with (d) against (b) and a (d)-against-(d) noise band. 200 rounds, no embedder.
+**Phase 1 (`save-latency.txt`).** A paired `saveMemoryWithCandidates` wall clock: 200 rounds, no embedder, (d) against the prototype (b), with a (d)-against-(d) noise band.
 
-**p50, saving project at 2%**, (d) → (b), at 1 000, 20 000 and 50 000 rows:
+p50 with the saving project at 2%, (d) → (b), at 1 000, 20 000 and 50 000 rows:
 
 | corpus    | 1 000       | 20 000       | 50 000        |
 | --------- | ----------- | ------------ | ------------- |
 | generator | 9.46 → 9.31 | 12.16 → 7.61 | 20.62 → 10.11 |
 | realistic | 1.56 → 1.35 | 3.52 → 1.26  | 8.02 → 2.57   |
 
-**Paired median difference (b − d) at 50 000 rows**, by share:
+**Phase 2 (`save-latency-impl.txt`).** The same design, but with the shipped code against the #469 status quo, which is replayed by wrapping the repositories. See D7.
 
-- generator: −11.16 ms [−11.94, −9.73] at 2%, −8.17 at 20% and −3.10 at 60%;
-- realistic: −5.33 [−5.57, −5.08] at 2%, −3.19 at 20% and −0.83 at 60%.
-
-**Noise band:** every (d)−(d) interval lies within [−0.20, 0.60] ms. Every (b) − (d) interval at 20 000 and 50 000 rows lies outside it.
-
-**Caveat:** the per-project triggers are installed in every arm, so these figures EXCLUDE (b)'s extra write. `write-cost.txt` measures that write separately: about +0.05 ms per insert in a transaction, and +0.04 to +0.09 ms committed, at 6 projects.
+Both files install the per-project triggers in every arm. So neither includes the extra write (b) adds per insert; `write-cost.txt` measures that separately.
 
 ### D3 — No static SQL migration; a boot reconciler is the migration and the reproduction path
 
-A `.sql` migration cannot loop over projects. The DDL therefore lives in one module (`project-lexical-index.ts`), which has two parts:
+A `.sql` migration cannot loop over projects. The DDL therefore lives in one module, `packages/db/src/project-lexical-index.ts`:
 
-- **`projectLexicalIndexDdl(projectId)`:** the view, the table and three triggers. This DDL is the recipe.
-- **`reconcileProjectLexicalIndexes(raw)`:** runs in `createDb` right after `migrate` and before serving, under the same `BEGIN IMMEDIATE` discipline. For each project whose objects are missing, or whose stored `sqlite_master.sql` differs from the compiled DDL, it drops and recreates them and runs `'rebuild'`. A recipe change in a later release is therefore detected without a version marker: "the DDL is the recipe".
+- **The recipe:** the view, the external-content table and three triggers, built per project. The table carries `memory_fts`'s FTS5 options, read through `inheritedFts5Arguments`.
+- **`reconcileProjectLexicalIndexes`:** runs in `createDb` right after `migrate` and before `ANALYZE`, in one `BEGIN IMMEDIATE` transaction.
+  - It builds every project's missing index.
+  - It drops and rebuilds every index whose stored `sqlite_master.sql` differs from the compiled DDL. A recipe change in a later release, including a change to `memory_fts`'s own options, is therefore detected without a version marker.
+  - It drops the objects of every project that no longer exists, such as after the dev seed's `--reset`.
+  - On a database that already existed, it logs `project lexical indexes: built N, dropped M (T ms)` when it did any work.
+- **`ensureProjectLexicalIndex`:**
+  - `ProjectsRepository.insert` calls it in the caller's transaction.
+  - The save-time statement and the pruning read call it as a safety net. It covers projects inserted with raw SQL after boot, which happens only in test fixtures and the dev seed.
+  - A per-connection cache, filled only outside a transaction, keeps it to zero statements on the hot path. The save-time statement count is therefore unchanged at 8 (`ancestry-statements.test.ts`).
+- **Building:** a build inserts the project's rows with the same flattened tags the triggers write. It does not use FTS5 `'rebuild'`, which would read the view's raw JSON `tags`, and FTS5 cannot rebuild from a view that calls `json_each`.
 
-`ProjectsRepository.create` runs the same DDL inside the project-creating transaction; an empty table needs no rebuild. The default project created by migration 0031 is covered by the reconciler.
+### D4 — Table name: the hex encoding of the project id
 
-Alternatives considered:
+The index is named `memory_fts_p_` followed by the lowercase hexadecimal encoding of the id's UTF-8 bytes. `projectIdOfLexicalIndexObject` decodes a name back to the id, which is how the reconciler finds orphans.
 
-- **Lazy creation on first save.** It puts DDL on a request path. Rejected.
-- **A registry table mapping project to table name.** A deterministic name needs no registry (D4).
+Phase 1 proposed `lower(project_id)` behind a `^[0-9a-z]{26}$` guard. Phase 2 replaced it, for three reasons:
 
-### D4 — Table name from the project id
+- test fixtures and raw inserts use arbitrary ids;
+- SQLite identifiers are case-insensitive, so lowercasing is not injective;
+- hex is injective and safe for every id, so no guard is needed.
 
-The table is named `memory_fts_p_` followed by `lower(project_id)`, after the id is checked against `^[0-9a-z]{26}$`. Both id formats in use are 26 alphanumeric characters.
+The id still appears as an escaped string literal in the view and trigger `WHEN` clauses. The tests cover an id containing a quote and a space.
 
-Alternatives considered:
+### D5 — Routing by per-project triggers (owner decision)
 
-- **`projects.rowid`.** VACUUM may renumber rowids on a table without an `INTEGER PRIMARY KEY`. Rejected.
-- **Quoting arbitrary ids.** No need, since the ids are already constrained.
-
-### D5 — Routing by per-project triggers, not by application code
-
-The persistence spec requires trigger-maintained FTS. The per-project `WHEN` triggers satisfy it with no spec amendment. Their cost grows with the project count (write-cost table). A repository-maintained write would keep the insert cost flat, but it needs a persistence amendment and gives up the transactional guarantee the triggers carry. That is an open decision for the owner.
+The owner chose SQLite `WHEN` triggers, which satisfy "FTS5 sync SHALL be implemented via SQL triggers" without amending the spec. The owner also chose no hard cap on the number of projects. Instead, the measured cost curve is the supported-scale guidance; see "Supported scale".
 
 ### D6 — Spec placement and archive order
 
-The two #469 requirements are not archived yet. They name the opposite behaviour: statistics over "every indexed row", and scores "exactly those of default bm25 over the whole index". This change therefore states its rule as an ADDED draft. Once #469 archives, the delta becomes MODIFIED of those two requirements. That keeps both the archive order and the MODIFIED-replaces-wholesale rule correct.
+The two #469 requirements are not archived yet, and they state the opposite: statistics over "every indexed row", and scores "exactly those of default bm25 over the whole index". This change therefore states its rule as ADDED requirements.
 
-The derived-classification requirement gains a name-pattern rule, so that tables created per project are classified without listing each one.
+Whichever of the two changes archives second must reconcile the text. If #469 archives first, this delta becomes a MODIFIED of those two requirements. The persistence delta adds the `memory_fts_p_` name-pattern classification.
+
+### D7 — Phase 2 gates against the shipped code
+
+Each gate ran on the Phase 1 corpora, which the base commit built, so every first open is an upgrade.
+
+- **`pnpm run eval:save-time`:** identical to the prototype (b) output. The only difference from the base is the non-gating ingest series at floor 0.00, where pending rows go from 275 to 250. At 0.60 it stays at 54.
+- **`pnpm eval`:** passes, with unchanged metrics. The `dump-ids.ts` sha256 is `670ec7c1…`, byte-identical to the base.
+- **prefix80 recall (`implementation-gates.txt`):** the source surfaced in 71 of 90 probes on the generator and 89 of 90 on the realistic corpus. That equals the status quo and the prototype. With pruning off on the per-project index the counts are the same, so pruning loses no target.
+- **Upgrade (`implementation-gates.txt`), first open at 50 000 rows:** the reconciler took 802 ms on the generator and 230 ms on the realistic corpus. The second open took 41 ms and 4 ms. The first open grew the WAL by 34.5 MB and 10.7 MB.
+- **End to end (`save-latency-impl.txt`):** with the saving project at 2%, the p50 goes from 21.13 to 8.92 ms on the generator and from 7.46 to 1.54 ms on the realistic corpus, at 50 000 rows. At 1 000 rows it is 9.36 → 9.35 ms and 1.43 → 1.30 ms. The paired differences at 50 000 rows are −12.75 ms [−13.32, −11.24] and −5.95 ms [−6.19, −5.50]. Every interval at 20 000 and 50 000 rows lies outside the noise band of [−0.30, 0.54] ms.
+
+## Supported scale
+
+With no cap, the cost per project is the guidance. Figures come from `write-cost.txt`, at 50 000 rows, generator / realistic:
+
+| projects | insert, in-tx    | insert, commit   | connection open | schema objects |
+| -------- | ---------------- | ---------------- | --------------- | -------------- |
+| 6        | 0.077 / 0.042 ms | 0.196 / 0.103 ms | 0.36 ms         | 166            |
+| 200      | 0.102 / 0.073 ms | 0.213 / 0.140 ms | 4.15 ms         | 1 912          |
+| 1 000    | 0.325 / 0.272 ms | 0.552 / 0.390 ms | 42.63 ms        | 9 112          |
+
+Before this change, the insert cost 0.031 / 0.015 ms in a transaction and the open cost 0.22 ms.
+
+Creating one project adds nine schema objects. It took 0.43 ms at 200 projects and 1.7 ms at 1 000, and the next statement on every connection re-parses the schema.
+
+Up to a few hundred projects, the added cost per save is a fraction of a millisecond. At 1 000 projects, each insert costs about 0.3 ms more and each new connection about 42 ms more. The server holds one long-lived connection.
 
 ## Risks / Trade-offs
 
-- **[Risk] Many projects make every write and every schema parse slower.**
-  - At 1 000 projects: insert 0.33 ms in a transaction, connection open 42.6 ms, 9 112 schema objects.
-  - Creating a project changes the schema, so every connection re-parses it on its next statement.
-  - → Mitigation: the owner sets a supported project-count envelope, or chooses repository-maintained routing (D5). The dashboard should show the object count.
-- **[Risk] The upgrade builds every project's index once at boot.** That took 779 ms at 50 000 generator rows. The WAL grows by about the new index's size (32.8 MB).
-  - → Mitigation: it runs before serving, as migrations do. Phase 2 measures it on a populated upgrade test.
-- **[Risk] A rollback to an older release leaves the per-project triggers firing.** They keep maintaining tables that nothing reads. This is harmless but costs writes.
-  - → Mitigation: Phase 2 documents the cleanup SQL that drops `memory_fts_p_%` objects.
+- **[Risk] Many projects slow every write and every schema parse.** At 1 000 projects: insert 0.33 ms, connection open 42.6 ms.
+  - → Accepted (D5): the curve is documented in this design and in `docs/embeddings.md`.
+- **[Risk] The first boot after upgrade builds every project's index.** It took 802 ms and added 34.5 MB of WAL at 50 000 generator rows.
+  - → It runs before serving, as migrations do. The boot log names its duration.
+- **[Risk] A rollback to an older release leaves the per-project triggers firing.** They keep maintaining tables nothing reads. This is harmless, but it costs writes.
+  - → `docs/embeddings.md` gives the cleanup: drop every `memory_fts_p_%` trigger, table and view.
+- **[Risk] A project inserted with raw SQL after boot has no index until its first save-time read builds one.** Only test fixtures and the dev seed do this.
+  - → The read path builds the index first, and the next boot's reconciler covers it too.
 - **[Trade-off] Per-project idf changes which rows enter the 20-row pool.** Accepted because:
   - `similarity` is token containment and does not depend on bm25;
   - the sweep at the shipped floor is unchanged;
   - no target was lost in any measured cell.
-- **[Trade-off] Small projects fall back to the unpruned expression more often.** In a small project, its own common words are pruned too. This finds more candidates (124 on the generator), at a cost that stays bounded by the project's size.
-- **[Trade-off] The lexical index storage roughly doubles.** Accepted only if the owner agrees (Open Questions).
+- **[Trade-off] Small projects fall back to the unpruned expression more often.** In a small project, its own common words are pruned too, so the fallback fires. This finds more candidates (124 on the generator), at a cost bounded by the project's size.
+- **[Trade-off] The lexical-index storage roughly doubles:** +32.8 MB at 50 000 generator rows. Accepted by the owner.
 
 ## Migration Plan
 
-Phase 2, after owner approval:
-
-1. Rebase on #469's archive. Rewrite the spec deltas as MODIFIED (D6).
-2. Add `project-lexical-index.ts` (DDL, reconciler, name function), with RED tests first:
-   - triggers keep a project table equal to its view after insert, purge and tag update (`integrity-check` plus a match probe);
-   - the reconciler recreates a missing or drifted object and is a no-op otherwise;
-   - creating a project creates its index in the same transaction.
-3. Call the reconciler from `createDb` after `migrate`. Classify `memory_fts_p_%` objects by pattern in the schema inventory and the invariants suite.
-4. Switch `searchBm25Candidates` and the pruning read to the project's table and statistics.
-5. Gates:
-   - `pnpm run eval:save-time`, which must match `measurements/evals.txt` for (b);
-   - `pnpm eval`, byte-identical;
-   - the paired save latency;
-   - an upgrade test on a populated 50 000-row copy, measuring boot time and WAL growth;
-   - `scripts/mutate.mjs` on the routing `WHEN`, the reconciler drift check and the project filter.
-6. **Rollback:** revert the release, then optionally run the documented `DROP` of `memory_fts_p_%` objects. No source data is touched.
+1. **Deploy:** a normal server release. The first boot runs the reconciler before serving and logs its duration; nothing for the operator to do.
+2. **Rollback:** revert the release. Optionally drop the `memory_fts_p_%` objects, using the SQL in `docs/embeddings.md`. No source data is touched.
+3. **Archive order:** see D6.
 
 ## Open Questions
 
-- **Accept per-project idf for the save-time pool?** It is measured as harmless at the shipped floor, but it is a behaviour change.
-- **The routing mechanism:** per-project triggers, which are spec-compliant and whose cost grows with projects, or a repository-maintained write, which stays flat but needs a persistence amendment? What project count must be supported?
-- **The storage cost:** accept roughly 2× the lexical index, +32.8 MB at 50 000 generator rows?
-- **Search:** follow up later with option (a) for search (small-project search 10–37× faster), as its own change with a retrieval re-baseline?
+None. The owner closed them on approval: option (b), SQLite `WHEN` triggers, no project cap, and storage plus per-project idf accepted.

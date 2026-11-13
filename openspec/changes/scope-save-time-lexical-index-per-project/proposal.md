@@ -2,29 +2,23 @@
 
 Change `prune-common-terms-from-save-time-match` (PR #469) stopped `memory.save` from scoring every project's matches, but the save-time lexical cost still grows with rows in OTHER projects (issue #465). FTS5 walks every project's postings for the kept tokens, and the pruning read counts every project's documents. With the saving project at 2% of 50 000 rows, the status quo pays a 1.92 ms statement and a 7.64 ms pruning read on the generator corpus, against 0.11 ms and 0.23 ms at 1 000 rows (`measurements/options.txt`). End to end, that project's `memory.save` p50 is 20.62 ms at 50 000 rows against 9.46 ms at 1 000 (`measurements/save-latency.txt`).
 
-This change is **Phase 1: design and measurement only**. It compares four index shapes, measures each, and recommends one. It writes no migration and changes no production code.
+Phase 1 compared four index shapes and measured each. The owner approved **option (b)**, maintained by SQLite `WHEN` triggers with no cap on the number of projects. Phase 2 implements it.
 
 ## What Changes
 
-The recommendation is **option (b): a per-project lexical index for save-time detection only.** The global `memory_fts` stays as it is for `memory.search`, the relevance gate and the dashboard.
+**Option (b): a per-project lexical index for save-time detection only.** The global `memory_fts` stays as it is for `memory.search`, the relevance gate and the dashboard.
 
-- **New derived index:** one external-content FTS5 table per project, `memory_fts_p_<project id>`. Its content table is a view over that project's `memory` rows. It has the same columns and tokenizer as `memory_fts`.
-- **Maintenance:** three triggers per project on `memory` (`AFTER INSERT`, `AFTER DELETE`, `AFTER UPDATE OF content, tags, title`), routed by `WHEN new.project_id = '<id>'`. They are created when the project is created. A boot-time reconciler creates any that are missing and rebuilds them.
+- **New derived index:** one external-content FTS5 table per project, named `memory_fts_p_` followed by the hex encoding of the project id. Its content table is a view over that project's `memory` rows. It has the same columns and tokenizer as `memory_fts`.
+- **Maintenance:** three triggers per project on `memory` (`AFTER INSERT`, `AFTER DELETE`, `AFTER UPDATE OF content, tags, title`), routed by `WHEN new.project_id = '<id>'`. They are created when the repository inserts the project. A boot-time reconciler builds any that are missing, rebuilds any whose DDL drifted, and drops those of deleted projects. A save-time read builds a missing index first.
 - **Save-time statement:** `searchBm25Candidates` reads the saving project's table. The SQL shape after #469 is kept: `ORDER BY bm25(...)` and `LIMIT 20`.
 - **Pruning statistics:** the #469 common-term read takes its document frequencies and document total from the project's table. It uses a temp-schema `fts5vocab` over that table and counts the project's rows. `COMMON_TERM_DOCUMENT_RATIO` and the fallback are unchanged.
-- **Measured effect, end to end:** with the saving project at 2% of 50 000 rows, the `memory.save` p50 drops from 20.62 to 10.11 ms on the generator and from 8.02 to 2.57 ms on the realistic control. The paired differences are −11.16 and −5.33 ms, both outside the noise band.
+- **Measured effect, end to end:** the shipped code was measured against the #469 status quo (`measurements/save-latency-impl.txt`). With the saving project at 2% of 50 000 rows, the `memory.save` p50 drops from 21.13 to 8.92 ms on the generator and from 7.46 to 1.54 ms on the realistic control. The paired differences are −12.75 and −5.95 ms, both outside the noise band.
 - **Behaviour change, not marked BREAKING:** bm25's inverse document frequencies now cover the saving project, not the whole server. This can change which 20 rows enter the lexical pool. `similarity` is still token containment, and the floor and pool size are unchanged. Measured effects:
   - the save-time sweep at the shipped floor is unchanged;
   - `pnpm eval` is byte-identical;
   - in all 18 measured cells, the near-duplicate target surfaced exactly as under the status quo.
 
-Options measured and not recommended:
-
-- **(a)** per-project tables for both save and search;
-- **(c)** a project column in one global table, previously measured as E1;
-- **(d)** the status quo after #469.
-
-`design.md` gives the reasons and the full comparison.
+`design.md` holds the Phase 1 comparison, the owner's decisions, the supported-scale guidance and the Phase 2 gates.
 
 Invariants touched:
 
@@ -43,26 +37,25 @@ None.
 - `persistence`: adds a requirement for the per-project save-time lexical index. It covers the shape, the trigger maintenance, the reconciler as its reproduction path, and classifying derived tables by name pattern.
 - `memory`: adds "The save-time lexical query MUST read only the saving project's index". It holds the scoring and the pruning statistics. After #469 archives, this replaces parts of #469's two requirements (design D6).
 
-Both spec deltas are drafts in this phase.
-
 ## Impact
 
-- **Code (Phase 2, not written here):**
+- **Code:**
   - no SQL migration file: per-project DDL cannot be generated by a static SQL file, so the boot reconciler is the migration (design D3).
   - `packages/db/src/project-lexical-index.ts`: the DDL recipe, the reconciler and the table-name function.
   - `packages/db/src/client.ts`: runs the reconciler after `migrate`.
-  - `packages/db/src/repositories/projects-repository.ts`: `create` runs the DDL in its transaction.
+  - `packages/db/src/repositories/projects-repository.ts`: `insert` creates the index in the caller's transaction.
+  - `packages/db/src/client.ts`: `Db` declares the `$client` drizzle already returns.
   - `packages/db/src/repositories/memory-repository.ts`: `searchBm25Candidates`.
-  - `packages/db/src/repositories/term-statistics-repository.ts`: project-scoped document count and per-token frequencies.
-  - `packages/db/src/query-tokenizer.ts`: the temp vocabulary view per project.
+  - `packages/db/src/repositories/term-statistics-repository.ts`: project-scoped document count and per-token frequencies, through a temp-schema `fts5vocab` per project; `adminTokenTermFrequencies` is removed.
   - `packages/core/src/services/save-time-candidates.ts`: passes the project to the pruning read.
-- **Tests (Phase 2):**
-  - `apps/web/src/test/invariants.test.ts` and `packages/db/src/test-support/schema-inventory.ts`: classify the new objects by name pattern;
-  - `packages/db/src/schema/schema-drift.test.ts`;
-  - a migration test on a populated database;
+- **Tests:**
+  - `packages/db/src/project-lexical-index.test.ts`;
+  - `packages/db/src/repositories/term-statistics-repository.test.ts`;
   - `packages/db/src/repositories/memory-repository.perf.test.ts`;
-  - `packages/core/src/services/save-time-candidates.test.ts`.
-- **Docs:** `docs/embeddings.md`, which covers the detection path and the engine constants.
+  - `packages/db/src/schema/schema-drift.test.ts`;
+  - `packages/core/src/services/save-time-candidates.test.ts`;
+  - `apps/web/src/test/invariants.test.ts`: the name-pattern classification and the admin allow-list.
+- **Docs:** `docs/embeddings.md`, `docs/backup.md`, `docs/docker.md` and `README.md`.
 - **Specs:**
   - `openspec/specs/persistence/spec.md`;
   - `openspec/specs/memory/spec.md`, after #469 archives.

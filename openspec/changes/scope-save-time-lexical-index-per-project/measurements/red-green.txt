@@ -1,0 +1,100 @@
+# RED/GREEN evidence (Phase 2)
+instrument: vitest, the named suites; RED first, then GREEN on the implementation
+
+## RED 1: packages/db/src/project-lexical-index.test.ts against a stub module (same exports, no behaviour)
+Two tests pass on the stub by construction: 'leaves a clean schema untouched' and 'rolls the index back…'. Each is pinned by a mutation in mutation.txt instead (clean-schema skip removed; cache filled inside a transaction).
+   × the per-project index name > is a safe identifier, distinct for every distinct id, and decodes back to the id 26ms
+   × the per-project index name > indexes a project whose id needs quoting 17ms
+   × boot reconciliation > builds the index of migration 0031's hex-id default project 19ms
+   × boot reconciliation > creates a missing index and populates it from existing rows 18ms
+   × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it 16ms
+   × boot reconciliation > drops every object of a project whose row no longer exists 17ms
+   × project creation > creates the index when the repository inserts the project 17ms
+   × trigger maintenance > indexes a write to project A in A's table only 18ms
+   × trigger maintenance > a purge leaves no posting behind, tags included 17ms
+   × trigger maintenance > a tag update replaces the old tag postings with the new ones 18ms
+   × the save-time statement reads the project index > returns exactly the scores of an index holding only that project 17ms
+   × the save-time statement reads the project index > is unchanged by rows added to another project 21ms
+   × the save-time statement reads the project index > builds the index first when the project has none 18ms
+   × project-scoped term statistics > counts the project's rows in every status and no other project's 17ms
+   × project-scoped term statistics > reads each token's terms and the project's own document frequencies 17ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/project-lexical-index.test.ts > the per-project index name > is a safe identifier, distinct for every distinct id, and decodes back to the id
+AssertionError: expected 3 to be 6 // Object.is equality
+ FAIL  src/project-lexical-index.test.ts > the per-project index name > indexes a project whose id needs quoting
+SqliteError: no such table: memory_fts_p_14
+ FAIL  src/project-lexical-index.test.ts > boot reconciliation > builds the index of migration 0031's hex-id default project
+AssertionError: expected [] to include 'memory_fts_p_26'
+ FAIL  src/project-lexical-index.test.ts > boot reconciliation > creates a missing index and populates it from existing rows
+AssertionError: expected [] to deeply equal [ 'p1' ]
+ FAIL  src/project-lexical-index.test.ts > boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+SqliteError: no such trigger: memory_fts_p_2_ai
+ FAIL  src/project-lexical-index.test.ts > boot reconciliation > drops every object of a project whose row no longer exists
+AssertionError: expected 0 to be greater than 0
+ FAIL  src/project-lexical-index.test.ts > project creation > creates the index when the repository inserts the project
+AssertionError: expected [] to include 'memory_fts_p_11'
+ FAIL  src/project-lexical-index.test.ts > trigger maintenance > indexes a write to project A in A's table only
+SqliteError: no such table: memory_fts_p_2
+ FAIL  src/project-lexical-index.test.ts > trigger maintenance > a purge leaves no posting behind, tags included
+SqliteError: no such table: memory_fts_p_2
+ FAIL  src/project-lexical-index.test.ts > trigger maintenance > a tag update replaces the old tag postings with the new ones
+SqliteError: no such table: memory_fts_p_2
+ FAIL  src/project-lexical-index.test.ts > the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+AssertionError: expected [ Array(3) ] to deeply equal [ [ 'a1', -0.4634312463031669 ], …(2) ]
+ FAIL  src/project-lexical-index.test.ts > the save-time statement reads the project index > is unchanged by rows added to another project
+AssertionError: expected [ [ 'a1', …(1) ], …(2) ] to deeply equal [ Array(3) ]
+ FAIL  src/project-lexical-index.test.ts > the save-time statement reads the project index > builds the index first when the project has none
+AssertionError: expected [] to include 'memory_fts_p_8'
+ FAIL  src/project-lexical-index.test.ts > project-scoped term statistics > counts the project's rows in every status and no other project's
+AssertionError: expected +0 to be 2 // Object.is equality
+ FAIL  src/project-lexical-index.test.ts > project-scoped term statistics > reads each token's terms and the project's own document frequencies
+AssertionError: expected [] to deeply equal [ …(3) ]
+      Tests  15 failed | 2 passed (17)
+
+## RED 2: the two new core tests against the base code (scratch clone, src from HEAD before the change)
+   × findSaveTimeCandidates — common-term pruning > omits a token common in the saving project even when it is rare across the server 29ms
+     → expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+   × findSaveTimeCandidates — common-term pruning > is not changed by rows another project adds 22ms
+     → expected [ [ …(2) ] ] to deeply equal [ [ …(2) ] ]
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+AssertionError: expected [ [ …(2) ] ] to deeply equal [ [ …(2) ] ]
+      Tests  2 failed | 7 passed | 59 skipped (68)
+
+## GREEN: db suites
+ ✓ src/repositories/memory-repository.perf.test.ts > MemoryRepository — read-path performance (optimize-db-read-path) > searchBm25Candidates — reads only the saving project index > scans the project's own index, never the global one
+ ✓ src/repositories/memory-repository.perf.test.ts > MemoryRepository — read-path performance (optimize-db-read-path) > searchBm25Candidates — reads only the saving project index > returns the rows, order and scores of an index holding only that project
+ ✓ src/project-lexical-index.test.ts > the per-project index name > is a safe identifier, distinct for every distinct id, and decodes back to the id
+ ✓ src/project-lexical-index.test.ts > the per-project index name > indexes a project whose id needs quoting
+ ✓ src/project-lexical-index.test.ts > boot reconciliation > builds the index of migration 0031's hex-id default project
+ ✓ src/project-lexical-index.test.ts > boot reconciliation > creates a missing index and populates it from existing rows
+ ✓ src/project-lexical-index.test.ts > boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+ ✓ src/project-lexical-index.test.ts > boot reconciliation > leaves a clean schema untouched
+ ✓ src/project-lexical-index.test.ts > boot reconciliation > drops every object of a project whose row no longer exists
+ ✓ src/project-lexical-index.test.ts > project creation > creates the index when the repository inserts the project
+ ✓ src/project-lexical-index.test.ts > project creation > rolls the index back with the project when the caller's transaction aborts
+ ✓ src/project-lexical-index.test.ts > trigger maintenance > indexes a write to project A in A's table only
+ ✓ src/project-lexical-index.test.ts > trigger maintenance > a purge leaves no posting behind, tags included
+ ✓ src/project-lexical-index.test.ts > trigger maintenance > a tag update replaces the old tag postings with the new ones
+ ✓ src/project-lexical-index.test.ts > the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+ ✓ src/project-lexical-index.test.ts > the save-time statement reads the project index > is unchanged by rows added to another project
+ ✓ src/project-lexical-index.test.ts > the save-time statement reads the project index > builds the index first when the project has none
+ ✓ src/project-lexical-index.test.ts > project-scoped term statistics > counts the project's rows in every status and no other project's
+ ✓ src/project-lexical-index.test.ts > project-scoped term statistics > reads each token's terms and the project's own document frequencies
+ ✓ src/repositories/term-statistics-repository.test.ts > projectTokenTermFrequencies tokenises each token through the index tokenizer > returns every token's term instances in order, each with its document frequency
+ ✓ src/repositories/term-statistics-repository.test.ts > projectTokenTermFrequencies tokenises each token through the index tokenizer > counts a token made of one repeated term as two instances
+ ✓ src/repositories/term-statistics-repository.test.ts > projectTokenTermFrequencies tokenises each token through the index tokenizer > returns an empty list for a token the tokenizer yields no term for, and for no tokens
+ ✓ src/repositories/term-statistics-repository.test.ts > projectTokenTermFrequencies tokenises each token through the index tokenizer > leaks no token between consecutive reads or into the per-text read
+      Tests  45 passed (45)
+
+## GREEN: core common-term pruning suite
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > omits a token present in at least half of the rows and keeps a rarer one
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > at 4 of 10 rows the token is omitted only from exactly half upward
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > a save whose every token is common keeps the builder expression unchanged
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > tokens found only in the saved text do not count as kept, so the common tokens stay
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > omits a token common in the saving project even when it is rare across the server
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > is not changed by rows another project adds
+ ✓ src/services/save-time-candidates.test.ts > findSaveTimeCandidates — common-term pruning > a multi-term token stays even when each of its terms is common
+      Tests  9 passed | 59 skipped (68)

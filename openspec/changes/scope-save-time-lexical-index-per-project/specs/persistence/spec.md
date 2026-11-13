@@ -4,12 +4,16 @@
 
 Each project SHALL have its own derived full-text index, used only by save-time candidate detection. The global `memory_fts` SHALL remain the index for interactive search, the relevance level's term statistics and the dashboard.
 
-> Draft (Phase 1). This change proposes it and has measured it, but it is not yet approved for implementation. See the change's design D1 and D3–D5.
+- **Shape:** the index is an external-content FTS5 table named `memory_fts_p_<hex>`. `<hex>` is the lowercase hexadecimal encoding of the project id's UTF-8 bytes, so every distinct id has a distinct, safe identifier, and the id can be recovered from the name. The content table SHALL be a view named `memory_fts_p_<hex>_src` that selects that project's `memory` rows. The table's columns, and the tokenizer arguments it carries, SHALL be those of `memory_fts`.
+- **Maintenance:** three triggers on `memory` SHALL maintain the index: one for insert, one for delete, and one for an update of `content`, `tags` or `title`. Each trigger SHALL be routed by a `WHEN` clause on the row's `project_id`. It SHALL write the same flattened tags that `memory_fts`'s triggers write. A row SHALL be indexed in its project's table before the inserting transaction commits.
+- **Population:** building an index SHALL insert the project's existing rows with those same flattened tags, so that a built index equals one maintained by its triggers.
+- **Creation:** inserting a project through the projects repository SHALL create its view, table and triggers in the caller's transaction. A save-time read for a project that has no index SHALL build the index before reading it.
+- **Reproduction path:** a reconciler SHALL run after migrations and before the server serves. It SHALL:
+  - build every project's index that is missing;
+  - drop and rebuild every index whose stored DDL differs from the compiled recipe;
+  - drop every object whose project no longer exists.
 
-- **Shape:** an external-content FTS5 table named `memory_fts_p_<id>`, where `<id>` is the project id lowercased. The id SHALL match `^[0-9a-z]{26}$` after lowercasing, or the table SHALL NOT be created. Its content table SHALL be a view `memory_fts_p_<id>_src` selecting that project's `memory` rows. Its columns and tokenizer arguments SHALL be those of `memory_fts`.
-- **Maintenance:** three triggers on `memory` SHALL maintain it, one each for insert, delete and update of `content`, `tags` or `title`. Each trigger SHALL be routed by a `WHEN` clause on the row's `project_id`, and SHALL pass the same flattened tags `memory_fts`'s triggers pass. A row SHALL be indexed in its project's table before the inserting transaction commits.
-- **Creation:** creating a project SHALL create its view, table and triggers in the same transaction as the project row.
-- **Reproduction path:** a reconciler SHALL run after migrations and before the server serves. It SHALL recreate and rebuild any project's objects that are missing, or whose stored DDL differs from the compiled recipe. The DDL is the recipe, so no version marker is required.
+  The DDL is the recipe, so no version marker is required.
 - **Classification:** these objects are derived. The source/derived classification SHALL classify them by the `memory_fts_p_` name pattern rather than by listing each one.
 
 #### Scenario: A saved memory is indexed in its project's table only
@@ -25,14 +29,27 @@ Each project SHALL have its own derived full-text index, used only by save-time 
 - **WHEN** the memory row is physically deleted by an allow-listed purge
 - **THEN** the project's table SHALL NOT match any of that memory's terms, including its tag terms
 
-#### Scenario: A creation path that misses the project is repaired at boot
+#### Scenario: A project created outside the repository is indexed at boot
 
 - **GIVEN** a project that has no save-time lexical index, such as the default project created by a SQL migration
 - **WHEN** the server starts
-- **THEN** the reconciler SHALL create and rebuild that project's index before the first request is served
+- **THEN** the reconciler SHALL build that project's index from its existing rows before the first request is served
 
 #### Scenario: A drifted recipe is re-derived
 
 - **GIVEN** a project whose stored trigger DDL differs from the compiled recipe
 - **WHEN** the server starts
 - **THEN** the reconciler SHALL drop and recreate that project's objects and rebuild its table from `memory`
+
+#### Scenario: A deleted project's objects are dropped
+
+- **GIVEN** per-project index objects whose project row no longer exists
+- **WHEN** the server starts
+- **THEN** the reconciler SHALL drop every one of those objects
+
+#### Scenario: An aborted project creation leaves no index behind
+
+- **GIVEN** a transaction that inserts a project through the repository and then aborts
+- **WHEN** the transaction rolls back
+- **THEN** neither the project nor any of its index objects SHALL exist
+- **AND** inserting the same project again SHALL create a working index
