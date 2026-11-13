@@ -296,4 +296,16 @@ describe('project-scoped term statistics', () => {
       [{ term: 'elsewhere', documentFrequency: null }],
     ]);
   });
+
+  it('still reads the statistics after a transaction that first read them rolls back', () => {
+    const read = () =>
+      repos.termStatistics.projectTokenTermFrequencies(projectScope('pa'), ['held']);
+    expect(() =>
+      db.handle.db.transaction(() => {
+        expect(read()).toEqual([[{ term: 'held', documentFrequency: 2 }]]);
+        throw new Error('abort');
+      }),
+    ).toThrow('abort');
+    expect(read()).toEqual([[{ term: 'held', documentFrequency: 2 }]]);
+  });
 });

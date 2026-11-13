@@ -134,7 +134,7 @@ export function projectLexicalVocabulary(sqlite: Database.Database, projectId: s
   if (!created) vocabularies.set(sqlite, (created = new Set()));
   if (!created.has(projectId)) {
     sqlite.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS ${vocab} USING fts5vocab(main, '${t}', 'row')`);
-    created.add(projectId);
+    if (!sqlite.inTransaction) created.add(projectId);
   }
   return vocab;
 }
