@@ -13,5 +13,6 @@ export type {
 export * from './diagnostics.js';
 export * as diagnostics from './diagnostics.js';
 export * from './data-loss-guard.js';
+export * from './project-lexical-index.js';
 export * from './query-tokenizer.js';
 export * from './scope.js';
