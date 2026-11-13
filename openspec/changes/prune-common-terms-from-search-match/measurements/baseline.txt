@@ -1,0 +1,58 @@
+# memory.search lexical branch — baseline before this change
+queries: realistic control = the 28 retrieval-eval query texts; generator = the first 6 words of 28 memories of the largest project
+scope: the largest project; status active; rank window computeRankWindowSize(8, 0); the builder is uncapped on this path
+statistics: global memory_fts_vocab and adminDocumentCount; ratio 0.5
+pruned >=1: fall back to every token when no kept token reaches any row (a query is not an indexed row)
+pruned >1: pruneCommonTokens unchanged, the save-time rule (#469 prototype)
+lookup gate: adminDocumentCount + adminQueryTermFrequencies, what memory.search reads today
+lookup separate: gate + a second per-token read; lookup combined: adminDocumentCount + one read carrying the query (row 0) and each token (rows 1..n)
+lookup combined dedup: the combined read, each distinct term joined to memory_fts_vocab once (materialized CTE)
+
+## generator, 1000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 0.446 ms   pruned >=1 0.303 ms   pruned >1 0.309 ms
+rows matched, p50 share:  unpruned 97.0%   pruned >=1 0.1%   pruned >1 96.8%
+expression changed:  pruned >=1 15/28   pruned >1 11/28; top-8 lexical ids identical:  pruned >=1 13/28   pruned >1 17/28
+lookup p50:  gate 0.187 ms   separate 0.361 ms   combined 0.336 ms   combined dedup 0.198 ms; combined gate map equals today's for 28/28; dedup output equals combined for 28/28
+search p50 (MemoryService.search, no embedder): 2.927 ms
+
+## generator, 20000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 4.437 ms   pruned >=1 4.310 ms   pruned >1 4.240 ms
+rows matched, p50 share:  unpruned 96.7%   pruned >=1 96.6%   pruned >1 96.6%
+expression changed:  pruned >=1 11/28   pruned >1 11/28; top-8 lexical ids identical:  pruned >=1 17/28   pruned >1 17/28
+lookup p50:  gate 0.648 ms   separate 1.257 ms   combined 1.234 ms   combined dedup 0.637 ms; combined gate map equals today's for 28/28; dedup output equals combined for 28/28
+search p50 (MemoryService.search, no embedder): 9.002 ms
+
+## generator, 50000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 24.024 ms   pruned >=1 23.265 ms   pruned >1 23.187 ms
+rows matched, p50 share:  unpruned 96.6%   pruned >=1 96.5%   pruned >1 96.5%
+expression changed:  pruned >=1 12/28   pruned >1 12/28; top-8 lexical ids identical:  pruned >=1 16/28   pruned >1 16/28
+lookup p50:  gate 1.537 ms   separate 3.039 ms   combined 3.031 ms   combined dedup 1.562 ms; combined gate map equals today's for 28/28; dedup output equals combined for 28/28
+search p50 (MemoryService.search, no embedder): 30.368 ms
+
+## realistic, 1000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 0.303 ms   pruned >=1 0.240 ms   pruned >1 0.229 ms
+rows matched, p50 share:  unpruned 90.0%   pruned >=1 51.5%   pruned >1 51.5%
+expression changed:  pruned >=1 19/28   pruned >1 19/28; top-8 lexical ids identical:  pruned >=1 27/28   pruned >1 27/28
+lookup p50:  gate 0.109 ms   separate 0.207 ms   combined 0.187 ms   combined dedup 0.121 ms; combined gate map equals today's for 28/28; dedup output equals combined for 28/28
+search p50 (MemoryService.search, no embedder): 1.000 ms
+
+## realistic, 20000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 2.719 ms   pruned >=1 1.748 ms   pruned >1 1.723 ms
+rows matched, p50 share:  unpruned 90.0%   pruned >=1 51.4%   pruned >1 51.4%
+expression changed:  pruned >=1 19/28   pruned >1 19/28; top-8 lexical ids identical:  pruned >=1 27/28   pruned >1 27/28
+lookup p50:  gate 0.339 ms   separate 0.667 ms   combined 0.649 ms   combined dedup 0.351 ms; combined gate map equals today's for 28/28; dedup output equals combined for 28/28
+search p50 (MemoryService.search, no embedder): 3.521 ms
+
+## realistic, 50000 rows (28 queries)
+plan: SCAN memory_fts VIRTUAL TABLE INDEX 0:M3 | SEARCH m USING INTEGER PRIMARY KEY (rowid=?) | USE TEMP B-TREE FOR ORDER BY
+statement p50:  unpruned 6.625 ms   pruned >=1 4.223 ms   pruned >1 4.164 ms
+rows matched, p50 share:  unpruned 90.0%   pruned >=1 51.4%   pruned >1 51.4%
+expression changed:  pruned >=1 19/28   pruned >1 19/28; top-8 lexical ids identical:  pruned >=1 27/28   pruned >1 27/28
+lookup p50:  gate 0.675 ms   separate 1.335 ms   combined 1.318 ms   combined dedup 0.694 ms; combined gate map equals today's for 28/28; dedup output equals combined for 28/28
+search p50 (MemoryService.search, no embedder): 7.884 ms
+
