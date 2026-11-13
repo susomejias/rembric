@@ -24,13 +24,16 @@ export async function reconcileArchivedProjectJudgments(
   for (const projectId of repos.projects.listArchivedIds()) {
     let closedHere = 0;
     for (;;) {
+      // An operator may unarchive the project while the loop yields between batches.
       const batch = tx.transaction(() =>
-        orphanPendingOnProjectArchive(repos, relations, {
-          projectId,
-          at: new Date(),
-          origin: 'reconcile',
-          limit: batchSize,
-        }),
+        repos.projects.findById(projectId)?.archivedAt
+          ? orphanPendingOnProjectArchive(repos, relations, {
+              projectId,
+              at: new Date(),
+              origin: 'reconcile',
+              limit: batchSize,
+            })
+          : 0,
       );
       closedHere += batch;
       if (batch < batchSize) break;

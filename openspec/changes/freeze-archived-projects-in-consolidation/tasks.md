@@ -28,6 +28,7 @@
   - a backlog of more than one batch converges in one call, with one transaction per batch;
   - an active project's pendings are untouched;
   - unarchive restores the reconciled rows.
+- [x] 5.3 Re-check `archived_at` inside each batch transaction, so a project unarchived while the reconciliation yields is left alone. The independent verification found this race; it is pinned by the test "stops closing a project that is unarchived between batches" and mutation 14.
 - [x] 5.2 Call it from `startProcess()` in `apps/web/src/lib/process.ts`, after the data-loss guard. Wrap it in try/catch with `console.error('[process] …')`, and log the one summary line only when it did work. Add a test that a thrown reconciliation does not prevent the process from starting.
 
 ## 6. Deadline after restore (D6, owner decision)

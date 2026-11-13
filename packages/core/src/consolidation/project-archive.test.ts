@@ -444,6 +444,18 @@ describe('the process-start reconciliation', () => {
     for (const j of backlog) expect(rel(j).status).toBe('pending');
   });
 
+  it('stops closing a project that is unarchived between batches', async () => {
+    const backlog = Array.from({ length: 7 }, (_, i) => pendingIn(p, `race${i}`));
+    archivedWithoutClosing(p);
+
+    const reconciling = reconcileArchivedProjectJudgments(repos, db.handle.db, { batchSize: 3 });
+    setImmediate(() => projects.unarchive(p));
+    await reconciling;
+
+    expect(projects.getById(p)!.archivedAt).toBeNull();
+    for (const j of backlog) expect(rel(j).status).toBe('pending');
+  });
+
   it('writes nothing on a converged store', async () => {
     pendingIn(p, 'one');
     projects.archive(p);
