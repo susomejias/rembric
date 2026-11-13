@@ -1,0 +1,21 @@
+# Dev-server smoke — base main boots first, then this branch on the same database
+instrument: next dev on a free port (3107; 3000 was checked with lsof), REMBRIC_DATA_DIR in a mktemp scratch directory, MCP over HTTP (project.use autocreate, memory.save), the SQLite file read directly afterwards
+base = the base commit's packages in a scratch clone; branch = this worktree; the listening process' cwd was checked before each phase
+
+| Case | Expected | Result | Verdict |
+| --- | --- | --- | --- |
+| base: project.use autocreate smoke-alpha | created | true | PASS |
+| base: near-duplicate save in alpha | alpha target in candidates[] | source fts | PASS |
+| base: control, no per-project objects | 0 objects | 0 | PASS |
+| branch boot: default index objects | table + view + 3 triggers (+4 shadows) | 9 | PASS |
+| branch boot: smoke-alpha index objects | table + view + 3 triggers (+4 shadows) | 9 | PASS |
+| branch: alpha index holds only alpha rows | all rows alpha (global memory_fts: 3 incl. default) | 2 rows, 0 foreign | PASS |
+| branch: near-duplicate save in alpha | alpha target in candidates[] | source fts, similarity 1 | PASS |
+| branch: no candidate from another project | 0 | 0 | PASS |
+| branch: project.use autocreate smoke-beta | index objects exist at once | created true, 9 objects | PASS |
+| branch: save in beta is indexed in beta | 1 row | 1 | PASS |
+
+base data: memories per project: [{"slug":"default","n":2},{"slug":"smoke-alpha","n":3}]; projects: 2
+branch boot log: [db] project lexical indexes: built 2, dropped 0 (2 ms)
+
+Controls: base must leave no memory_fts_p_ object (it did not), so the branch's objects come from its reconciler; the global memory_fts holds the default project's zephyrkite row that the alpha index must not (3 global rows against 2 alpha rows, 0 foreign).

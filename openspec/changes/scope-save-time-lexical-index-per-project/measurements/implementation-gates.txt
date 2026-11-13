@@ -1,0 +1,41 @@
+# Phase 2 gates — upgrade cost and prefix80 recall, implementation as shipped
+upgrade instrument: single-run wall clock of createDb on a base-built copy (first open builds every project index), then a second open; data.db and WAL sizes after each
+recall instrument: prefix80 probes through findSaveTimeCandidates (no embedder, perSaveMax 100 so no cap hides a target); "surfaced" = the source memory is an fts candidate
+compare with options.txt (prototype b: generator 71/90, realistic 89/90; status quo d: the same)
+
+## generator-skew, 1000 rows
+upgrade: first open 46 ms (project lexical indexes: built 7, dropped 0 (41 ms)), second open 3 ms; data.db+WAL 27.8 MB before, data.db 27.8 MB + WAL 1.0 MB after the first open
+  share  2% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 2/10
+  share 20% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 0/10
+  share 60% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 2/10
+
+## generator-skew, 20000 rows
+upgrade: first open 263 ms (project lexical indexes: built 7, dropped 0 (257 ms)), second open 9 ms; data.db+WAL 240.8 MB before, data.db 254.3 MB + WAL 13.7 MB after the first open
+  share  2% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 0/10
+  share 20% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 1/10
+  share 60% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 0/10
+
+## generator-skew, 50000 rows
+upgrade: first open 837 ms (project lexical indexes: built 7, dropped 0 (802 ms)), second open 41 ms; data.db+WAL 589.0 MB before, data.db 623.2 MB + WAL 34.5 MB after the first open
+  share  2% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 0/10
+  share 20% prefix80 source surfaced: pruned 8/10, pruning off 8/10; fts candidate sets identical 1/10
+  share 60% prefix80 source surfaced: pruned 7/10, pruning off 7/10; fts candidate sets identical 1/10
+
+## realistic-skew, 1000 rows
+upgrade: first open 14 ms (project lexical indexes: built 7, dropped 0 (12 ms)), second open 2 ms; data.db+WAL 1.4 MB before, data.db 1.4 MB + WAL 0.5 MB after the first open
+  share  2% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+  share 20% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+  share 60% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+
+## realistic-skew, 20000 rows
+upgrade: first open 101 ms (project lexical indexes: built 7, dropped 0 (98 ms)), second open 5 ms; data.db+WAL 21.1 MB before, data.db 25.6 MB + WAL 4.5 MB after the first open
+  share  2% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+  share 20% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+  share 60% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+
+## realistic-skew, 50000 rows
+upgrade: first open 233 ms (project lexical indexes: built 7, dropped 0 (230 ms)), second open 4 ms; data.db+WAL 54.0 MB before, data.db 63.6 MB + WAL 10.7 MB after the first open
+  share  2% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+  share 20% prefix80 source surfaced: pruned 9/10, pruning off 9/10; fts candidate sets identical 10/10
+  share 60% prefix80 source surfaced: pruned 10/10, pruning off 10/10; fts candidate sets identical 10/10
+

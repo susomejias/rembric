@@ -1,0 +1,318 @@
+# per-project lexical index — mutation check (task 4.4)
+Each case weakens one condition, runs the suite that names it, and restores the file byte for byte (scripts/mutate.mjs).
+A scratch helper outside the workspace called scripts/mutate.mjs once per case. Source at b98354e6.
+Every case below turned at least one named test red; no mutation survived (21 of 21).
+
+### Routing: insert trigger WHEN removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    AFTER INSERT ON memory WHEN new.project_id = ${id} BEGIN
+replace:
+    AFTER INSERT ON memory BEGIN
+  CAUGHT by 2:
+  × trigger maintenance > indexes a write to project A in A's table only
+  × the save-time statement reads the project index > is unchanged by rows added to another project
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [ 'a1' ] to deeply equal []
+  AssertionError: expected [ …(3) ] to deeply equal [ Array(3) ]
+exit 0
+### Routing: delete trigger WHEN removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    AFTER DELETE ON memory WHEN old.project_id = ${id} BEGIN
+replace:
+    AFTER DELETE ON memory BEGIN
+  CAUGHT by 1:
+  × trigger maintenance > a purge leaves no posting behind, tags included
+  all 1 mutations caught; project-lexical-index.ts restored
+  SqliteError: database disk image is malformed
+exit 0
+### Routing: update trigger WHEN removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    ON memory WHEN old.project_id = ${id} BEGIN ${deleteOld} ${insertNew}
+replace:
+    ON memory BEGIN ${deleteOld} ${insertNew}
+  CAUGHT by 1:
+  × trigger maintenance > a tag update replaces the old tag postings with the new ones
+  all 1 mutations caught; project-lexical-index.ts restored
+  SqliteError: database disk image is malformed
+exit 0
+### View: project filter removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    title FROM memory WHERE project_id = ${id}`
+replace:
+    title FROM memory`
+  CAUGHT by 1:
+  × trigger maintenance > indexes a write to project A in A's table only
+  all 1 mutations caught; project-lexical-index.ts restored
+  SqliteError: database disk image is malformed
+exit 0
+### Build: population filter removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    title FROM memory WHERE project_id = ?`
+replace:
+    title FROM memory WHERE project_id = ? OR 1`
+  CAUGHT by 2:
+  × the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+  × project-scoped term statistics > reads each token's terms and the project's own document frequencies
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [ Array(3) ] to deeply equal [ [ 'a1', -0.4634312463031669 ], …(2) ]
+  AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+exit 0
+### Build: population skipped
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    title FROM memory WHERE project_id = ?`
+replace:
+    title FROM memory WHERE 0 AND project_id = ?`
+  CAUGHT by 6:
+  × boot reconciliation > creates a missing index and populates it from existing rows
+  × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+  × the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+  × the save-time statement reads the project index > is unchanged by rows added to another project
+  × the save-time statement reads the project index > builds the index first when the project has none
+  × project-scoped term statistics > reads each token's terms and the project's own document frequencies
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [] to deeply equal [ 'm1' ]
+  AssertionError: expected [] to deeply equal [ 'm1' ]
+  AssertionError: expected [] to deeply equal [ [ 'a1', -0.4634312463031669 ], …(2) ]
+  AssertionError: expected [] to have a length of 20 but got +0
+  AssertionError: expected [] to deeply equal [ 'r1' ]
+  AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+exit 0
+### Name: hex encoding replaced by lowercase id
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    Buffer.from(projectId, 'utf8').toString('hex')
+replace:
+    projectId.toLowerCase()
+  CAUGHT by 7:
+  × the per-project index name > is a safe identifier, distinct for every distinct id, and decodes back to the id
+  × the per-project index name > indexes a project whose id needs quoting
+  × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+  × boot reconciliation > leaves a clean schema untouched
+  × boot reconciliation > drops every object of a project whose row no longer exists
+  × project creation > creates the index when the repository inserts the project
+  × the save-time statement reads the project index > builds the index first when the project has none
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected 5 to be 6 // Object.is equality
+  SqliteError: near "'neil project_src AS SELECT rowid AS rowid, content, tags, title FROM memory WHERE project_id = '": syntax error
+  SqliteError: view memory_fts_p_p1_src already exists
+  AssertionError: expected { built: [], …(1) } to deeply equal { built: [], dropped: [] }
+  AssertionError: expected [ Array(1) ] to deeply equal [ 'gone' ]
+  SqliteError: near "-": syntax error
+  SqliteError: near "-": syntax error
+exit 0
+### Literal: quote escaping removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    value.replaceAll("'", "''")
+replace:
+    value
+  CAUGHT by 1:
+  × the per-project index name > indexes a project whose id needs quoting
+  all 1 mutations caught; project-lexical-index.ts restored
+  SqliteError: near "neil": syntax error
+exit 0
+### Reconciler: drift check reduced to existence
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    stored.get(o.name) === o.sql
+replace:
+    stored.has(o.name)
+  CAUGHT by 1:
+  × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [] to deeply equal [ 'p1' ]
+exit 0
+### Reconciler: clean-schema skip removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    if (objects.every((o) => stored.get(o.name) === o.sql)) continue;
+replace:
+    (deleted)
+  CAUGHT by 3:
+  × boot reconciliation > creates a missing index and populates it from existing rows
+  × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+  × boot reconciliation > leaves a clean schema untouched
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [ 'fedbda63c3b14b0f406ea58a87', 'p1' ] to deeply equal [ 'p1' ]
+  AssertionError: expected [ '486405caeb11553d109d88599f', 'p1' ] to deeply equal [ 'p1' ]
+  AssertionError: expected { built: [ …(2) ], dropped: [] } to deeply equal { built: [], dropped: [] }
+exit 0
+### Reconciler: orphan drop removed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    for (const id of dropped) dropObjects(sqlite, id);
+replace:
+    (deleted)
+  CAUGHT by 1:
+  × boot reconciliation > drops every object of a project whose row no longer exists
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [ 'memory_fts_p_676f6e65', …(8) ] to deeply equal []
+exit 0
+### Ensure: missing-table check bypassed
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    if (present === 0) {
+replace:
+    if (false) {
+  CAUGHT by 13:
+  × the per-project index name > indexes a project whose id needs quoting
+  × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+  × boot reconciliation > leaves a clean schema untouched
+  × boot reconciliation > drops every object of a project whose row no longer exists
+  × project creation > creates the index when the repository inserts the project
+  × project creation > rolls the index back with the project when the caller's transaction aborts
+  × trigger maintenance > indexes a write to project A in A's table only
+  × trigger maintenance > a purge leaves no posting behind, tags included
+  × trigger maintenance > a tag update replaces the old tag postings with the new ones
+  × the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+  × the save-time statement reads the project index > is unchanged by rows added to another project
+  × the save-time statement reads the project index > builds the index first when the project has none
+  × project-scoped term statistics > reads each token's terms and the project's own document frequencies
+  all 1 mutations caught; project-lexical-index.ts restored
+  SqliteError: no such table: memory_fts_p_6f276e65696c2070726f6a656374
+  SqliteError: no such trigger: memory_fts_p_7031_ai
+  AssertionError: expected { built: [ 'p1' ], dropped: [] } to deeply equal { built: [], dropped: [] }
+  AssertionError: expected 0 to be greater than 0
+  AssertionError: expected [] to include 'memory_fts_p_6e65772d70726f6a656374'
+  SqliteError: no such table: memory_fts_p_61626f72746564
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7261772d6f6e6c79
+  SqliteError: no such fts5 table: main.memory_fts_p_7061
+exit 0
+### Ensure: cache filled inside a transaction
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    if (!sqlite.inTransaction) ensuredOn(sqlite).add(projectId);
+replace:
+    ensuredOn(sqlite).add(projectId);
+  CAUGHT by 1:
+  × project creation > rolls the index back with the project when the caller's transaction aborts
+  all 1 mutations caught; project-lexical-index.ts restored
+  SqliteError: no such table: memory_fts_p_61626f72746564
+exit 0
+### Vocabulary: global vocabulary instead of the project one
+$ node scripts/mutate.mjs --file packages/db/src/project-lexical-index.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    USING fts5vocab(main, '${t}', 'row')
+replace:
+    USING fts5vocab(main, 'memory_fts', 'row')
+  CAUGHT by 1:
+  × project-scoped term statistics > reads each token's terms and the project's own document frequencies
+  all 1 mutations caught; project-lexical-index.ts restored
+  AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+exit 0
+### Creation: repository insert no longer creates the index
+$ node scripts/mutate.mjs --file packages/db/src/repositories/projects-repository.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    if (row) ensureProjectLexicalIndex(this.db.$client, row.id);
+replace:
+    (deleted)
+  CAUGHT by 2:
+  × project creation > creates the index when the repository inserts the project
+  × project creation > rolls the index back with the project when the caller's transaction aborts
+  all 1 mutations caught; projects-repository.ts restored
+  AssertionError: expected [] to include 'memory_fts_p_6e65772d70726f6a656374'
+  SqliteError: no such table: memory_fts_p_61626f72746564
+exit 0
+### Statement: global memory_fts instead of the project table
+$ node scripts/mutate.mjs --file packages/db/src/repositories/memory-repository.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    const t = sql.raw(projectLexicalIndexName(opts.projectId));
+replace:
+    const t = sql.raw('memory_fts');
+  CAUGHT by 2:
+  × the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+  × the save-time statement reads the project index > is unchanged by rows added to another project
+  all 1 mutations caught; memory-repository.ts restored
+  AssertionError: expected [ Array(3) ] to deeply equal [ [ 'a1', -0.4634312463031669 ], …(2) ]
+  AssertionError: expected [ [ 'a1', …(1) ], …(2) ] to deeply equal [ Array(3) ]
+exit 0
+### Statement: read-path ensure removed
+$ node scripts/mutate.mjs --file packages/db/src/repositories/memory-repository.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    ensureProjectLexicalIndex(this.db.$client, opts.projectId);
+replace:
+    (deleted)
+  CAUGHT by 3:
+  × the save-time statement reads the project index > returns exactly the scores of an index holding only that project
+  × the save-time statement reads the project index > is unchanged by rows added to another project
+  × the save-time statement reads the project index > builds the index first when the project has none
+  all 1 mutations caught; memory-repository.ts restored
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7061
+  SqliteError: no such table: memory_fts_p_7261772d6f6e6c79
+exit 0
+### Statistics: document count loses its project filter
+$ node scripts/mutate.mjs --file packages/db/src/repositories/term-statistics-repository.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    WHERE scope = 'project' AND project_id = ${scope.projectId}`
+replace:
+    WHERE scope = 'project'`
+  CAUGHT by 1:
+  × project-scoped term statistics > counts the project's rows in every status and no other project's
+  all 1 mutations caught; term-statistics-repository.ts restored
+  AssertionError: expected 7 to be 2 // Object.is equality
+exit 0
+### Boot: reconciler call removed
+$ node scripts/mutate.mjs --file packages/db/src/client.ts --spec packages/db/src/project-lexical-index.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:
+    const { built, dropped } = reconcileProjectLexicalIndexes(sqlite);
+replace:
+    const { built, dropped } = { built: [], dropped: [] };
+  CAUGHT by 4:
+  × boot reconciliation > builds the index of migration 0031's hex-id default project
+  × boot reconciliation > creates a missing index and populates it from existing rows
+  × boot reconciliation > recreates an index whose stored DDL drifted from the recipe, and rebuilds it
+  × boot reconciliation > leaves a clean schema untouched
+  all 1 mutations caught; client.ts restored
+  AssertionError: expected [] to include 'memory_fts_p_373862313130636561346666…'
+  AssertionError: expected [ '55775947d0e215b5b769312ca0', 'p1' ] to deeply equal [ 'p1' ]
+  AssertionError: expected [ '574a2cfa02fda0f11a39c91475', 'p1' ] to deeply equal [ 'p1' ]
+  AssertionError: expected { …(2) } to deeply equal { built: [], dropped: [] }
+exit 0
+### Core: pruning frequencies from another project
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec packages/core/src/services/save-time-candidates.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    termStatistics.projectTokenTermFrequencies(scope, tokens),
+replace:
+    termStatistics.projectTokenTermFrequencies(projectScope('p0'), tokens),
+  CAUGHT by 4:
+  × findSaveTimeCandidates — common-term pruning > omits a token present in at least half of the rows and keeps a rarer one
+  × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+  × findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
+  × findSaveTimeCandidates — common-term pruning > omits a token common in the saving project even when it is rare across the server
+  all 1 mutations caught; save-time-candidates.ts restored
+  AssertionError: expected [ '"the" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+  AssertionError: expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+  AssertionError: expected [ Array(1) ] to not deeply equal [ Array(1) ]
+  AssertionError: expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+exit 0
+### Core: pruning total from another project
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec packages/core/src/services/save-time-candidates.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:
+    termStatistics.projectDocumentCount(scope),
+replace:
+    termStatistics.projectDocumentCount(projectScope('p0')),
+  CAUGHT by 5:
+  × findSaveTimeCandidates — common-term pruning > omits a token present in at least half of the rows and keeps a rarer one
+  × findSaveTimeCandidates — common-term pruning > at 5 of 10 rows the token is omitted only from exactly half upward
+  × findSaveTimeCandidates — common-term pruning > a near-duplicate sharing a rarer token surfaces lexically with an unchanged similarity
+  × findSaveTimeCandidates — common-term pruning > omits a token common in the saving project even when it is rare across the server
+  × findSaveTimeCandidates — common-term pruning > a multi-term token stays even when each of its terms is common
+  all 1 mutations caught; save-time-candidates.ts restored
+  AssertionError: expected [ '"the" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+  AssertionError: expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+  AssertionError: expected [ Array(1) ] to not deeply equal [ Array(1) ]
+  AssertionError: expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
+  AssertionError: expected [ '"two-space"' ] to deeply equal [ '"two-space" OR "zephyrkite"' ]
+exit 0
