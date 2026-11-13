@@ -41,6 +41,16 @@ Undoing a decay, an archive or a merge from `/dashboard/consolidation` also rest
 
 A pending pair with a retired memory therefore exists only when it predates this behaviour, or when an operator restored it by undoing its op. The queue withholds it, `/dashboard/judgments` still lists it, and the stale pending drain below closes it, or the deadline does if an operator restored it.
 
+### Closed when a project is archived
+
+An archived project is frozen. The consolidation sweep skips it entirely, the session-start sweep and "Run now" alike, so no decay, no deadline and no drain ever touches it.
+
+Archiving a project closes all of its pending pairs in the same transaction, with the reasoning prefix `project archived`. They are journaled in one `maintenance` run of kind `project_archive_orphan`, written only when there is a pair to close. If the journal write fails, the archive fails with it.
+
+On every server start, pending pairs in projects that were archived before this behaviour existed are closed the same way, with `origin: "reconcile"` in the run summary. The pass works in batches and writes nothing once nothing is left.
+
+Unarchiving restores every pair its archiving (or that reconciliation) closed. A pair keeps a verdict written after it was closed. A pair stays closed when one of its memories was retired since, and its op stays active. A restored pair's 14-day deadline counts from the restore, not from its creation. While the project is archived, undoing one of those ops from `/dashboard/consolidation` is refused: unarchive the project instead.
+
 ### Stale pending drain
 
 Each sweep run also re-checks pending pairs against the save-time detection rules of the running build, in the pair's own project, and orphans a pair when:

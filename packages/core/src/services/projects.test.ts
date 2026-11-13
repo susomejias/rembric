@@ -10,7 +10,7 @@ let projects: ProjectsService;
 
 beforeEach(() => {
   db = createTestDb();
-  projects = new ProjectsService(createRepositories(db.handle.db));
+  projects = new ProjectsService(createRepositories(db.handle.db), undefined, db.handle.db);
 });
 
 afterEach(() => {

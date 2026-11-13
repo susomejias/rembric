@@ -181,7 +181,7 @@ export function ProjectsTable({
                         }?`}
                         description={`${archivable.length} ${
                           archivable.length === 1 ? 'project' : 'projects'
-                        } will reject new writes while existing memories stay queryable. ${skipped} ${
+                        } will reject new writes while existing memories stay queryable, and their pending judgments will be closed until you unarchive them. ${skipped} ${
                           skipped === 1 ? 'project' : 'projects'
                         } will be skipped — the default project cannot be archived, and an archived one is left as it is.`}
                         confirmLabel="ARCHIVE SELECTED"
@@ -273,7 +273,7 @@ function ProjectRowMenu({
                   <ConfirmSubmit
                     tone="warn"
                     title={`Archive project "${row.label}"?`}
-                    description="New writes will be rejected; existing memories stay queryable. You can unarchive later."
+                    description="New writes will be rejected; existing memories stay queryable. Its pending judgments are closed and come back when you unarchive it."
                     confirmLabel="ARCHIVE PROJECT"
                   >
                     <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>

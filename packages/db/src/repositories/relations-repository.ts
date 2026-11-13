@@ -9,6 +9,7 @@ import {
   isNull,
   lt,
   ne,
+  notInArray,
   or,
   sql,
   type SQL,
@@ -283,11 +284,32 @@ export class RelationsRepository {
       .map((r) => r.targetId);
   }
 
+  listPendingInProject(
+    projectId: string,
+    limit?: number,
+  ): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
+    const query = this.db
+      .select({
+        judgmentId: memoryRelations.judgmentId,
+        sourceId: memoryRelations.sourceId,
+        targetId: memoryRelations.targetId,
+      })
+      .from(memoryRelations)
+      .innerJoin(sourceMemory, eq(sourceMemory.id, memoryRelations.sourceId))
+      .innerJoin(targetMemory, eq(targetMemory.id, memoryRelations.targetId))
+      .where(and(eq(memoryRelations.status, 'pending'), endpointsInScope(projectId)))
+      .orderBy(memoryRelations.createdAt, memoryRelations.judgmentId)
+      .$dynamic();
+    return limit === undefined ? query.all() : query.limit(limit).all();
+  }
+
   findPendingOlderThanInScope(opts: {
     projectId: string;
     cutoffMs: number;
     limit: number;
+    excludeJudgmentIds?: readonly string[];
   }): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
+    const excluded = opts.excludeJudgmentIds ?? [];
     return this.db
       .select({
         judgmentId: memoryRelations.judgmentId,
@@ -302,6 +324,7 @@ export class RelationsRepository {
           eq(memoryRelations.status, 'pending'),
           lt(memoryRelations.createdAt, new Date(opts.cutoffMs)),
           endpointsInScope(opts.projectId),
+          excluded.length > 0 ? notInArray(memoryRelations.judgmentId, [...excluded]) : undefined,
         ),
       )
       .orderBy(memoryRelations.createdAt)

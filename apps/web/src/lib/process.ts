@@ -1,7 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 
-import { ensureEntityExtractor, entityMarkerPath } from '@rembric/core';
+import {
+  ensureEntityExtractor,
+  entityMarkerPath,
+  reconcileArchivedProjectJudgments,
+} from '@rembric/core';
 import {
   assertDataLossGuard,
   createDiagnostics,
@@ -69,7 +73,26 @@ export function startProcess(): void {
   startSessionReaper(services);
   startEmbeddingDrain(services);
   startEntityBackfill(services);
+  void closeArchivedProjectJudgments(services);
   void warmEmbedder(services);
+}
+
+export async function closeArchivedProjectJudgments(
+  services: Pick<Services, 'repos' | 'db'>,
+  reconcile: typeof reconcileArchivedProjectJudgments = reconcileArchivedProjectJudgments,
+): Promise<void> {
+  const started = performance.now();
+  try {
+    const { closed, projects } = await reconcile(services.repos, services.db.db);
+    if (closed > 0) {
+      const ms = Math.round(performance.now() - started);
+      console.error(
+        `[process] archived-project judgments: closed ${closed} in ${projects} projects (${ms} ms)`,
+      );
+    }
+  } catch (err) {
+    console.error('[process] archived-project judgment reconciliation failed', message(err));
+  }
 }
 
 async function warmEmbedder(services: Services): Promise<void> {

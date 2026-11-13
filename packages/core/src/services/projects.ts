@@ -1,7 +1,13 @@
-import { type Project, type Repositories } from '@rembric/db';
+import { type Project, type Repositories, type TransactionRunner } from '@rembric/db';
 import { ulid } from 'ulid';
 
+import {
+  orphanPendingOnProjectArchive,
+  restoreProjectArchiveOrphanings,
+} from '../consolidation/operations.js';
+
 import { DomainError } from './errors.js';
+import { RelationsService } from './relations.js';
 
 export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 
@@ -12,9 +18,22 @@ export interface ProjectView extends Project {
 
 export class ProjectsService {
   constructor(
-    private readonly repos: Pick<Repositories, 'projects'>,
+    private readonly repos: Pick<
+      Repositories,
+      'projects' | 'memory' | 'relations' | 'consolidation'
+    >,
     private readonly now: () => Date = () => new Date(),
+    private readonly tx?: TransactionRunner,
   ) {}
+
+  private lifecycleTx(op: string): TransactionRunner {
+    if (!this.tx) {
+      throw new Error(
+        `projects.${op}: needs a TransactionRunner, it closes and restores judgments atomically`,
+      );
+    }
+    return this.tx;
+  }
 
   /** Look up a project by slug. Returns `undefined` if missing. Never inserts. */
   findBySlug(slug: string): Project | undefined {
@@ -78,19 +97,32 @@ export class ProjectsService {
         `projects.archive: id=${id} is the default project and cannot be archived`,
       );
     }
-    const updated = this.repos.projects.setArchivedAt(id, this.now(), true);
-    if (!updated) {
-      const existing = this.getById(id);
-      if (!existing) throw new DomainError('project_not_found', `projects.archive: id=${id}`);
-      throw new DomainError('conflict', `projects.archive: id=${id} already archived`);
-    }
-    return updated;
+    const tx = this.lifecycleTx('archive');
+    return tx.transaction(() => {
+      const at = this.now();
+      const updated = this.repos.projects.setArchivedAt(id, at, true);
+      if (!updated) {
+        const existing = this.getById(id);
+        if (!existing) throw new DomainError('project_not_found', `projects.archive: id=${id}`);
+        throw new DomainError('conflict', `projects.archive: id=${id} already archived`);
+      }
+      orphanPendingOnProjectArchive(this.repos, new RelationsService(this.repos, tx, this.now), {
+        projectId: id,
+        at,
+        origin: 'archive',
+      });
+      return updated;
+    });
   }
 
   unarchive(id: string): Project {
-    const updated = this.repos.projects.setArchivedAt(id, null, false);
-    if (!updated) throw new DomainError('project_not_found', `projects.unarchive: id=${id}`);
-    return updated;
+    const tx = this.lifecycleTx('unarchive');
+    return tx.transaction(() => {
+      const updated = this.repos.projects.setArchivedAt(id, null, false);
+      if (!updated) throw new DomainError('project_not_found', `projects.unarchive: id=${id}`);
+      restoreProjectArchiveOrphanings(this.repos, id, this.now());
+      return updated;
+    });
   }
 
   assertWritable(id: string): void {

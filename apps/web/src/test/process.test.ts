@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DataLossGuardError } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { startProcess } from '../lib/process';
+import { closeArchivedProjectJudgments, startProcess } from '../lib/process';
 
 type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
@@ -140,5 +140,50 @@ describe('startProcess data-loss guard', () => {
     expect(errors.lines.join('\n')).toContain(
       'embedder warmup skipped (no local model cache; the first save loads it)',
     );
+  });
+});
+
+describe('closeArchivedProjectJudgments', () => {
+  const services = { repos: {}, db: { db: {} } } as unknown as Parameters<
+    typeof closeArchivedProjectJudgments
+  >[0]; // the reconcile seam below never touches them
+
+  it('logs one summary line when it closed judgments', async () => {
+    const errors = captureErrors();
+    try {
+      await closeArchivedProjectJudgments(services, () =>
+        Promise.resolve({ closed: 7, projects: 2 }),
+      );
+    } finally {
+      errors.restore();
+    }
+    expect(errors.lines).toHaveLength(1);
+    expect(errors.lines[0]).toMatch(
+      /^\[process\] archived-project judgments: closed 7 in 2 projects \(\d+ ms\)$/,
+    );
+  });
+
+  it('stays silent on a converged store', async () => {
+    const errors = captureErrors();
+    try {
+      await closeArchivedProjectJudgments(services, () =>
+        Promise.resolve({ closed: 0, projects: 0 }),
+      );
+    } finally {
+      errors.restore();
+    }
+    expect(errors.lines).toEqual([]);
+  });
+
+  it('logs a failure and resolves instead of throwing', async () => {
+    const errors = captureErrors();
+    try {
+      await expect(
+        closeArchivedProjectJudgments(services, () => Promise.reject(new Error('disk full'))),
+      ).resolves.toBeUndefined();
+    } finally {
+      errors.restore();
+    }
+    expect(errors.lines.join('\n')).toMatch(/reconciliation failed.*disk full/);
   });
 });

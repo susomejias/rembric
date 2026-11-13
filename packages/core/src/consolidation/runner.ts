@@ -14,7 +14,12 @@ import {
 
 import type { ScopeKey } from './candidates.js';
 import { findDecayCandidates, DEFAULT_DECAY, type DecayThresholds } from './decay.js';
-import { applyDecay, recordOrphanPromote, type ConsolidationDeps } from './operations.js';
+import {
+  applyDecay,
+  PROJECT_ARCHIVE_ORPHANING_PREFIX,
+  recordOrphanPromote,
+  type ConsolidationDeps,
+} from './operations.js';
 
 export interface ConsolidationRunnerOptions {
   repos: ConsolidationDeps & Pick<Repositories, 'projects' | 'vectors' | 'entities'>;
@@ -86,9 +91,14 @@ export const DRAIN_LOW_BAND_REASON = 'low confidence band';
 interface SweepCall {
   drainSpentMs: number;
   revertedJudgmentIds: string[] | null;
+  recentlyRestoredJudgmentIds: string[] | null;
 }
 
-const newSweepCall = (): SweepCall => ({ drainSpentMs: 0, revertedJudgmentIds: null });
+const newSweepCall = (): SweepCall => ({
+  drainSpentMs: 0,
+  revertedJudgmentIds: null,
+  recentlyRestoredJudgmentIds: null,
+});
 
 export function drainDisposition(evaluation: PairEvaluation): DrainDisposition {
   if (evaluation.kind === 'retired') return 'drain_retired';
@@ -114,7 +124,7 @@ export class ConsolidationRunner {
   /** Sweep every project, the default one included. Manual trigger passes force. */
   runAll(opts?: { force?: boolean }): ConsolidationRunSummary {
     const scopes: ScopeKey[] = this.opts.repos.projects
-      .listAllIds()
+      .listActiveIds()
       .map((id) => ({ projectId: id }));
     return this.sweep(scopes, opts);
   }
@@ -122,7 +132,11 @@ export class ConsolidationRunner {
   sweepFor(projectId: string | null): ConsolidationRunSummary {
     const defaultId = this.defaultProjectId();
     const scopes: ScopeKey[] = [{ projectId: defaultId }];
-    if (projectId !== null && projectId !== defaultId) {
+    if (
+      projectId !== null &&
+      projectId !== defaultId &&
+      !this.opts.repos.projects.findById(projectId)?.archivedAt
+    ) {
       scopes.push({ projectId });
     }
     return this.sweep(scopes);
@@ -185,7 +199,7 @@ export class ConsolidationRunner {
     }
 
     // 2. Deadline orphaning.
-    ops.orphaned = this.orphanExpired(runId, scope);
+    ops.orphaned = this.orphanExpired(runId, scope, call);
 
     // 3. Stale save-time pending drain.
     const drain = this.drainStale(runId, scope, call);
@@ -314,12 +328,18 @@ export class ConsolidationRunner {
     });
   }
 
-  private orphanExpired(runId: string, scope: ScopeKey): number {
+  private orphanExpired(runId: string, scope: ScopeKey, call: SweepCall): number {
     const deadlineMs = this.opts.orphanDeadlineMs ?? DEFAULT_ORPHAN_DEADLINE_MS;
+    // A judgment restored by unarchiving gets a fresh deadline window from its restore.
+    call.recentlyRestoredJudgmentIds ??= this.opts.relations.listOrphaningsRevertedWithin(
+      PROJECT_ARCHIVE_ORPHANING_PREFIX,
+      deadlineMs,
+    );
     const pending = this.opts.relations.findPendingOlderThanInScope({
       projectId: scope.projectId,
       cutoffMs: deadlineMs,
       limit: ORPHAN_BATCH,
+      excludeJudgmentIds: call.recentlyRestoredJudgmentIds,
     });
 
     const reason = `unjudged after ${deadlineMs}ms deadline`;

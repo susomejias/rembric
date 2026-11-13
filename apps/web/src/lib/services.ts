@@ -67,7 +67,7 @@ function buildServices(): Services {
   const db = getDb();
   const repos = createRepositories(db.db);
   const tokens = new TokensService(repos, db.db);
-  const projects = new ProjectsService(repos);
+  const projects = new ProjectsService(repos, undefined, db.db);
   const agentSessions = new AgentSessionsService(repos, db.db);
   const relations = new RelationsService(repos, db.db);
   const prompts = new PromptsService(repos, db.db);
