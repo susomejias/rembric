@@ -1,0 +1,27 @@
+# Retrieval evaluation — before/after
+instrument: pnpm eval (run-eval.ts) and packages/core/src/test-support/retrieval/dump-ids.ts (result ids per query at limits 5, 8, 200)
+before: the base commit 5e3a2069 in a scratch worktree, packages rebuilt; after: this change, packages rebuilt
+
+dump-ids sha256 (84 entries)
+  before 670ec7c16c34e3805fbef1951524d071e4ce35bd66405599bf15d25b0dcf1f37
+  after  33dcc5ce24580c6254464452c0f14229c5af9075d412110df1ca8c5ee036971c
+  control: the before hash equals the one prune-common-terms-from-save-time-match recorded for its base, so the instrument has not drifted
+  3 of 84 entries differ, each by order only (same id set before and after):
+    q-nimbus-deploy-pipeline-latest@200: positions 10-13 reordered; before ['nimbus-deploy-runbook-step', 'nimbus-deploy-pipeline-old', 'nimbus-runbook-step-handoff', 'nimbus-runbook-step-dlq-drain'] after ['nimbus-deploy-pipeline-old', 'nimbus-deploy-runbook-step', 'nimbus-runbook-step-dlq-drain', 'nimbus-runbook-step-handoff']; ids added 0, removed 0
+    q-abstain-nimbus-tracing-vendor@8: positions 7-8 reordered; before ['nimbus-backfill-watermark', 'nimbus-mq-decision'] after ['nimbus-mq-decision', 'nimbus-backfill-watermark']; ids added 0, removed 0
+    q-abstain-nimbus-tracing-vendor@200: positions 7-8 reordered; before ['nimbus-backfill-watermark', 'nimbus-mq-decision'] after ['nimbus-mq-decision', 'nimbus-backfill-watermark']; ids added 0, removed 0
+
+pnpm eval, before
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+pnpm eval, after
+  hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+  grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+  rembric retrieval eval passed.
+
+ratchet: no floor or cap moved, so the committed baselines are unchanged.
+The @8 change swaps positions 7 and 8 inside the same page; the other two are positions 7-8 and 10-13 at limit 200.
+Every scorecard metric above is identical before and after.
