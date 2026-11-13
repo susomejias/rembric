@@ -316,3 +316,8 @@ replace:
   AssertionError: expected [ '"pivot" OR "zephyrkite"' ] to deeply equal [ '"zephyrkite"' ]
   AssertionError: expected [ '"two-space"' ] to deeply equal [ '"two-space" OR "zephyrkite"' ]
 exit 0
+
+## Vocabulary cache inside a rolled-back transaction (added after independent verification)
+mutation: if (!sqlite.inTransaction) created.add(projectId);  ->  created.add(projectId);
+  CAUGHT by 1:
+    x project-scoped term statistics > still reads the statistics after a transaction that first read them rolls back

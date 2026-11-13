@@ -48,6 +48,7 @@ None.
   - `packages/db/src/repositories/memory-repository.ts`: `searchBm25Candidates`.
   - `packages/db/src/repositories/term-statistics-repository.ts`: project-scoped document count and per-token frequencies, through a temp-schema `fts5vocab` per project; `adminTokenTermFrequencies` is removed.
   - `packages/core/src/services/save-time-candidates.ts`: passes the project to the pruning read.
+  - `packages/core/src/services/ancestry-statements.test.ts`: pins the project-scoped count statement's text.
 - **Tests:**
   - `packages/db/src/project-lexical-index.test.ts`;
   - `packages/db/src/repositories/term-statistics-repository.test.ts`;
