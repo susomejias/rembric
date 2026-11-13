@@ -1463,6 +1463,87 @@ describe('the search lexical MATCH omits index-common terms', () => {
     expect((await search('kubernetes notes', null)).matchExpr).toBe('"kubernetes" OR "notes"');
   });
 
+  it('runs the full expression when the pruned one matches nothing in the searched scope', async () => {
+    const release = seed([
+      'release notes one',
+      'release notes two',
+      'release notes three',
+      'release notes four',
+    ]);
+    seed(['kubernetes notes a', 'kubernetes notes b'], 'infra');
+    const bm25 = vi.spyOn(repos.memory, 'searchBm25Ids');
+    const result = await hybridSearch({
+      repos,
+      query: 'kubernetes release notes',
+      scope: projectScope(projectId),
+      status: 'active',
+      limit: 8,
+      offset: 0,
+    });
+    expect(bm25.mock.calls.map((c) => c[0].matchExpr)).toEqual([
+      '"kubernetes"',
+      '"kubernetes" OR "release" OR "notes"',
+    ]);
+    bm25.mockRestore();
+    expect(new Set(result.ids)).toEqual(new Set(release));
+    expect(result.abstained).toBe(false);
+  });
+
+  it('issues one statement when nothing was pruned, even if it matches nothing', async () => {
+    seed(ten);
+    expect((await search('zzzqqq kubernetesx')).matchExpr).toBe('"zzzqqq" OR "kubernetesx"');
+    const bm25 = vi.spyOn(repos.memory, 'searchBm25Ids');
+    await hybridSearch({
+      repos,
+      query: 'zzzqqq kubernetesx',
+      scope: projectScope(projectId),
+      status: 'active',
+      limit: 8,
+      offset: 0,
+    });
+    expect(bm25).toHaveBeenCalledTimes(1);
+    bm25.mockRestore();
+  });
+
+  it('runs the full expression when a filter excludes every row the pruned one matches', async () => {
+    seed(ten);
+    const kept = mem.save(
+      { type: 'user', title: 'user row', content: 'notes the user keeps' },
+      projectScope(projectId),
+    );
+    const result = await hybridSearch({
+      repos,
+      query: 'kubernetes notes',
+      scope: projectScope(projectId),
+      status: 'active',
+      type: 'user',
+      limit: 8,
+      offset: 0,
+    });
+    expect(result.ids).toEqual([kept.id]);
+  });
+
+  it('searches the full expression when the statistics read fails, as before pruning existed', async () => {
+    seed(ten);
+    const failing = createRepositories(db.handle.db);
+    vi.spyOn(failing.termStatistics, 'adminSearchTermFrequencies').mockImplementation(() => {
+      throw new Error('statistics unavailable');
+    });
+    const opts = {
+      query: 'kubernetes notes',
+      scope: projectScope(projectId),
+      status: 'active' as const,
+      limit: 8,
+      offset: 0,
+      abstentionFloor: null,
+      relativeLevelRatio: null,
+    };
+    const degraded = await hybridSearch({ repos: failing, ...opts });
+    const unpruned = await hybridSearch({ repos, ...opts, commonTermRatio: null });
+    expect(degraded.ids).toEqual(unpruned.ids);
+    expect(degraded.ids.length).toBeGreaterThan(1);
+  });
+
   it('reads the statistics once and feeds the gate the values a separate read returns', async () => {
     seed(ten);
     const query = 'kubernetes notes absentword';

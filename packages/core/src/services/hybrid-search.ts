@@ -369,28 +369,42 @@ function lexicalRetriever(
   statistics: () => TermStatistics,
 ): string[] {
   if (tokens.length === 0) return [];
-  const commonTermRatio =
-    opts.commonTermRatio !== undefined ? opts.commonTermRatio : COMMON_TERM_DOCUMENT_RATIO;
+  const search = (kept: readonly string[]) =>
+    opts.repos.memory
+      .searchBm25Ids({
+        matchExpr: joinFtsTokens(kept),
+        scope: opts.scope,
+        status: opts.status,
+        type: opts.type,
+        tag: opts.tag,
+        topicKey: opts.topicKey,
+        limit: rankWindowSize,
+      })
+      .map((r) => r.id);
   try {
-    let kept: readonly string[] = tokens;
-    if (commonTermRatio !== null) {
-      const { tokens: terms, documentCount } = statistics();
-      kept = pruneCommonTokens(tokens, terms, documentCount, commonTermRatio, 0);
-    }
-    const matchExpr = joinFtsTokens(kept);
-    const rows = opts.repos.memory.searchBm25Ids({
-      matchExpr,
-      scope: opts.scope,
-      status: opts.status,
-      type: opts.type,
-      tag: opts.tag,
-      topicKey: opts.topicKey,
-      limit: rankWindowSize,
-    });
-    return rows.map((r) => r.id);
+    const kept = keptTokens(opts, tokens, statistics);
+    const ids = search(kept);
+    return ids.length === 0 && kept.length < tokens.length ? search(tokens) : ids;
   } catch {
     return [];
   }
+}
+
+function keptTokens(
+  opts: HybridSearchOpts,
+  tokens: readonly string[],
+  statistics: () => TermStatistics,
+): readonly string[] {
+  const commonTermRatio =
+    opts.commonTermRatio !== undefined ? opts.commonTermRatio : COMMON_TERM_DOCUMENT_RATIO;
+  if (commonTermRatio === null) return tokens;
+  let read: TermStatistics;
+  try {
+    read = statistics();
+  } catch {
+    return tokens;
+  }
+  return pruneCommonTokens(tokens, read.tokens, read.documentCount, commonTermRatio, 0);
 }
 
 async function denseRetriever(

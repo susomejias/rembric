@@ -46,4 +46,12 @@
 ## 5. Results
 
 - `pnpm eval`: identical scorecard before and after; no baseline moves.
-- End to end (`search-after.txt`, p50 over 28 queries, run 1 / run 2): realistic 50 000 rows 7.877 / 7.903 ms before, 5.687 / 5.680 ms after; 20 000 rows 3.519 / 3.761 → 2.731 / 2.775 ms; generator 50 000 rows 29.851 / 30.457 → 28.416 / 28.635 ms. No size or corpus got slower.
+- End to end (`search-after.txt`, after the correction, p50 over 28 queries, run 1 / run 2): realistic 50 000 rows 7.911 / 7.880 ms before, 5.657 / 5.673 ms after; 20 000 rows 3.509 / 3.486 → 2.709 / 2.730 ms; generator 50 000 rows 29.683 / 29.248 → 28.612 / 28.717 ms; generator 1 000 rows 2.719 / 2.657 → 2.650 / 2.640 ms (its reduced `MATCH` often finds nothing in scope and is rerun in full). No size or corpus got slower.
+
+## 6. Independent verification and correction
+
+- [x] 6.1 Independent verifier (Risk item 3: `pruneCommonTokens` is shared with save time, and the gate reads through the new statistics read). Save-time sweep byte-identical; the gate's document total and term map, entries and key order, identical to base on 74 end-to-end probes and 2 000 fuzzed queries.
+- [x] 6.2 Blocker reproduced by the parent against the base copy: `kubernetes release notes` in a project of `release notes` rows, with `kubernetes` only in another project, FTS only: base 6 rows, `abstained: false`; change 0 rows, `abstained: true`, "no candidate matched the query in this scope". The same held for a `type` filter.
+- [x] 6.3 Correction: a reduced `MATCH` that returns no row runs the full expression once more; a failed statistics read searches the full expression. RED: 3 tests failed on 471be1db. GREEN: 178/178 focused. The verifier's 74 probes now match base in results and abstention (0 differences, 0 emptied; before the correction 4 differed and 3 emptied).
+- [x] 6.4 Mutation of the three new conditions: 3 of 3 caught (`mutation.txt`). `pnpm eval` and `dump-ids.ts` are unchanged by the correction (same sha256 as before it).
+- [x] 6.5 The spec delta, design D2/D4, the proposal and `docs/embeddings.md` describe the full-expression rerun.

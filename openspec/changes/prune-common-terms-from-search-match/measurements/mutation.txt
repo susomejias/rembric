@@ -1,6 +1,6 @@
 # search lexical pruning — mutation check (task 4.2)
 Each case weakens one condition, runs the suite that names it, and restores the file byte for byte (scripts/mutate.mjs).
-Source at 0f005466. Every case turned at least one named test red; no mutation survived (10 of 10).
+Source at 0f005466. Every case turned at least one named test red; no mutation survived (13 of 13: 10 at 0f005466, 3 for the correction).
 
 ### Ratio boundary inclusive (>= to >)
 $ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
@@ -88,3 +88,32 @@ replace: WITH f AS (
     CAUGHT by 1:
       × adminSearchTermFrequencies reads the query and its tokens in one statement > joins each distinct term to the vocabulary once, by the term-constrained seek
   all 1 mutations caught; term-statistics-repository.ts restored
+
+## Correction: empty reduced MATCH and failed statistics read (working tree on 471be1db)
+
+### Empty pruned result not retried
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    return ids.length === 0 && kept.length < tokens.length ? search(tokens) : ids;
+replace: return ids;
+    CAUGHT by 2:
+      × the search lexical MATCH omits index-common terms > runs the full expression when the pruned one matches nothing in the searched scope
+      × the search lexical MATCH omits index-common terms > runs the full expression when a filter excludes every row the pruned one matches
+  all 1 mutations caught; hybrid-search.ts restored
+### Retry also when nothing was pruned
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    ids.length === 0 && kept.length < tokens.length
+replace: ids.length === 0
+    CAUGHT by 1:
+      × the search lexical MATCH omits index-common terms > issues one statement when nothing was pruned, even if it matches nothing
+  all 1 mutations caught; hybrid-search.ts restored
+### Failed statistics read empties the branch
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:      } catch {
+    return tokens;
+  }
+replace:   } catch {
+    return [];
+  }
+    CAUGHT by 1:
+      × the search lexical MATCH omits index-common terms > searches the full expression when the statistics read fails, as before pruning existed
+  all 1 mutations caught; hybrid-search.ts restored

@@ -45,6 +45,8 @@ The ratio is `COMMON_TERM_DOCUMENT_RATIO`, not a second constant (owner decision
 
 `pruneCommonTokens` keeps every token when no kept token reaches another row. At save time, "another" means a frequency above 1, because the saved row is already indexed. A query is not indexed, so for search the bound is 0. The helper gains a required `ownIndexedRows` argument instead of a second copy of the rule.
 
+The counts are global, but the statement runs inside the searched scope and filters. The independent verification found that a kept token whose rows all lie in another project, or behind a `type`, `status`, `tag` or `topic_key` filter, emptied the lexical branch where the base returned rows. With no dense branch, the search then reported a false empty-pool abstention (`kubernetes release notes` in a project of `release notes` rows: 6 rows at base, 0 and `abstained: true` before the correction). So when the reduced `MATCH` returns no row, the branch runs the full expression once more. The extra statement is paid only on an empty result, never when nothing was pruned. Counting the fallback per scope was not taken: it would need scoped statistics and still miss the filters.
+
 Measured consequence (`baseline.txt`): on the realistic corpus both bounds produce the same expressions (19/28 changed) and the same top-8 (27/28 identical). On the generator at 1 000 rows the bounds differ. With "above 0" a query built from a memory's own words matches 0.1% of rows instead of 96.8%, and the top-8 is identical for 13/28 queries instead of 17/28. The positions that change held rows that matched on common terms only, whose bm25 contribution is clamped to `1e-6`. The owner kept "above 0".
 
 ### D3 — One read, terms deduplicated (owner decision)
@@ -59,7 +61,7 @@ Row 0 is read in term order, the order the vocabulary table produced, so the gat
 
 ### D4 — Failure stays inside the lexical branch
 
-The statistics read runs inside the lexical retriever's existing `try`. If it throws, the lexical branch returns nothing and search degrades to the dense branch, as for any lexical failure ("A failure of either branch SHALL degrade gracefully"). The gate makes its own attempt later, exactly as today.
+If the statistics read throws, the lexical branch searches the full expression, as it did before this change. Returning nothing instead would turn a transient read failure into a false empty-pool abstention, which the independent verification observed under fault injection. The read is not memoised on failure, so the gate makes its own attempt later and fails exactly as it does today.
 
 ### D5 — Test seam, not configuration
 

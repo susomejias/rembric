@@ -180,7 +180,10 @@ another memory, nothing is dropped at all.
 Interactive `memory.search` (and `/api/<slug>/memory/recall`) applies the same
 rule to its lexical branch, against the global `memory_fts` it scans: a query
 token found in at least half of all memories leaves the `MATCH`, and when no
-remaining token matches any memory the whole query is kept. The counts come from
+remaining token matches any memory the whole query is kept. Because the counts
+cover every project while the search is scoped and filtered, a shortened `MATCH`
+that finds nothing is run again in full, so the lexical branch never comes back
+empty where the whole query would have matched. The counts come from
 the same read the relevance gate already makes, now carrying each token as well
 as the whole query, so a search reads term statistics once. The dashboard's
 memory search is unchanged.

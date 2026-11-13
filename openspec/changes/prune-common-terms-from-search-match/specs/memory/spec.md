@@ -8,7 +8,9 @@ The frequencies and the total SHALL be the ones "The relevance level's term stat
 
 If no kept token reaches at least one indexed row, the branch SHALL keep every token the builder produced, in the builder's order and quoting. Whenever the builder yields at least one token, the `MATCH` SHALL therefore be non-empty, and a query whose every token is common SHALL match what it matched before this omission existed. Kept tokens SHALL keep the builder's quoting and order.
 
-The statistics the omission needs SHALL be read at most once per search, in the same read that resolves the query's terms for the relevance level, and the relevance level SHALL be computed from the same values it would read on its own. A failure of that read SHALL degrade the lexical branch only, as any other lexical failure does.
+The statistics count rows across the whole index, so a kept token can reach rows that the searched scope or the `status`, `type`, `tag` or `topic_key` filters exclude. When the reduced `MATCH` returns no row, the branch SHALL run the builder's full expression with the same scope, filters and limit, and return its result. The lexical branch SHALL therefore return no row only where the full expression returns none.
+
+The statistics the omission needs SHALL be read at most once per search, in the same read that resolves the query's terms for the relevance level, and the relevance level SHALL be computed from the same values it would read on its own. A failure of that read SHALL leave the `MATCH` unreduced: the branch SHALL search the builder's full expression, as it did before this omission existed.
 
 The omission applies to `memory.search` and to every surface that calls the same service. It SHALL NOT change the dashboard's memory search, save-time detection, or the relevance level.
 
@@ -35,6 +37,18 @@ The omission applies to `memory.search` and to every surface that calls the same
 - **GIVEN** a query made of one common term and one term no indexed row contains
 - **WHEN** `memory.search` is called
 - **THEN** the lexical `MATCH` SHALL be the builder's full expression, so the rows the common term matches are still returned
+
+#### Scenario: A kept term found only outside the scope restores every token
+
+- **GIVEN** a project whose rows match `release notes`, and another project holding the only rows that contain `kubernetes`, where `release` and `notes` are index-common and `kubernetes` is not
+- **WHEN** `memory.search` is called in the first project with the query `kubernetes release notes`
+- **THEN** the lexical branch SHALL return the first project's `release notes` rows, as the full expression does, and the search SHALL NOT report an empty-pool abstention
+
+#### Scenario: A failed statistics read searches the full expression
+
+- **GIVEN** a search whose term-statistics read fails
+- **WHEN** the lexical branch builds its `MATCH`
+- **THEN** it SHALL search the builder's full expression and return the ids that expression returns
 
 #### Scenario: A phrase token is never omitted
 
