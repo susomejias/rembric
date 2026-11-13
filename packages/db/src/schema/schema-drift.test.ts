@@ -2,7 +2,7 @@ import { is } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { describe, expect, it } from 'vitest';
 
-import { schema } from '@rembric/db';
+import { projectIdOfLexicalIndexObject, schema } from '@rembric/db';
 
 import { createTestDb } from '../test-support/db.js';
 import { ALL_TABLES } from '../test-support/schema-inventory.js';
@@ -333,6 +333,7 @@ describe('13.12 / 13.13 — migration round-trip + schema drift', () => {
       )
       .all()
       .map((r) => r.name)
+      .filter((name) => projectIdOfLexicalIndexObject(name) === undefined)
       .sort();
 
     for (const expected of EXPECTED_TABLES) {

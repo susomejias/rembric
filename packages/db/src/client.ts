@@ -7,11 +7,12 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as sqliteVec from 'sqlite-vec';
 
 import { migrate } from './migrate.js';
+import { reconcileProjectLexicalIndexes } from './project-lexical-index.js';
 import { createQueryTokenizerTables } from './query-tokenizer.js';
 import * as schema from './schema/index.js';
 
 export type Schema = typeof schema;
-export type Db = BetterSQLite3Database<Schema>;
+export type Db = BetterSQLite3Database<Schema> & { $client: Database.Database };
 
 export type TransactionRunner = Pick<Db, 'transaction'>;
 
@@ -42,7 +43,8 @@ export function createDb(opts: CreateDbOptions): DbHandle {
   const dbPath = join(opts.dataDir, 'data.db');
 
   const log = opts.onStartupLog ?? ((line: string) => console.error(`[db] ${line}`));
-  log(`data file ${resolve(dbPath)} (pre-existing: ${existsSync(dbPath)})`);
+  const preExisting = existsSync(dbPath);
+  log(`data file ${resolve(dbPath)} (pre-existing: ${preExisting})`);
 
   const sqlite = new Database(dbPath, opts.readonly ? { readonly: true } : undefined);
 
@@ -63,6 +65,13 @@ export function createDb(opts: CreateDbOptions): DbHandle {
       migrationsDir: opts.migrationsDir ?? defaultMigrationsDir(),
       onProgress: opts.onMigrationProgress,
     });
+
+    const startedAt = performance.now();
+    const { built, dropped } = reconcileProjectLexicalIndexes(sqlite);
+    if (preExisting && (built.length > 0 || dropped.length > 0)) {
+      const ms = Math.round(performance.now() - startedAt);
+      log(`project lexical indexes: built ${built.length}, dropped ${dropped.length} (${ms} ms)`);
+    }
 
     sqlite.pragma('analysis_limit = 1000');
     sqlite.exec('ANALYZE');

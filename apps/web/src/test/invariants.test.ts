@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { RUNTIME_IMAGE_LABEL_FILTER } from '@rembric/core';
 import type { RequestContext } from '@rembric/core';
-import { defaultMigrationsDir } from '@rembric/db';
+import { defaultMigrationsDir, projectIdOfLexicalIndexObject } from '@rembric/db';
 import ts from 'typescript';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -1657,7 +1657,7 @@ describe('derived-table reproducibility invariant', () => {
       )
       .all()
       .map((r) => r.name)
-      .filter((n) => !shadows.has(n));
+      .filter((n) => !shadows.has(n) && projectIdOfLexicalIndexObject(n) === undefined);
   }
 
   const fixture = createTestDb();
@@ -1681,6 +1681,33 @@ describe('derived-table reproducibility invariant', () => {
     ).toEqual([]);
 
     expect([...owned].sort()).toEqual(classified);
+  });
+
+  it('classifies every per-project lexical index object as derived from an existing project', () => {
+    const raw = fixture.handle.raw;
+    const projects = new Set(
+      raw
+        .prepare<[], { id: string }>('SELECT id FROM projects')
+        .all()
+        .map((r) => r.id),
+    );
+    const objects = raw
+      .prepare<[], { name: string }>(
+        `SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`,
+      )
+      .all()
+      .map((r) => r.name)
+      .filter((n) => projectIdOfLexicalIndexObject(n) !== undefined);
+    expect(objects.length, 'the default project has no per-project lexical index').toBeGreaterThan(
+      0,
+    );
+    for (const name of objects) {
+      expect(projects.has(projectIdOfLexicalIndexObject(name)!), `${name} names no project`).toBe(
+        true,
+      );
+    }
+    const src = readFileSync(join(repoRoot, 'packages/db/src/project-lexical-index.ts'), 'utf8');
+    expect(src).toMatch(/export function reconcileProjectLexicalIndexes\b/);
   });
 
   it('every named trigger exists in the migrated schema', () => {

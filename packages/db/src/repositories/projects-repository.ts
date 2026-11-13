@@ -1,13 +1,16 @@
 import { and, asc, count, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
+import { ensureProjectLexicalIndex } from '../project-lexical-index.js';
 import { projects, type NewProject, type Project } from '../schema/projects.js';
 
 export class ProjectsRepository {
   constructor(private readonly db: Db) {}
 
   insert(values: NewProject): Project | undefined {
-    return this.db.insert(projects).values(values).returning().get();
+    const row = this.db.insert(projects).values(values).returning().get();
+    if (row) ensureProjectLexicalIndex(this.db.$client, row.id);
+    return row;
   }
 
   findById(id: string): Project | undefined {
