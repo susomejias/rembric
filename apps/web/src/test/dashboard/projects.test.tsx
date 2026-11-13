@@ -17,7 +17,7 @@ let projects: ProjectsService;
 beforeEach(() => {
   t = createTestDb();
   servicesRef.current = buildDashboardServices(t.handle);
-  projects = new ProjectsService(createRepositories(t.handle.db));
+  projects = new ProjectsService(createRepositories(t.handle.db), undefined, t.handle.db);
 });
 
 afterEach(() => t.cleanup());

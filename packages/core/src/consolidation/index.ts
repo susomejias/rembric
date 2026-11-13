@@ -5,7 +5,12 @@ export type { DecayThresholds } from './decay.js';
 
 export {
   applyDecay,
+  orphanPendingOnProjectArchive,
   orphanPendingOnRetirement,
+  PROJECT_ARCHIVE_ORPHAN_REASON,
+  PROJECT_ARCHIVE_ORPHANING_PREFIX,
+  PROJECT_ARCHIVE_RUN_KIND,
+  restoreProjectArchiveOrphanings,
   RETIREMENT_ORPHAN_REASON,
   undoOp,
   undoRun,
@@ -13,6 +18,8 @@ export {
 export type {
   KeptOrphaned,
   KeptVerdict,
+  ProjectArchiveOrphanInput,
+  ProjectArchiveRestoreResult,
   RetirementCause,
   RetirementInput,
   SkippedRow,
@@ -20,6 +27,9 @@ export type {
   UndoRunResult,
 } from './operations.js';
 export type { DecayOpInput, ConsolidationOpType } from './operations.js';
+
+export { ARCHIVE_RECONCILE_BATCH, reconcileArchivedProjectJudgments } from './archived-projects.js';
+export type { ArchivedProjectReconcileResult } from './archived-projects.js';
 
 export {
   ConsolidationRunner,

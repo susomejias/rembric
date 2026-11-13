@@ -58,9 +58,9 @@ On every process start, the server SHALL orphan every `pending` judgment whose e
 - **THEN** after the reconciliation finishes, the project SHALL have no pending judgment
 - **AND** each batch SHALL have been committed in its own transaction
 
-### Requirement: An archive orphaning MUST NOT be undone while its project is archived
+### Requirement: An orphaning MUST NOT be undone while its project is archived
 
-Undoing an `orphan_promote` op whose reasoning starts with `orphaned: project archived`, singly or as part of an "Undo entire run", SHALL be refused with a `conflict` error while the judgment's project is archived, and SHALL change no row. The refusal SHALL name unarchiving the project as the restore path. Once the project is active, the op SHALL be undoable like any other orphaning.
+Undoing any `orphan_promote` op whose judgment belongs to an archived project, whether it was written by an archive, the deadline, the drain or a retirement, singly or as part of an "Undo entire run", SHALL be refused with a `conflict` error and SHALL change no row. So SHALL undoing a memory retirement (`decay`, `agent_memory_archive`, `merge`, `supersede`) whose undo would restore such an orphaning as a side effect. The refusal SHALL name unarchiving the project as the restore path. A pending judgment in an archived project can be closed by no agent and no sweep, and the process-start reconciliation would close it again. Once the project is active, the op SHALL be undoable like any other orphaning.
 
 #### Scenario: Undo is refused while archived
 
@@ -68,6 +68,18 @@ Undoing an `orphan_promote` op whose reasoning starts with `orphaned: project ar
 - **WHEN** the operator undoes one of those ops, or the whole run
 - **THEN** the undo SHALL be refused with `conflict`
 - **AND** every relation and op SHALL be unchanged
+
+#### Scenario: A deadline orphaning in an archived project is not undoable either
+
+- **GIVEN** a judgment orphaned by the deadline step while its project was active, and the project archived since
+- **WHEN** the operator undoes that deadline op
+- **THEN** the undo SHALL be refused with `conflict` and no row SHALL change
+
+#### Scenario: Undoing a memory retirement cannot re-open an archived project's judgment
+
+- **GIVEN** a memory of project `P` archived from the dashboard, whose pending judgment that retirement orphaned, and `P` archived since
+- **WHEN** the operator undoes that memory archive, singly or as its whole run
+- **THEN** the undo SHALL be refused with `conflict` and no row SHALL change
 
 #### Scenario: Undo works after unarchive for an op unarchive could not restore
 

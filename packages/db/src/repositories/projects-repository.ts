@@ -53,6 +53,24 @@ export class ProjectsRepository {
       .map((r) => r.id);
   }
 
+  listActiveIds(): string[] {
+    return this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(isNull(projects.archivedAt))
+      .all()
+      .map((r) => r.id);
+  }
+
+  listArchivedIds(): string[] {
+    return this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(isNotNull(projects.archivedAt))
+      .all()
+      .map((r) => r.id);
+  }
+
   listActiveSlugs(): string[] {
     return this.db
       .select({ slug: projects.slug })

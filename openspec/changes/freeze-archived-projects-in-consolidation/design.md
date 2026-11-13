@@ -102,7 +102,15 @@ Alternatives:
 - It logs one line only when it did work: `[process] archived-project judgments: closed N in P projects (M ms)`.
 - A failure is logged and does not stop the process. The next boot retries.
 
-`ARCHIVE_RECONCILE_BATCH` is a named constant chosen from a measurement: the largest batch whose transaction stays within 50 ms at a 50 000-memory synthetic corpus, the same blocking target the drain was measured against.
+`ARCHIVE_RECONCILE_BATCH = 400` is a named constant chosen from a measurement (`measurements/archive-cost.txt`). At a 50 000-memory synthetic corpus, one batch transaction took:
+
+| Batch | p50     | p95     |
+| ----- | ------- | ------- |
+| 200   | 13.9 ms | 14.5 ms |
+| 400   | 25.7 ms | 31.5 ms |
+| 800   | 54.5 ms | 60.1 ms |
+
+400 is the largest measured batch within the 50 ms blocking target the drain was measured against.
 
 Alternatives:
 
@@ -110,9 +118,9 @@ Alternatives:
 - **Reconcile inside the sweep.** Rejected. D1 removes archived projects from the sweep, and the session-start sweep never reached them anyway.
 - **Ask operators to bulk-orphan by hand.** Rejected. It does not work for installations whose operators never look, which is the point of the change.
 
-### D5 — Undoing an archive orphaning is refused while its project is archived
+### D5 — Undoing an orphaning is refused while its project is archived
 
-`undoOp` and `undoRun` refuse with `DomainError('conflict', …)` when the op is an archive orphaning and the judgment's project is archived. The message names unarchive as the restore path.
+`undoOp` and `undoRun` refuse with `DomainError('conflict', …)` when the op is any `orphan_promote` and the judgment's project is archived, whatever wrote it (archive, deadline, drain or retirement). The message names unarchive as the restore path.
 
 Without this guard, a dashboard undo would put a judgment back to `pending` in a project that no agent and no sweep can reach. D4 would then close it again at the next boot, so the operator's undo and the reconciliation would fight. Once the project is active again, the single-op and run undo work as for any other orphaning.
 
@@ -132,7 +140,13 @@ Alternative:
 
 ## Risks / Trade-offs
 
-- **[Risk] Archiving a project with a large backlog blocks the event loop for one transaction.** → The transaction must be atomic with the `archived_at` write, so it is not batched. Its cost is measured at 1 000 and 10 000 pending judgments on a synthetic corpus. Archive is a rare operator action, and the measurement is recorded so the bound is known rather than assumed.
+- **[Risk] Archiving a project with a large backlog blocks the event loop for one transaction.** → Measured at a 50 000-memory synthetic corpus (`measurements/archive-cost.txt`):
+  - 64–69 ms at 1 000 pending judgments;
+  - 644–762 ms at 10 000, about 0.07 ms per judgment.
+
+  The transaction must be atomic with the `archived_at` write, so it is not batched. Archive is a rare operator action, and a single project holding 10 000 pending judgments is far beyond any measured backlog. Accepted.
+
+- **[Risk] The deadline step reads the recently restored judgments once per sweep call.** → Measured at 0.2 ms with 1 000 journal ops, 0.7 ms with 10 000 and 7.7 ms with 100 000. It runs once per call, not once per scope.
 - **[Risk] The boot reconciliation runs on installations whose operators never asked for it.** → It only changes `pending` judgments in projects the operator archived. Every change is journaled in a `maintenance` run labelled `origin: reconcile`, and unarchive restores it. No memory row changes.
 - **[Risk] The operator's pending count drops at upgrade without an action of theirs.** → Accepted. Those judgments could never be closed by an agent, and the runs explain where they went.
 - **[Trade-off] A restored judgment is excluded from the stale drain forever.** → Accepted, because it follows from the drain's existing "undo is final" rule, the same trade-off the retirement change accepted. The deadline step and a new archive still close it.

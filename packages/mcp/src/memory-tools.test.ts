@@ -77,7 +77,7 @@ function isErrorResponse(resp: unknown): boolean {
 beforeEach(() => {
   db = createTestDb();
   defaultProjectId = defaultProject(db.handle).id;
-  projects = new ProjectsService(createRepositories(db.handle.db));
+  projects = new ProjectsService(createRepositories(db.handle.db), undefined, db.handle.db);
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
   handlers = buildMemoryHandlers({ logInternalError, memory, projects });
   projectA = projects.create({ slug: 'test-rembric' });

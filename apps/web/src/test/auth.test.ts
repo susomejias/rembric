@@ -19,7 +19,7 @@ describe('authenticate — static + OAuth coexistence', () => {
     t = createTestDb();
     repos = createRepositories(t.handle.db);
     tokens = new TokensService(repos, t.handle.db);
-    projects = new ProjectsService(repos);
+    projects = new ProjectsService(repos, undefined, t.handle.db);
     oauth = new OAuthService({ oauth: repos.oauth }, TTL);
   });
 

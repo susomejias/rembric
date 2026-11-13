@@ -9,9 +9,13 @@ import {
 } from '@rembric/db';
 import { ulid } from 'ulid';
 
+import { DomainError } from '../services/errors.js';
 import { RelationsService } from '../services/relations.js';
 
 export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'consolidation'>;
+
+/** Undo reads the project's archive state to refuse restoring a judgment while it is frozen. */
+export type UndoDeps = ConsolidationDeps & Pick<Repositories, 'projects'>;
 
 export const RETIREMENT_ORPHAN_REASON = 'endpoint retired at retirement';
 
@@ -72,6 +76,110 @@ export function orphanPendingOnRetirement(
     });
   }
   return rows.length;
+}
+
+export const PROJECT_ARCHIVE_ORPHAN_REASON = 'project archived';
+export const PROJECT_ARCHIVE_ORPHANING_PREFIX = `orphaned: ${PROJECT_ARCHIVE_ORPHAN_REASON}`;
+export const PROJECT_ARCHIVE_RUN_KIND = 'project_archive_orphan';
+
+export interface ProjectArchiveOrphanInput {
+  projectId: string;
+  at: Date;
+  origin: 'archive' | 'reconcile';
+  /** Omitted, every pending judgment of the project is orphaned. */
+  limit?: number;
+}
+
+/** Runs inside the caller's transaction: one maintenance run for what it orphans, none when nothing is pending. */
+export function orphanPendingOnProjectArchive(
+  repos: ConsolidationDeps,
+  relations: Pick<RelationsService, 'orphan'>,
+  input: ProjectArchiveOrphanInput,
+): number {
+  const rows = repos.relations.listPendingInProject(input.projectId, input.limit);
+  if (rows.length === 0) return 0;
+  const runId = ulid(input.at.getTime());
+  repos.consolidation.insertRun({
+    id: runId,
+    startedAt: input.at,
+    finishedAt: input.at,
+    scope: 'maintenance',
+    summary: JSON.stringify({
+      kind: PROJECT_ARCHIVE_RUN_KIND,
+      projectId: input.projectId,
+      origin: input.origin,
+      orphaned: rows.length,
+    }),
+  });
+  for (const row of rows) {
+    relations.orphan(row.judgmentId, PROJECT_ARCHIVE_ORPHAN_REASON, input.at);
+    recordOrphanPromote(repos, {
+      runId,
+      judgmentId: row.judgmentId,
+      sourceId: row.sourceId,
+      targetId: row.targetId,
+      relation: null,
+      reasoning: PROJECT_ARCHIVE_ORPHAN_REASON,
+      appliedAt: input.at,
+    });
+  }
+  return rows.length;
+}
+
+export interface ProjectArchiveRestoreResult {
+  restored: string[];
+  skipped: SkippedRow[];
+  keptVerdicts: KeptVerdict[];
+  keptOrphaned: KeptOrphaned[];
+}
+
+/** Runs inside the caller's transaction. Archive runs hold only archive orphanings; a pair with a retired endpoint stays orphaned, as on a retirement undo. */
+export function restoreProjectArchiveOrphanings(
+  repos: ConsolidationDeps,
+  projectId: string,
+  now: Date,
+): ProjectArchiveRestoreResult {
+  const out: ProjectArchiveRestoreResult = {
+    restored: [],
+    skipped: [],
+    keptVerdicts: [],
+    keptOrphaned: [],
+  };
+  for (const runId of repos.consolidation.listMaintenanceRunIds(
+    PROJECT_ARCHIVE_RUN_KIND,
+    projectId,
+  )) {
+    for (const op of repos.consolidation.listActiveOps(runId)) {
+      const rel = op.createdId ? repos.relations.findByJudgmentId(op.createdId) : undefined;
+      if (rel && !writtenSinceOp(rel, op)) {
+        const rows = new Map(
+          repos.memory.unsafeGetByIds([rel.sourceId, rel.targetId]).map((m) => [m.id, m.status]),
+        );
+        const retiredId = [rel.sourceId, rel.targetId].find((id) => rows.get(id) !== 'active');
+        if (retiredId !== undefined) {
+          out.keptOrphaned.push({ judgmentId: rel.judgmentId, retiredId });
+          continue;
+        }
+      }
+      undoOrphaning(repos, op, out.skipped, out.keptVerdicts);
+      repos.consolidation.markReverted(op.id, now);
+      out.restored.push(op.id);
+    }
+  }
+  return out;
+}
+
+/** While archived, nothing can judge or sweep the pair again, so unarchive is the only restore path. */
+function assertNotFrozenArchiveOrphaning(repos: UndoDeps, op: ConsolidationOp): void {
+  if (op.opType !== 'orphan_promote') return;
+  const [endpoint] = repos.memory.unsafeGetByIds(op.affectedIds.slice(0, 1));
+  const project = endpoint?.projectId ? repos.projects.findById(endpoint.projectId) : undefined;
+  if (project?.archivedAt) {
+    throw new DomainError(
+      'conflict',
+      `undoOp: ${op.id} closed a judgment of archived project ${project.id}; unarchive the project to restore its judgments`,
+    );
+  }
 }
 
 export const REACTIVATE_UNDO_OP_TYPES: ReadonlySet<ConsolidationOpType> = new Set([
@@ -233,10 +341,18 @@ export class NotUndoableError extends Error {
   }
 }
 
-export function undoOp(repos: ConsolidationDeps, tx: TransactionRunner, opId: string): UndoResult {
+export function undoOp(repos: UndoDeps, tx: TransactionRunner, opId: string): UndoResult {
   const op = repos.consolidation.findOpById(opId);
   if (!op) throw new Error(`undoOp: ${opId} not found`);
   if (op.revertedAt) throw new Error(`undoOp: ${opId} already reverted`);
+
+  assertNotFrozenArchiveOrphaning(repos, op);
+  if (REACTIVATE_UNDO_OP_TYPES.has(op.opType)) {
+    const retiredIds = new Set(op.affectedIds);
+    for (const linked of repos.consolidation.listActiveOps(op.runId)) {
+      if (isRetirementOrphaning(linked, retiredIds)) assertNotFrozenArchiveOrphaning(repos, linked);
+    }
+  }
 
   if (TERMINAL_OP_TYPES.has(op.opType)) {
     throw new NotUndoableError(
@@ -357,11 +473,7 @@ function restoreRetirementOrphanings(
   }
 }
 
-export function undoRun(
-  repos: ConsolidationDeps,
-  tx: TransactionRunner,
-  runId: string,
-): UndoRunResult {
+export function undoRun(repos: UndoDeps, tx: TransactionRunner, runId: string): UndoRunResult {
   const ops = repos.consolidation.listActiveOps(runId);
   const reverted: string[] = [];
   const skipped: SkippedRow[] = [];

@@ -73,6 +73,41 @@ export class ConsolidationRepository {
       .flatMap((r) => (r.createdId === null ? [] : [r.createdId]));
   }
 
+  /** Maintenance runs whose JSON summary names this `kind` and `projectId`. */
+  listMaintenanceRunIds(kind: string, projectId: string): string[] {
+    return this.db
+      .select({ id: consolidationRuns.id })
+      .from(consolidationRuns)
+      .where(
+        and(
+          eq(consolidationRuns.scope, 'maintenance'),
+          sql`json_valid(${consolidationRuns.summary})`,
+          sql`json_extract(${consolidationRuns.summary}, '$.kind') = ${kind}`,
+          sql`json_extract(${consolidationRuns.summary}, '$.projectId') = ${projectId}`,
+        ),
+      )
+      .orderBy(consolidationRuns.startedAt)
+      .all()
+      .map((r) => r.id);
+  }
+
+  /** `created_id` of `orphan_promote` ops with this reasoning prefix reverted after `sinceMs`. */
+  listOrphanPromoteCreatedIdsRevertedSince(reasoningPrefix: string, sinceMs: number): string[] {
+    return this.db
+      .selectDistinct({ createdId: consolidationOps.createdId })
+      .from(consolidationOps)
+      .where(
+        and(
+          eq(consolidationOps.opType, 'orphan_promote'),
+          isNotNull(consolidationOps.createdId),
+          sql`${consolidationOps.revertedAt} > ${sinceMs}`,
+          sql`substr(${consolidationOps.reasoning}, 1, ${reasoningPrefix.length}) = ${reasoningPrefix}`,
+        ),
+      )
+      .all()
+      .flatMap((r) => (r.createdId === null ? [] : [r.createdId]));
+  }
+
   listLiveOrphanPromoteOps(judgmentId: string): ConsolidationOp[] {
     return this.db
       .select()

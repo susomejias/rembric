@@ -384,12 +384,22 @@ export class RelationsService {
     projectId: string;
     cutoffMs: number;
     limit: number;
+    excludeJudgmentIds?: readonly string[];
   }): Pick<MemoryRelation, 'judgmentId' | 'sourceId' | 'targetId'>[] {
     return this.repos.relations.findPendingOlderThanInScope({
       projectId: opts.projectId,
       cutoffMs: this.now().getTime() - opts.cutoffMs,
       limit: opts.limit,
+      ...(opts.excludeJudgmentIds ? { excludeJudgmentIds: opts.excludeJudgmentIds } : {}),
     });
+  }
+
+  /** Judgments whose orphaning with this reasoning prefix was undone within the last `windowMs`. */
+  listOrphaningsRevertedWithin(reasoningPrefix: string, windowMs: number): string[] {
+    return this.repos.consolidation.listOrphanPromoteCreatedIdsRevertedSince(
+      reasoningPrefix,
+      this.now().getTime() - windowMs,
+    );
   }
 
   /** Scoped pending-judgment total — the queue-depth signal `memory.context`/`memory.stats` surface. */
