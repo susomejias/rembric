@@ -3,6 +3,7 @@ import {
   type Memory,
   type MemoryStatus,
   type Repositories,
+  type Scope,
   type TokenTermFrequency,
 } from '@rembric/db';
 
@@ -151,6 +152,7 @@ export function findSaveTimeCandidates(
   const queryTokens = tokenSet(saved.content);
   const matchExpr = saveTimeMatchExpression(
     repos.termStatistics,
+    projectScope(projectId),
     saved.content,
     opts.commonTermRatio === undefined ? COMMON_TERM_DOCUMENT_RATIO : opts.commonTermRatio,
   );
@@ -275,8 +277,9 @@ export function findSaveTimeCandidates(
 export function saveTimeMatchExpression(
   termStatistics: Pick<
     Repositories['termStatistics'],
-    'adminDocumentCount' | 'adminTokenTermFrequencies'
+    'projectDocumentCount' | 'projectTokenTermFrequencies'
   >,
+  scope: Scope,
   content: string,
   commonTermRatio: number | null,
 ): string {
@@ -285,8 +288,8 @@ export function saveTimeMatchExpression(
   return joinFtsTokens(
     pruneCommonTokens(
       tokens,
-      termStatistics.adminTokenTermFrequencies(tokens),
-      termStatistics.adminDocumentCount(),
+      termStatistics.projectTokenTermFrequencies(scope, tokens),
+      termStatistics.projectDocumentCount(scope),
       commonTermRatio,
     ),
   );

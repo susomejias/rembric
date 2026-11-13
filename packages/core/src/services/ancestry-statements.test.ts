@@ -102,7 +102,9 @@ describe('ancestry traversal costs one statement, not one per hop', () => {
       /select "replaces" from "memory" where "id" = \?/i.test(s),
     );
     const termStatistics = statements.filter((s) =>
-      /rembric_query_terms|^SELECT count\(\*\) AS n FROM memory$/.test(s),
+      /rembric_query_terms|^SELECT count\(\*\) AS n FROM memory WHERE scope = 'project' AND project_id = \?$/.test(
+        s,
+      ),
     );
     expect(ancestry).toHaveLength(1);
     expect(perHopProbes).toHaveLength(0);

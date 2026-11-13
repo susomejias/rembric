@@ -5,6 +5,7 @@ import {
   ensureProjectLexicalIndex,
   projectIdOfLexicalIndexObject,
   projectLexicalIndexName,
+  projectScope,
   reconcileProjectLexicalIndexes,
   type Repositories,
 } from '@rembric/db';
@@ -201,5 +202,98 @@ describe('trigger maintenance', () => {
     expect(matches('pa', 'after')).toEqual(['a1']);
     expect(matches('pb', 'after')).toEqual([]);
     integrityCheck('pa');
+  });
+});
+
+describe('the save-time statement reads the project index', () => {
+  const candidates = (projectId: string, matchExpr: string) =>
+    repos.memory
+      .searchBm25Candidates({ matchExpr, excludeId: 'none', projectId, excludeIds: [], limit: 20 })
+      .map((r) => [r.id, r.rank]);
+
+  function reference(projectId: string, matchExpr: string): [string, number][] {
+    const raw = db.handle.raw;
+    raw.exec(`CREATE VIRTUAL TABLE temp.ref USING fts5(content, tags, title, content='')`);
+    raw
+      .prepare(
+        `INSERT INTO temp.ref(rowid, content, tags, title)
+         SELECT rowid, content, coalesce((SELECT group_concat(value, ' ') FROM json_each(tags)), ''),
+                title FROM memory WHERE project_id = ?`,
+      )
+      .run(projectId);
+    const rows = raw
+      .prepare<[string, string], { id: string; rank: number }>(
+        `SELECT m.id AS id, bm25(ref) AS rank FROM temp.ref JOIN memory m ON m.rowid = ref.rowid
+         WHERE ref MATCH ? AND m.project_id = ? AND m.status = 'active' ORDER BY bm25(ref) LIMIT 20`,
+      )
+      .all(matchExpr, projectId)
+      .map((r): [string, number] => [r.id, r.rank]);
+    raw.exec('DROP TABLE temp.ref');
+    return rows;
+  }
+
+  beforeEach(() => {
+    seedProject('pa');
+    seedProject('pb');
+    save('a1', 'pa', 'zephyrkite ledger amber', ['kite']);
+    save('a2', 'pa', 'zephyrkite birch');
+    save('a3', 'pa', 'ledger cedar dune');
+    save('b-shared', 'pb', 'zephyrkite zephyrkite kite');
+  });
+
+  it('returns exactly the scores of an index holding only that project', () => {
+    const expr = '"zephyrkite" OR "ledger" OR "kite"';
+    expect(candidates('pa', expr)).toEqual(reference('pa', expr));
+    expect(candidates('pa', expr)).toHaveLength(3);
+  });
+
+  it('is unchanged by rows added to another project', () => {
+    const expr = '"zephyrkite" OR "ledger"';
+    const before = candidates('pa', expr);
+    for (let i = 0; i < 30; i++) save(`b${i}`, 'pb', `zephyrkite ledger filler ${i}`);
+    expect(candidates('pa', expr)).toEqual(before);
+    expect(candidates('pb', expr)).toHaveLength(20);
+  });
+
+  it('builds the index first when the project has none', () => {
+    seedProject('raw-only');
+    save('r1', 'raw-only', 'zephyrkite unindexed');
+    expect(objectsOf('raw-only')).toEqual([]);
+    expect(candidates('raw-only', '"zephyrkite"').map(([id]) => id)).toEqual(['r1']);
+    expect(objectsOf('raw-only')).toContain(projectLexicalIndexName('raw-only'));
+  });
+});
+
+describe('project-scoped term statistics', () => {
+  beforeEach(() => {
+    seedProject('pa');
+    seedProject('pb');
+    save('a1', 'pa', 'apps core held');
+    save('a2', 'pa', 'apps held');
+    db.handle.raw.prepare(`UPDATE memory SET status = 'archived' WHERE id = ?`).run('a2');
+    for (let i = 0; i < 5; i++) save(`b${i}`, 'pb', 'apps core held elsewhere');
+  });
+
+  it("counts the project's rows in every status and no other project's", () => {
+    expect(repos.termStatistics.projectDocumentCount(projectScope('pa'))).toBe(2);
+    expect(repos.termStatistics.projectDocumentCount(projectScope('pb'))).toBe(5);
+  });
+
+  it("reads each token's terms and the project's own document frequencies", () => {
+    expect(
+      repos.termStatistics.projectTokenTermFrequencies(projectScope('pa'), [
+        'apps/core-12',
+        'held',
+        'elsewhere',
+      ]),
+    ).toEqual([
+      [
+        { term: 'apps', documentFrequency: 2 },
+        { term: 'core', documentFrequency: 1 },
+        { term: '12', documentFrequency: null },
+      ],
+      [{ term: 'held', documentFrequency: 2 }],
+      [{ term: 'elsewhere', documentFrequency: null }],
+    ]);
   });
 });
