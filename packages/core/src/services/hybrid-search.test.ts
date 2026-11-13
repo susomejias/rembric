@@ -646,7 +646,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     expect(result.gateShortened).toBeUndefined();
   });
 
-  it('abstains on an empty pool without reading term statistics or pool text', async () => {
+  it('abstains on an empty pool without reading pool text or a second term-statistics read', async () => {
     const ftsOnly = new MemoryService(repos, db.handle.db);
     ftsOnly.save(
       { type: 'user', title: 'nothing in common', content: 'nothing in common' },
@@ -664,7 +664,7 @@ describe('hybrid search plumbing (FakeEmbedder)', () => {
     });
     expect(result.abstained).toBe(true);
     expect(textByIds).not.toHaveBeenCalled();
-    expect(documentCount).not.toHaveBeenCalled();
+    expect(documentCount).toHaveBeenCalledTimes(1);
     textByIds.mockRestore();
     documentCount.mockRestore();
   });
@@ -769,6 +769,7 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
       status: 'active',
       limit: 8,
       offset: 0,
+      commonTermRatio: null,
       ...over,
     });
 
@@ -940,7 +941,7 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
       const page1 = await mem.searchWithAbstention(
         { query: QUERY, limit: 2, offset: 0 },
         projectScope(projectId),
-        { relativeLevelRatio: cut },
+        { relativeLevelRatio: cut, commonTermRatio: null },
       );
       expect(page1.memories.map((m) => m.id).sort()).toEqual([...survivors].sort());
       expect(page1.gateShortened).toBeUndefined(); // full page
@@ -948,7 +949,7 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
       const page2 = await mem.searchWithAbstention(
         { query: QUERY, limit: 2, offset: 2 },
         projectScope(projectId),
-        { relativeLevelRatio: cut },
+        { relativeLevelRatio: cut, commonTermRatio: null },
       );
       expect(page2.memories).toEqual([]);
       expect(page2.abstained).toBe(false);
@@ -1170,9 +1171,34 @@ describe('the disabled path does no gate work', () => {
       abstentionFloor: null,
       relativeLevelRatio: null,
     });
+    expect(calls).toEqual([
+      'adminDocumentCount',
+      'adminSearchTermFrequencies',
+      'searchBm25Ids',
+      'rankingMetadataByIds',
+      'confirmationCountsByIds',
+    ]);
+    expect(calls).not.toContain('textByIds');
+  });
+
+  it('issues no statistics read at all once lexical pruning is off as well', async () => {
+    mem.save(
+      { type: 'project', title: 'Rollout 0', content: 'rollout note on timezone rotation' },
+      projectScope(projectId),
+    );
+    const { repos: counting, calls } = countingRepos();
+    await hybridSearch({
+      repos: counting,
+      query: 'rollout timezone rotation',
+      scope: projectScope(projectId),
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      abstentionFloor: null,
+      relativeLevelRatio: null,
+      commonTermRatio: null,
+    });
     expect(calls).toEqual(['searchBm25Ids', 'rankingMetadataByIds', 'confirmationCountsByIds']);
-    for (const read of ['textByIds', 'adminDocumentCount', 'adminQueryTermFrequencies'])
-      expect(calls).not.toContain(read);
   });
 
   it('issues both of them the moment either gate is enabled — so the list above is a decision', async () => {
@@ -1191,8 +1217,9 @@ describe('the disabled path does no gate work', () => {
       abstentionFloor: null,
       relativeLevelRatio: 0.4,
     });
-    for (const read of ['textByIds', 'adminDocumentCount', 'adminQueryTermFrequencies'])
-      expect(calls).toContain(read);
+    expect(calls).toContain('textByIds');
+    for (const read of ['adminDocumentCount', 'adminSearchTermFrequencies'])
+      expect(calls.filter((c) => c === read)).toHaveLength(1);
   });
 
   it('returns the ids the pre-gate pipeline produces, reconstructed from its surviving parts', async () => {
@@ -1336,5 +1363,126 @@ describe('confirm the exclusion holds (add-entity-index Decision 1 / task 8.1)',
       defaultProjectScope(db.handle),
     );
     expect(after.map((m) => m.id)).toEqual(before.map((m) => m.id));
+  });
+});
+
+describe('the search lexical MATCH omits index-common terms', () => {
+  let db: TestDb;
+  let repos: Repositories;
+  let projectId: string;
+  let mem: MemoryService;
+
+  beforeEach(() => {
+    db = createTestDb();
+    repos = createRepositories(db.handle.db);
+    projectId = new ProjectsService(repos).create({ slug: 'app' }).id;
+    mem = new MemoryService(repos, db.handle.db);
+  });
+
+  afterEach(() => db.cleanup());
+
+  function seed(contents: string[], slug?: string): string[] {
+    const target = slug ? new ProjectsService(repos).create({ slug }).id : projectId;
+    return contents.map(
+      (content, i) =>
+        mem.save(
+          { type: 'project', title: `row ${slug ?? 'a'}${i}`, content },
+          projectScope(target),
+        ).id,
+    );
+  }
+
+  async function search(query: string, commonTermRatio?: number | null) {
+    const bm25 = vi.spyOn(repos.memory, 'searchBm25Ids');
+    const result = await hybridSearch({
+      repos,
+      query,
+      scope: projectScope(projectId),
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      ...(commonTermRatio !== undefined ? { commonTermRatio } : {}),
+    });
+    const matchExpr = bm25.mock.calls[0]?.[0].matchExpr;
+    bm25.mockRestore();
+    return { ids: result.ids, matchExpr };
+  }
+
+  const ten = [
+    'kubernetes notes the',
+    'notes the alpha beta',
+    'notes the alpha beta',
+    'notes the alpha beta',
+    'notes the alpha beta',
+    'notes the alpha zed',
+    'filler one',
+    'filler two',
+    'filler three',
+    'filler four',
+  ];
+
+  it('drops a token found in at least half of the index and keeps a rarer one', async () => {
+    const [kube] = seed(ten);
+    const { ids, matchExpr } = await search('kubernetes notes');
+    expect(matchExpr).toBe('"kubernetes"');
+    expect(ids[0]).toBe(kube);
+  });
+
+  it('omits a term in exactly half of the rows and keeps one in a row fewer', async () => {
+    seed(ten);
+    expect((await search('alpha beta')).matchExpr).toBe('"beta"');
+  });
+
+  it('keeps every token when the only kept token reaches no row', async () => {
+    seed(ten);
+    expect((await search('notes absentword')).matchExpr).toBe('"notes" OR "absentword"');
+  });
+
+  it('keeps a query of common tokens whole, with the ids the unpruned branch returns', async () => {
+    seed(ten);
+    const pruned = await search('notes the');
+    const unpruned = await search('notes the', null);
+    expect(pruned.matchExpr).toBe('"notes" OR "the"');
+    expect(pruned.ids).toEqual(unpruned.ids);
+    expect(pruned.ids.length).toBeGreaterThan(0);
+  });
+
+  it('never omits a token the index matches as a phrase of common terms', async () => {
+    seed(ten);
+    expect((await search('notes-the kubernetes')).matchExpr).toBe('"notes-the" OR "kubernetes"');
+  });
+
+  it('judges commonness over the whole index, not the searched project', async () => {
+    seed(['kubernetes notes', 'notes only']);
+    seed(['notes', 'notes', 'notes', 'notes', 'notes', 'notes'], 'other');
+    expect((await search('kubernetes notes')).matchExpr).toBe('"kubernetes"');
+  });
+
+  it('builds the full expression with the seam off', async () => {
+    seed(ten);
+    expect((await search('kubernetes notes', null)).matchExpr).toBe('"kubernetes" OR "notes"');
+  });
+
+  it('reads the statistics once and feeds the gate the values a separate read returns', async () => {
+    seed(ten);
+    const query = 'kubernetes notes absentword';
+    const expectedCount = repos.termStatistics.adminDocumentCount();
+    const expectedFrequencies = repos.termStatistics.adminQueryTermFrequencies(query);
+    const count = vi.spyOn(repos.termStatistics, 'adminDocumentCount');
+    const read = vi.spyOn(repos.termStatistics, 'adminSearchTermFrequencies');
+    let leader: GateLeader | undefined;
+    await hybridSearch({
+      repos,
+      query,
+      scope: projectScope(projectId),
+      status: 'active',
+      limit: 8,
+      offset: 0,
+      onGateWindow: (l) => (leader = l),
+    });
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(leader?.documentCount).toBe(expectedCount);
+    expect([...(leader?.documentFrequencies ?? [])]).toEqual([...expectedFrequencies]);
   });
 });

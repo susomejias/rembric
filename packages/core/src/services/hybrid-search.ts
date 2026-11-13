@@ -6,7 +6,10 @@ import {
   type QueryTermFrequencies,
   type Repositories,
   type SearchScope,
+  type TokenTermFrequency,
 } from '@rembric/db';
+
+import { COMMON_TERM_DOCUMENT_RATIO, pruneCommonTokens } from './save-time-candidates.js';
 
 /** RRF constant (Elastic's `rank_constant`); the common literature default. */
 export const RANK_CONSTANT = 60;
@@ -46,6 +49,8 @@ export interface HybridSearchOpts {
   abstentionFloor?: number | null;
   relativeLevelRatio?: number | null;
   diversityCap?: number;
+  /** Test seam only — never read from the environment; `null` turns lexical pruning and its read off. */
+  commonTermRatio?: number | null;
   /** Calibration-sweep sink; supplying it forces the pool text read even with both gates `null`. */
   onGateWindow?: (leader: GateLeader) => void;
 }
@@ -81,14 +86,16 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
     opts.relativeLevelRatio !== undefined ? opts.relativeLevelRatio : RELATIVE_LEVEL_RATIO;
   const diversityCap = opts.diversityCap ?? DIVERSITY_CAP;
 
-  const lexicalIds = lexicalRetriever(opts, rankWindowSize);
+  const tokens = ftsQueryTokens(opts.query);
+  const statistics = termStatisticsReader(opts, tokens);
+  const lexicalIds = lexicalRetriever(opts, rankWindowSize, tokens, statistics);
   const dense = await denseRetriever(opts, rankWindowSize);
 
   const fused = fuseRRFWithScores([dense.map((d) => d.id), lexicalIds], RANK_CONSTANT);
 
   if (fused.length === 0) {
     if (opts.onGateWindow) {
-      const { documentCount, documentFrequencies } = poolLevels(fused, dense, opts);
+      const { documentCount, documentFrequencies } = poolLevels(fused, dense, opts, statistics);
       opts.onGateWindow({
         level: 0,
         coverage: 0,
@@ -106,7 +113,12 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   let gated: { id: string; score: number }[] = fused;
   let gateRemovedRows = false;
   if (gatesEnabled || opts.onGateWindow) {
-    const { scored, documentCount, documentFrequencies } = poolLevels(fused, dense, opts);
+    const { scored, documentCount, documentFrequencies } = poolLevels(
+      fused,
+      dense,
+      opts,
+      statistics,
+    );
     const leveled = fused.map((r) => ({ ...r, level: scored.get(r.id)?.level ?? 0 }));
     const leader = poolLeader(leveled, scored);
     opts.onGateWindow?.({
@@ -138,6 +150,27 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   };
 }
 
+interface TermStatistics {
+  documentCount: number;
+  query: QueryTermFrequencies;
+  tokens: TokenTermFrequency[][];
+}
+
+function termStatisticsReader(
+  opts: HybridSearchOpts,
+  tokens: readonly string[],
+): () => TermStatistics {
+  let read: TermStatistics | undefined;
+  return () => {
+    if (!read) {
+      const documentCount = opts.repos.termStatistics.adminDocumentCount();
+      const frequencies = opts.repos.termStatistics.adminSearchTermFrequencies(opts.query, tokens);
+      read = { documentCount, ...frequencies };
+    }
+    return read;
+  };
+}
+
 interface PoolLevels {
   scored: Map<string, { level: number; coverage: number; cosine: number }>;
   documentCount: number;
@@ -148,10 +181,10 @@ function poolLevels(
   pool: readonly { id: string }[],
   dense: readonly { id: string; score: number }[],
   opts: HybridSearchOpts,
+  statistics: () => TermStatistics,
 ): PoolLevels {
   const scored = new Map<string, { level: number; coverage: number; cosine: number }>();
-  const documentCount = opts.repos.termStatistics.adminDocumentCount();
-  const documentFrequencies = opts.repos.termStatistics.adminQueryTermFrequencies(opts.query);
+  const { documentCount, query: documentFrequencies } = statistics();
   const queryTokens = new Set(documentFrequencies.keys());
   const weightOf = termWeightsFor(documentCount, documentFrequencies);
   const cosineById = new Map(dense.map((d) => [d.id, d.score]));
@@ -329,10 +362,22 @@ export function applyDiversityCap<T extends { sessionId: string | null }>(
   return [...admitted, ...backfill];
 }
 
-function lexicalRetriever(opts: HybridSearchOpts, rankWindowSize: number): string[] {
-  const matchExpr = sanitizeFtsQuery(opts.query);
-  if (!matchExpr) return [];
+function lexicalRetriever(
+  opts: HybridSearchOpts,
+  rankWindowSize: number,
+  tokens: readonly string[],
+  statistics: () => TermStatistics,
+): string[] {
+  if (tokens.length === 0) return [];
+  const commonTermRatio =
+    opts.commonTermRatio !== undefined ? opts.commonTermRatio : COMMON_TERM_DOCUMENT_RATIO;
   try {
+    let kept: readonly string[] = tokens;
+    if (commonTermRatio !== null) {
+      const { tokens: terms, documentCount } = statistics();
+      kept = pruneCommonTokens(tokens, terms, documentCount, commonTermRatio, 0);
+    }
+    const matchExpr = joinFtsTokens(kept);
     const rows = opts.repos.memory.searchBm25Ids({
       matchExpr,
       scope: opts.scope,

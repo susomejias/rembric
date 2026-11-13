@@ -139,15 +139,15 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 
 ## Engine constants (not configuration)
 
-| Constant                     | Value                                                  | Lives in                                             |
-| ---------------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
-| Model + revision             | `onnx-community/gte-multilingual-base@2edbf5e`         | `packages/core/src/embeddings/model-identity.json`   |
-| Quantization / dims          | q8 / 768 (matches `memory_vec FLOAT[768]`)             | `packages/core/src/embeddings/model-identity.json`   |
-| `VEC_THRESHOLD`              | 0.70 (calibrated 2026-06-05; telemetry on every drain) | `packages/core/src/services/save-time-candidates.ts` |
-| `LEXICAL_CANDIDATE_FLOOR`    | 0.60 (save-time sweep, `pnpm run eval:save-time`)      | `packages/core/src/services/save-time-candidates.ts` |
-| `COMMON_TERM_DOCUMENT_RATIO` | 0.5 (where FTS5's bm25 stops weighting a term)         | `packages/core/src/services/save-time-candidates.ts` |
-| `CANDIDATE_LOW_BAND_CEILING` | 0.75 (per-band verdict rates, issue #467)              | `packages/core/src/services/save-time-candidates.ts` |
-| `CANDIDATE_HIGH_BAND_FLOOR`  | 0.85 (per-band verdict rates, issue #467)              | `packages/core/src/services/save-time-candidates.ts` |
+| Constant                     | Value                                                           | Lives in                                             |
+| ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| Model + revision             | `onnx-community/gte-multilingual-base@2edbf5e`                  | `packages/core/src/embeddings/model-identity.json`   |
+| Quantization / dims          | q8 / 768 (matches `memory_vec FLOAT[768]`)                      | `packages/core/src/embeddings/model-identity.json`   |
+| `VEC_THRESHOLD`              | 0.70 (calibrated 2026-06-05; telemetry on every drain)          | `packages/core/src/services/save-time-candidates.ts` |
+| `LEXICAL_CANDIDATE_FLOOR`    | 0.60 (save-time sweep, `pnpm run eval:save-time`)               | `packages/core/src/services/save-time-candidates.ts` |
+| `COMMON_TERM_DOCUMENT_RATIO` | 0.5 (where FTS5's bm25 stops weighting a term; save and search) | `packages/core/src/services/save-time-candidates.ts` |
+| `CANDIDATE_LOW_BAND_CEILING` | 0.75 (per-band verdict rates, issue #467)                       | `packages/core/src/services/save-time-candidates.ts` |
+| `CANDIDATE_HIGH_BAND_FLOOR`  | 0.85 (per-band verdict rates, issue #467)                       | `packages/core/src/services/save-time-candidates.ts` |
 
 The lexical pass never thresholds raw bm25: bm25 is unbounded and depends on
 corpus size, so no fixed floor over it is stable. bm25 only orders the pool
@@ -176,6 +176,14 @@ term at a constant `1e-6`, so dropping it barely moves the order, but keeping
 it made FTS5 rank every row that holds it. A token FTS5 matches as a phrase
 (`two-space`, a file path) is never dropped. When no remaining token could match
 another memory, nothing is dropped at all.
+
+Interactive `memory.search` (and `/api/<slug>/memory/recall`) applies the same
+rule to its lexical branch, against the global `memory_fts` it scans: a query
+token found in at least half of all memories leaves the `MATCH`, and when no
+remaining token matches any memory the whole query is kept. The counts come from
+the same read the relevance gate already makes, now carrying each token as well
+as the whole query, so a search reads term statistics once. The dashboard's
+memory search is unchanged.
 
 ### Cost and supported scale of the per-project index
 
