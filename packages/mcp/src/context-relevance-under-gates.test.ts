@@ -69,6 +69,15 @@ const saveFillers = (n: number) => {
     );
 };
 
+/** Rows no focus matches, so the fillers' shared terms stay under the common-term ratio. */
+const saveUnrelated = (n: number) => {
+  for (let i = 0; i < n; i++)
+    memory.save(
+      { type: 'project', title: `Ledger ${i}`, content: `ledger entry ${i}` },
+      defaultScope,
+    );
+};
+
 /** Rows the entity pre-pass can reach by `path`, and that no focus text matches. */
 const saveLinked = (n: number, path: string, type: 'project' | 'reference' = 'project') => {
   const rows = [];
@@ -149,6 +158,7 @@ describe('memory.context relevance channel under the shipped gates', () => {
   it('reports the ranked pass as shortened when the shipped ratio cuts its page', async () => {
     const answer = memory.save(RUNBOOK, defaultScope);
     saveFillers(12);
+    saveUnrelated(14);
     const focus = 'how do we restart the nimbus scheduler';
 
     const ungated = await memory.searchWithAbstention({ query: focus, limit: 5 }, defaultScope, {
@@ -208,6 +218,7 @@ describe('memory.context relevance channel under the shipped gates', () => {
       memory.save({ ...RUNBOOK, title: `${RUNBOOK.title} ${i}` }, defaultScope),
     );
     saveFillers(6);
+    saveUnrelated(8);
 
     const body = payload(
       await runWithContext(ctx(), () =>

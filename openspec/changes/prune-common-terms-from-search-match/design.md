@@ -63,7 +63,7 @@ The statistics read runs inside the lexical retriever's existing `try`. If it th
 
 ### D5 — Test seam, not configuration
 
-`commonTermRatio?: number | null` on `HybridSearchOpts`. Production omits it. `null` turns pruning and its read off, which reproduces the base behaviour for comparisons. It is not in `SearchMemoriesInput` or `GateOverrides`, so no MCP schema can reach it.
+`commonTermRatio?: number | null` on `HybridSearchOpts`. Production omits it. `null` turns pruning and its read off, which reproduces the base behaviour for comparisons. It is added to `GateOverrides`, the service-level overrides that `SearchMemoriesInput` deliberately excludes, so no MCP schema can reach it.
 
 ## Risks / Trade-offs
 

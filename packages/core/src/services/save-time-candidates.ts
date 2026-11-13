@@ -291,15 +291,18 @@ export function saveTimeMatchExpression(
       termStatistics.projectTokenTermFrequencies(scope, tokens),
       termStatistics.projectDocumentCount(scope),
       commonTermRatio,
+      1,
     ),
   );
 }
 
+/** `ownIndexedRows`: rows of the probe already in the index — 1 for a saved row, 0 for a query. */
 export function pruneCommonTokens(
   tokens: readonly string[],
   termsByToken: readonly (readonly TokenTermFrequency[])[],
   documentCount: number,
   commonTermRatio: number,
+  ownIndexedRows: number,
 ): string[] {
   const kept: string[] = [];
   let keptReachesAnotherRow = false;
@@ -307,8 +310,8 @@ export function pruneCommonTokens(
     const frequencies = (termsByToken[i] ?? []).map((t) => t.documentFrequency ?? 0);
     if (frequencies.length === 1 && frequencies[0]! >= commonTermRatio * documentCount) return;
     kept.push(token);
-    // The saved row is already indexed, so a frequency of 1 is the saved row alone.
-    if (frequencies.length > 0 && Math.min(...frequencies) > 1) keptReachesAnotherRow = true;
+    if (frequencies.length > 0 && Math.min(...frequencies) > ownIndexedRows)
+      keptReachesAnotherRow = true;
   });
   return keptReachesAnotherRow ? kept : [...tokens];
 }
