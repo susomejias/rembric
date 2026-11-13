@@ -10,6 +10,7 @@ import {
   memory,
   memoryRelations,
   MemoryRepository,
+  projectLexicalIndexName,
   projectScope,
   type MemoryType,
   type NewMemory,
@@ -347,7 +348,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
     });
   });
 
-  describe('searchBm25Candidates — scores only the saving project matches', () => {
+  describe('searchBm25Candidates — reads only the saving project index', () => {
     function seedTwoProjects(): void {
       seedProject(t.handle, 'p1', 'project-one');
       const rows: NewMemory[] = [];
@@ -377,23 +378,30 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       limit: 20,
     };
 
-    it('lets the join filter the matches before bm25 is computed, instead of FTS5 ranking every match', () => {
+    it("scans the project's own index, never the global one", () => {
       seedTwoProjects();
       const plan = explainWhileRunning(t, () => repo.searchBm25Candidates(query)).join(' | ');
+      expect(plan).toContain(`SCAN ${projectLexicalIndexName('p0')} VIRTUAL TABLE`);
+      expect(plan).not.toMatch(/SCAN memory_fts VIRTUAL TABLE/);
       expect(plan).toContain('SEARCH m USING INTEGER PRIMARY KEY (rowid=?)');
-      expect(plan).toContain('USE TEMP B-TREE FOR ORDER BY');
-      expect(plan).not.toMatch(/memory_fts VIRTUAL TABLE INDEX 32:/);
     });
 
-    it('returns the same rows, order and scores as FTS5 ranking every match', () => {
+    it('returns the rows, order and scores of an index holding only that project', () => {
       seedTwoProjects();
+      t.handle.raw.exec(
+        `CREATE VIRTUAL TABLE temp.ref USING fts5(content, tags, title, content='')`,
+      );
+      t.handle.raw.exec(
+        `INSERT INTO temp.ref(rowid, content, tags, title)
+         SELECT rowid, content, coalesce((SELECT group_concat(value, ' ') FROM json_each(tags)), ''),
+                title FROM memory WHERE project_id = 'p0'`,
+      );
       const reference = t.handle.raw
         .prepare<[string], { id: string; rank: number }>(
-          `SELECT m.id AS id, memory_fts.rank AS rank
-           FROM memory_fts JOIN memory m ON m.rowid = memory_fts.rowid
-           WHERE memory_fts MATCH ? AND m.id NOT IN ('in-00', 'in-01')
-             AND m.scope = 'project' AND m.project_id = 'p0' AND m.status = 'active'
-           ORDER BY rank LIMIT 20`,
+          `SELECT m.id AS id, bm25(ref) AS rank
+           FROM temp.ref JOIN memory m ON m.rowid = ref.rowid
+           WHERE ref MATCH ? AND m.id NOT IN ('in-00', 'in-01') AND m.status = 'active'
+           ORDER BY bm25(ref) LIMIT 20`,
         )
         .all(query.matchExpr);
       expect(reference).toHaveLength(20);

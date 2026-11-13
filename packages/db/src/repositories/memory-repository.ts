@@ -1,6 +1,7 @@
 import { and, count, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
+import { ensureProjectLexicalIndex, projectLexicalIndexName } from '../project-lexical-index.js';
 import { confirmations, type NewConfirmation } from '../schema/confirmations.js';
 import {
   memory,
@@ -94,6 +95,8 @@ export class MemoryRepository {
     excludeIds: string[];
     limit: number;
   }): { id: string; rank: number; title: string; content: string; topicKey: string | null }[] {
+    ensureProjectLexicalIndex(this.db.$client, opts.projectId);
+    const t = sql.raw(projectLexicalIndexName(opts.projectId));
     return this.db.all<{
       id: string;
       rank: number;
@@ -102,16 +105,16 @@ export class MemoryRepository {
       topicKey: string | null;
     }>(
       sql`
-        SELECT m.id AS id, bm25(memory_fts) AS rank, m.title AS title, m.content AS content,
+        SELECT m.id AS id, bm25(${t}) AS rank, m.title AS title, m.content AS content,
                m.topic_key AS topicKey
-        FROM memory_fts
-          JOIN memory m ON m.rowid = memory_fts.rowid
-        WHERE memory_fts MATCH ${opts.matchExpr}
+        FROM ${t}
+          JOIN memory m ON m.rowid = ${t}.rowid
+        WHERE ${t} MATCH ${opts.matchExpr}
           AND m.id != ${opts.excludeId}
           AND ${scopeWhere(projectScope(opts.projectId), 'm')}
           AND m.status = 'active'
           AND m.id NOT IN (SELECT value FROM json_each(${JSON.stringify(opts.excludeIds)}))
-        ORDER BY bm25(memory_fts)
+        ORDER BY bm25(${t})
         LIMIT ${opts.limit}
       `,
     );

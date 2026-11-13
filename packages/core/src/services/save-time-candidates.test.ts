@@ -891,6 +891,45 @@ describe('findSaveTimeCandidates — common-term pruning', () => {
     expect(result.candidates.find((c) => c.targetId === sharing)?.source).toBe('fts');
   });
 
+  function seedIn(projectId: string, contents: readonly string[]): void {
+    for (const [i, content] of contents.entries())
+      memorySvc.save(
+        { type: 'project', title: `Other ${FILLER_WORDS[i % 8]}`, content },
+        projectScope(projectId),
+      );
+  }
+
+  it('omits a token common in the saving project even when it is rare across the server', () => {
+    seed(['zephyrkite marker', ...FILLER_WORDS.slice(0, 7).map((w) => `pivot ${w}`), 'filler one']);
+    seedIn(
+      'p0',
+      Array.from({ length: 40 }, (_, i) => `unrelated ${FILLER_WORDS[i % 8]} ${i}`),
+    );
+    const saved = saveProbe('pivot zephyrkite');
+    expect(documentFrequency('pivot')! < documentCount() / 2).toBe(true);
+
+    expect(detectRecordingMatch(saved).matchExprs).toEqual(['"zephyrkite"']);
+  });
+
+  it('is not changed by rows another project adds', () => {
+    const [rare] = seed(['kite alpha', 'kite beta', 'beta ember']);
+    seed(FILLER_WORDS.slice(0, 6).map((w) => `filler ${w}`));
+    const saved = saveProbe('kite alpha beta');
+    const detect = () =>
+      findSaveTimeCandidates(createRepositories(db.handle.db), saved, {
+        perSaveMax: 5,
+        poolSize: 1,
+      }).candidates.map((c) => [c.targetId, c.similarity]);
+    const before = detect();
+    expect(before.map(([id]) => id)).toEqual([rare]);
+
+    seedIn(
+      'p0',
+      Array.from({ length: 12 }, (_, i) => `alpha ${FILLER_WORDS[i % 8]} ${i}`),
+    );
+    expect(detect()).toEqual(before);
+  });
+
   it('a multi-term token stays even when each of its terms is common', () => {
     seed(['zephyrkite marker', ...FILLER_WORDS.map((w) => `two ${w} space`)]);
     const saved = saveProbe('two-space zephyrkite');

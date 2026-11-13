@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRepositories, QUERY_TERMS_VOCAB_TABLE, type Repositories } from '@rembric/db';
+import {
+  createRepositories,
+  projectScope,
+  QUERY_TERMS_VOCAB_TABLE,
+  type Repositories,
+} from '@rembric/db';
 
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
@@ -90,13 +95,28 @@ describe('adminQueryTermFrequencies keys the read on the index own terms', () =>
   });
 });
 
-describe('adminTokenTermFrequencies tokenises each token through the index tokenizer', () => {
+describe('projectTokenTermFrequencies tokenises each token through the index tokenizer', () => {
+  const scope = projectScope('p1');
+  const saveIn = (id: string, content: string) =>
+    db.handle.raw
+      .prepare(
+        `INSERT INTO memory (id, scope, project_id, type, title, content, status, created_at)
+         VALUES (?, 'project', 'p1', 'reference', 'title', ?, 'active', 0)`,
+      )
+      .run(id, content);
+
+  beforeEach(() => {
+    db.handle.raw
+      .prepare(`INSERT INTO projects (id, slug, created_at) VALUES ('p1', 'p1', 0)`)
+      .run();
+  });
+
   it("returns every token's term instances in order, each with its document frequency", () => {
-    save('m1', 'στάσις apps core held');
-    save('m2', 'apps held');
+    saveIn('m1', 'στάσις apps core held');
+    saveIn('m2', 'apps held');
 
     expect(
-      repos.termStatistics.adminTokenTermFrequencies(['apps/core-12', 'στάσις', 'held']),
+      repos.termStatistics.projectTokenTermFrequencies(scope, ['apps/core-12', 'στάσις', 'held']),
     ).toEqual([
       [
         { term: 'apps', documentFrequency: 2 },
@@ -109,8 +129,8 @@ describe('adminTokenTermFrequencies tokenises each token through the index token
   });
 
   it('counts a token made of one repeated term as two instances', () => {
-    save('m1', 'ha');
-    expect(repos.termStatistics.adminTokenTermFrequencies(['ha-ha'])).toEqual([
+    saveIn('m1', 'ha');
+    expect(repos.termStatistics.projectTokenTermFrequencies(scope, ['ha-ha'])).toEqual([
       [
         { term: 'ha', documentFrequency: 1 },
         { term: 'ha', documentFrequency: 1 },
@@ -119,17 +139,17 @@ describe('adminTokenTermFrequencies tokenises each token through the index token
   });
 
   it('returns an empty list for a token the tokenizer yields no term for, and for no tokens', () => {
-    expect(repos.termStatistics.adminTokenTermFrequencies(['--', 'alpha'])).toEqual([
+    expect(repos.termStatistics.projectTokenTermFrequencies(scope, ['--', 'alpha'])).toEqual([
       [],
       [{ term: 'alpha', documentFrequency: null }],
     ]);
-    expect(repos.termStatistics.adminTokenTermFrequencies([])).toEqual([]);
+    expect(repos.termStatistics.projectTokenTermFrequencies(scope, [])).toEqual([]);
   });
 
   it('leaks no token between consecutive reads or into the per-text read', () => {
-    save('m1', 'alpha beta');
-    repos.termStatistics.adminTokenTermFrequencies(['alpha', 'beta', 'gamma']);
-    expect(repos.termStatistics.adminTokenTermFrequencies(['delta'])).toEqual([
+    saveIn('m1', 'alpha beta');
+    repos.termStatistics.projectTokenTermFrequencies(scope, ['alpha', 'beta', 'gamma']);
+    expect(repos.termStatistics.projectTokenTermFrequencies(scope, ['delta'])).toEqual([
       [{ term: 'delta', documentFrequency: null }],
     ]);
     expect([...repos.termStatistics.adminQueryTermFrequencies('epsilon').keys()]).toEqual([
