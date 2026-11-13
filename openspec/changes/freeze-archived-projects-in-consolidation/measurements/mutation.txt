@@ -1,0 +1,20 @@
+Mutation checks: node scripts/mutate.mjs --spec packages/core/src/consolidation/project-archive.test.ts --workspace packages/core
+Each condition was weakened on its own; "red" names the tests that failed without it.
+
+ 1 runner.runAll listActiveIds() -> listAllIds()                 red: a forced sweep leaves an archived project untouched and still sweeps active ones
+ 2 runner.sweepFor archived guard -> true                        red: a session-start sweep for an archived project sweeps only the default project
+ 3a listMaintenanceRunIds kind condition removed                 red: restores only from archive runs, not from another maintenance run naming the project
+     (first run: survived; the test above was added to pin it)
+ 3b listMaintenanceRunIds projectId condition removed            red: only restores the unarchived project
+ 4 restore endpoint-active check -> false                        red: keeps a judgment orphaned when an endpoint was retired while archived; allows the undo once the project is active again
+ 5 undo guard `project?.archivedAt` -> false                     red: refuses a single-op undo and a run undo; refuses undoing a deadline orphaning once its project is archived
+ 6 undoRun pre-check removed                                     survived twice; removed from the code as redundant: undoOp's own guard
+     and the linked-retirement guard reject the first undo in every run shape before any write
+ 7 linked retirement guard removed                               red: refuses undoing a memory retirement that would re-open a judgment of an archived project
+     (found while analysing 6: undoing a memory archive restored its retirement orphanings in an archived project)
+ 8 deadline exclusion (notInArray) removed                       red: stays pending after a restore and is orphaned once the fresh window passes
+ 9 deadline exclusion prefix -> a prefix matching nothing        red: same test
+10 reconcile loop `if (batch < batchSize) break` -> break        red: closes an archived project's backlog in batches, one run each, and unarchive restores it
+11 archive tx.transaction -> plain call                          red: a failure while journaling rolls back the archive and every orphaning
+12 unarchive restore call removed                                red: 5 tests (archive then unarchive; endpoint retired; second cycle; only the unarchived project; reconcile restore)
+13 archive orphaning limited to 0 rows                           red: 14 tests
