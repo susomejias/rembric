@@ -8,6 +8,7 @@ export * from './repositories/index.js';
 export * from './repositories/scope-clause.js';
 export type {
   QueryTermFrequencies,
+  SearchTermFrequencies,
   TokenTermFrequency,
 } from './repositories/term-statistics-repository.js';
 export * from './diagnostics.js';

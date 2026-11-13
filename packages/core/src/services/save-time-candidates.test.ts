@@ -19,6 +19,7 @@ import {
   ENTITY_RARITY_MIN_LINKS,
   findSaveTimeCandidates,
   LEXICAL_CANDIDATE_FLOOR,
+  pruneCommonTokens,
   runPostSaveSteps,
   sanitizeFtsQuery,
   tokenContainment,
@@ -1857,5 +1858,25 @@ describe('evaluatePair agrees with detection over the save-time fixture', () => 
     expect(bySource.vec).toBeGreaterThan(0);
     expect(bySource.fts).toBeGreaterThan(0);
     expect(bySource.entity).toBeGreaterThan(0);
+  });
+});
+
+describe('pruneCommonTokens counts only the rows that are not the probe itself', () => {
+  const freq = (term: string, documentFrequency: number | null) => [{ term, documentFrequency }];
+  const tokens = ['kubernetes', 'the'];
+  const terms = [freq('kubernetes', 1), freq('the', 8)];
+
+  it('keeps the pruned list when a kept token reaches one row and the probe owns none', () => {
+    expect(pruneCommonTokens(tokens, terms, 10, 0.5, 0)).toEqual(['kubernetes']);
+  });
+
+  it('falls back to every token when that one row is the probe itself', () => {
+    expect(pruneCommonTokens(tokens, terms, 10, 0.5, 1)).toEqual(['kubernetes', 'the']);
+  });
+
+  it('falls back to every token when a kept token reaches no row at all', () => {
+    expect(
+      pruneCommonTokens(tokens, [freq('kubernetes', null), freq('the', 8)], 10, 0.5, 0),
+    ).toEqual(['kubernetes', 'the']);
   });
 });

@@ -77,22 +77,6 @@ describe('adminQueryTermFrequencies keys the read on the index own terms', () =>
         .sort(),
     ).toEqual(['delta', 'epsilon']);
   });
-
-  it('takes the term-constrained seek on both sides of the join', () => {
-    const plan = db.handle.raw
-      .prepare<[], { detail: string }>(
-        `EXPLAIN QUERY PLAN
-         SELECT q.term AS term, v.doc AS doc
-         FROM temp.${QUERY_TERMS_VOCAB_TABLE} q
-         LEFT JOIN memory_fts_vocab v ON v.term = q.term`,
-      )
-      .all()
-      .map((r) => r.detail);
-    expect(plan).toEqual([
-      'SCAN q VIRTUAL TABLE INDEX 1:',
-      'SCAN v VIRTUAL TABLE INDEX 259: LEFT-JOIN',
-    ]);
-  });
 });
 
 describe('projectTokenTermFrequencies tokenises each token through the index tokenizer', () => {
@@ -155,5 +139,102 @@ describe('projectTokenTermFrequencies tokenises each token through the index tok
     expect([...repos.termStatistics.adminQueryTermFrequencies('epsilon').keys()]).toEqual([
       'epsilon',
     ]);
+  });
+});
+
+describe('adminSearchTermFrequencies reads the query and its tokens in one statement', () => {
+  it("returns the query's terms in term order, each with its global document frequency", () => {
+    save('m1', 'zeta alpha');
+    save('m2', 'zeta mid');
+    save('m3', 'zeta');
+
+    const { query } = repos.termStatistics.adminSearchTermFrequencies('zeta alpha zeta Mid gone', [
+      'zeta',
+      'alpha',
+    ]);
+    expect([...query]).toEqual([
+      ['alpha', 1],
+      ['gone', null],
+      ['mid', 1],
+      ['zeta', 3],
+    ]);
+  });
+
+  it("returns each token's term instances in order, with null for a term the index lacks", () => {
+    save('m1', 'two space notes');
+    save('m2', 'notes');
+
+    const { tokens } = repos.termStatistics.adminSearchTermFrequencies(
+      'two-space notes absentterm',
+      ['two-space', 'notes', 'absentterm', '¿'],
+    );
+    expect(tokens).toEqual([
+      [
+        { term: 'two', documentFrequency: 1 },
+        { term: 'space', documentFrequency: 1 },
+      ],
+      [{ term: 'notes', documentFrequency: 2 }],
+      [{ term: 'absentterm', documentFrequency: null }],
+      [],
+    ]);
+  });
+
+  it('counts a token made of one repeated term as two instances', () => {
+    save('m1', 'ha');
+    const { tokens } = repos.termStatistics.adminSearchTermFrequencies('ha-ha', ['ha-ha']);
+    expect(tokens).toEqual([
+      [
+        { term: 'ha', documentFrequency: 1 },
+        { term: 'ha', documentFrequency: 1 },
+      ],
+    ]);
+  });
+
+  it('keeps the per-text read equal to the query half of the combined read', () => {
+    save('m1', 'alpha beta');
+    save('m2', 'beta gamma');
+    const text = 'gamma beta unknownword alpha';
+    expect(repos.termStatistics.adminQueryTermFrequencies(text)).toEqual(
+      repos.termStatistics.adminSearchTermFrequencies(text, ['gamma']).query,
+    );
+    expect([...repos.termStatistics.adminQueryTermFrequencies(text).keys()]).toEqual([
+      'alpha',
+      'beta',
+      'gamma',
+      'unknownword',
+    ]);
+  });
+
+  it('leaks no term or token between consecutive reads', () => {
+    save('m1', 'alpha beta delta');
+    repos.termStatistics.adminSearchTermFrequencies('alpha beta', ['alpha', 'beta']);
+    const second = repos.termStatistics.adminSearchTermFrequencies('delta', ['delta']);
+    expect([...second.query.keys()]).toEqual(['delta']);
+    expect(second.tokens).toEqual([[{ term: 'delta', documentFrequency: 1 }]]);
+  });
+
+  it('joins each distinct term to the vocabulary once, by the term-constrained seek', () => {
+    save('m1', 'alpha beta');
+    const raw = db.handle.raw;
+    const prepare = raw.prepare.bind(raw);
+    const texts: string[] = [];
+    raw.prepare = (text: string) => {
+      texts.push(text);
+      return prepare(text);
+    };
+    try {
+      repos.termStatistics.adminSearchTermFrequencies('alpha beta alpha', ['alpha', 'beta']);
+    } finally {
+      raw.prepare = prepare;
+    }
+    const read = texts.find((t) => /memory_fts_vocab/.test(t));
+    expect(read).toBeDefined();
+    const plan = prepare<[], { detail: string }>(`EXPLAIN QUERY PLAN ${read!}`)
+      .all()
+      .map((r) => r.detail);
+    expect(plan.filter((d) => /memory_fts_vocab|SCAN v /.test(d))).toEqual([
+      'SCAN v VIRTUAL TABLE INDEX 259: LEFT-JOIN',
+    ]);
+    expect(plan.some((d) => /MATERIALIZE f/.test(d))).toBe(true);
   });
 });

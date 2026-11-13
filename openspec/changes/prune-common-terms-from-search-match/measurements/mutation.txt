@@ -1,0 +1,119 @@
+# search lexical pruning — mutation check (task 4.2)
+Each case weakens one condition, runs the suite that names it, and restores the file byte for byte (scripts/mutate.mjs).
+Source at 0f005466. Every case turned at least one named test red; no mutation survived (13 of 13: 10 at 0f005466, 3 for the correction).
+
+### Ratio boundary inclusive (>= to >)
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    frequencies[0]! >= commonTermRatio
+replace: frequencies[0]! > commonTermRatio
+    CAUGHT by 1:
+      × the search lexical MATCH omits index-common terms > omits a term in exactly half of the rows and keeps one in a row fewer
+  all 1 mutations caught; save-time-candidates.ts restored
+### Phrase guard removed
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    frequencies.length === 1 && 
+replace: 
+    CAUGHT by 1:
+      × the search lexical MATCH omits index-common terms > never omits a token the index matches as a phrase of common terms
+  all 1 mutations caught; save-time-candidates.ts restored
+### Query own rows: search passes 1 instead of 0
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    commonTermRatio, 0)
+replace: commonTermRatio, 1)
+    CAUGHT by 2:
+      × the search lexical MATCH omits index-common terms > drops a token found in at least half of the index and keeps a rarer one
+      × the search lexical MATCH omits index-common terms > judges commonness over the whole index, not the searched project
+  all 1 mutations caught; hybrid-search.ts restored
+### Own-rows bound ignored (always > 1)
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec src/services/save-time-candidates.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    Math.min(...frequencies) > ownIndexedRows
+replace: Math.min(...frequencies) > 1
+    CAUGHT by 1:
+      × pruneCommonTokens counts only the rows that are not the probe itself > keeps the pruned list when a kept token reaches one row and the probe owns none
+  all 1 mutations caught; save-time-candidates.ts restored
+### Fallback removed
+$ node scripts/mutate.mjs --file packages/core/src/services/save-time-candidates.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    return keptReachesAnotherRow ? kept : [...tokens];
+replace: return kept;
+    CAUGHT by 8:
+      × hybrid search plumbing (FakeEmbedder) > finds a memory with no embedding via the lexical branch (coverage gap)
+      × hybrid search plumbing (FakeEmbedder) > finds a memory by a term present only in its title (FTS indexes title)
+      × hybrid search plumbing (FakeEmbedder) > degrades to FTS-only when no embedQuery is wired
+      × the disabled path does no gate work > issues exactly the pre-change reads and never the gate window text read
+      × the disabled path does no gate work > issues both of them the moment either gate is enabled — so the list above is a decision
+      × the disabled path does no gate work > returns the ids the pre-gate pipeline produces, reconstructed from its surviving parts
+      × the search lexical MATCH omits index-common terms > keeps every token when the only kept token reaches no row
+      × the search lexical MATCH omits index-common terms > keeps a query of common tokens whole, with the ids the unpruned branch returns
+  all 1 mutations caught; save-time-candidates.ts restored
+### Pruning never applied
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    if (commonTermRatio !== null) {
+replace: if (false) {
+    CAUGHT by 5:
+      × hybrid search plumbing (FakeEmbedder) > abstains on an empty pool without reading pool text or a second term-statistics read
+      × the disabled path does no gate work > issues exactly the pre-change reads and never the gate window text read
+      × the search lexical MATCH omits index-common terms > drops a token found in at least half of the index and keeps a rarer one
+      × the search lexical MATCH omits index-common terms > omits a term in exactly half of the rows and keeps one in a row fewer
+      × the search lexical MATCH omits index-common terms > judges commonness over the whole index, not the searched project
+  all 1 mutations caught; hybrid-search.ts restored
+### Statistics read not memoised
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    if (!read) {
+replace: if (true) {
+    CAUGHT by 2:
+      × the disabled path does no gate work > issues both of them the moment either gate is enabled — so the list above is a decision
+      × the search lexical MATCH omits index-common terms > reads the statistics once and feeds the gate the values a separate read returns
+  all 1 mutations caught; hybrid-search.ts restored
+### Distinct terms dropped
+$ node scripts/mutate.mjs --file packages/db/src/repositories/term-statistics-repository.ts --spec src/repositories/term-statistics-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:    SELECT DISTINCT term
+replace: SELECT term
+    CAUGHT by 3:
+      × adminSearchTermFrequencies reads the query and its tokens in one statement > returns each token's term instances in order, with null for a term the index lacks
+      × adminSearchTermFrequencies reads the query and its tokens in one statement > counts a token made of one repeated term as two instances
+      × adminSearchTermFrequencies reads the query and its tokens in one statement > leaks no term or token between consecutive reads
+  all 1 mutations caught; term-statistics-repository.ts restored
+### Query map term order dropped
+$ node scripts/mutate.mjs --file packages/db/src/repositories/term-statistics-repository.ts --spec src/repositories/term-statistics-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:    CASE WHEN i.doc = 0 THEN i.term END, 
+replace: 
+    CAUGHT by 2:
+      × adminSearchTermFrequencies reads the query and its tokens in one statement > returns the query's terms in term order, each with its global document frequency
+      × adminSearchTermFrequencies reads the query and its tokens in one statement > keeps the per-text read equal to the query half of the combined read
+  all 1 mutations caught; term-statistics-repository.ts restored
+### CTE not materialized
+$ node scripts/mutate.mjs --file packages/db/src/repositories/term-statistics-repository.ts --spec src/repositories/term-statistics-repository.test.ts --workspace packages/db --mutation <find> --with <replace>
+find:    WITH f AS MATERIALIZED (
+replace: WITH f AS (
+    CAUGHT by 1:
+      × adminSearchTermFrequencies reads the query and its tokens in one statement > joins each distinct term to the vocabulary once, by the term-constrained seek
+  all 1 mutations caught; term-statistics-repository.ts restored
+
+## Correction: empty reduced MATCH and failed statistics read (working tree on 471be1db)
+
+### Empty pruned result not retried
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    return ids.length === 0 && kept.length < tokens.length ? search(tokens) : ids;
+replace: return ids;
+    CAUGHT by 2:
+      × the search lexical MATCH omits index-common terms > runs the full expression when the pruned one matches nothing in the searched scope
+      × the search lexical MATCH omits index-common terms > runs the full expression when a filter excludes every row the pruned one matches
+  all 1 mutations caught; hybrid-search.ts restored
+### Retry also when nothing was pruned
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:    ids.length === 0 && kept.length < tokens.length
+replace: ids.length === 0
+    CAUGHT by 1:
+      × the search lexical MATCH omits index-common terms > issues one statement when nothing was pruned, even if it matches nothing
+  all 1 mutations caught; hybrid-search.ts restored
+### Failed statistics read empties the branch
+$ node scripts/mutate.mjs --file packages/core/src/services/hybrid-search.ts --spec src/services/hybrid-search.test.ts --workspace packages/core --mutation <find> --with <replace>
+find:      } catch {
+    return tokens;
+  }
+replace:   } catch {
+    return [];
+  }
+    CAUGHT by 1:
+      × the search lexical MATCH omits index-common terms > searches the full expression when the statistics read fails, as before pruning existed
+  all 1 mutations caught; hybrid-search.ts restored

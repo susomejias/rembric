@@ -640,7 +640,7 @@ const ADMIN_CALL_SITES: Readonly<Record<string, readonly string[]>> = {
   'packages/core/src/services/agent-sessions.ts': ['adminCountByStatus'],
   'packages/core/src/services/hybrid-search.ts': [
     'adminDocumentCount',
-    'adminQueryTermFrequencies',
+    'adminSearchTermFrequencies',
   ],
 };
 

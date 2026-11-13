@@ -89,7 +89,7 @@ export interface ConfirmOptions {
 /** Deliberately not part of `SearchMemoriesInput`, so no MCP tool schema can reach these. */
 export type GateOverrides = Pick<
   HybridSearchOpts,
-  'abstentionFloor' | 'relativeLevelRatio' | 'onGateWindow'
+  'abstentionFloor' | 'relativeLevelRatio' | 'onGateWindow' | 'commonTermRatio'
 >;
 
 export interface SearchMemoriesInput {

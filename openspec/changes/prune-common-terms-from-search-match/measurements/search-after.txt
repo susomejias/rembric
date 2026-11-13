@@ -1,0 +1,28 @@
+# memory.search end to end — before (base 5e3a2069), run 1
+generator   1000 rows  search p50 2.719 ms  p95 3.077 ms  (28 queries)
+generator  20000 rows  search p50 8.377 ms  p95 10.480 ms  (28 queries)
+generator  50000 rows  search p50 29.683 ms  p95 33.421 ms  (28 queries)
+realistic   1000 rows  search p50 0.952 ms  p95 1.148 ms  (28 queries)
+realistic  20000 rows  search p50 3.509 ms  p95 5.325 ms  (28 queries)
+realistic  50000 rows  search p50 7.911 ms  p95 11.678 ms  (28 queries)
+# memory.search end to end — after (correction, working tree on 471be1db), run 1
+generator   1000 rows  search p50 2.650 ms  p95 3.120 ms  (28 queries)
+generator  20000 rows  search p50 8.181 ms  p95 8.996 ms  (28 queries)
+generator  50000 rows  search p50 28.612 ms  p95 29.995 ms  (28 queries)
+realistic   1000 rows  search p50 0.910 ms  p95 1.085 ms  (28 queries)
+realistic  20000 rows  search p50 2.709 ms  p95 3.712 ms  (28 queries)
+realistic  50000 rows  search p50 5.657 ms  p95 7.889 ms  (28 queries)
+# memory.search end to end — before (base 5e3a2069), run 2
+generator   1000 rows  search p50 2.657 ms  p95 2.987 ms  (28 queries)
+generator  20000 rows  search p50 8.405 ms  p95 10.527 ms  (28 queries)
+generator  50000 rows  search p50 29.248 ms  p95 32.987 ms  (28 queries)
+realistic   1000 rows  search p50 0.937 ms  p95 1.133 ms  (28 queries)
+realistic  20000 rows  search p50 3.486 ms  p95 5.282 ms  (28 queries)
+realistic  50000 rows  search p50 7.880 ms  p95 11.454 ms  (28 queries)
+# memory.search end to end — after (correction, working tree on 471be1db), run 2
+generator   1000 rows  search p50 2.640 ms  p95 3.090 ms  (28 queries)
+generator  20000 rows  search p50 8.151 ms  p95 9.122 ms  (28 queries)
+generator  50000 rows  search p50 28.717 ms  p95 30.919 ms  (28 queries)
+realistic   1000 rows  search p50 0.897 ms  p95 1.099 ms  (28 queries)
+realistic  20000 rows  search p50 2.730 ms  p95 3.738 ms  (28 queries)
+realistic  50000 rows  search p50 5.673 ms  p95 7.931 ms  (28 queries)
