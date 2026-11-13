@@ -1,0 +1,19 @@
+corpus: 50000 memories (seed-volumetric, relations 0), archived project: vol-0
+instrument: wall clock of the named call, performance.now(), one fresh clone per sample
+
+## 7.1 archive transaction (ProjectsService.archive: archived_at + orphan + journal)
+pending=1000: min 64.2 ms, max 69.3 ms over 3 runs
+pending=10000: min 643.8 ms, max 762.1 ms over 3 runs
+
+## 7.2 reconcile batch transaction (one orphanPendingOnProjectArchive batch), target p95 <= 50 ms
+batch=50: p50 4.3 ms, p95 5.3 ms, max 5.3 ms (10 batches, 10 000 pending)
+batch=100: p50 7.3 ms, p95 7.6 ms, max 7.6 ms (10 batches, 10 000 pending)
+batch=200: p50 13.9 ms, p95 14.5 ms, max 14.5 ms (10 batches, 10 000 pending)
+batch=400: p50 25.7 ms, p95 31.5 ms, max 31.5 ms (10 batches, 10 000 pending)
+batch=800: p50 54.5 ms, p95 60.1 ms, max 60.1 ms (10 batches, 10 000 pending)
+largest batch within p95 <= 50 ms: 400
+
+## 7.3 restored-judgment exclusion read (listOrphaningsRevertedWithin), once per sweep call
+ops=1000 (every tenth reverted, half archive orphanings): p50 0.1 ms, p95 0.2 ms, 100 ids
+ops=10000 (every tenth reverted, half archive orphanings): p50 0.6 ms, p95 0.7 ms, 1000 ids
+ops=100000 (every tenth reverted, half archive orphanings): p50 6.7 ms, p95 7.7 ms, 10000 ids
