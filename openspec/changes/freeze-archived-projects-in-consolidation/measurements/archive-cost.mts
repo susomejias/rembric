@@ -66,7 +66,9 @@ function withPending(from: string, pending: number): string {
   const repos = db.createRepositories(handle.db);
   const project = repos.projects.findBySlug(TARGET)!;
   const ids: string[] = handle.raw
-    .prepare("SELECT id FROM memory WHERE scope = 'project' AND project_id = ? AND status = 'active' ORDER BY id")
+    .prepare(
+      "SELECT id FROM memory WHERE scope = 'project' AND project_id = ? AND status = 'active' ORDER BY id",
+    )
     .all(project.id)
     .map((r: { id: string }) => r.id);
   const relations = new core.RelationsService(repos, handle.db);
@@ -119,11 +121,15 @@ for (const pending of [1_000, 10_000]) {
     if (left !== 0) throw new Error(`archive left ${left} pending`);
     dispose(c);
   }
-  out(`pending=${pending}: min ${fmt(Math.min(...samples))} ms, max ${fmt(Math.max(...samples))} ms over ${REPEATS} runs`);
+  out(
+    `pending=${pending}: min ${fmt(Math.min(...samples))} ms, max ${fmt(Math.max(...samples))} ms over ${REPEATS} runs`,
+  );
 }
 
 out('');
-out(`## 7.2 reconcile batch transaction (one orphanPendingOnProjectArchive batch), target p95 <= ${BUDGET_MS} ms`);
+out(
+  `## 7.2 reconcile batch transaction (one orphanPendingOnProjectArchive batch), target p95 <= ${BUDGET_MS} ms`,
+);
 const big = withPending(base, 10_000);
 let chosen = 0;
 for (const size of BATCH_SIZES) {
@@ -149,7 +155,9 @@ for (const size of BATCH_SIZES) {
   dispose(c);
   const p95 = pct(samples, 95);
   if (p95 <= BUDGET_MS) chosen = size;
-  out(`batch=${size}: p50 ${fmt(pct(samples, 50))} ms, p95 ${fmt(p95)} ms, max ${fmt(Math.max(...samples))} ms (${BATCH_SAMPLES} batches, 10 000 pending)`);
+  out(
+    `batch=${size}: p50 ${fmt(pct(samples, 50))} ms, p95 ${fmt(p95)} ms, max ${fmt(Math.max(...samples))} ms (${BATCH_SAMPLES} batches, 10 000 pending)`,
+  );
 }
 out(`largest batch within p95 <= ${BUDGET_MS} ms: ${chosen}`);
 
@@ -161,7 +169,13 @@ for (const opsCount of [1_000, 10_000, 100_000]) {
   const now = Date.now();
   c.handle.db.transaction(() => {
     const runId = ulid(now);
-    repos.consolidation.insertRun({ id: runId, startedAt: new Date(now), finishedAt: new Date(now), scope: 'maintenance', summary: '{}' });
+    repos.consolidation.insertRun({
+      id: runId,
+      startedAt: new Date(now),
+      finishedAt: new Date(now),
+      scope: 'maintenance',
+      summary: '{}',
+    });
     for (let i = 0; i < opsCount; i++) {
       const opId = ulid(now + i);
       repos.consolidation.insertOp({
@@ -170,7 +184,10 @@ for (const opsCount of [1_000, 10_000, 100_000]) {
         opType: 'orphan_promote',
         affectedIds: ['a', 'b'],
         createdId: `j${i}`,
-        reasoning: i % 2 === 0 ? `orphaned: ${core.PROJECT_ARCHIVE_ORPHAN_REASON}` : 'orphaned: unjudged after 1209600000ms deadline',
+        reasoning:
+          i % 2 === 0
+            ? `orphaned: ${core.PROJECT_ARCHIVE_ORPHAN_REASON}`
+            : 'orphaned: unjudged after 1209600000ms deadline',
         appliedAt: new Date(now),
       });
       if (i % 10 === 0) repos.consolidation.markReverted(opId, new Date(now));
@@ -181,11 +198,16 @@ for (const opsCount of [1_000, 10_000, 100_000]) {
   let found = 0;
   for (let i = 0; i < 20; i++) {
     const t0 = performance.now();
-    found = relations.listOrphaningsRevertedWithin(core.PROJECT_ARCHIVE_ORPHANING_PREFIX, 14 * 86_400_000).length;
+    found = relations.listOrphaningsRevertedWithin(
+      core.PROJECT_ARCHIVE_ORPHANING_PREFIX,
+      14 * 86_400_000,
+    ).length;
     samples.push(performance.now() - t0);
   }
   dispose(c);
-  out(`ops=${opsCount} (every tenth reverted, half archive orphanings): p50 ${fmt(pct(samples, 50))} ms, p95 ${fmt(pct(samples, 95))} ms, ${found} ids`);
+  out(
+    `ops=${opsCount} (every tenth reverted, half archive orphanings): p50 ${fmt(pct(samples, 50))} ms, p95 ${fmt(pct(samples, 95))} ms, ${found} ids`,
+  );
 }
 
 const target = new URL('./archive-cost.txt', import.meta.url);
