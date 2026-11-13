@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.12](https://github.com/susomejias/rembric/compare/server-v0.30.11...server-v0.30.12) (2026-11-13)
+
+
+### Features
+
+* **core:** freeze archived projects in consolidation ([3ed1321](https://github.com/susomejias/rembric/commit/3ed13211bee4e178a84e50bc0216d5d614397251))
+* **core:** read save-time lexical candidates from the saving project's index ([cefab6f](https://github.com/susomejias/rembric/commit/cefab6f810e82e2a627accd42622293415ac64ad))
+* **db:** maintain a per-project lexical index by triggers and boot reconciliation ([0df49d6](https://github.com/susomejias/rembric/commit/0df49d68eb518c8c0f80f2a698f36c86a3bf4bb0))
+
+
+### Performance
+
+* **core:** drop index-common terms from the search lexical match ([5dc6ca2](https://github.com/susomejias/rembric/commit/5dc6ca2811e4845337c54c214f4869e97f2e17de)), closes [#473](https://github.com/susomejias/rembric/issues/473)
+
 ## [0.30.11](https://github.com/susomejias/rembric/compare/server-v0.30.10...server-v0.30.11) (2026-11-12)
 
 
