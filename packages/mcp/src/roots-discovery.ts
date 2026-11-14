@@ -1,11 +1,10 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
-  ErrorCode,
-  McpError,
+  ProtocolError,
   type ListRootsResult,
+  type McpServer,
   type RequestId,
-} from '@modelcontextprotocol/sdk/types.js';
+  type RequestOptions,
+} from '@modelcontextprotocol/server';
 import type { ProjectsService } from '@rembric/core';
 import type { SessionRouter } from '@rembric/core';
 
@@ -131,12 +130,12 @@ function listRootsOptions(ctx: RootsDiscoveryContext): RequestOptions {
   return options;
 }
 
-/** `McpError.code` is a plain `number`, so the enum members are widened to match it. */
-const NO_ANSWER_CODES: readonly number[] = [ErrorCode.RequestTimeout, ErrorCode.ConnectionClosed];
+// SDK 1.x ConnectionClosed and RequestTimeout: a client error carrying either was never an answer.
+const NO_ANSWER_CODES: readonly number[] = [-32000, -32001];
 
-/** A JSON-RPC error is an answer; a timeout or transport failure is not. */
+/** A JSON-RPC error is an answer; a timeout or transport failure (an `SdkError`) is not. */
 function isAnswerFromClient(err: unknown): boolean {
-  return err instanceof McpError && !NO_ANSWER_CODES.includes(err.code);
+  return err instanceof ProtocolError && !NO_ANSWER_CODES.includes(err.code);
 }
 
 export async function refreshRootsAfterChange(

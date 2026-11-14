@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js';
 import {
   classifyInboundRequest,
   createMcpHandler,
   isLegacyRequest,
+  SUPPORTED_PROTOCOL_VERSIONS,
   UnsupportedProtocolVersionError,
   WebStandardStreamableHTTPServerTransport,
   type AuthInfo,

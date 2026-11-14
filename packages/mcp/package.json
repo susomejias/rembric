@@ -21,7 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@rembric/core": "workspace:*",
     "@rembric/db": "workspace:*",
     "slugify": "^1.6.9",
@@ -29,6 +29,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
     "@rembric/config": "workspace:*",
     "@types/node": "^22.7.0",
     "drizzle-orm": "^0.36.0",

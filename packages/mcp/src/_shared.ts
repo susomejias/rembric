@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { AgentSessionsService } from '@rembric/core';
 import type { ProjectsService, ProjectView } from '@rembric/core';
 import type { ProjectResolutionSource, SessionRouter } from '@rembric/core';
