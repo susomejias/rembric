@@ -1,3 +1,7 @@
+import {
+  hostHeaderValidationResponse,
+  originValidationResponse,
+} from '@modelcontextprotocol/server';
 import { runWithContext } from '@rembric/core';
 
 import { verifyMcpBearerToken } from '../../../lib/mcp-auth';
@@ -10,6 +14,9 @@ export const dynamic = 'force-dynamic';
 type RouteContext = { params: Promise<{ path?: string[] }> };
 
 async function handle(request: Request, context: RouteContext): Promise<Response> {
+  const rebinding = dnsRebindingRefusal(request);
+  if (rebinding !== undefined) return rebinding;
+
   const { path } = await context.params;
   const slug = path?.[0] ?? null;
 
@@ -47,82 +54,34 @@ async function handle(request: Request, context: RouteContext): Promise<Response
   }
   if (rateLimitResponse !== null) return rateLimitResponse;
 
-  const oversized = await bodyTooLarge(request);
-  if (oversized !== null) return oversized;
-
-  const rebinding = dnsRebindingRefusal(request);
-  if (rebinding !== null) return rebinding;
-
   const { authInfo, requestContext } = auth;
 
   return runWithContext(requestContext, () => getMcpSurface().fetch(request, { authInfo }));
 }
 
-const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024;
-
-function maxBodyBytes(): number {
-  const raw = process.env['MAX_BODY_BYTES'];
-  if (raw === undefined || raw.trim().length === 0) return DEFAULT_MAX_BODY_BYTES;
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_BODY_BYTES;
-}
-
-async function bodyTooLarge(request: Request): Promise<Response | null> {
-  const method = request.method.toUpperCase();
-  if (method !== 'POST' && method !== 'DELETE') return null;
-
-  const max = maxBodyBytes();
-  const declared = request.headers.get('content-length');
-  if (declared !== null) {
-    const n = Number(declared);
-    if (Number.isInteger(n) && n > max) return payloadTooLarge(max);
-  }
-  const bytes = await request.clone().arrayBuffer();
-  return bytes.byteLength > max ? payloadTooLarge(max) : null;
-}
-
-function payloadTooLarge(max: number): Response {
-  return Response.json(
-    { ok: false, code: 'payload_too_large', message: `request body exceeds the ${max}-byte limit` },
-    { status: 413, headers: { Connection: 'close' } },
+function dnsRebindingRefusal(request: Request): Response | undefined {
+  const hosts = allowedHostnames('REMBRIC_MCP_ALLOWED_HOSTS');
+  const origins = allowedHostnames('REMBRIC_MCP_ALLOWED_ORIGINS');
+  return (
+    (hosts && hostHeaderValidationResponse(request, hosts)) ??
+    (origins && originValidationResponse(request, origins))
   );
 }
 
-function dnsRebindingRefusal(request: Request): Response | null {
-  const allowedHosts = splitCsv(process.env['REMBRIC_MCP_ALLOWED_HOSTS']);
-  const allowedOrigins = splitCsv(process.env['REMBRIC_MCP_ALLOWED_ORIGINS']);
-  if (allowedHosts.length === 0 && allowedOrigins.length === 0) return null;
-
-  if (allowedHosts.length > 0) {
-    const host = request.headers.get('host');
-    if (host === null || !allowedHosts.includes(host)) return invalidHeader('Host', host);
-  }
-  if (allowedOrigins.length > 0) {
-    const origin = request.headers.get('origin');
-    if (origin !== null && !allowedOrigins.includes(origin)) {
-      return invalidHeader('Origin', origin);
-    }
-  }
-  return null;
-}
-
-function invalidHeader(name: 'Host' | 'Origin', value: string | null): Response {
-  return Response.json(
-    {
-      jsonrpc: '2.0',
-      error: { code: -32000, message: `Invalid ${name} header: ${value}` },
-      id: null,
-    },
-    { status: 403 },
-  );
-}
-
-function splitCsv(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
+function allowedHostnames(name: string): string[] | undefined {
+  const entries = (process.env[name] ?? '')
     .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return entries.length > 0 ? entries.map(hostnameOf) : undefined;
+}
+
+function hostnameOf(entry: string): string {
+  for (const candidate of [entry, `http://${entry}`]) {
+    const hostname = URL.canParse(candidate) ? new URL(candidate).hostname : '';
+    if (hostname.length > 0) return hostname;
+  }
+  return entry;
 }
 
 export const GET = handle;
