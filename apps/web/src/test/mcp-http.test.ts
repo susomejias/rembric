@@ -367,22 +367,75 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     ]) {
       afterEach(() => delete process.env[key]);
     }
+    afterEach(resetMcpSurface);
 
-    it('refuses a body over MAX_BODY_BYTES with 413, in the server’s exact shape', async () => {
-      process.env['MAX_BODY_BYTES'] = '1024';
+    async function resetMcpSurface(): Promise<void> {
+      await globalForApp.__rembricMcpSurface?.close?.();
+      delete globalForApp.__rembricMcpSurface;
+    }
+
+    async function withBodyCap(value: string): Promise<void> {
+      process.env['MAX_BODY_BYTES'] = value;
+      await resetMcpSurface();
+    }
+
+    it('refuses a body over MAX_BODY_BYTES with the SDK’s 413 JSON-RPC error', async () => {
+      await withBodyCap('1024');
       const res = await POST(mcpRequest({ ...initializeBody, pad: 'x'.repeat(4096) }), ctx);
       expect(res.status).toBe(413);
+      expect(res.headers.get('connection')).toBeNull();
       expect(await res.json()).toEqual({
-        ok: false,
-        code: 'payload_too_large',
-        message: 'request body exceeds the 1024-byte limit',
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Payload Too Large: Request body must not exceed 1024 bytes',
+        },
+        id: null,
       });
     });
 
+    it('stops reading an over-cap body instead of buffering all of it', async () => {
+      await withBodyCap('1024');
+      const chunk = new TextEncoder().encode('x'.repeat(512));
+      let pulled = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled += chunk.byteLength;
+          if (pulled > 8 * 1024 * 1024) controller.close();
+          else controller.enqueue(chunk);
+        },
+      });
+      const request = new Request(`${ORIGIN}/mcp`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' });
+      const res = await POST(request, ctx);
+      expect(res.status).toBe(413);
+      expect(pulled).toBeLessThan(64 * 1024);
+    });
+
     it('control: a body under the same cap still reaches the transport', async () => {
-      process.env['MAX_BODY_BYTES'] = '1024';
+      await withBodyCap('1024');
       const res = await POST(mcpRequest(initializeBody), ctx);
       expect(res.status).toBe(200);
+    });
+
+    it('control: an invalid MAX_BODY_BYTES falls back to the default cap', async () => {
+      const padded = {
+        ...initializeBody,
+        params: { ...initializeBody.params, clientInfo: { name: 'x'.repeat(4096), version: '0' } },
+      };
+      for (const invalid of ['-1', '1.5']) {
+        await withBodyCap(invalid);
+        const res = await POST(mcpRequest(padded), ctx);
+        expect(res.status).toBe(200);
+      }
     });
 
     it('refuses a disallowed Origin with the SDK’s 403 body, and passes an allowed one', async () => {
@@ -395,7 +448,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       expect(denied.status).toBe(403);
       expect(await denied.json()).toEqual({
         jsonrpc: '2.0',
-        error: { code: -32000, message: 'Invalid Origin header: https://evil.example' },
+        error: { code: -32000, message: 'Invalid Origin: evil.example' },
         id: null,
       });
 
@@ -406,6 +459,15 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       expect(allowed.status).toBe(200);
     });
 
+    it('matches an Origin entry by hostname, ignoring scheme and port', async () => {
+      process.env['REMBRIC_MCP_ALLOWED_ORIGINS'] = 'https://allowed.example';
+      const res = await POST(
+        mcpRequest(initializeBody, { origin: 'http://allowed.example:8443' }),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    });
+
     it('refuses a rebinding Host with the SDK’s 403 body, and passes an allowed one', async () => {
       process.env['REMBRIC_MCP_ALLOWED_HOSTS'] = 'rembric.example.com:443';
 
@@ -413,13 +475,49 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       expect(denied.status).toBe(403);
       expect(await denied.json()).toEqual({
         jsonrpc: '2.0',
-        error: { code: -32000, message: 'Invalid Host header: 127.0.0.1:8787' },
+        error: { code: -32000, message: 'Invalid Host: 127.0.0.1' },
         id: null,
       });
 
       process.env['REMBRIC_MCP_ALLOWED_HOSTS'] = '127.0.0.1:8787';
       const allowed = await POST(mcpRequest(initializeBody, { host: '127.0.0.1:8787' }), ctx);
       expect(allowed.status).toBe(200);
+    });
+
+    it('admits the host of a configured host:port entry on any port', async () => {
+      process.env['REMBRIC_MCP_ALLOWED_HOSTS'] = 'other.example, rembric.example.com:443';
+      for (const host of ['rembric.example.com:443', 'rembric.example.com']) {
+        const res = await POST(mcpRequest(initializeBody, { host }), ctx);
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it('refuses a rebinding request before authenticating it', async () => {
+      process.env['REMBRIC_MCP_ALLOWED_HOSTS'] = 'rembric.example.com';
+      process.env['REMBRIC_MCP_ALLOWED_ORIGINS'] = 'https://rembric.example.com';
+      const anonymous = (headers: Record<string, string>): Request =>
+        new Request(`${ORIGIN}/mcp`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            ...headers,
+          },
+          body: JSON.stringify(initializeBody),
+        });
+
+      const badHost = await POST(anonymous({ host: 'attacker.example' }), ctx);
+      expect(badHost.status).toBe(403);
+      expect(badHost.headers.get('www-authenticate')).toBeNull();
+
+      const badOrigin = await POST(
+        anonymous({ host: 'rembric.example.com', origin: 'https://attacker.example' }),
+        ctx,
+      );
+      expect(badOrigin.status).toBe(403);
+
+      const allowed = await POST(anonymous({ host: 'rembric.example.com' }), ctx);
+      expect(allowed.status).toBe(401);
     });
 
     it('control: with neither allow-list set, a request with no Origin/Host is untouched', async () => {
