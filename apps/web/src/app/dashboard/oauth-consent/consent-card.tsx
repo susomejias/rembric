@@ -13,6 +13,7 @@ export interface ConsentCardProps {
   clientName: string;
   redirectHost: string;
   grantedScope: string;
+  project: { slug: string; displayName: string | null } | null;
 }
 
 const SCOPE_COPY: Record<string, string> = {
@@ -22,7 +23,13 @@ const SCOPE_COPY: Record<string, string> = {
 
 const META_LABEL = 'font-mono text-[10px] tracking-[.16em] text-muted-foreground uppercase';
 
-export function ConsentCard({ blob, clientName, redirectHost, grantedScope }: ConsentCardProps) {
+export function ConsentCard({
+  blob,
+  clientName,
+  redirectHost,
+  grantedScope,
+  project,
+}: ConsentCardProps) {
   const access = resolveGrantedScope(grantedScope) === 'read:*' ? 'Read-only' : 'Read & write';
   const scopes = grantedScope.split(/\s+/).filter((scope) => scope.length > 0);
 
@@ -68,10 +75,27 @@ export function ConsentCard({ blob, clientName, redirectHost, grantedScope }: Co
         </ul>
       </section>
 
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        Project scope, if any, is bound by the connector path{' '}
-        <code className="font-mono text-foreground">/mcp/&lt;slug&gt;</code>.
-      </p>
+      <section className="flex flex-col gap-1">
+        <h2 className={META_LABEL}>Project</h2>
+        {project === null ? (
+          <>
+            <span className="text-sm font-semibold text-foreground">Unbound</span>
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              The token is not bound to a project: it can reach every project on this server.
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="text-sm font-semibold break-words text-foreground">
+              {project.displayName ?? project.slug}
+            </span>
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              The token can reach only this project, at{' '}
+              <code className="font-mono text-foreground">/mcp/{project.slug}</code>.
+            </span>
+          </>
+        )}
+      </section>
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <form action="/dashboard/oauth/consent" method="post" className="sm:flex-1">

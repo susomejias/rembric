@@ -37,7 +37,7 @@ export default async function OAuthConsentPage({
     );
   }
 
-  const { oauth } = getServices();
+  const { oauth, projects } = getServices();
   if (oauth === null) {
     return (
       <ConsentShell hl="Authorization" rest="Error.">
@@ -57,12 +57,24 @@ export default async function OAuthConsentPage({
     );
   }
 
+  const projectId = areq.projectId ?? null;
+  const project = projectId === null ? null : (projects.getById(projectId) ?? null);
+  if (projectId !== null && project === null) {
+    return (
+      <ConsentShell hl="Authorization" rest="Error.">
+        <ErrorNotice message="The project this authorization request is bound to no longer exists." />
+        <Lead>Return to the application and start the connection again.</Lead>
+      </ConsentShell>
+    );
+  }
+
   return (
     <ConsentCard
       blob={blob}
       clientName={client.clientName ?? areq.clientId}
       redirectHost={safeHost(areq.redirectUri)}
       grantedScope={grantedOAuthScope(areq.scope)}
+      project={project === null ? null : { slug: project.slug, displayName: project.displayName }}
     />
   );
 }
