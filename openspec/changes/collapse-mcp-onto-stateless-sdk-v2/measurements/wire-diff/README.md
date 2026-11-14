@@ -48,3 +48,4 @@ One line per shape, `same` or `DIFF`, with its catalogue number. For each `DIFF`
 
 - `base-vs-candidate-pr1.txt`: `wire-base` (detached at `origin/main`) against this branch at PR 1, whose server code is identical. 101 shapes, 0 differences, exit 0, 33.2 s.
 - `sensitivity-control.txt`: the same pair with the candidate started with `MAX_BODY_BYTES=2048 REMBRIC_MCP_ALLOWED_ORIGINS=https://other.example`. Exit 1, naming shape 062 (the `413` message names the 2048-byte limit), shape 064 (the allowed-`Origin` control answers `403`; `mcp-session-id`, `cache-control` and `x-accel-buffering` are reported absent) and shape 094, whose only change is the session-id ordinal shifted by 064 minting no session.
+- `base-vs-candidate-pr3.txt`: `wire-base` (detached at `origin/main`) against PR 3, the stateless handler and removals. 101 shapes, 57 differences, exit 1; each is classified against the proposal's "What is lost" table in `pr3-diff-classification.md`.
