@@ -71,7 +71,6 @@ export async function authenticate(input: {
     memberProjectIds: resolved.memberProjectIds,
     project,
     requestedSlug: pathSlug && pathSlug.length > 0 ? pathSlug : null,
-    mcpSessionId: null,
   };
 }
 

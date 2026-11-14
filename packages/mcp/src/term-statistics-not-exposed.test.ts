@@ -4,7 +4,6 @@ import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -43,7 +42,6 @@ function context(): RequestContext {
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: 'mcp-sess-term-stats',
   };
 }
 
@@ -60,7 +58,6 @@ beforeEach(() => {
   token = mintTestToken(db.handle, { scope: '*' }).token;
   const agentSessions = new AgentSessionsService(repos, db.handle.db);
   const relations = new RelationsService(repos, db.handle.db);
-  const router = new SessionRouter();
   const deps = {
     repos,
     memory,
@@ -68,7 +65,6 @@ beforeEach(() => {
     agentSessions,
     prompts: new PromptsService(repos, db.handle.db),
     relations,
-    router,
   };
   handlers = buildMemoryHandlers({ logInternalError, ...deps, orphanAfterMs: 86_400_000 });
   observability = buildObservabilityHandlers({

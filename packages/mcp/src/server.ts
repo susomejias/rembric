@@ -10,7 +10,6 @@ import type { PromptsService } from '@rembric/core';
 import type { RelationsService } from '@rembric/core';
 import type { CandidateOptions } from '@rembric/core';
 import type { UsageCounters } from '@rembric/core';
-import type { SessionRouter } from '@rembric/core';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
 import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
 import { runWithToolCallId } from '@rembric/core';
@@ -53,8 +52,6 @@ import {
   projectCurrentSchema,
   projectListOutput,
   projectListSchema,
-  projectUseOutput,
-  projectUseSchema,
 } from './project-tools.js';
 import {
   buildPromptHandlers,
@@ -73,7 +70,6 @@ import {
   suggestTopicKeyOutput,
   suggestTopicKeySchema,
 } from './relations-tools.js';
-import { markRefreshPending } from './roots-discovery.js';
 import {
   buildSessionHandlers,
   sessionEndOutput,
@@ -108,7 +104,6 @@ export interface CreateMcpServerOptions {
     content: string,
     projectId: string,
   ) => Promise<boolean>;
-  router: SessionRouter;
   repos: Repositories;
   doctor: () => DoctorReport;
   /** Fire-and-forget consolidation sweep, invoked after session start. */
@@ -231,13 +226,11 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     candidates: opts.candidates,
     embedNow: opts.embedNow,
     repos: opts.repos,
-    router: opts.router,
     projects: opts.projects,
     agentSessions: opts.agentSessions,
     prompts: opts.prompts,
     orphanAfterMs: opts.orphanAfterMs,
     usageCounters: opts.usageCounters,
-    getServer: () => server,
     logInternalError: opts.logInternalError,
   });
   registerTool(
@@ -305,9 +298,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   const sessionHandlers = buildSessionHandlers({
     agentSessions: opts.agentSessions,
     projects: opts.projects,
-    router: opts.router,
     sweep: opts.sweep,
-    getServer: () => server,
     logInternalError: opts.logInternalError,
   });
 
@@ -315,9 +306,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   const promptHandlers = buildPromptHandlers({
     prompts: opts.prompts,
     agentSessions: opts.agentSessions,
-    router: opts.router,
     projects: opts.projects,
-    getServer: () => server,
     logInternalError: opts.logInternalError,
   });
 
@@ -326,13 +315,11 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     memory: opts.memory,
     agentSessions: opts.agentSessions,
     repos: opts.repos,
-    router: opts.router,
     projects: opts.projects,
     doctor: opts.doctor,
     relations: opts.relations,
     candidates: opts.candidates,
     embedNow: opts.embedNow,
-    getServer: () => server,
     logInternalError: opts.logInternalError,
   });
 
@@ -340,7 +327,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_start',
     {
       description: withRedactionNote(
-        "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode/Pi providers POST to the sessions endpoint). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt, title, reused, agent }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session; `agent` is the resolved session's own attribution and, when `reused:true`, MAY differ from the `agent` you passed — it is never overwritten, so it reports whose session you are now writing into. Once a session is active on this connection, do NOT call this again — memory.save, memory.confirm_batch and memory.session_summary attach to it automatically.",
+        "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode/Pi providers POST to the sessions endpoint). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug; must name this connection's project, else scope_locked) }. Returns: { sessionId, scope, projectId, startedAt, title, reused, agent }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session; `agent` is the resolved session's own attribution and, when `reused:true`, MAY differ from the `agent` you passed — it is never overwritten, so it reports whose session you are now writing into. Once a session is active on this connection, do NOT call this again — memory.save, memory.confirm_batch and memory.session_summary attach to it automatically.",
       ),
       inputSchema: sessionStartSchema,
       outputSchema: sessionStartOutput,
@@ -376,7 +363,7 @@ Does NOT end the session — use memory.session_end for that.`,
     'memory.session_resume',
     {
       description:
-        "Return an already-closed session to active, so a resumed conversation reattaches to its original row instead of running unattributed or forking a second one. Call it when you are continuing a conversation whose Rembric session was ended or abandoned (the retirement sweep abandons idle sessions) and you know that session's id — never invent one. Args: { sessionId } — REQUIRED, with no fallback: an omitted id is rejected with invalid_input rather than guessed by recency. Returns: { ok: true, sessionId, status ('active'), startedAt, resumedAt (the new activity stamp; unchanged when the session was already active), previousStatus, previousEndedAt, title }. `previousStatus` and `previousEndedAt` report what this call discarded — `previousEndedAt` is NOT retained on the row afterwards, so this response is the only place it is ever reported. On success the session becomes this connection's session, so later memory.save calls attach to it with no sessionId argument. Resuming an already-active session succeeds and mutates nothing. Errors: session_not_found (unknown id, or a session belonging to another token or project), session_deleted (an operator soft-deleted it — ask them to undelete it).",
+        "Return an already-closed session to active, so a resumed conversation reattaches to its original row instead of running unattributed or forking a second one. Call it when you are continuing a conversation whose Rembric session was ended or abandoned (the retirement sweep abandons idle sessions) and you know that session's id — never invent one. Args: { sessionId } — REQUIRED, with no fallback: an omitted id is rejected with invalid_input rather than guessed by recency. Returns: { ok: true, sessionId, status ('active'), startedAt, resumedAt (the new activity stamp; unchanged when the session was already active), previousStatus, previousEndedAt, title }. `previousStatus` and `previousEndedAt` report what this call discarded — `previousEndedAt` is NOT retained on the row afterwards, so this response is the only place it is ever reported. Resuming binds nothing to this connection: later writes attach to it without a sessionId only while it is the sole active session, so pass this sessionId when another may be active. Resuming an already-active session succeeds and mutates nothing. Errors: session_not_found (unknown id, or a session belonging to another token or project), session_deleted (an operator soft-deleted it — ask them to undelete it).",
       inputSchema: sessionResumeSchema,
       outputSchema: sessionResumeOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Resume session'),
@@ -489,21 +476,8 @@ Does NOT end the session — use memory.session_end for that.`,
     repos: opts.repos,
     projects: opts.projects,
     agentSessions: opts.agentSessions,
-    router: opts.router,
-    getServer: () => server,
     logInternalError: opts.logInternalError,
   });
-  registerTool(
-    'project.use',
-    {
-      description:
-        'Activate a project for this MCP session by slug. By default, never creates and never switches mid-session. Pass autocreate:true to mint a new project (slug must match strict regex). Pass confirmSwitch:true to replace the current project (only allowed when no session is active — close it first via memory.session_summary). ASK THE USER before passing either flag.',
-      inputSchema: projectUseSchema,
-      outputSchema: projectUseOutput,
-      annotations: WRITE_ANNOTATIONS('Use project'),
-    },
-    projectHandlers.use,
-  );
   registerTool(
     'project.list',
     {
@@ -518,8 +492,7 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'project.current',
     {
-      description:
-        'Report the project active in this session (slug, projectId, source) plus any pending suggestedSlugs surfaced by roots-based discovery.',
+      description: 'Report the project active in this session (slug, projectId, source).',
       inputSchema: projectCurrentSchema,
       outputSchema: projectCurrentOutput,
       annotations: READ_ANNOTATIONS('Current project'),
@@ -530,10 +503,8 @@ Does NOT end the session — use memory.session_end for that.`,
   // ── Relations tools (judgment graph) ──────────────────────────────
   const relationsHandlers = buildRelationsHandlers({
     relations: opts.relations,
-    router: opts.router,
     projects: opts.projects,
     repos: opts.repos,
-    getServer: () => server,
     logInternalError: opts.logInternalError,
   });
   registerTool(
@@ -573,10 +544,6 @@ Does NOT end the session — use memory.session_end for that.`,
   );
 
   serveToolCalls(server, tools);
-
-  server.server.setNotificationHandler('notifications/roots/list_changed', () => {
-    markRefreshPending(server);
-  });
 
   return server;
 }

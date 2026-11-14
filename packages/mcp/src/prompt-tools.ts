@@ -1,9 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { type PromptsService, RedactionTally } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
-import type { SessionRouter } from '@rembric/core';
 import { type Scope } from '@rembric/db';
 import { z } from 'zod';
 
@@ -71,10 +69,7 @@ export const searchPromptsOutput = {
 export interface PromptToolDeps extends ErrorReportingDeps {
   prompts: PromptsService;
   agentSessions: AgentSessionsService;
-  router: SessionRouter;
   projects: ProjectsService;
-  /** Set by `createMcpServer` after construction to enable roots discovery. */
-  getServer?: () => McpServer;
 }
 
 export function buildPromptHandlers(deps: PromptToolDeps) {

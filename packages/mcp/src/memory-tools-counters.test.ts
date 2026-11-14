@@ -6,7 +6,6 @@ import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { UsageCounters } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Project, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -43,7 +42,6 @@ function fakeContext(scope: TokenScope): RequestContext {
     memberProjectIds: [],
     project: projectA,
     requestedSlug: projectA?.slug ?? null,
-    mcpSessionId: null,
   };
 }
 
@@ -61,7 +59,6 @@ beforeEach(() => {
     agentSessions: new AgentSessionsService(repos, db.handle.db),
     prompts: new PromptsService(repos, db.handle.db),
     relations: new RelationsService(repos, db.handle.db),
-    router: new SessionRouter(),
     usageCounters: counters,
   });
   projectA = projects.create({ slug: 'counter-test' });

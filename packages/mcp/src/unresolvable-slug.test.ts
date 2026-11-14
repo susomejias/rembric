@@ -5,7 +5,6 @@ import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   createRepositories,
   memory as memoryTable,
@@ -38,7 +37,6 @@ let memory: MemoryService;
 let agentSessions: AgentSessionsService;
 let prompts: PromptsService;
 let relations: RelationsService;
-let router: SessionRouter;
 let adminToken: Token;
 let realProject: Project;
 let defaultProjectId: string;
@@ -63,7 +61,6 @@ beforeEach(() => {
   agentSessions = new AgentSessionsService(repos, db.handle.db);
   prompts = new PromptsService(repos, db.handle.db);
   relations = new RelationsService(repos, db.handle.db);
-  router = new SessionRouter();
   adminToken = mintTestToken(db.handle, { scope: ADMIN }).token;
   realProject = projects.create({ slug: 'rembric' });
   defaultProjectId = defaultProject(db.handle).id;
@@ -82,7 +79,6 @@ function ctxFor(overrides: Partial<RequestContext> = {}): RequestContext {
     memberProjectIds: [],
     project: null,
     requestedSlug: UNRESOLVABLE,
-    mcpSessionId: 'mcp-sess-unresolvable',
     ...overrides,
   };
 }
@@ -104,7 +100,6 @@ function memoryHandlers() {
     memory,
     relations,
     repos,
-    router,
     projects,
     agentSessions,
     prompts,
@@ -154,7 +149,6 @@ describe('writes on an unresolvable slug insert nothing', () => {
       memory,
       agentSessions,
       repos,
-      router,
       projects,
       doctor: () => DOCTOR,
       relations,
@@ -190,7 +184,6 @@ describe('writes on an unresolvable slug insert nothing', () => {
       logInternalError,
       prompts,
       agentSessions,
-      router,
       projects,
     });
     const r = await runWithContext(ctxFor(), () =>
@@ -204,7 +197,7 @@ describe('writes on an unresolvable slug insert nothing', () => {
   });
 
   it('memory.session_start is refused and opens no session in the default project', async () => {
-    const handlers = buildSessionHandlers({ logInternalError, agentSessions, projects, router });
+    const handlers = buildSessionHandlers({ logInternalError, agentSessions, projects });
     const r = await runWithContext(ctxFor(), () =>
       Promise.resolve(handlers.sessionStart({ agent: 'probe' })),
     );
@@ -228,13 +221,12 @@ describe('the refusal names candidate slugs', () => {
 });
 
 describe('the refusal does not brick the connection', () => {
-  it('project.current, project.list, memory.about and project.use all still work', async () => {
+  it('project.current and project.list still work, and the refusal points at the dashboard', async () => {
     const projectTools = buildProjectHandlers({
       logInternalError,
       repos,
       projects,
       agentSessions,
-      router,
     });
     const current = await runWithContext(ctxFor(), () => Promise.resolve(projectTools.current({})));
     expect(decode(current).isError).toBe(false);
@@ -251,12 +243,14 @@ describe('the refusal does not brick the connection', () => {
     expect(real, `project.list has no entry for ${realProject.slug}`).toBeDefined();
     expect(real?.activeMemoryCount).toBe(1);
 
-    const used = await runWithContext(ctxFor(), () =>
-      Promise.resolve(projectTools.use({ slug: UNRESOLVABLE, autocreate: true })),
+    const refused = await runWithContext(ctxFor(), () =>
+      Promise.resolve(memoryHandlers().search({ query: 'tabs' })),
     );
-    const { isError, body } = decode(used);
-    expect(isError).toBe(false);
-    expect(body.created).toBe(true);
+    const { isError, body } = decode(refused);
+    expect(isError).toBe(true);
+    expect(body.message).toBe(
+      `project '${UNRESOLVABLE}' does not exist; create it from the dashboard`,
+    );
   });
 
   it('project.current on an unresolvable slug projects no project data at all', async () => {
@@ -265,7 +259,6 @@ describe('the refusal does not brick the connection', () => {
       repos,
       projects,
       agentSessions,
-      router,
     });
     const pinnedToOther = mintTestToken(db.handle, {
       project: realProject,
@@ -281,33 +274,7 @@ describe('the refusal does not brick the connection', () => {
       slug: null,
       projectId: null,
       source: 'url-path',
-      suggestedSlugs: [],
     });
-  });
-
-  it('a scope-resolving tool succeeds in the new project after that project.use', async () => {
-    const projectTools = buildProjectHandlers({
-      logInternalError,
-      repos,
-      projects,
-      agentSessions,
-      router,
-    });
-    await runWithContext(ctxFor(), () =>
-      Promise.resolve(projectTools.use({ slug: UNRESOLVABLE, autocreate: true })),
-    );
-    const minted = projects.findBySlug(UNRESOLVABLE);
-    expect(minted).toBeDefined();
-    const inScope = memory.save(
-      { type: 'project', title: 'row in the minted project', content: 'row in the minted project' },
-      projectScope(minted?.id ?? ''),
-    );
-    const r = await runWithContext(ctxFor({ project: minted ?? null }), () =>
-      Promise.resolve(memoryHandlers().search({ query: 'minted' })),
-    );
-    const { isError, body } = decode(r);
-    expect(isError).toBe(false);
-    expect((body.memories as { id: string }[]).map((m) => m.id)).toContain(inScope.id);
   });
 });
 
@@ -323,19 +290,14 @@ describe('error messages name only reachable remedies', () => {
   });
 
   it('the refusal a path-scoped connection can still produce names no scope', async () => {
-    const projectTools = buildProjectHandlers({
-      logInternalError,
-      repos,
-      projects,
-      agentSessions,
-      router,
-    });
+    const sessionTools = buildSessionHandlers({ logInternalError, agentSessions, projects });
     const r = await runWithContext(
       ctxFor({ project: realProject, requestedSlug: realProject.slug }),
-      () => Promise.resolve(projectTools.use({ slug: 'somewhere-else', autocreate: true })),
+      () => Promise.resolve(sessionTools.sessionStart({ project: 'somewhere-else' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
+    expect(body.code).toBe('scope_locked');
     const message = body.message as string;
     expect(message).toContain('rembric');
     expect(message).not.toMatch(/global|user-wide/i);
@@ -349,14 +311,13 @@ describe('error messages name only reachable remedies', () => {
     expect(instructions).not.toMatch(/separate MCP connection|second connection/i);
   });
 
-  it('a project-pinned token denied a read on the default project is told to activate its own', async () => {
+  it('a project-pinned token denied a read on the default project is told the URL of its own', async () => {
     const pinned = mintTestToken(db.handle, { project: realProject, access: 'write' }).token;
     const r = await runWithContext(
       ctxFor({
         token: pinned,
         scope: `project:${realProject.id}`,
         requestedSlug: null,
-        mcpSessionId: 'mcp-sess-pinned',
       }),
       () => Promise.resolve(memoryHandlers().search({ query: 'tabs' })),
     );
@@ -364,83 +325,79 @@ describe('error messages name only reachable remedies', () => {
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
     const message = body.message as string;
-    expect(message).toContain('project.use');
-    expect(message).toContain('rembric');
+    expect(message).toContain("reconnect at '/mcp/rembric'");
+    expect(message).not.toContain('project.use');
   });
 
-  it('a read:* token denied a write is not told to call project.use', async () => {
+  it('a read:* token denied a write is not told to reconnect', async () => {
     const readOnly = mintTestToken(db.handle, { scope: 'read:*' }).token;
     const r = await runWithContext(
       ctxFor({
         token: readOnly,
         scope: 'read:*',
         requestedSlug: null,
-        mcpSessionId: 'mcp-sess-readonly',
       }),
       () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    expect(body.message as string).not.toContain('project.use');
+    expect(body.message as string).not.toContain('reconnect at');
   });
 
-  it('a token pinned to another project IS told to activate it on a project-scope denial', async () => {
+  it('a token pinned to another project IS told its URL on a project-scope denial', async () => {
     const other = projects.create({ slug: 'other-project' });
     const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
-    router.setActiveProject(pinned.id, 'mcp-sess-cross', realProject.id, 'tool-explicit');
     const r = await runWithContext(
       ctxFor({
         token: pinned,
         scope: `read:project:${other.id}`,
         requestedSlug: null,
-        mcpSessionId: 'mcp-sess-cross',
       }),
       () => Promise.resolve(memoryHandlers().search({ query: 'tabs' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    // The denial names the project it refused; the remedy names the token's pin.
-    expect(body.message as string).toContain(realProject.id);
-    expect(body.message as string).toContain("project.use({slug: 'other-project'})");
+    expect(body.message as string).toContain(defaultProjectId);
+    expect(body.message as string).toContain("reconnect at '/mcp/other-project'");
+    expect(body.message as string).not.toContain('project.use');
   });
 
-  it('a token denied an action on its OWN pinned project is not told to activate it', async () => {
-    const pinned = mintTestToken(db.handle, { project: realProject, access: 'read' }).token;
-    router.setActiveProject(pinned.id, 'mcp-sess-own', realProject.id, 'tool-explicit');
+  it('a token denied an action on its OWN pinned project is not told to reconnect', async () => {
+    const home = projects.getById(defaultProjectId);
+    if (!home) throw new Error('fixture: default project missing');
+    const pinned = mintTestToken(db.handle, { project: home, access: 'read' }).token;
     const r = await runWithContext(
       ctxFor({
         token: pinned,
-        scope: `read:project:${realProject.id}`,
+        scope: `read:project:${home.id}`,
         requestedSlug: null,
-        mcpSessionId: 'mcp-sess-own',
       }),
       () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    expect(body.message as string).not.toContain('project.use');
+    expect(body.message as string).not.toContain('reconnect at');
   });
 
-  it('a legacy token whose scope carries a slug is told to activate that slug', async () => {
+  it('a legacy token whose scope carries a slug is told that slug’s URL', async () => {
     const r = await runWithContext(
       ctxFor({
         scope: 'read:project:legacy-slug',
         requestedSlug: null,
-        mcpSessionId: 'mcp-sess-legacy',
       }),
       () => Promise.resolve(memoryHandlers().save({ type: 'user', title: 't', content: 'c' })),
     );
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    expect(body.message as string).toContain("project.use({slug: 'legacy-slug'})");
+    expect(body.message as string).toContain("reconnect at '/mcp/legacy-slug'");
     expect(body.message as string).not.toContain('undefined');
   });
 
-  it('a pinned token denied a read on a path-scoped connection is not told to call project.use', async () => {
+  it('a pinned token denied a read on a path-scoped connection is not told to reconnect', async () => {
     const other = projects.create({ slug: 'other-project' });
     const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
     const r = await runWithContext(
@@ -455,7 +412,7 @@ describe('error messages name only reachable remedies', () => {
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    expect(body.message as string).not.toContain('project.use');
+    expect(body.message as string).not.toContain('reconnect at');
   });
 });
 
@@ -496,7 +453,6 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
 
 const EXEMPT: Record<string, Record<string, unknown>> = {
   'memory.about': {},
-  'project.use': { slug: UNRESOLVABLE, autocreate: true },
   'project.list': {},
   'project.current': {},
 };
@@ -512,7 +468,6 @@ describe('every registered scope-sensitive tool refuses an unresolvable slug', (
       prompts,
       relations,
       candidates: { perSaveMax: 5 },
-      router,
       repos,
       doctor: () => DOCTOR,
       requestedSlug: UNRESOLVABLE,
@@ -551,4 +506,25 @@ describe('every registered scope-sensitive tool refuses an unresolvable slug', (
     );
     expect(decode(result).isError).toBe(false);
   });
+
+  it.each(['projects', ADMIN] as const)(
+    'no tool creates the named project for a %s token',
+    async (scope) => {
+      const member = projects.create({ slug: 'set-member' });
+      const memberProjectIds = scope === ADMIN ? [] : [realProject.id, member.id];
+      const token =
+        scope === ADMIN
+          ? adminToken
+          : mintTestToken(db.handle, { projects: [realProject, member], access: 'write' }).token;
+      const ctx = ctxFor({ token, scope, memberProjectIds });
+      const before = projects.list(true).length;
+      for (const name of [...Object.keys(MINIMAL_ARGS), ...Object.keys(EXEMPT)]) {
+        const args: Record<string, unknown> = { ...MINIMAL_ARGS[name], ...EXEMPT[name] };
+        if (name === 'memory.session_start') args.project = UNRESOLVABLE;
+        await runWithContext(ctx, () => client.callTool({ name, arguments: args }));
+      }
+      expect(projects.findBySlug(UNRESOLVABLE)).toBeUndefined();
+      expect(projects.list(true)).toHaveLength(before);
+    },
+  );
 });

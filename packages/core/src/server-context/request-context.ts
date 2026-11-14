@@ -8,7 +8,6 @@ export interface RequestContext extends TokenReach {
   token: Token;
   project: Project | null;
   requestedSlug: string | null;
-  mcpSessionId: string | null;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();

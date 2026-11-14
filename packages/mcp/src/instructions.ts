@@ -18,8 +18,7 @@ memory.about`;
 
 const PATH_SCOPED_NOTE = (slug: string) => `\n\nproject '${slug}'.`;
 
-// Names no retired scope; confirmSwitch is documented in project.use's description.
-const UNSCOPED_NOTE = `\n\nProject always active: roots or default project; project.use to switch.`;
+const UNSCOPED_NOTE = `\n\nProject always active: the default project; reach another at /mcp/<slug>.`;
 
 export function buildInstructions(ctx: InstructionsContext): string {
   return ctx.requestedSlug ? BASE + PATH_SCOPED_NOTE(ctx.requestedSlug) : BASE + UNSCOPED_NOTE;

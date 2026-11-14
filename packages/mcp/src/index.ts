@@ -8,8 +8,6 @@ export * from './project-tools.js';
 export * from './prompt-tools.js';
 export * from './relations-tools.js';
 export * from './result.js';
-export * from './roots-discovery.js';
 export * from './server.js';
 export * from './session-tools.js';
 export * from './topic-key.js';
-export * from './transport.js';

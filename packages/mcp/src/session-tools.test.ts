@@ -2,7 +2,6 @@ import { AgentSessionsService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   agentSessions as agentSessionsTable,
   createRepositories,
@@ -26,7 +25,6 @@ let tokens: TokensService;
 let adminToken: Token;
 let handlers: ReturnType<typeof buildSessionHandlers>;
 let defaultProjectId: string;
-let router: SessionRouter;
 
 function makeContext(): RequestContext {
   return {
@@ -35,7 +33,6 @@ function makeContext(): RequestContext {
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: null,
   };
 }
 
@@ -55,14 +52,13 @@ beforeEach(() => {
   projects = new ProjectsService(createRepositories(db.handle.db));
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
   tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
-  router = new SessionRouter();
   tokens.bootstrapAdmin('session-tools-test-admin-zzz');
   adminToken = db.handle.db
     .select()
     .from(tokensSchema)
     .where(eq(tokensSchema.name, 'admin'))
     .get()!;
-  handlers = buildSessionHandlers({ logInternalError, agentSessions, projects, router });
+  handlers = buildSessionHandlers({ logInternalError, agentSessions, projects });
 });
 
 afterEach(() => db.cleanup());
@@ -167,38 +163,34 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     expect(rowsForPair()).toHaveLength(3);
   });
 
-  it('the transport pin answers session_start even when a fresher live row exists (binding precedes lookups)', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-start' };
+  it('a resumed row binds nothing: session_start adopts the fresher live row, not the resumed one', async () => {
+    const ctx = makeContext();
     const stale = startSession('pi');
     backdate(stale.id, 89);
-    startSession('other');
+    const other = startSession('other');
     await runWithContext(ctx, () => handlers.sessionResume({ sessionId: stale.id }));
 
     const r = await runWithContext(ctx, () => handlers.sessionStart({}));
     const out = parseText<{ sessionId: string; reused: boolean }>(r);
     expect(out.reused).toBe(true);
-    expect(out.sessionId).toBe(stale.id);
+    expect(out.sessionId).toBe(other.id);
     expect(rowsForPair()).toHaveLength(2);
   });
 
-  it('a terminal bound row is not adopted; the binding is re-pointed to the resolved row, never cleared', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-fallthrough' };
+  it('a row resumed and then ended is not adopted by a later session_start', async () => {
+    const ctx = makeContext();
     const ended = startSession('ended');
     await runWithContext(ctx, () => handlers.sessionResume({ sessionId: ended.id }));
-    expect(router.get(adminToken.id, 'transport-fallthrough')?.rembricSessionId).toBe(ended.id);
     agentSessions.end(ended.id, { tokenId: adminToken.id });
 
     const r = await runWithContext(ctx, () => handlers.sessionStart({}));
     const out = parseText<{ sessionId: string; reused: boolean }>(r);
     expect(out.sessionId).not.toBe(ended.id);
     expect(out.reused).toBe(false);
-    expect(router.get(adminToken.id, 'transport-fallthrough')?.rembricSessionId).toBe(
-      out.sessionId,
-    );
   });
 
-  it('a soft-deleted bound row is not adopted', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-deleted' };
+  it('a soft-deleted resumed row is not adopted', async () => {
+    const ctx = makeContext();
     const s = startSession('deleted');
     await runWithContext(ctx, () => handlers.sessionResume({ sessionId: s.id }));
     agentSessions.softDelete(s.id, { adminBypass: true });
@@ -207,6 +199,71 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     const out = parseText<{ sessionId: string; reused: boolean }>(r);
     expect(out.sessionId).not.toBe(s.id);
     expect(out.reused).toBe(false);
+  });
+});
+
+describe('memory.session_start({project}) asserts the connection project', () => {
+  const sessionCount = (): number => db.handle.db.select().from(agentSessionsTable).all().length;
+
+  it.each([
+    ['an existing other project', 'other-existing'],
+    ['an unknown slug', 'no-such-slug'],
+  ])('path-less: naming %s is scope_locked, naming the default slug', async (_label, slug) => {
+    projects.create({ slug: 'other-existing' });
+    const defaultSlug = projects.getDefault().slug;
+    const before = projects.list(true).length;
+
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionStart({ agent: 'probe', project: slug }),
+    );
+    const out = parseText<{ code: string; message: string }>(r);
+    expect(out.code).toBe('scope_locked');
+    expect(out.message).toBe(
+      `connection resolves to the default project '${defaultSlug}'; cannot start a session for project '${slug}'`,
+    );
+    expect(sessionCount()).toBe(0);
+    expect(projects.list(true)).toHaveLength(before);
+  });
+
+  it('path-scoped: naming another project is scope_locked, naming the bound slug', async () => {
+    const foo = projects.create({ slug: 'foo' });
+    projects.create({ slug: 'bar' });
+    const ctx: RequestContext = { ...makeContext(), project: foo, requestedSlug: 'foo' };
+
+    const r = await runWithContext(ctx, () => handlers.sessionStart({ project: 'bar' }));
+    const out = parseText<{ code: string; message: string }>(r);
+    expect(out.code).toBe('scope_locked');
+    expect(out.message).toBe(
+      "connection is path-scoped to 'foo'; cannot start a session for project 'bar'",
+    );
+    expect(sessionCount()).toBe(0);
+  });
+
+  it('control: naming the resolved project starts the session exactly as omitting it', async () => {
+    const foo = projects.create({ slug: 'foo' });
+    const atFoo: RequestContext = { ...makeContext(), project: foo, requestedSlug: 'foo' };
+    const scoped = parseText<{ projectId: string; reused: boolean }>(
+      await runWithContext(atFoo, () => handlers.sessionStart({ agent: 'a', project: 'foo' })),
+    );
+    expect(scoped).toMatchObject({ projectId: foo.id, reused: false });
+
+    const defaultSlug = projects.getDefault().slug;
+    const pathless = parseText<{ projectId: string; reused: boolean }>(
+      await runWithContext(makeContext(), () =>
+        handlers.sessionStart({ agent: 'a', project: defaultSlug }),
+      ),
+    );
+    expect(pathless).toMatchObject({ projectId: defaultProjectId, reused: false });
+    expect(sessionCount()).toBe(2);
+  });
+
+  it('activates nothing: a later call without project still resolves to the default project', async () => {
+    projects.create({ slug: 'other-existing' });
+    await runWithContext(makeContext(), () => handlers.sessionStart({ project: 'other-existing' }));
+    const out = parseText<{ projectId: string }>(
+      await runWithContext(makeContext(), () => handlers.sessionStart({})),
+    );
+    expect(out.projectId).toBe(defaultProjectId);
   });
 });
 
@@ -234,25 +291,21 @@ describe('memory.session_summary on a session the sweep already abandoned', () =
     expect(after?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
   });
 
-  it('session_end on an abandoned row keeps the transport binding', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-1' };
+  it('session_end on an abandoned row succeeds and leaves it abandoned', async () => {
+    const ctx = makeContext();
     const s = startSession();
-    router.setActiveSession(adminToken.id, 'transport-1', s.id);
     agentSessions.markAbandoned(s.id, { adminBypass: true });
 
     const r = await runWithContext(ctx, () => handlers.sessionEnd({ sessionId: s.id }));
     expect(parseText<{ ok: boolean }>(r).ok).toBe(true);
-    expect(router.get(adminToken.id, 'transport-1')?.rembricSessionId).toBe(s.id);
     expect(agentSessions.getById(s.id)?.status).toBe('abandoned');
   });
 
-  it('session_end on an active row still clears the binding', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-2' };
+  it('session_end on an active row ends it', async () => {
+    const ctx = makeContext();
     const s = startSession();
-    router.setActiveSession(adminToken.id, 'transport-2', s.id);
 
     await runWithContext(ctx, () => handlers.sessionEnd({ sessionId: s.id }));
-    expect(router.get(adminToken.id, 'transport-2')?.rembricSessionId).toBeNull();
     expect(agentSessions.getById(s.id)?.status).toBe('ended');
   });
 
@@ -424,23 +477,29 @@ describe('memory.session_resume', () => {
     expect(out.status).toBe('active');
   });
 
-  it('pins the transport binding even with a second active session in the same scope', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-resume' };
+  it('binds nothing to the connection: with a second active session, a write must name it', async () => {
+    const ctx = makeContext();
     const s = startSession();
     agentSessions.end(s.id, { tokenId: adminToken.id });
     const concurrent = startSession('concurrent');
     const transport = { tokenId: adminToken.id, projectId: defaultProjectId };
-    expect(router.get(adminToken.id, 'transport-resume')?.rembricSessionId).toBeUndefined();
     expect(agentSessions.findActiveForTransport(transport)?.id).toBe(concurrent.id);
 
     await runWithContext(ctx, () => handlers.sessionResume({ sessionId: s.id }));
 
     expect(agentSessions.findActiveForTransport(transport)).toBeNull();
-    expect(router.get(adminToken.id, 'transport-resume')?.rembricSessionId).toBe(s.id);
+    const unnamed = await runWithContext(ctx, () =>
+      handlers.sessionSummary({ summary: 'unnamed', title: 'unnamed' }),
+    );
+    expect(parseText<{ code?: string }>(unnamed).code).toBe('session_not_found');
+    const named = await runWithContext(ctx, () =>
+      handlers.sessionSummary({ sessionId: s.id, summary: 'named', title: 'named' }),
+    );
+    expect(parseText<{ sessionId: string }>(named).sessionId).toBe(s.id);
   });
 
-  it('re-pins an already-active session without mutating the row', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-noop' };
+  it('resumes an already-active session without mutating the row', async () => {
+    const ctx = makeContext();
     const s = startSession();
     const before = agentSessions.getById(s.id);
 
@@ -450,13 +509,12 @@ describe('memory.session_resume', () => {
     expect(out.ok).toBe(true);
     expect(out.previousStatus).toBe('active');
     expect(out.previousEndedAt).toBeNull();
-    expect(router.get(adminToken.id, 'transport-noop')?.rembricSessionId).toBe(s.id);
     expect(agentSessions.getById(s.id)?.lastActivityAt?.getTime()).toBe(
       before?.lastActivityAt?.getTime(),
     );
   });
 
-  it('masks a session in another project as session_not_found and pins nothing', async () => {
+  it('masks a session in another project as session_not_found', async () => {
     const mine = projects.create({ slug: 'resume-mine' });
     const theirs = projects.create({ slug: 'resume-theirs' });
     const s = agentSessions.start({ tokenId: adminToken.id, projectId: theirs.id, agent: 'x' });
@@ -466,17 +524,15 @@ describe('memory.session_resume', () => {
       ...makeContext(),
       project: mine,
       requestedSlug: 'resume-mine',
-      mcpSessionId: 'transport-cross',
     };
     const r = await runWithContext(ctx, () => handlers.sessionResume({ sessionId: s.id }));
 
     expect(parseText<ResumeResponse>(r).code).toBe('session_not_found');
     expect(agentSessions.getById(s.id)?.status).toBe('abandoned');
-    expect(router.get(adminToken.id, 'transport-cross')?.rembricSessionId).toBeUndefined();
   });
 
-  it('refuses a soft-deleted session and pins nothing', async () => {
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-deleted' };
+  it('refuses a soft-deleted session', async () => {
+    const ctx = makeContext();
     const s = startSession();
     agentSessions.end(s.id, { tokenId: adminToken.id });
     agentSessions.softDelete(s.id, { adminBypass: true });
@@ -490,7 +546,6 @@ describe('memory.session_resume', () => {
     expect(after?.endedAt?.getTime()).toBe(before?.endedAt?.getTime());
     expect(after?.lastActivityAt?.getTime()).toBe(before?.lastActivityAt?.getTime());
     expect(after?.deletedAt?.getTime()).toBe(before?.deletedAt?.getTime());
-    expect(router.get(adminToken.id, 'transport-deleted')?.rembricSessionId).toBeUndefined();
   });
 
   it('masks another token’s session as session_not_found', async () => {
@@ -546,7 +601,7 @@ describe('session tools acting on a resumed session', () => {
     expect(sessionRowIds(adminToken.id, defaultProjectId)).toEqual([s.id]);
   });
 
-  it('memory.session_end writes a fresh ended_at on a resumed row and clears the binding', async () => {
+  it('memory.session_end writes a fresh ended_at on a resumed row', async () => {
     const ticks = [
       new Date('2026-01-01T00:00:00.000Z'),
       new Date('2026-01-01T01:00:00.000Z'),
@@ -563,9 +618,8 @@ describe('session tools acting on a resumed session', () => {
       logInternalError,
       agentSessions: sessions,
       projects,
-      router,
     });
-    const ctx: RequestContext = { ...makeContext(), mcpSessionId: 'transport-resume-end' };
+    const ctx = makeContext();
 
     const s = sessions.start({ tokenId: adminToken.id, projectId: defaultProjectId, agent: 'a' });
     tick = 1;
@@ -573,7 +627,6 @@ describe('session tools acting on a resumed session', () => {
     expect(firstEnd.endedAt?.getTime()).toBe(ticks[1]!.getTime());
     tick = 2;
     await runWithContext(ctx, () => clocked.sessionResume({ sessionId: s.id }));
-    expect(router.get(adminToken.id, 'transport-resume-end')?.rembricSessionId).toBe(s.id);
 
     tick = 3;
     const r = await runWithContext(ctx, () => clocked.sessionEnd({ sessionId: s.id }));
@@ -585,7 +638,6 @@ describe('session tools acting on a resumed session', () => {
     const after = sessions.getById(s.id);
     expect(after?.status).toBe('ended');
     expect(after?.endedAt?.getTime()).toBe(ticks[3]!.getTime());
-    expect(router.get(adminToken.id, 'transport-resume-end')?.rembricSessionId).toBeNull();
   });
 
   it('memory.session_summary replaces a final summary once the row is resumed, and not before', async () => {

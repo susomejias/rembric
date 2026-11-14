@@ -3,7 +3,6 @@ import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   createRepositories,
   memoryRelations,
@@ -178,7 +177,6 @@ function fakeContext(): RequestContext {
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: null,
   };
 }
 
@@ -202,7 +200,6 @@ function makeObservability(db: TestDb, vectorByContent?: Map<string, Buffer>) {
     memory,
     agentSessions,
     repos,
-    router: new SessionRouter(),
     projects,
     doctor: () => ({
       db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },

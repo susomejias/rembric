@@ -2,7 +2,6 @@ import { AgentSessionsService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   agentSessions as agentSessionsTable,
   createRepositories,
@@ -35,20 +34,18 @@ let handlers: ReturnType<typeof buildSessionHandlers>;
 let defaultProjectId: string;
 let nowMs: number;
 
-function makeContext(mcpSessionId: string | null = null): RequestContext {
+function makeContext(): RequestContext {
   return {
     token: adminToken,
     scope: SCOPE,
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId,
   };
 }
 
-/** The model calling memory.session_start (no args) on the given transport. */
-async function modelSessionStart(mcpSessionId: string | null = null) {
-  const r = await runWithContext(makeContext(mcpSessionId), () => handlers.sessionStart({}));
+async function modelSessionStart() {
+  const r = await runWithContext(makeContext(), () => handlers.sessionStart({}));
   const parsed = JSON.parse((r as McpTextResponse).content[0]?.text ?? '{}') as {
     sessionId: string;
     reused: boolean;
@@ -105,7 +102,6 @@ beforeEach(() => {
     logInternalError,
     agentSessions,
     projects,
-    router: new SessionRouter(),
     sweep: () => {
       agentSessions.abandonStale({ olderThanMs: ABANDON_AFTER });
     },
@@ -114,7 +110,7 @@ beforeEach(() => {
 
 afterEach(() => db.cleanup());
 
-describe('session_start resolution order: binding → fresh-unique → sole-active → mint', () => {
+describe('session_start resolution order: fresh-unique → sole-active → mint', () => {
   it('CONTROL: fresh unique active row is reused (probe sanity)', async () => {
     ensureHostRow(PI_SESSION_ID, 'pi');
     const r = await modelSessionStart();
@@ -123,55 +119,7 @@ describe('session_start resolution order: binding → fresh-unique → sole-acti
     expect(rowCount()).toBe(1);
   });
 
-  it('bound transport: zero ghosts before the sweep, one by-design mint after it, snowball dead', async () => {
-    const T = 'repro-transport';
-
-    // Day 1, 09:00 — the plugin registers the host uuid over HTTP.
-    ensureHostRow(PI_SESSION_ID, 'pi');
-    const first = await modelSessionStart(T);
-    expect(first.reused).toBe(true);
-    expect(first.sessionId).toBe(PI_SESSION_ID);
-
-    // 10:29 — 89 minutes idle, then the model calls again: the pin answers.
-    nowMs += 89 * MIN;
-    const afterIdle = await modelSessionStart(T);
-    expect(afterIdle.reused).toBe(true);
-    expect(afterIdle.sessionId).toBe(PI_SESSION_ID);
-    expect(rowCount()).toBe(1);
-
-    nowMs = Date.parse('2026-08-03T09:00:00Z');
-    agentSessions.abandonStale({ olderThanMs: ABANDON_AFTER });
-    const postSweep = await modelSessionStart(T);
-    expect(postSweep.reused).toBe(false);
-    expect(rowCount()).toBe(2);
-    const ghostId = postSweep.sessionId;
-
-    // The user reopens the same Pi conversation: ensure (idempotent) + /resume.
-    ensureHostRow(PI_SESSION_ID, 'pi');
-    agentSessions.resume(PI_SESSION_ID, { tokenId: adminToken.id });
-
-    const reusedIds: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      nowMs += 2 * MIN;
-      const r = await modelSessionStart(T);
-      reusedIds.push(`${r.sessionId.slice(0, 8)}(reused=${r.reused})`);
-      expect(r.reused).toBe(true);
-      expect(r.sessionId).toBe(ghostId);
-    }
-    expect(rowCount()).toBe(2);
-
-    // Quit: the plugin ends only its own row.
-    agentSessions.end(PI_SESSION_ID, { tokenId: adminToken.id });
-
-    const final = rows();
-
-    expect(final).toHaveLength(2);
-    expect(final.filter((r) => r.agent === 'pi')).toHaveLength(1);
-    expect(final.find((r) => r.id === PI_SESSION_ID.slice(0, 12))?.status).toBe('ended');
-    expect(final.filter((r) => r.agent === 'unknown')).toHaveLength(1);
-  });
-
-  it('binding-less transport: sole-active adoption kills the idle-gap ghosts; ≥2 live rows still mint', async () => {
+  it('sole-active adoption kills the idle-gap ghosts; ≥2 live rows still mint', async () => {
     ensureHostRow(PI_SESSION_ID, 'pi');
     const first = await modelSessionStart();
     expect(first.reused).toBe(true);

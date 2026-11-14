@@ -203,7 +203,7 @@ describe('authenticate — static + OAuth coexistence', () => {
     });
     expect(ctx.project?.id).toBe(proj.id);
     expect(ctx.requestedSlug).toBe('auth-proj');
-    expect(ctx.mcpSessionId).toBeNull();
+    expect(ctx).not.toHaveProperty('mcpSessionId');
   });
 
   it('leaves project null for a slug that names no project, instead of throwing', async () => {

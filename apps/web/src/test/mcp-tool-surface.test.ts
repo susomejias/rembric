@@ -12,7 +12,6 @@ type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { raw: { close: () => void }; close: () => void };
   __rembricMcpSurface?: { close?: () => Promise<void> };
-  __rembricSessionRouter?: unknown;
 };
 
 const globalForApp = globalThis as MutableGlobal;
@@ -22,7 +21,6 @@ function resetAppGlobals(): void {
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
-  delete globalForApp.__rembricSessionRouter;
 }
 
 const ORIGIN = 'http://127.0.0.1:8787';
@@ -39,6 +37,18 @@ const TOOL_CALL_ERROR_PARAMS: Record<string, { name: string; arguments?: unknown
   noArgsRequired: { name: 'memory.save' },
   invalid: { name: 'memory.save', arguments: { type: 'user', title: 't', content: 'c' } },
   extraKey: { name: 'memory.about', arguments: { bogus: 1 } },
+};
+
+interface Tool {
+  name: string;
+  description?: string;
+  outputSchema?: unknown;
+}
+
+const CHANGED_DESCRIPTIONS: Record<string, string> = {
+  'memory.session_start': "project? (slug; must name this connection's project, else scope_locked)",
+  'memory.session_resume': 'Resuming binds nothing to this connection',
+  'project.current': 'Report the project active in this session (slug, projectId, source).',
 };
 
 function canonicalJson(value: unknown): string {
@@ -81,7 +91,7 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  function post(body: unknown, sessionId?: string): Promise<Response> {
+  function post(body: unknown): Promise<Response> {
     return POST(
       new Request(`${ORIGIN}/mcp`, {
         method: 'POST',
@@ -89,7 +99,6 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
           authorization: `Bearer ${adminToken}`,
           'content-type': 'application/json',
           accept: 'application/json, text/event-stream',
-          ...(sessionId === undefined ? {} : { 'mcp-session-id': sessionId }),
         },
         body: JSON.stringify(body),
       }),
@@ -97,7 +106,7 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
     );
   }
 
-  async function openSession(): Promise<string | undefined> {
+  async function initialize(): Promise<void> {
     const init = await post({
       jsonrpc: '2.0',
       id: 1,
@@ -109,27 +118,59 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
       },
     });
     expect(init.status).toBe(200);
-    const sessionId = init.headers.get('mcp-session-id') ?? undefined;
+    expect(init.headers.get('mcp-session-id')).toBeNull();
     await init.text();
 
-    const initialized = await post(
-      { jsonrpc: '2.0', method: 'notifications/initialized' },
-      sessionId,
-    );
+    const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
     expect(initialized.status).toBe(202);
-    return sessionId;
   }
 
-  it('returns the 25 tools of the base byte-for-byte after key-order normalization', async () => {
-    const sessionId = await openSession();
-    const list = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, sessionId);
+  it('returns the base tools minus project.use, changed only where the removals reach', async () => {
+    await initialize();
+    const list = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     expect(list.status).toBe(200);
     const { result } = await readJsonRpc(list);
+    const live = (result as { tools: Tool[] }).tools;
+    const byName = new Map(live.map((t) => [t.name, t]));
 
-    const base: unknown = JSON.parse(readFileSync(BASE_TOOLS_LIST, 'utf8'));
-    expect((result as { tools: unknown[] }).tools).toHaveLength(25);
-    expect(result).toEqual(base);
-    expect(canonicalJson(result)).toBe(canonicalJson(base));
+    const base = (JSON.parse(readFileSync(BASE_TOOLS_LIST, 'utf8')) as { tools: Tool[] }).tools;
+    expect(base).toHaveLength(25);
+    expect(live).toHaveLength(24);
+    expect(byName.has('project.use')).toBe(false);
+
+    const expected = base
+      .filter((t) => t.name !== 'project.use')
+      .map((t) => {
+        const changed = CHANGED_DESCRIPTIONS[t.name];
+        if (changed === undefined) return t;
+        expect(t.description).not.toBe(byName.get(t.name)?.description);
+        return { ...t, description: byName.get(t.name)?.description };
+      })
+      .map((t) => {
+        if (t.name !== 'project.current') return t;
+        const schema = t.outputSchema as {
+          properties: Record<string, unknown>;
+          required: string[];
+        };
+        const { suggestedSlugs: _dropped, ...properties } = schema.properties;
+        void _dropped;
+        return {
+          ...t,
+          outputSchema: {
+            ...schema,
+            properties,
+            required: schema.required.filter((r) => r !== 'suggestedSlugs'),
+          },
+        };
+      });
+    expect({ tools: live }).toEqual({ tools: expected });
+    expect(canonicalJson({ tools: live })).toBe(canonicalJson({ tools: expected }));
+
+    for (const [name, mustContain] of Object.entries(CHANGED_DESCRIPTIONS)) {
+      const description = byName.get(name)?.description ?? '';
+      expect(description).toContain(mustContain);
+      expect(description).not.toMatch(/roots|project\.use|suggestedSlugs/);
+    }
   });
 
   it.each(Object.keys(TOOL_CALL_ERROR_PARAMS))(
@@ -138,11 +179,13 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
       const base = (
         JSON.parse(readFileSync(BASE_TOOL_CALL_ERRORS, 'utf8')) as Record<string, unknown>
       )[shape];
-      const sessionId = await openSession();
-      const res = await post(
-        { jsonrpc: '2.0', id: 9, method: 'tools/call', params: TOOL_CALL_ERROR_PARAMS[shape] },
-        sessionId,
-      );
+      await initialize();
+      const res = await post({
+        jsonrpc: '2.0',
+        id: 9,
+        method: 'tools/call',
+        params: TOOL_CALL_ERROR_PARAMS[shape],
+      });
       expect(res.status).toBe(200);
       expect(await readJsonRpc(res)).toEqual(base);
     },

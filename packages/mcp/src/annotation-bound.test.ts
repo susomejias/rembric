@@ -47,7 +47,6 @@ function fakeContext(p: Project): RequestContext {
     memberProjectIds: [],
     project: p,
     requestedSlug: p.slug,
-    mcpSessionId: null,
   };
 }
 

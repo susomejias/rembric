@@ -184,12 +184,13 @@ describe('MCP initialize instructions', () => {
     expect(text).not.toMatch(/global|user-wide/i);
   });
 
-  it('tells an unscoped connection a project is always active, names the default project, and names no retired scope', () => {
+  it('tells an unscoped connection a project is always active, names the default project and the /mcp/<slug> way out, and names no retired scope or tool', () => {
     const text = buildInstructions({ requestedSlug: null });
     expect(text).toContain('always active');
     expect(text).toContain('default project');
-    expect(text).toContain('project.use');
-    expect(text).toContain('roots');
+    expect(text).toContain('/mcp/<slug>');
+    expect(text).not.toContain('project.use');
+    expect(text).not.toMatch(/roots/i);
     expect(text).not.toMatch(/global|user-wide/i);
   });
 

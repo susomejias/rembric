@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { TokensService, type TokenPair } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
@@ -28,7 +28,6 @@ type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { raw: { close: () => void }; close: () => void };
   __rembricMcpSurface?: { close?: () => Promise<void> };
-  __rembricSessionRouter?: unknown;
   __rembricDashboardSessions?: unknown;
 };
 
@@ -43,7 +42,6 @@ function resetAppGlobals(): void {
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
-  delete globalForApp.__rembricSessionRouter;
   delete globalForApp.__rembricDashboardSessions;
 }
 
@@ -106,78 +104,6 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
 
   const ctx = { params: Promise.resolve({}) };
 
-  it('refuses an unknown mcp-session-id with 404/-32001 before constructing anything', async () => {
-    const res = await POST(
-      mcpRequest(
-        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
-        { 'mcp-session-id': 'no-such-session-id' },
-      ),
-      ctx,
-    );
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error?: { code?: number } };
-    expect(body.error?.code).toBe(-32001);
-  });
-
-  it('control: a live mcp-session-id from a real initialize is unaffected', async () => {
-    const init = await POST(
-      mcpRequest({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'c', version: '0' },
-        },
-      }),
-      ctx,
-    );
-    expect(init.status).toBe(200);
-    const sessionId = init.headers.get('mcp-session-id');
-    expect(sessionId).toBeTruthy();
-
-    const list = await POST(
-      mcpRequest(
-        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
-        { 'mcp-session-id': sessionId ?? '' },
-      ),
-      ctx,
-    );
-    expect(list.status).toBe(200);
-  });
-
-  it('tears a live session down on DELETE, after which the session id is unknown', async () => {
-    const init = await POST(
-      mcpRequest({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'c', version: '0' },
-        },
-      }),
-      ctx,
-    );
-    const sessionId = init.headers.get('mcp-session-id');
-    if (sessionId === null) throw new Error('fixture: initialize did not establish a session');
-
-    const deleted = await DELETE(
-      mcpRequest(undefined, { 'mcp-session-id': sessionId }, 'DELETE'),
-      ctx,
-    );
-    expect(deleted.status).toBeLessThan(300);
-
-    const after = await POST(
-      mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { 'mcp-session-id': sessionId }),
-      ctx,
-    );
-    expect(after.status).toBe(404);
-    expect(((await after.json()) as { error?: { code?: number } }).error?.code).toBe(-32001);
-  });
-
   const initializeBody = {
     jsonrpc: '2.0',
     id: 1,
@@ -188,6 +114,87 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       clientInfo: { name: 'c', version: '0' },
     },
   };
+
+  async function rpcResult(res: Response): Promise<Record<string, unknown>> {
+    const text = await res.text();
+    const data = text.startsWith('{')
+      ? text
+      : (text
+          .split('\n')
+          .find((line) => line.startsWith('data: '))
+          ?.slice('data: '.length) ?? '');
+    const parsed = JSON.parse(data) as { result?: Record<string, unknown> };
+    if (parsed.result === undefined) throw new Error(`no JSON-RPC result in: ${text}`);
+    return parsed.result;
+  }
+
+  describe('one stateless handler for both eras', () => {
+    it('answers a 2025 initialize without minting an Mcp-Session-Id', async () => {
+      const res = await POST(mcpRequest(initializeBody), ctx);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('mcp-session-id')).toBeNull();
+      const result = await rpcResult(res);
+      expect(result['protocolVersion']).toBe('2025-06-18');
+    });
+
+    it('serves tools/list and tools/call on later requests that carry no session id', async () => {
+      await POST(mcpRequest(initializeBody), ctx);
+      const list = await POST(mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' }), ctx);
+      expect(list.status).toBe(200);
+      const tools = (await rpcResult(list))['tools'] as Array<{ name: string }>;
+      expect(tools.map((t) => t.name)).toContain('project.current');
+
+      const call = await POST(
+        mcpRequest({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'tools/call',
+          params: { name: 'project.current', arguments: {} },
+        }),
+        ctx,
+      );
+      expect(call.status).toBe(200);
+      const result = (await rpcResult(call)) as { isError?: boolean; structuredContent?: unknown };
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({ source: 'default' });
+    });
+
+    it('ignores an mcp-session-id the server never minted instead of answering 404/-32001', async () => {
+      const res = await POST(
+        mcpRequest(
+          { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+          { 'mcp-session-id': 'no-such-session-id' },
+        ),
+        ctx,
+      );
+      expect(res.status).toBe(200);
+      expect(Array.isArray((await rpcResult(res))['tools'])).toBe(true);
+    });
+
+    for (const path of [[], ['some-project']]) {
+      const at = path.length === 0 ? '/mcp' : `/mcp/${path.join('/')}`;
+      const pathCtx = { params: Promise.resolve(path.length === 0 ? {} : { path }) };
+
+      it(`answers GET on ${at} with 405 and opens no event stream`, async () => {
+        const res = await GET(
+          mcpRequest(undefined, { accept: 'text/event-stream' }, 'GET'),
+          pathCtx,
+        );
+        expect(res.status).toBe(405);
+        expect(res.headers.get('content-type') ?? '').not.toContain('text/event-stream');
+      });
+
+      it(`answers DELETE on ${at} with 405`, async () => {
+        const res = await DELETE(mcpRequest(undefined, {}, 'DELETE'), pathCtx);
+        expect(res.status).toBe(405);
+      });
+    }
+
+    it('control: the same bearer POSTs a 2025 request to the same endpoint successfully', async () => {
+      const res = await POST(mcpRequest({ jsonrpc: '2.0', id: 9, method: 'ping' }), ctx);
+      expect(res.status).toBe(200);
+    });
+  });
 
   describe('transport contract pinned before the SDK v2 collapse', () => {
     it('answers a request with no bearer with an RFC 6750 challenge naming the resource metadata', async () => {
@@ -229,36 +236,20 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       `);
     });
 
-    it('keeps the standalone GET stream alive with a comment frame', async () => {
-      const init = await POST(mcpRequest(initializeBody), ctx);
-      const sessionId = init.headers.get('mcp-session-id');
-      if (sessionId === null) throw new Error('fixture: initialize did not establish a session');
-
+    it('opens no standalone GET stream, so no keepalive frame is ever written', async () => {
       vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
       try {
-        const stream = await GET(
-          mcpRequest(
-            undefined,
-            { 'mcp-session-id': sessionId, accept: 'text/event-stream' },
-            'GET',
-          ),
-          ctx,
-        );
-        expect(stream.status).toBe(200);
-        expect(stream.headers.get('content-type')).toContain('text/event-stream');
-        const reader = stream.body!.getReader();
+        const res = await GET(mcpRequest(undefined, { accept: 'text/event-stream' }, 'GET'), ctx);
+        expect(res.status).toBe(405);
         vi.advanceTimersByTime(15_000);
-        const { value } = await reader.read();
-        expect(new TextDecoder().decode(value)).toBe(': keepalive\n\n');
-        await reader.cancel();
+        expect(await res.text()).not.toContain(': keepalive');
       } finally {
         vi.useRealTimers();
       }
-      await DELETE(mcpRequest(undefined, { 'mcp-session-id': sessionId }, 'DELETE'), ctx);
     });
   });
 
-  describe('2026-07-28 era negotiation', () => {
+  describe('2026-07-28 era served natively', () => {
     const MODERN = '2026-07-28';
     const envelope = {
       'io.modelcontextprotocol/protocolVersion': MODERN,
@@ -270,7 +261,32 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       error?: { code?: number; data?: { supported?: string[]; requested?: string } };
     };
 
-    it('refuses a server/discover probe with -32022 naming only 2025-era versions', async () => {
+    function routeFetch(url: string | URL, init?: RequestInit): Promise<Response> {
+      const rest = new URL(url).pathname
+        .split('/')
+        .filter((s) => s.length > 0)
+        .slice(1);
+      const request = new Request(url, init);
+      const routeCtx = { params: Promise.resolve(rest.length > 0 ? { path: rest } : {}) };
+      const method = request.method.toUpperCase();
+      const handler = method === 'GET' ? GET : method === 'DELETE' ? DELETE : POST;
+      return handler(request, routeCtx);
+    }
+
+    async function connect(mode: 'auto' | 'legacy'): Promise<Client> {
+      const transport = new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), {
+        fetch: routeFetch,
+        requestInit: { headers: { Authorization: `Bearer ${adminToken}` } },
+      });
+      const client = new Client(
+        { name: 'era-probe', version: '0.0.0' },
+        { versionNegotiation: { mode } },
+      );
+      await client.connect(transport);
+      return client;
+    }
+
+    it('answers a server/discover probe with a result instead of -32022', async () => {
       const res = await POST(
         mcpRequest(
           { jsonrpc: '2.0', id: 7, method: 'server/discover', params: { _meta: envelope } },
@@ -278,16 +294,14 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
         ),
         ctx,
       );
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as RpcError;
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as RpcError & { result?: { supportedVersions?: string[] } };
       expect(body.id).toBe(7);
-      expect(body.error?.code).toBe(-32022);
-      expect(body.error?.data?.requested).toBe(MODERN);
-      expect(body.error?.data?.supported).toEqual([...SUPPORTED_PROTOCOL_VERSIONS]);
-      expect(body.error?.data?.supported?.every((v) => v < MODERN)).toBe(true);
+      expect(body.error).toBeUndefined();
+      expect(body.result?.supportedVersions).toContain(MODERN);
     });
 
-    it('refuses a modern-era notification with the same -32022', async () => {
+    it('accepts a modern-era notification instead of refusing it with -32022', async () => {
       const res = await POST(
         mcpRequest(
           { jsonrpc: '2.0', method: 'notifications/cancelled', params: { _meta: envelope } },
@@ -295,11 +309,30 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
         ),
         ctx,
       );
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as RpcError;
-      expect(body.id).toBeNull();
-      expect(body.error?.code).toBe(-32022);
+      expect(res.status).toBe(202);
     });
+
+    for (const mode of ['auto', 'legacy'] as const) {
+      it(`a client negotiating in ${mode} mode connects and gets the same tools, then calls one`, async () => {
+        const client = await connect(mode);
+        try {
+          expect(client.getProtocolEra()).toBe(mode === 'auto' ? 'modern' : 'legacy');
+          const { tools } = await client.listTools();
+          const legacyList = await POST(
+            mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+            ctx,
+          );
+          const legacyTools = (await rpcResult(legacyList))['tools'] as Array<{ name: string }>;
+          expect(tools.map((t) => t.name)).toEqual(legacyTools.map((t) => t.name));
+
+          const current = await client.callTool({ name: 'project.current', arguments: {} });
+          expect(current.isError).not.toBe(true);
+          expect(current.structuredContent).toMatchObject({ source: 'default' });
+        } finally {
+          await client.close();
+        }
+      });
+    }
 
     it('control: a malformed modern request keeps the SDK rejection', async () => {
       const res = await POST(
@@ -536,32 +569,9 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
         ctx,
       );
       expect(init.status).toBe(200);
-      const sessionId = init.headers.get('mcp-session-id');
-      if (!sessionId) throw new Error('fixture: missing MCP session');
-      const headers = { 'mcp-session-id': sessionId, 'mcp-protocol-version': protocolVersion };
+      const headers = { 'mcp-protocol-version': protocolVersion };
       const selected = services.projects.create({ slug: `promotion-selected-${protocolVersion}` });
-      const pinned = await result(
-        await POST(
-          mcpRequestForToken(
-            target.plaintext,
-            {
-              jsonrpc: '2.0',
-              id: 3,
-              method: 'tools/call',
-              params: {
-                name: 'project.use',
-                arguments: { slug: selected.slug, confirmSwitch: true },
-              },
-            },
-            headers,
-          ),
-          ctx,
-        ),
-      );
-      expect(pinned.result.isError).not.toBe(true);
-      expect(JSON.parse(pinned.result.content[0]?.text ?? '')).toMatchObject({
-        projectId: selected.id,
-      });
+      const selectedCtx = { params: Promise.resolve({ path: [selected.slug] }) };
       const call = () =>
         POST(
           mcpRequestForToken(
@@ -581,7 +591,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
             },
             headers,
           ),
-          ctx,
+          selectedCtx,
         );
       async function result(response: Response) {
         expect(response.status).toBe(200);
@@ -623,7 +633,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
             },
             headers,
           ),
-          ctx,
+          selectedCtx,
         ),
       );
       expect(JSON.parse(current.result.content[0]?.text ?? '')).toMatchObject({
@@ -705,10 +715,9 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       const body = { ...initializeBody, params: { ...initializeBody.params, protocolVersion } };
       const init = await POST(mcpRequestForToken(target.plaintext, body), ctx);
       expect(init.status).toBe(200);
-      const sessionId = init.headers.get('mcp-session-id');
-      if (!sessionId) throw new Error('fixture: missing MCP session');
-      const headers = { 'mcp-session-id': sessionId, 'mcp-protocol-version': protocolVersion };
+      const headers = { 'mcp-protocol-version': protocolVersion };
       const selected = services.projects.create({ slug: `rotation-selected-${protocolVersion}` });
+      const selectedCtx = { params: Promise.resolve({ path: [selected.slug] }) };
       async function tool(secret: string, name: string, args: Record<string, unknown>) {
         const response = await POST(
           mcpRequestForToken(
@@ -721,7 +730,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
             },
             headers,
           ),
-          ctx,
+          selectedCtx,
         );
         expect(response.status).toBe(200);
         const text = await response.text();
@@ -737,9 +746,9 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
         expect(result.result.isError).not.toBe(true);
         return JSON.parse(result.result.content[0]?.text ?? '') as Record<string, unknown>;
       }
-      expect(
-        await tool(target.plaintext, 'project.use', { slug: selected.slug, confirmSwitch: true }),
-      ).toMatchObject({ projectId: selected.id });
+      expect(await tool(target.plaintext, 'project.current', {})).toMatchObject({
+        projectId: selected.id,
+      });
       expect((await POST(mcpRequestForToken(pair.accessToken, body), ctx)).status).toBe(200);
       function cookieSource(response: Response) {
         const cookie = response.headers
@@ -766,7 +775,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
               { jsonrpc: '2.0', id: 8, method: 'tools/list' },
               headers,
             ),
-            ctx,
+            selectedCtx,
           )
         ).status,
       ).toBe(401);

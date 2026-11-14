@@ -2,7 +2,6 @@ import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   createRepositories,
   memory,
@@ -46,7 +45,6 @@ function fakeContext(project: Project | null = null): RequestContext {
     memberProjectIds: [],
     project,
     requestedSlug: project?.slug ?? null,
-    mcpSessionId: null,
   };
 }
 
@@ -84,7 +82,6 @@ beforeEach(() => {
   handlers = buildRelationsHandlers({
     logInternalError,
     relations,
-    router: new SessionRouter(),
     projects: new ProjectsService(repos),
     repos,
   });

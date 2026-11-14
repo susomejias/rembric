@@ -1,61 +1,41 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import type { AgentSessionsService } from '@rembric/core';
 import type { ProjectsService, ProjectView } from '@rembric/core';
-import type { ProjectResolutionSource, SessionRouter } from '@rembric/core';
 import { DomainError } from '@rembric/core';
 import { sliceWithoutSplittingSurrogatePair } from '@rembric/core';
 import { isAuthorized, isProjectSetScope, pinnedProjectId } from '@rembric/core';
 import { getRequestContext, type RequestContext } from '@rembric/core';
-import { tryGetToolCallId } from '@rembric/core';
 import { projectScope, type Memory, type Scope, type SearchScope } from '@rembric/db';
 
-import { ensureRootsDiscoveryRun } from './roots-discovery.js';
-
 export interface ScopeResolutionDeps {
-  router?: SessionRouter;
   projects: ProjectsService;
-  getServer?: () => McpServer;
 }
+
+export type ProjectResolutionSource = 'url-path' | 'default';
 
 export interface EffectiveScope {
   scope: Scope;
-  project: { id: string; slug: string } | null;
+  project: { id: string; slug: string };
   source: ProjectResolutionSource;
 }
 
 export function unresolvableSlugError(slug: string, projects: ProjectsService): DomainError {
   return new DomainError(
     'project_not_found',
-    `project '${slug}' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})`,
+    `project '${slug}' does not exist; create it from the dashboard`,
     { suggestedSlugs: projects.findSimilarSlugs(slug) },
   );
 }
 
-export async function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
+export function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
+  return new Promise((resolve) => resolve(connectionScope(deps.projects)));
+}
+
+function connectionScope(projects: ProjectsService): EffectiveScope {
   const ctx = getRequestContext();
   if (ctx.project)
     return { scope: projectScope(ctx.project.id), project: ctx.project, source: 'url-path' };
-  if (ctx.requestedSlug !== null) throw unresolvableSlugError(ctx.requestedSlug, deps.projects);
-  if (!ctx.mcpSessionId || !deps.router) return defaultProjectScope(deps.projects);
-  if (deps.getServer) {
-    await ensureRootsDiscoveryRun(
-      { server: deps.getServer(), router: deps.router, projects: deps.projects },
-      {
-        tokenId: ctx.token.id,
-        mcpSessionId: ctx.mcpSessionId,
-        pathSlug: ctx.requestedSlug,
-        toolCallRequestId: tryGetToolCallId(),
-      },
-    );
-  }
-  const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
-  const project = entry?.projectId ? (deps.projects.getById(entry.projectId) ?? null) : null;
-  if (!entry || !project) return defaultProjectScope(deps.projects);
-  return {
-    scope: projectScope(project.id),
-    project,
-    source: entry.projectResolutionSource,
-  };
+  if (ctx.requestedSlug !== null) throw unresolvableSlugError(ctx.requestedSlug, projects);
+  return defaultProjectScope(projects);
 }
 
 function defaultProjectScope(projects: ProjectsService): EffectiveScope {
@@ -116,7 +96,6 @@ export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean
 }
 
 function remedyFor(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
-  // A path-scoped connection would have `project.use` refused as `scope_locked`.
   if (ctx.requestedSlug !== null) return '';
   const pinned = pinnedProjectId(ctx.scope);
   if (pinned !== null) return pinRemedy(pinned, scope, projects);
@@ -126,13 +105,9 @@ function remedyFor(ctx: RequestContext, scope: Scope, projects: ProjectsService)
 
 /** For a token pinned to one project and denied a DIFFERENT one. */
 function pinRemedy(pinned: string, scope: Scope, projects: ProjectsService): string {
-  // Re-activating the scope already active cannot change the answer.
   if (scope.projectId === pinned) return '';
   const slug = projects.getById(pinned)?.slug ?? pinned;
-  return (
-    `; this token is pinned to project '${slug}' — call project.use({slug: '${slug}'}) ` +
-    `or reconnect at '/mcp/${slug}'`
-  );
+  return `; this token is pinned to project '${slug}' — reconnect at '/mcp/${slug}'`;
 }
 
 function setRemedy(
@@ -150,7 +125,7 @@ function setRemedy(
   const named = slugs.map((slug) => `'${slug}'`).join(', ');
   return (
     `; this token reaches ${slugs.length === 1 ? 'project' : 'projects'} ${named} — ` +
-    `call project.use({slug: '${first}'}) or reconnect at '/mcp/${first}'`
+    `reconnect at '/mcp/${first}'`
   );
 }
 
@@ -180,14 +155,8 @@ export async function requireScope(
   return scope;
 }
 
-export function routerKey(): { tokenId: string; mcpSessionId: string } | null {
-  const ctx = getRequestContext();
-  if (!ctx.mcpSessionId) return null;
-  return { tokenId: ctx.token.id, mcpSessionId: ctx.mcpSessionId };
-}
-
 export function resolveSessionId(
-  deps: { router: SessionRouter; agentSessions: AgentSessionsService },
+  deps: { agentSessions: AgentSessionsService },
   explicit: string | undefined,
   projectId: string | null,
   opts: { touch?: boolean } = {},
@@ -197,17 +166,8 @@ export function resolveSessionId(
     if (touch) deps.agentSessions.touchActivity(explicit);
     return explicit;
   }
-  const ctx = getRequestContext();
-  const key = routerKey();
-  if (key) {
-    const routerHit = deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId;
-    if (routerHit) {
-      if (touch) deps.agentSessions.touchActivity(routerHit);
-      return routerHit;
-    }
-  }
   const active = deps.agentSessions.findActiveForTransport({
-    tokenId: ctx.token.id,
+    tokenId: getRequestContext().token.id,
     projectId,
   });
   if (active && touch) deps.agentSessions.touchActivity(active.id);

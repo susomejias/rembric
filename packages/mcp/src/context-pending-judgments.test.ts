@@ -4,7 +4,6 @@ import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   createRepositories,
   projectScope,
@@ -27,7 +26,6 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-const MCP_SESSION_ID = 'mcp-sess-pending-judgments';
 const SCOPE = '*' as const;
 const ORPHAN_AFTER_MS = 86_400_000;
 
@@ -48,7 +46,6 @@ function makeContext(token: Token): RequestContext {
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: MCP_SESSION_ID,
   };
 }
 
@@ -102,7 +99,6 @@ beforeEach(() => {
   memory = new MemoryService(repos, db.handle.db);
   adminToken = mintTestToken(db.handle, { scope: SCOPE }).token;
   const agentSessions = new AgentSessionsService(repos, db.handle.db);
-  const router = new SessionRouter();
   relations = new RelationsService(repos, db.handle.db);
   handlers = buildMemoryHandlers({
     logInternalError,
@@ -112,7 +108,6 @@ beforeEach(() => {
     agentSessions,
     prompts: new PromptsService(repos, db.handle.db),
     relations,
-    router,
     orphanAfterMs: ORPHAN_AFTER_MS,
   });
   observability = buildObservabilityHandlers({
@@ -121,7 +116,6 @@ beforeEach(() => {
     memory,
     projects,
     agentSessions,
-    router,
     relations,
     doctor: () => {
       throw new Error('memory.doctor is not under test here');
@@ -302,7 +296,6 @@ describe('memory.context withholds pending pairs whose endpoint is retired', () 
     const relationHandlers = buildRelationsHandlers({
       logInternalError,
       relations,
-      router: new SessionRouter(),
       projects,
       repos,
     });
