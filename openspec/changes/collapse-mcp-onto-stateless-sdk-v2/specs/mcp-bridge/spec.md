@@ -133,7 +133,7 @@ The bridge SHALL impose **no hard version floor**: it SHALL NOT refuse to run, a
 - **THEN** no version-related stderr line SHALL be printed
 - **AND** the bridge SHALL connect exactly as it would without this requirement
 
-#### Scenario: An older server's errors propagate unchanged
+#### Scenario: An older server degrades to today's behaviour, not worse
 
 - **GIVEN** a server whose version is older than `MIN_SERVER_VERSION` and that answers a request with an HTTP error status
 - **WHEN** the host issues that request through the bridge
@@ -187,6 +187,16 @@ The bridge SHALL NOT modify tool names, tool arguments, tool results, or any oth
 
 - **WHEN** a `tools/call` frame passes through the bridge in either direction
 - **THEN** the tool name, the arguments object and the result SHALL be byte-identical to what the sender emitted
+
+### Requirement: Bridge compatibility documentation distinguishes support from host verification
+
+The documentation SHALL describe the bridge as a standard stdio MCP transport replacement for hosts that previously used `mcp-remote`. Its compatibility table SHALL retain recorded host-level evidence where it exists and label unmeasured hosts as supported but not host-verified; it SHALL not present an unmeasured host as a recorded run.
+
+#### Scenario: An unmeasured host is labelled supported but not host-verified
+
+- **WHEN** the bridge's compatibility table is read
+- **THEN** every host with no recorded host-level run SHALL be labelled supported but not host-verified
+- **AND** no such host SHALL be presented as a recorded run, and every host with a recorded run SHALL keep its evidence
 
 ## REMOVED Requirements
 

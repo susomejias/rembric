@@ -56,9 +56,9 @@ A path slug that names no project is NOT resolved to the default project. An ope
 - **WHEN** an MCP call arrives with `X-Rembric-Project: rembric` and no path slug
 - **THEN** the server SHALL ignore the header and SHALL resolve the request to the default project
 
-#### Scenario: No path slug sets the scope
+#### Scenario: Neither path nor tool call has set scope
 
-- **WHEN** the agent calls `memory.save` on a `/mcp` connection, whether or not its client advertises the `roots` capability
+- **WHEN** the agent calls `memory.save` on a `/mcp` connection, where no tool call can set a project, whether or not its client advertises the `roots` capability
 - **THEN** the call SHALL succeed against the default project
 - **AND** it SHALL NOT be rejected with `project_required`, which is retired from the MCP surface entirely: no emitting site remains, because the two paths that leave a connection unusable emit their own codes — `project_not_found` for an unresolvable slug and `project_archived` for an archived project
 

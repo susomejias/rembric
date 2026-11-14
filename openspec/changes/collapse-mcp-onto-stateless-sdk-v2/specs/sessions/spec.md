@@ -41,7 +41,7 @@ The `memory.session_start` tool SHALL accept an optional `project?: string` argu
 - **WHEN** the agent calls `memory.session_start({agent: 'claude-code', project: 'default'})`
 - **THEN** the call SHALL succeed exactly as `memory.session_start({agent: 'claude-code'})` does, and the session row SHALL carry the default project's `project_id`
 
-#### Scenario: `memory.session_start` with a different existing slug on `/mcp`
+#### Scenario: `memory.session_start` with an explicit valid slug on `/mcp`
 
 - **WHEN** the agent calls `memory.session_start({project: 'rembric'})` on a `/mcp` (no path slug) connection, the slug exists, and it is not the default project's slug
 - **THEN** the call SHALL be rejected with code `scope_locked` and a message naming the default project's slug
@@ -56,42 +56,6 @@ The `memory.session_start` tool SHALL accept an optional `project?: string` argu
 
 - **WHEN** the agent calls `memory.session_start({project: 'unknown-slug'})` on a connection that resolved to an existing project, and no project has slug `unknown-slug`
 - **THEN** the call SHALL be rejected with code `scope_locked`; no session row SHALL be inserted and no project row SHALL be created
-
-### Requirement: Session-tool handlers MUST honor the documented scope-resolution precedence
-
-Every MCP tool handler under `packages/mcp/src/` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
-
-1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
-2. **The default project**, when the connection is path-less (`ctx.requestedSlug === null`). There is no third step and no scopeless outcome: no per-connection pin, no MCP roots and no tool call contributes a project.
-
-A handler that resolves scope using only `ctx.project` and falls through directly to a scope of its own choosing SHALL be considered to be in violation of this requirement. In particular, a handler SHALL NOT construct the default project's scope itself — it SHALL obtain it from the shared resolver, so the resolution rule lives in one place and a change to it cannot leave a handler behind.
-
-#### Scenario: Path-less connection returns the default project's scope
-
-- **GIVEN** a token connected to `/mcp` (path-less), whether or not its client advertises the `roots` capability
-- **WHEN** the agent calls `memory.context`
-- **THEN** the response SHALL include the default project's scope and only that project's memories
-
-#### Scenario: Path-scoped connection to a missing project does not fall back
-
-- **GIVEN** a token connected to `/mcp/bar` where project `bar` does not exist, and an earlier connection by the same token that wrote to project `foo`
-- **WHEN** the agent calls `memory.context`
-- **THEN** the call SHALL be refused with `code: 'project_not_found'` rather than resolving to any project, and SHALL NOT fall back to the default project
-- **AND** the response SHALL NOT leak `foo`'s memories
-
-#### Scenario: Path-scoped connection to existing project returns that project's scope
-
-- **GIVEN** a token connected to `/mcp/baz` where project `baz` exists
-- **AND** auth has resolved `ctx.project` to the `baz` project
-- **WHEN** the agent calls `memory.context`
-- **THEN** the response SHALL include `scope: "project:<baz.id>"`
-
-#### Scenario: `memory.search_prompts` honours the shared scope resolution
-
-- **GIVEN** a token connected to `/mcp/foo` where project `foo` exists, and prompts saved in `foo` and in the default project
-- **WHEN** the agent calls `memory.search_prompts({ query: "anything" })`
-- **THEN** the server SHALL resolve scope to `project:<foo.id>`
-- **AND** SHALL NOT return prompts from any other project, including the default project
 
 ### Requirement: `findActiveForTransport` MUST NOT guess under concurrent ambiguity
 
@@ -252,6 +216,44 @@ The server keeps no route from an MCP connection to a live session, in process o
 - **WHEN** either retirement pass runs
 - **THEN** the row SHALL be flipped to `abandoned`
 
+## ADDED Requirements
+
+### Requirement: Session-tool handlers MUST resolve scope from the URL path or the default project only
+
+Every MCP tool handler under `packages/mcp/src/` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
+
+1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
+2. **The default project**, when the connection is path-less (`ctx.requestedSlug === null`). There is no third step and no scopeless outcome: no per-connection pin, no MCP roots and no tool call contributes a project.
+
+A handler that resolves scope using only `ctx.project` and falls through directly to a scope of its own choosing SHALL be considered to be in violation of this requirement. In particular, a handler SHALL NOT construct the default project's scope itself — it SHALL obtain it from the shared resolver, so the resolution rule lives in one place and a change to it cannot leave a handler behind.
+
+#### Scenario: Path-less connection returns the default project's scope
+
+- **GIVEN** a token connected to `/mcp` (path-less), whether or not its client advertises the `roots` capability
+- **WHEN** the agent calls `memory.context`
+- **THEN** the response SHALL include the default project's scope and only that project's memories
+
+#### Scenario: Path-scoped connection to a missing project does not fall back
+
+- **GIVEN** a token connected to `/mcp/bar` where project `bar` does not exist, and an earlier connection by the same token that wrote to project `foo`
+- **WHEN** the agent calls `memory.context`
+- **THEN** the call SHALL be refused with `code: 'project_not_found'` rather than resolving to any project, and SHALL NOT fall back to the default project
+- **AND** the response SHALL NOT leak `foo`'s memories
+
+#### Scenario: Path-scoped connection to existing project returns that project's scope
+
+- **GIVEN** a token connected to `/mcp/baz` where project `baz` exists
+- **AND** auth has resolved `ctx.project` to the `baz` project
+- **WHEN** the agent calls `memory.context`
+- **THEN** the response SHALL include `scope: "project:<baz.id>"`
+
+#### Scenario: `memory.search_prompts` honours the shared scope resolution
+
+- **GIVEN** a token connected to `/mcp/foo` where project `foo` exists, and prompts saved in `foo` and in the default project
+- **WHEN** the agent calls `memory.search_prompts({ query: "anything" })`
+- **THEN** the server SHALL resolve scope to `project:<foo.id>`
+- **AND** SHALL NOT return prompts from any other project, including the default project
+
 ## REMOVED Requirements
 
 ### Requirement: A project switch MUST NOT happen while a session is active
@@ -259,3 +261,9 @@ The server keeps no route from an MCP connection to a live session, in process o
 **Reason**: No tool can switch a connection's project any more: `project.use` is removed, and a connection's project is fixed by its URL path or is the default project. The `session_active_must_end` guard has nothing left to guard.
 
 **Migration**: To work in another project, connect at `/mcp/<slug>` (for bridge clients, add a `.rembric` file with `PROJECT_SLUG` or set `REMBRIC_PROJECT_SLUG`). Close the current session with `memory.session_summary` or `memory.session_end` as usual; nothing requires it before reconnecting.
+
+### Requirement: Session-tool handlers MUST honor the documented scope-resolution precedence
+
+**Reason**: The precedence placed a `SessionRouter` step, fed by `project.use` and by roots discovery, between the URL path and the default project. The router and both of its sources are removed, so the scenarios that pinned a router pin, a router fallback and router-based `memory.search_prompts` resolution describe behaviour that no longer exists.
+
+**Migration**: None required. A path-scoped connection resolves to its project and a path-less connection to the default project, as specified by "Session-tool handlers MUST resolve scope from the URL path or the default project only". To work in another project, connect at `/mcp/<slug>`.
