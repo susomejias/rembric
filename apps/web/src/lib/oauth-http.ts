@@ -18,6 +18,7 @@ export class BodyParseError extends Error {
 export type BodyKind = 'json' | 'form';
 
 const BODY_LIMIT_BYTES = 100 * 1024;
+const PARAMETER_LIMIT = 1000;
 const MEDIA_TYPE: Record<BodyKind, string> = {
   json: 'application/json',
   form: 'application/x-www-form-urlencoded',
@@ -96,8 +97,12 @@ export async function readBody(request: Request, kind: BodyKind): Promise<unknow
 
   if (kind === 'json') return text.length === 0 ? {} : (JSON.parse(text) as unknown);
   const form = new Map<string, string[]>();
+  let parameters = 0;
   for (const [name, value] of new URLSearchParams(text)) {
-    form.set(name, [...(form.get(name) ?? []), value]);
+    if ((parameters += 1) > PARAMETER_LIMIT) throw new BodyParseError('too many parameters');
+    const values = form.get(name);
+    if (values === undefined) form.set(name, [value]);
+    else values.push(value);
   }
   return Object.fromEntries(
     [...form].map(([name, values]) => [name, values.length === 1 ? values[0] : values]),

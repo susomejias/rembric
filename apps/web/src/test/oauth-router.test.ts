@@ -206,6 +206,29 @@ describe('request body parsing', () => {
     return ((await registered.json()) as { client_id: string }).client_id;
   }
 
+  it('refuses a form with more than 1000 parameters before building it', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+    const atLimit = Array.from({ length: 1000 }, () => 'a').join('&');
+
+    const control = await post(
+      '/token',
+      'application/x-www-form-urlencoded',
+      atLimit,
+      '198.51.100.45',
+    );
+    const over = await post(
+      '/token',
+      'application/x-www-form-urlencoded',
+      `${atLimit}&a`,
+      '198.51.100.46',
+    );
+
+    expect(control.status).toBe(400);
+    expect(over.status).toBe(500);
+    expect(await over.json()).toEqual({ ok: false, code: 'internal_error' });
+  });
+
   it('refuses a repeated form parameter instead of keeping the last value', async () => {
     const clientId = await publicClient('198.51.100.41');
     const form = `grant_type=refresh_token&grant_type=refresh_token&refresh_token=unknown&client_id=${clientId}`;
