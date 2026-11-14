@@ -31,7 +31,9 @@ export async function POST(
   if (!isAuthorized(ctx, 'read', { scope: 'project', projectId: project.id })) {
     return forbidden();
   }
-  const parsed = parseMemoryRecall(await readJson(request));
+  const read = await readJson(request);
+  if (!read.ok) return read.response;
+  const parsed = parseMemoryRecall(read.body);
   if (!parsed.ok) return invalidInput(parsed.message);
   const deps = getServices();
   const limit = Math.min(parsed.data.limit ?? 5, 5);

@@ -49,6 +49,15 @@ function mintAdmin(name = 'healthz-admin'): CreatedToken {
   return mintTestToken(getServices().db, { scope: '*' }, name);
 }
 
+function failedAttemptFrom(hop: string): Promise<Response> {
+  return GET(
+    new Request(`${ORIGIN}/healthz`, {
+      method: 'GET',
+      headers: { authorization: 'Bearer nope', 'x-forwarded-for': hop },
+    }),
+  );
+}
+
 async function call(token?: string): Promise<{ status: number; body: Record<string, unknown> }> {
   const headers: Record<string, string> = {};
   if (token !== undefined) headers['authorization'] = `Bearer ${token}`;
@@ -145,6 +154,19 @@ describe('GET /healthz', () => {
       code: 'rate_limited',
       message: 'too many failed attempts',
     });
+  });
+
+  it('keys the lockout on a validated address, so non-address values share one bucket', async () => {
+    expect((await failedAttemptFrom('spoof-a')).status).toBe(401);
+    expect((await failedAttemptFrom('spoof-b')).status).toBe(401);
+    expect((await failedAttemptFrom('spoof-c')).status).toBe(429);
+  });
+
+  it('control: two different addresses keep separate lockout buckets', async () => {
+    expect((await failedAttemptFrom('198.51.100.1')).status).toBe(401);
+    expect((await failedAttemptFrom('198.51.100.1')).status).toBe(401);
+    expect((await failedAttemptFrom('198.51.100.2')).status).toBe(401);
+    expect((await failedAttemptFrom('198.51.100.1')).status).toBe(429);
   });
 
   it('answers 503 db_unavailable when the database connection is dead', async () => {

@@ -27,7 +27,9 @@ export async function POST(
   if (!isAuthorized(ctx, 'write', { scope: 'project', projectId: project.id })) {
     return forbidden();
   }
-  const parsed = parseSessionPost(await readJson(request));
+  const read = await readJson(request);
+  if (!read.ok) return read.response;
+  const parsed = parseSessionPost(read.body);
   if (!parsed.ok) return invalidInput(parsed.message);
   const deps = getServices();
   try {

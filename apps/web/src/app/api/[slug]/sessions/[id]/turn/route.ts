@@ -32,7 +32,9 @@ export async function POST(
   const deps = getServices();
   const blocked = rejectIfDeleted(deps.agentSessions, sessionId, ctx.token.id, project.id);
   if (blocked) return send(blocked.status, blocked.body);
-  const parsed = parseSessionTurn(await readJson(request));
+  const read = await readJson(request);
+  if (!read.ok) return read.response;
+  const parsed = parseSessionTurn(read.body);
   if (!parsed.ok) return invalidInput(parsed.message);
   try {
     const result = deps.agentSessions.reportTurn(sessionId, {

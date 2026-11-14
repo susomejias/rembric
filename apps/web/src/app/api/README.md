@@ -63,10 +63,13 @@ These are the only known behavioural differences from the Hono router, and each
 one is a limit of the Next runtime or of this slice's scope:
 
 - **Lockout identity.** `apps/server` keys the lockout on the socket's remote
-  address; a Next route handler cannot reach it. The first `x-forwarded-for`
-  hop is used instead, and a direct loopback request (no such header) shares a
-  single `'unknown'` bucket. The lockout state itself is also per-process, so
-  the two servers do not share counters.
+  address; a Next route handler cannot reach it. The production launcher
+  (`apps/web/server.js`) therefore rewrites `x-forwarded-for` to the trusted
+  identity (the socket address, or the `REMBRIC_TRUSTED_PROXY_HOPS` entry)
+  before Next sees the request, and `clientIdentity` reads that value, falling
+  back to a single `'0.0.0.0'` bucket when it is not an IP address. `next dev`
+  has no launcher, so there the header stays client-controlled. The lockout
+  state itself is also per-process, so the two servers do not share counters.
 - **Unhandled errors.** An unexpected (non-`DomainError`) failure inside an
   auth path, or inside `memory/recall`'s service call, answers this surface's
   JSON `internal_error` body with a 500, where the Hono app's default handler

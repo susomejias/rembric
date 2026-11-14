@@ -1,6 +1,7 @@
 import { ping } from '@rembric/db';
 
 import { AuthError, authenticate } from '../../lib/auth';
+import { clientIdentity } from '../../lib/client-identity';
 import { getServices } from '../../lib/services';
 import { REMBRIC_VERSION } from '../../lib/version';
 
@@ -49,13 +50,4 @@ export async function GET(request: Request): Promise<Response> {
     }
     return Response.json({ ok: false, code: 'db_unavailable' }, { status: 503 });
   }
-}
-
-function clientIdentity(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return 'unknown';
 }

@@ -753,3 +753,164 @@ describe('POST /:slug/memory/recall — refusals', () => {
     expect(r.json).toMatchObject({ ok: false, code: 'project_not_found' });
   });
 });
+
+describe('request body bound', () => {
+  type Sent = ReturnType<typeof call>;
+  const SESSION = 'sess-bodycap1';
+  const routes: [string, string, (req: Request) => Sent][] = [
+    ['sessions', '/sessions', (req) => call(sessionsPost, req, slugCtx())],
+    ['memory/recall', '/memory/recall', (req) => call(recallPost, req, slugCtx())],
+    ['turn', `/sessions/${SESSION}/turn`, (req) => call(turnPost, req, sessionCtx(SESSION))],
+    ['end', `/sessions/${SESSION}/end`, (req) => call(endPost, req, sessionCtx(SESSION))],
+    [
+      'summary',
+      `/sessions/${SESSION}/summary`,
+      (req) => call(summaryPost, req, sessionCtx(SESSION)),
+    ],
+    [
+      'recall-hints',
+      `/sessions/${SESSION}/recall-hints`,
+      (req) => call(hintsPost, req, sessionCtx(SESSION)),
+    ],
+    ['resume', `/sessions/${SESSION}/resume`, (req) => call(resumePost, req, sessionCtx(SESSION))],
+  ];
+
+  beforeEach(async () => {
+    const r = await call(
+      sessionsPost,
+      request('POST', `/api/${project.slug}/sessions`, {
+        token: admin.plaintext,
+        body: { id: SESSION },
+      }),
+      slugCtx(),
+    );
+    expect(r.status).toBe(200);
+    process.env['MAX_BODY_BYTES'] = '1024';
+  });
+
+  afterEach(() => {
+    delete process.env['MAX_BODY_BYTES'];
+  });
+
+  function streamed(path: string): {
+    req: Request;
+    pulled: () => number;
+    cancelled: () => boolean;
+  } {
+    const chunk = new TextEncoder().encode('x'.repeat(512));
+    let pulled = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += chunk.byteLength;
+        if (pulled > 8 * 1024 * 1024) controller.close();
+        else controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new Request(`${ORIGIN}/api/${project.slug}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${admin.plaintext}`, 'content-type': 'application/json' },
+      body,
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+    return { req, pulled: () => pulled, cancelled: () => cancelled };
+  }
+
+  it.each(routes)(
+    '%s answers 413 payload_too_large and stops reading a streamed over-cap body',
+    async (_name, path, send) => {
+      const { req, pulled, cancelled } = streamed(path);
+      const r = await send(req);
+      expect(r.status).toBe(413);
+      expect(r.json).toEqual({
+        ok: false,
+        code: 'payload_too_large',
+        message: 'request body exceeds 1024 bytes',
+      });
+      expect(pulled()).toBeLessThan(64 * 1024);
+      expect(cancelled()).toBe(true);
+    },
+  );
+
+  it('refuses a declared Content-Length over the cap before reading the body', async () => {
+    let pulled = false;
+    const req = new Request(`${ORIGIN}/api/${project.slug}/sessions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${admin.plaintext}`,
+        'content-type': 'application/json',
+        'content-length': '2048',
+      },
+      body: new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulled = true;
+            controller.enqueue(new TextEncoder().encode(JSON.stringify({ id: 'sess-declared1' })));
+            controller.close();
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+    const r = await call(sessionsPost, req, slugCtx());
+    expect(r.status).toBe(413);
+    expect(r.json).toMatchObject({ ok: false, code: 'payload_too_large' });
+    expect(pulled).toBe(false);
+    expect(getServices().agentSessions.getById('sess-declared1')).toBeFalsy();
+  });
+
+  it('control: a body under the same cap is processed unchanged', async () => {
+    const r = await call(
+      sessionsPost,
+      request('POST', `/api/${project.slug}/sessions`, {
+        token: admin.plaintext,
+        body: { id: 'sess-undercap1', description: 'x'.repeat(512) },
+      }),
+      slugCtx(),
+    );
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, sessionId: 'sess-undercap1', created: true });
+  });
+
+  it('control: an invalid MAX_BODY_BYTES falls back to the 4 MiB default', async () => {
+    for (const invalid of ['-1', '1.5', 'abc']) {
+      process.env['MAX_BODY_BYTES'] = invalid;
+      const r = await call(
+        summaryPost,
+        request('POST', `/api/${project.slug}/sessions/${SESSION}/summary`, {
+          token: admin.plaintext,
+          body: { summary: 'y'.repeat(8 * 1024) },
+        }),
+        sessionCtx(SESSION),
+      );
+      expect(r.status).toBe(200);
+    }
+  });
+
+  it('control: a malformed or failing body still answers 400 invalid_input', async () => {
+    const malformed = new Request(`${ORIGIN}/api/${project.slug}/sessions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${admin.plaintext}`, 'content-type': 'application/json' },
+      body: '{"id":',
+    });
+    const failing = new Request(`${ORIGIN}/api/${project.slug}/sessions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${admin.plaintext}`, 'content-type': 'application/json' },
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.error(new Error('client went away'));
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+    for (const req of [malformed, failing]) {
+      const r = await call(sessionsPost, req, slugCtx());
+      expect(r.status).toBe(400);
+      expect(r.json).toMatchObject({ ok: false, code: 'invalid_input' });
+    }
+  });
+});
