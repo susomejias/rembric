@@ -51,7 +51,13 @@ type RegisteredTool = {
   label: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<ToolResult>;
+  execute: (
+    toolCallId: string,
+    params: unknown,
+    signal?: AbortSignal,
+    onUpdate?: unknown,
+    ctx?: unknown,
+  ) => Promise<ToolResult>;
   renderCall?: (args: unknown, theme: FakeTheme, context: RenderContext) => RenderComponent;
   renderResult?: (
     result: ToolResult,
@@ -104,9 +110,13 @@ const LEAKED_CHILD_MARKERS = [
 ] as const;
 const savedChildMarkers: Record<string, string | undefined> = {};
 
-async function rawRpc(method: string, params: Record<string, unknown>): Promise<unknown> {
+async function rawRpc(
+  method: string,
+  params: Record<string, unknown>,
+  token: string = ADMIN_TOKEN,
+): Promise<unknown> {
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${ADMIN_TOKEN}`,
+    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
   };
@@ -210,9 +220,10 @@ function toolNamed(harness: Harness, canonical: string): RegisteredTool {
 async function callThroughExtension(
   tool: RegisteredTool,
   args: unknown,
+  ctx?: Harness['ctx'],
 ): Promise<{ refused: boolean; text: string }> {
   try {
-    const result = await tool.execute('call-1', args);
+    const result = await tool.execute('call-1', args, undefined, undefined, ctx);
     return { refused: false, text: result.content.map((part) => part.text ?? '').join('\n') };
   } catch (err) {
     return { refused: true, text: err instanceof Error ? err.message : String(err) };
@@ -1343,16 +1354,25 @@ describe('the successor session attributes its memories', () => {
       const b = await startedHarness(successor);
       await b.fire('before_agent_start', { prompt: 'the successor session' });
 
-      const save = await callThroughExtension(toolNamed(b, 'memory.save'), {
-        type: 'project',
-        title: `attribution after ${reason}`,
-        content: 'saved without naming a sessionId',
-        tags: ['pi'],
-      });
-      expect(save.refused).toBe(false);
+      const save = (await rawRpc(
+        'tools/call',
+        {
+          name: 'memory.save',
+          arguments: {
+            type: 'project',
+            title: `attribution after ${reason}`,
+            content: 'saved without naming a sessionId',
+            tags: ['pi'],
+          },
+        },
+        minted.plaintext,
+      )) as { result?: { isError?: boolean; content?: Array<{ text?: string }> } };
+      expect(save.result?.isError).not.toBe(true);
 
       return {
-        savedSessionId: repos.memory.unsafeGetById(savedId(save.text))?.sessionId ?? null,
+        savedSessionId:
+          repos.memory.unsafeGetById(savedId(save.result?.content?.[0]?.text ?? ''))?.sessionId ??
+          null,
         attributedToSuccessor: repos.memory.adminListBySession(successor).length,
       };
     } finally {
@@ -1367,11 +1387,11 @@ describe('the successor session attributes its memories', () => {
     expect(attributedToSuccessor).toBeGreaterThan(0);
   });
 
-  it('the control — without the end, the save lands on the successor by pin, and the replaced row is untouched', async () => {
+  it('the control — without the end, the successor attributes nothing', async () => {
     const { savedSessionId, attributedToSuccessor } = await saveThroughSuccessor('reload');
 
-    expect(savedSessionId).toBe('pi-ambiguity-b-reload');
-    expect(attributedToSuccessor).toBeGreaterThan(0);
+    expect(savedSessionId).toBeNull();
+    expect(attributedToSuccessor).toBe(0);
     expect(repos.memory.adminListBySession('pi-ambiguity-a-reload')).toHaveLength(0);
   });
 });
@@ -1460,10 +1480,10 @@ describe('shutdown teardown budget', () => {
       await harness.fire('session_shutdown', { reason: 'quit' });
       const elapsed = Date.now() - started;
 
-      expect(stub.seen).toContain('DELETE');
+      expect(stub.seen).not.toContain('DELETE');
       expect(stub.paths).toContain(`/api/${PROJECT_SLUG}/sessions/${sessionId}/end`);
       expect(stub.paths.filter((p) => p.endsWith('/summary'))).toEqual([]);
-      expect(elapsed, 'the DELETE was not awaited at all').toBeGreaterThan(POST_TIMEOUT_MS / 2);
+      expect(elapsed, 'the end was not awaited at all').toBeGreaterThan(POST_TIMEOUT_MS / 2);
       expect(
         elapsed,
         `the quit waited ${elapsed}ms on a dead server; the flush budget is ${POST_TIMEOUT_MS}ms`,
@@ -1622,199 +1642,174 @@ describe('missing configuration disables the extension', () => {
   });
 });
 
-describe('session identity declaration on the MCP transport (D4\u2032)', () => {
-  async function seedConcurrentRow(): Promise<void> {
-    const resolved = await tokens.authenticate(ADMIN_TOKEN);
-    sessions.ensure({
-      id: 'pi-bind-other',
-      tokenId: resolved.token.id,
-      projectId: project.id,
-      agent: 'pi',
-    });
-  }
+describe('session identity on every session-attaching tool call', () => {
+  type SentCall = { name: string; arguments: Record<string, unknown> };
 
-  function spyMcpCalls() {
-    const resumeCalls: { transport: string | null; sessionId: unknown }[] = [];
-    const toolCalls: string[] = [];
+  function spyToolCalls(): { calls: SentCall[]; restore: () => void } {
+    const calls: SentCall[] = [];
     const realFetch = globalThis.fetch;
     const spy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes('/mcp') && typeof init?.body === 'string') {
+        if (String(input).includes('/mcp') && typeof init?.body === 'string') {
           const parsed = JSON.parse(init.body) as {
             method?: string;
             params?: { name?: string; arguments?: Record<string, unknown> };
           };
           if (parsed.method === 'tools/call') {
-            toolCalls.push(parsed.params?.name ?? '');
-            if (parsed.params?.name === 'memory.session_resume') {
-              resumeCalls.push({
-                transport: new Headers(init.headers).get('mcp-session-id'),
-                sessionId: parsed.params.arguments?.sessionId,
-              });
-            }
+            calls.push({
+              name: parsed.params?.name ?? '',
+              arguments: parsed.params?.arguments ?? {},
+            });
           }
         }
         return realFetch(input, init);
       });
-    return { resumeCalls, toolCalls, spy, realFetch };
+    return { calls, restore: () => spy.mockRestore() };
   }
 
-  function resumeErrorResponse(initBody: string): Response {
-    const parsed = JSON.parse(initBody) as { id?: number };
-    return new Response(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        id: parsed.id ?? 0,
-        result: {
-          content: [
-            { type: 'text', text: '{"ok":false,"code":"session_not_found","message":"gone"}' },
-          ],
-          isError: true,
-        },
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+  async function seedActiveRow(id: string): Promise<void> {
+    const resolved = await tokens.authenticate(ADMIN_TOKEN);
+    sessions.ensure({ id, tokenId: resolved.token.id, projectId: project.id, agent: 'pi' });
   }
 
-  it('declares its identity after the first ensure, and the pin answers session_start', async () => {
-    const sessionId = 'pi-bind-host';
+  function sessionRowCount(): number {
+    return Object.values(sessions.adminCountByStatus()).reduce((sum, n) => sum + n, 0);
+  }
+
+  function saveArgs(title: string): Record<string, unknown> {
+    return { type: 'project', title, content: title, tags: ['pi'] };
+  }
+
+  it('a write without a model-supplied sessionId carries the host id, and declaring it costs no row', async () => {
+    const sessionId = 'pi-identity-host';
     const harness = await startedHarness(sessionId);
-    await seedConcurrentRow();
+    await seedActiveRow('pi-identity-host-neighbour');
 
-    const { resumeCalls, toolCalls, spy } = spyMcpCalls();
+    const { calls, restore } = spyToolCalls();
+    let save: { refused: boolean; text: string };
+    let rowsBefore: number;
+    let rowsAfter: number;
     try {
       await harness.fire('before_agent_start', { prompt: 'first turn' });
-      // The same (transport, host) pair must not re-declare on the next turn.
       await harness.fire('before_agent_start', { prompt: 'second turn' });
+      rowsBefore = sessionRowCount();
+      save = await callThroughExtension(
+        toolNamed(harness, 'memory.save'),
+        saveArgs('saved by the host session'),
+        harness.ctx,
+      );
+      rowsAfter = sessionRowCount();
     } finally {
-      spy.mockRestore();
+      restore();
     }
 
-    expect(resumeCalls).toEqual([{ transport: expect.any(String), sessionId }]);
-    expect(toolCalls).not.toContain('memory.session_start');
-
-    const start = await callThroughExtension(toolNamed(harness, 'memory.session_start'), {});
-    expect(start.refused).toBe(false);
-    const out = JSON.parse(start.text) as { sessionId: string; reused: boolean };
-    expect(out.reused).toBe(true);
-    expect(out.sessionId).toBe(sessionId);
+    expect(save.refused).toBe(false);
+    expect(calls.map((call) => call.name)).toEqual(['memory.save']);
+    expect(calls[0].arguments.sessionId).toBe(sessionId);
+    expect(repos.memory.unsafeGetById(savedId(save.text))?.sessionId).toBe(sessionId);
+    expect(rowsAfter).toBe(rowsBefore);
   });
 
-  it('a failed declaration retries silently on the next turn and then binds', async () => {
-    const sessionId = 'pi-bind-retry';
+  it('a model-supplied sessionId is forwarded unchanged', async () => {
+    const sessionId = 'pi-identity-model-host';
+    const chosen = 'pi-identity-model-choice';
     const harness = await startedHarness(sessionId);
-    await seedConcurrentRow();
-    const realFetch = globalThis.fetch;
-    let failures = 0;
-    const spy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes('/mcp') && typeof init?.body === 'string') {
-          const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
-          if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
-            if (failures === 0) {
-              failures += 1;
-              return resumeErrorResponse(init.body);
-            }
-          }
-        }
-        return realFetch(input, init);
-      });
+    await harness.fire('before_agent_start', { prompt: 'the model names a session' });
+    await seedActiveRow(chosen);
+
+    const { calls, restore } = spyToolCalls();
+    let save: { refused: boolean; text: string };
     try {
-      await harness.fire('before_agent_start', { prompt: 'turn one' });
-      expect(harness.notifications).toHaveLength(0);
-      await harness.fire('before_agent_start', { prompt: 'turn two' });
-      expect(harness.notifications).toHaveLength(0);
+      save = await callThroughExtension(
+        toolNamed(harness, 'memory.save'),
+        { ...saveArgs('saved under the model-chosen session'), sessionId: chosen },
+        harness.ctx,
+      );
     } finally {
-      spy.mockRestore();
+      restore();
     }
 
-    const start = await callThroughExtension(toolNamed(harness, 'memory.session_start'), {});
-    const out = JSON.parse(start.text) as { sessionId: string; reused: boolean };
-    expect(out.reused).toBe(true);
-    expect(out.sessionId).toBe(sessionId);
+    expect(save.refused).toBe(false);
+    expect(calls[0].arguments.sessionId).toBe(chosen);
+    expect(repos.memory.unsafeGetById(savedId(save.text))?.sessionId).toBe(chosen);
   });
 
-  it('re-declares on the new transport after it re-initialises', async () => {
-    const sessionId = 'pi-bind-reinit';
-    const harness = await startedHarness(sessionId);
-    const { resumeTransports, spy } = (() => {
-      const seen: (string | null)[] = [];
-      const realFetch = globalThis.fetch;
-      const s = vi
-        .spyOn(globalThis, 'fetch')
-        .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-          const url = String(input);
-          if (url.includes('/mcp') && typeof init?.body === 'string') {
-            const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
-            if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
-              seen.push(new Headers(init.headers).get('mcp-session-id'));
-            }
-          }
-          const res = await realFetch(input, init);
-          if (url.includes('/mcp') && typeof init?.body === 'string') {
-            const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
-            if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
-              const headers = new Headers(res.headers);
-              headers.set('mcp-session-id', 'transport-B');
-              return new Response(res.body, { status: res.status, headers });
-            }
-          }
-          return res;
-        });
-      return { resumeTransports: seen, spy: s };
-    })();
+  it('a tool that declares no sessionId is forwarded untouched', async () => {
+    const harness = await startedHarness('pi-identity-no-declaration');
+    await harness.fire('before_agent_start', { prompt: 'search turn' });
+    const search = toolNamed(harness, 'memory.search');
+    const properties = (search.parameters.properties ?? {}) as Record<string, unknown>;
+    expect(Object.keys(properties)).not.toContain('sessionId');
+
+    const { calls, restore } = spyToolCalls();
+    let result: { refused: boolean; text: string };
     try {
-      await harness.fire('before_agent_start', { prompt: 'turn one' }); // declares on A
-      await harness.fire('before_agent_start', { prompt: 'turn two' }); // transport is B now
+      result = await callThroughExtension(search, { query: 'identity' }, harness.ctx);
     } finally {
-      spy.mockRestore();
+      restore();
     }
 
-    expect(resumeTransports).toHaveLength(2);
-    expect(resumeTransports[0]).not.toBe(resumeTransports[1]);
+    expect(result.refused).toBe(false);
+    expect(calls).toEqual([{ name: 'memory.search', arguments: { query: 'identity' } }]);
   });
 
-  it('resets the failure budget when the transport re-keys', async () => {
-    const sessionId = 'pi-bind-rekey-budget';
-    const harness = await startedHarness(sessionId);
-    let attempts = 0;
-    const realFetch = globalThis.fetch;
-    const spy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes('/mcp') && typeof init?.body === 'string') {
-          const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
-          if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
-            attempts += 1;
-            const failed = resumeErrorResponse(init.body);
-            // A fresh handshake re-keys the transport once the budget is spent.
-            if (attempts === 3) {
-              const headers = new Headers(failed.headers);
-              headers.set('mcp-session-id', 'transport-after-rekey');
-              return new Response(failed.body, { status: failed.status, headers });
-            }
-            return failed;
-          }
-        }
-        return realFetch(input, init);
-      });
+  it('nothing is added before the host row exists, and nothing is refused or notified', async () => {
+    const harness = await startedHarness('pi-identity-before-ensure');
+
+    const { calls, restore } = spyToolCalls();
+    let save: { refused: boolean; text: string };
     try {
-      for (let turn = 1; turn <= 5; turn++) {
-        await harness.fire('before_agent_start', { prompt: `turn ${turn}` });
-      }
+      save = await callThroughExtension(
+        toolNamed(harness, 'memory.save'),
+        saveArgs('saved before any ensure'),
+        harness.ctx,
+      );
     } finally {
-      spy.mockRestore();
+      restore();
     }
 
-    expect(attempts).toBe(5);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].arguments).not.toHaveProperty('sessionId');
+    expect(save.refused).toBe(false);
+    expect(harness.notifications).toEqual([]);
   });
 
-  it('two concurrent conversations in one project each save to their own row', async () => {
+  it('a suppressed sub-agent session adds nothing', async () => {
+    vi.stubEnv('REMBRIC_SUBAGENT', '1');
+    const { calls, restore } = spyToolCalls();
+    let save: { refused: boolean; text: string };
+    try {
+      const harness = await startedHarness('pi-identity-subagent');
+      await harness.fire('before_agent_start', { prompt: 'delegated work' });
+      save = await callThroughExtension(
+        toolNamed(harness, 'memory.save'),
+        saveArgs('saved by a sub-agent'),
+        harness.ctx,
+      );
+    } finally {
+      restore();
+      vi.unstubAllEnvs();
+    }
+
+    expect(calls.map((call) => call.name)).toEqual(['memory.save']);
+    expect(calls[0].arguments).not.toHaveProperty('sessionId');
+    expect(save.refused).toBe(false);
+    expect(sessions.getById('pi-identity-subagent')).toBeUndefined();
+  });
+
+  it('the registered schema of a session-attaching tool is the server’s', async () => {
+    const wire = (await rawListTools()).find((tool) => tool.name === 'memory.save');
+    const wireSchema = wire?.inputSchema as { properties?: object; required?: string[] };
+    expect(Object.keys(wireSchema.properties ?? {})).toContain('sessionId');
+
+    const harness = await startedHarness('pi-identity-schema');
+    const registered = toolNamed(harness, 'memory.save').parameters as { required?: string[] };
+    expect(withoutDescriptions(registered)).toEqual(withoutDescriptions(wireSchema));
+    expect(registered.required ?? []).not.toContain('sessionId');
+  });
+
+  it('two parallel Pi sessions in one project keep their own rows', async () => {
     const firstId = 'pi-concurrent-a';
     const secondId = 'pi-concurrent-b';
 
@@ -1823,62 +1818,22 @@ describe('session identity declaration on the MCP transport (D4\u2032)', () => {
     await a.fire('before_agent_start', { prompt: 'conversation A' });
     await b.fire('before_agent_start', { prompt: 'conversation B' });
 
-    const saveA = await callThroughExtension(toolNamed(a, 'memory.save'), {
-      type: 'project',
-      title: 'saved by conversation A',
-      content: 'saved by conversation A',
-      tags: ['pi'],
-    });
-    const saveB = await callThroughExtension(toolNamed(b, 'memory.save'), {
-      type: 'project',
-      title: 'saved by conversation B',
-      content: 'saved by conversation B',
-      tags: ['pi'],
-    });
+    const saveA = await callThroughExtension(
+      toolNamed(a, 'memory.save'),
+      saveArgs('saved by conversation A'),
+      a.ctx,
+    );
+    const saveB = await callThroughExtension(
+      toolNamed(b, 'memory.save'),
+      saveArgs('saved by conversation B'),
+      b.ctx,
+    );
 
     expect(saveA.refused).toBe(false);
     expect(saveB.refused).toBe(false);
-    const attachedA = repos.memory.unsafeGetById(savedId(saveA.text))?.sessionId ?? null;
-    const attachedB = repos.memory.unsafeGetById(savedId(saveB.text))?.sessionId ?? null;
-
-    expect(attachedA).toBe(firstId);
-    expect(attachedB).toBe(secondId);
+    expect(repos.memory.unsafeGetById(savedId(saveA.text))?.sessionId).toBe(firstId);
+    expect(repos.memory.unsafeGetById(savedId(saveB.text))?.sessionId).toBe(secondId);
     expect(sessions.getById(firstId)?.status).toBe('active');
     expect(sessions.getById(secondId)?.status).toBe('active');
-  });
-
-  it('caps consecutive failures at BIND_FAILURE_LIMIT and degrades silently', async () => {
-    const sessionId = 'pi-bind-degrade';
-    const harness = await startedHarness(sessionId);
-    let attempts = 0;
-    const realFetch = globalThis.fetch;
-    const spy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes('/mcp') && typeof init?.body === 'string') {
-          const parsed = JSON.parse(init.body) as { method?: string; params?: { name?: string } };
-          if (parsed.method === 'tools/call' && parsed.params?.name === 'memory.session_resume') {
-            attempts += 1;
-            return resumeErrorResponse(init.body);
-          }
-        }
-        return realFetch(input, init);
-      });
-    try {
-      const first = (await harness.fire('before_agent_start', { prompt: 'turn 1' })) as {
-        message?: { content: string };
-      };
-      // Nudge injection is unaffected by the silent bind failures.
-      expect(first.message?.content).toContain('## Goal');
-      for (let turn = 2; turn <= 5; turn++) {
-        await harness.fire('before_agent_start', { prompt: `turn ${turn}` });
-      }
-    } finally {
-      spy.mockRestore();
-    }
-
-    expect(attempts).toBe(3);
-    expect(harness.notifications).toHaveLength(0);
   });
 });

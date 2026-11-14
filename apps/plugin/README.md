@@ -146,7 +146,9 @@ echo "PROJECT_SLUG=my-app-slug" > .rembric
 
 Format is dotenv-style (`KEY=VALUE`, `#` for comments). Reserved for future fields (e.g. `DEFAULT_SCOPE=`, `AUTO_SAVE=`) — today only `PROJECT_SLUG` is read. The bridge parses it on every MCP session start and builds the URL `${server_url}/mcp/my-app-slug`. The Rembric server pins the project from the URL path automatically.
 
-If `.rembric` is missing, unparseable, or `PROJECT_SLUG` is invalid, the bridge falls back to path-less `/mcp` and writes a diagnostic to stderr (visible in `claude --debug`). The session still works — a path-less connection resolves to the server's default project until the agent pins another with `project.use`.
+If `.rembric` is missing, unparseable, or `PROJECT_SLUG` is invalid, the bridge falls back to `REMBRIC_PROJECT_SLUG` when it is set, and otherwise to path-less `/mcp`. Either way it writes one diagnostic to stderr (visible in `claude --debug`) naming the fix: add a `.rembric` file containing `PROJECT_SLUG=<slug>`, or set `REMBRIC_PROJECT_SLUG`. The session still works — a path-less connection resolves to the server's default project for its whole life, and no tool switches it. To work in another project, change `.rembric` and start a new session.
+
+A slug the server does not know is refused with `project_not_found`. Create the project from the dashboard (`/dashboard/projects`); agents cannot create one, and the same URL works as soon as it exists.
 
 ### Whether to commit `.rembric`
 
@@ -190,7 +192,7 @@ The proactive-save protocol travels via the MCP `initialize.instructions` (~1 40
 - **Requires Node 18+** on PATH. Claude Code already needs Node, so this is normally satisfied.
 - The bridge uses `npx -y @rembric/mcp-bridge@<exact plugin version>` for the stdio↔HTTP MCP transport. The first launch downloads the pinned package; subsequent launches use npx's cache. Measured cold start to the first MCP frame was **586.7 ms** for the bridge versus **1,895.9 ms** for `mcp-remote@0.1.38`.
 - The measured session-start transport instrument was **2 requests** for the bridge (`GET /healthz`, `POST /mcp` initialize; **1 ms** to initialize) versus **4** for `mcp-remote` (`GET /mcp` plus three `.well-known` GETs; **25 ms**); the bridge makes zero `.well-known` requests.
-- One bridge process per MCP session. It forwards host frames verbatim and owns the one-request 404 recovery.
+- One bridge process per MCP session. It forwards host frames verbatim and propagates every HTTP error to the host unchanged: it never re-initializes or retries.
 
 ## Notes
 

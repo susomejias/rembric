@@ -42,10 +42,6 @@ function hasId(message) {
   return Boolean(message && Object.hasOwn(message, 'id'));
 }
 
-function isServerRequest(message) {
-  return Boolean(message && typeof message.method === 'string' && hasId(message));
-}
-
 function emit(stream, payload) {
   stream.write(`${payload}\n`);
 }
@@ -60,14 +56,6 @@ function correlatedError(id, message) {
 
 function describeFailure(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function discardBody(response) {
-  try {
-    await response.arrayBuffer();
-  } catch {
-    await response.text().catch(() => {});
-  }
 }
 
 export async function runBridge({
@@ -91,7 +79,11 @@ export async function runBridge({
   const slugResult = resolveSlug(projectDir, env, parseDotenv, SLUG_RE);
   if (slugResult.issue) {
     stderr.write(
-      `[rembric-bridge] ${slugResult.issue}; using ${slugResult.slug ? `slug ${slugResult.slug}` : 'path-less /mcp'}.\n`,
+      slugResult.slug
+        ? `[rembric-bridge] ${slugResult.issue}; using slug ${slugResult.slug}.\n`
+        : `[rembric-bridge] ${slugResult.issue}; add a .rembric file containing PROJECT_SLUG=<slug> ` +
+            `to ${projectDir} or set REMBRIC_PROJECT_SLUG. Using path-less /mcp, which resolves to ` +
+            `the server's default project.\n`,
     );
   }
   const endpoint = buildEndpoint(baseUrl, slugResult.slug);
@@ -117,46 +109,36 @@ export async function runBridge({
     .catch(() => {});
 
   let sessionId = null;
-  let sessionGeneration = 0;
   let negotiatedProtocolVersion = DEFAULT_PROTOCOL_VERSION;
-  let latestInitialize = null;
-  let recoveryPromise = null;
-  const cancelledDuringRecovery = new Set();
   let initializationReady = Promise.resolve();
-  const pendingServerRequests = new Map();
   const active = new Set();
   const controllers = new Set();
   let terminated = false;
   let finish;
 
-  function requestHeaders(session) {
+  function requestHeaders(isInitialize) {
     const headers = {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
       'MCP-Protocol-Version': negotiatedProtocolVersion,
     };
-    if (session) headers['mcp-session-id'] = session;
+    if (sessionId && !isInitialize) headers['mcp-session-id'] = sessionId;
     return headers;
   }
 
-  async function post(raw, includeSession = true) {
-    const sentSession = includeSession ? sessionId : null;
-    const sentGeneration = sessionGeneration;
+  async function post(raw, isInitialize) {
     const controller = new globalThis.AbortController();
     controllers.add(controller);
     try {
       const response = await fetchImpl(endpoint, {
         method: 'POST',
-        headers: requestHeaders(sentSession),
+        headers: requestHeaders(isInitialize),
         body: raw,
         signal: controller.signal,
       });
-      const nextSessionId = response.headers.get('mcp-session-id');
-      if (nextSessionId && response.status !== 404 && sentGeneration === sessionGeneration) {
-        sessionId = nextSessionId;
-      }
-      return { response, sentSession, controller };
+      if (isInitialize) sessionId = response.headers.get('mcp-session-id');
+      return { response, controller };
     } catch (error) {
       controllers.delete(controller);
       throw error;
@@ -173,10 +155,7 @@ export async function runBridge({
     }
   }
 
-  async function consume(
-    response,
-    { expectedId, forwardResponses, controller, initialize = false } = {},
-  ) {
+  async function consume(response, { expectedId, controller, initialize = false } = {}) {
     const expectedKey = expectedId === undefined ? null : messageKey(expectedId);
     let responded = expectedKey === null;
     let sawRpcMessage = false;
@@ -185,17 +164,10 @@ export async function runBridge({
       const message = jsonMessage(payload);
       if (!message) return false;
       sawRpcMessage = true;
-
-      if (isServerRequest(message)) {
-        pendingServerRequests.set(messageKey(message.id), message.id);
-        emit(stdout, payload);
-        return false;
-      }
-
       if (expectedKey !== null && hasId(message) && messageKey(message.id) === expectedKey) {
         responded = true;
         if (initialize) updateNegotiatedVersion(message);
-        if (forwardResponses) emit(stdout, payload);
+        emit(stdout, payload);
         return true;
       }
       return false;
@@ -249,7 +221,6 @@ export async function runBridge({
       if (expectedKey !== null && !responded) {
         throw new Error(`HTTP ${response.status} returned no correlated JSON-RPC response`);
       }
-      return responded;
     } finally {
       controllers.delete(controller);
     }
@@ -272,89 +243,15 @@ export async function runBridge({
     finish?.(1);
   }
 
-  async function sendServerResponse(raw) {
-    try {
-      const posted = await post(raw);
-      await consume(posted.response, { forwardResponses: false, controller: posted.controller });
-    } catch (error) {
-      pendingServerRequests.delete(messageKey(jsonMessage(raw)?.id));
-      terminate(`server request response failed: ${describeFailure(error)}`);
-    }
-  }
-
-  async function reinitialize() {
-    if (!latestInitialize) throw new Error('Cannot recover before initialize');
-    const initializeMessage = jsonMessage(latestInitialize);
-    if (!hasId(initializeMessage)) throw new Error('Cannot recover without an initialize id');
-    const initialized = await post(latestInitialize, false);
-    await consume(initialized.response, {
-      expectedId: initializeMessage.id,
-      forwardResponses: false,
-      controller: initialized.controller,
-      initialize: true,
-    });
-
-    const notification = await post('{"jsonrpc":"2.0","method":"notifications/initialized"}');
-    if (!notification.response.ok && notification.response.status !== 202) {
-      await discardBody(notification.response);
-      controllers.delete(notification.controller);
-      throw new Error(`initialized notification failed with HTTP ${notification.response.status}`);
-    }
-    await consume(notification.response, {
-      forwardResponses: false,
-      controller: notification.controller,
-    });
-  }
-
-  async function recover(failedSession) {
-    if (recoveryPromise) {
-      await recoveryPromise;
-      return;
-    }
-    if (sessionId !== failedSession) return;
-    sessionId = null;
-    sessionGeneration += 1;
-    recoveryPromise = reinitialize().finally(() => {
-      recoveryPromise = null;
-    });
-    try {
-      await recoveryPromise;
-    } catch (error) {
-      terminate(`session recovery failed: ${describeFailure(error)}`);
-      throw error;
-    }
-  }
-
   async function sendHostRequest(raw) {
     const message = jsonMessage(raw);
     if (!message) return;
     const isInitialize = message.method === 'initialize';
-    if (isInitialize) latestInitialize = raw;
 
     try {
-      if (message.method === 'notifications/cancelled' && recoveryPromise) {
-        const requestId = message.params?.requestId;
-        if (requestId !== undefined) cancelledDuringRecovery.add(messageKey(requestId));
-        return;
-      }
-      if (!isInitialize && recoveryPromise) await recoveryPromise;
-      const posted = await post(raw, !isInitialize);
-      if (posted.response.status === 404 && posted.sentSession) {
-        await discardBody(posted.response);
-        controllers.delete(posted.controller);
-        await recover(posted.sentSession);
-        if (hasId(message) && cancelledDuringRecovery.delete(messageKey(message.id))) return;
-        const retry = await post(raw);
-        await consume(retry.response, {
-          expectedId: hasId(message) ? message.id : undefined,
-          forwardResponses: true,
-          controller: retry.controller,
-        });
-        return;
-      }
+      const posted = await post(raw, isInitialize);
       await consume(posted.response, {
         expectedId: hasId(message) ? message.id : undefined,
-        forwardResponses: true,
         controller: posted.controller,
         initialize: isInitialize,
       });
@@ -389,18 +286,6 @@ export async function runBridge({
       const raw = line;
       const message = jsonMessage(raw);
       if (!message) return;
-
-      if (!message.method && hasId(message)) {
-        const key = messageKey(message.id);
-        if (pendingServerRequests.has(key)) {
-          pendingServerRequests.delete(key);
-          const operation = sendServerResponse(raw);
-          active.add(operation);
-          await operation;
-          active.delete(operation);
-          return;
-        }
-      }
 
       let operation;
       if (message.method === 'initialize') {

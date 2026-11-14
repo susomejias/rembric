@@ -37,6 +37,7 @@ export type SessionProtocol = {
   isSubAgent(sessionId: string): boolean;
   markSubAgent(sessionId: string): void;
   isKnown(sessionId: string): boolean;
+  isRegistered(sessionId: string): boolean;
   ensureSession(sessionId: string): Promise<void>;
   nudgesForTurn(sessionId: string, prompt: string): string[];
   /** Arm the tool-observation latch — the client supplies only the predicate. */
