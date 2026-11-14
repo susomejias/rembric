@@ -37,6 +37,6 @@
 
 ## 5. Close
 
-- [ ] 5.1 Register PRs 1–4 as a native stack with `gh stack`; each PR title and body is in English, and PRs 3 and 4 carry a "Breaking changes" section copied from the proposal.
+- [x] 5.1 Register PRs 1–4 as a native stack with `gh stack`; each PR title and body is in English, and PRs 3 and 4 carry a "Breaking changes" section copied from the proposal.
 - [ ] 5.3 At archive time, hand-edit the prose a delta cannot reach: `## Project slug selection` in `openspec/specs/claude-code-plugin/spec.md` (the path-less fallback, "Bootstrap for new slugs" and "Manual override" bullets) and the `## Purpose` of `openspec/specs/http-api/spec.md`, which names the `SessionRouter`.
 - [ ] 5.2 Reconcile the `mcp-api` and `claude-code-plugin` deltas with the open changes `expose-session-write-verdict`, `proactive-entity-recall` and `restore-memory-save-reminder` before archiving. `expose-session-write-verdict` modifies "The MCP server MUST expose four session-lifecycle tools", which this change removes and re-adds as "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding", so its delta moves to the new title.
