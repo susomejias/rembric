@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js';
+import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/client';
 import { TokensService, type TokenPair } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';

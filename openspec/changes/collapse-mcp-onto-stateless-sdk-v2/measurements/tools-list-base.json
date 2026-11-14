@@ -1,0 +1,3317 @@
+{
+  "tools": [
+    {
+      "name": "memory.save",
+      "description": "Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a ≤100-char scannable headline of what this memory is about, not the cwd), content, tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix). Optional: topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this is the LATEST take on a topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the slot's previous active row is superseded atomically. The response includes `candidates[]` when the save resembles existing memories in wording, meaning, or a shared rare identifier like a file path or URL (that kind may share little wording); judge each with memory.judge_batch while the context is fresh. `convergeWith[]` holds judgmentIds of candidates likely restating this fact (advisory): memory.merge them, or judge supersedes; reuse their topic_key. `candidatesDetected` counts the judgeable matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5): a lower bound, not a scope total; no request argument raises it. Only `candidates[]` entries carry `judgmentId`s (`related[]`: weaker matches, nothing to judge), so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key). The remainder is reachable via memory.search, recordable per pair with memory.compare. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["user", "feedback", "project", "reference", "procedural"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tags": {
+            "minItems": 1,
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Required: 1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5; e.g. dashboard, sqlite, bug-fix."
+          },
+          "topic_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sessionId": {
+            "description": "Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["type", "title", "content", "tags"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Save memory",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "judgmentId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "similarity": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "entityValue": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "judgmentId",
+                "targetId",
+                "title",
+                "snippet",
+                "similarity",
+                "source",
+                "topicKey"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "targetId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "similarity": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "entityValue": {
+                  "type": "string"
+                }
+              },
+              "required": ["targetId", "title", "snippet", "similarity", "source", "topicKey"],
+              "additionalProperties": false
+            }
+          },
+          "convergeWith": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "judgmentRequired": {
+            "type": "boolean"
+          },
+          "candidatesDetected": {
+            "type": "number"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "candidates",
+          "related",
+          "convergeWith",
+          "judgmentRequired",
+          "candidatesDetected"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.search",
+      "description": "Search memories. Call this before starting work in an area untouched this session, before diagnosing a possibly-known error, before building something that may already exist — or whenever the user references past work or asks to recall (\"remember\", \"recall\", \"what did we do\"). Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic's whole history — the active row plus every row it superseded, so you can check whether a topic already converged. Got a literal identifier? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. With `query` it narrows rather than fuses. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. `across_projects:true` also reads the other projects this token may reach. Never a default: only on an explicit ask; it dilutes the page with foreign memories. `searchedProjects[]` names what was read. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm_batch if still true, memory.save+topic_key if it changed, memory.judge_batch if it contradicts another memory). `abstained:true` means nothing matched — treat as \"nothing relevant found\", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "entity": {
+            "description": "Exact-address lookup. Use INSTEAD of `query` whenever you have the literal identifier — a text query for one is noisy (`migrate.ts` also hits `migrate.ts.bak`, `#36` degrades to any \"36\"). Accepts a path, git SHA, URL, error code, ticket, CVE, IPv4, `.local`-style hostname, systemd unit, MAC, env var name, or UUID. Returns every linked memory in scope, chronological and unranked — no relevance cutoff, and with no `limit` the whole linked set (bounded at 400) rather than the 8-row ranked default. Narrows further with `status`, `type`, `tag` and `topic_key`; with `query` it narrows, never fuses. Unknown value returns empty rather than a degraded text search, so retry with `query` if it does — unless the response also carries `entityIndexDraining`, which means the index has not finished scanning this scope and the same lookup is worth repeating shortly.",
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": ["user", "feedback", "project", "reference", "procedural"]
+          },
+          "tag": {
+            "type": "string"
+          },
+          "topic_key": {
+            "description": "Return only memories carrying this exact topic_key. On its own it returns the topic's whole history — the active row plus every row it superseded — because that is what tells you whether the topic already converged before you save a synonym key; pass `status` too to narrow to one. Pair with memory.suggest_topic_key.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "superseded", "archived"]
+          },
+          "across_projects": {
+            "description": "Also read the other projects this token is allowed to read — never one it is not. Leave it off for ordinary recall: pass it only when the user explicitly asks about other projects, or when this project answered nothing. `searchedProjects[]` in the response names the projects actually read, and `widened:true` appears only when that was more than one; a token that reaches a single project gets its ordinary result. Reads only — it does not change where memory.save writes, and memory.get_batch still refuses an id from another project.",
+            "type": "boolean"
+          },
+          "include_relations": {
+            "description": "Also fetch each result's one-hop supersedes/superseded_by/conflicts_with counterpart (if not already in the results) as a separate `expanded` array, capped at 5, never counted against `limit`.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max results (default 8). Raise it (up to 200) when 8 are all relevant and you need more.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "description": "Skip this many results for paging. Exact for the no-query listing; on a text query it is best-effort within a bounded relevance window, so a deep offset may return an empty page.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "snippet": {
+            "description": "Truncate each result's `content` to this many characters (ellipsis appended) so a broad triage scan stays cheap; omit for full content, then drill in with memory.get_batch.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "fields": {
+            "description": "Restrict each result to these fields; identity fields (id, type, title) are always included. Omit for the full row.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "relations_limit": {
+            "description": "How many relation annotations to return per memory (default 10). Each row's `relationsTotal` reports how many exist, so when it exceeds the returned length ask again with relations_limit: min(relationsTotal, 50). A value above 50 is REJECTED, not clamped. Annotations come contradiction- and lifecycle-first, so a lower bound never hides one of those — but it does bound what `include_relations` can expand from, since expansion draws on the annotations returned here. Rows and this bound are limited TOGETHER: their product may not exceed 4000 annotations per response, so trade one against the other (e.g. 80 rows at 50, or the row maximum at the default). Over-budget is REJECTED too. On the multi-row surfaces a judged `reason` is truncated; single-item `memory.get_batch({ids:[id],relations_limit:50})` returns complete reasons.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Search memories",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "memories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": ["string", "null"]
+                },
+                "content": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string"
+                },
+                "replaces": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "lastSeenAt": {
+                  "type": ["string", "null"]
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "relations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "targetId": {
+                        "type": "string"
+                      },
+                      "judgmentId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": ["string", "null"]
+                      },
+                      "confidence": {
+                        "type": ["number", "null"]
+                      }
+                    },
+                    "required": ["kind", "targetId", "status"],
+                    "additionalProperties": false
+                  }
+                },
+                "relationsTotal": {
+                  "type": "number"
+                },
+                "reviewState": {
+                  "type": "string"
+                },
+                "reviewAfter": {
+                  "type": ["string", "null"]
+                },
+                "reviewEscalated": {
+                  "type": "boolean"
+                },
+                "entities": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "value"],
+                    "additionalProperties": false
+                  }
+                },
+                "entitiesTotal": {
+                  "type": "number"
+                }
+              },
+              "required": ["id", "type", "title"],
+              "additionalProperties": false
+            }
+          },
+          "expanded": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": ["string", "null"]
+                },
+                "content": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string"
+                },
+                "replaces": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "lastSeenAt": {
+                  "type": ["string", "null"]
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "relations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "targetId": {
+                        "type": "string"
+                      },
+                      "judgmentId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": ["string", "null"]
+                      },
+                      "confidence": {
+                        "type": ["number", "null"]
+                      }
+                    },
+                    "required": ["kind", "targetId", "status"],
+                    "additionalProperties": false
+                  }
+                },
+                "relationsTotal": {
+                  "type": "number"
+                },
+                "reviewState": {
+                  "type": "string"
+                },
+                "reviewAfter": {
+                  "type": ["string", "null"]
+                },
+                "reviewEscalated": {
+                  "type": "boolean"
+                },
+                "entities": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "value"],
+                    "additionalProperties": false
+                  }
+                },
+                "entitiesTotal": {
+                  "type": "number"
+                },
+                "expandedFrom": {
+                  "type": "string"
+                },
+                "relationKind": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "type", "title", "expandedFrom", "relationKind"],
+              "additionalProperties": false
+            }
+          },
+          "abstained": {
+            "type": "boolean"
+          },
+          "abstainReason": {
+            "type": "string"
+          },
+          "gateShortened": {
+            "type": "boolean",
+            "const": true
+          },
+          "searchedProjects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "widened": {
+            "type": "boolean"
+          },
+          "viaEntity": {
+            "type": "boolean"
+          },
+          "entityIndexDraining": {
+            "type": "boolean"
+          }
+        },
+        "required": ["count", "memories", "abstained"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.get_batch",
+      "description": "Retrieve complete current memories/history by `ids: [id, ...]` OR ISO-offset `from`/optional `to`, never both. Period selects createdAt in [from,to), includes all statuses and defaults to server now; it is not a historical snapshot. `limit` default/max20 and `offset` default0 return { memories, errors, total, nextOffset }; resend the same selection with nextOffset until null. Missing/foreign targets have indistinguishable not_found errors. Partial success preserves data; no success on an attempted page sets MCP isError:true. Empty pages succeed. Successful served targets advance resolved-head access, not affirmation; unserved rows and projected history are untouched. Use for full untruncated content or history after memory.search. `predecessors[]` is bounded (id/title/status/createdAt only, no content) — `truncated:true` means more predecessor history exists than was returned; `headTruncated:true` means the supersedes-chain head could not be fully resolved. For an active memory the response also carries `reviewState`/`reviewAfter`: `needs_review` means re-verify (memory.confirm_batch if still true, memory.save+topic_key if changed).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ids": {
+            "description": "Memory IDs in requested order; duplicates removed before paging. Use IDs OR from/to, never both. A one-item array reads one memory; missing/foreign IDs have errors.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "from": {
+            "description": "ISO timestamp with offset: inclusive creation-time start. Select all in-scope statuses by createdAt, not lastSeenAt. Current records/history, not historical snapshots; mutually exclusive with ids.",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "to": {
+            "description": "ISO timestamp with offset: exclusive creation-time end; defaults to server now. Requires from < to.",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "limit": {
+            "description": "Outcomes per page, including errors; default/max20. Full records, no byte-based truncation.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "offset": {
+            "description": "Default0. Continue with nextOffset until null using the same selection. Period pages are live views; only successfully served records count as access.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "relations_limit": {
+            "description": "How many relation annotations to return per memory (default 10). Each row's `relationsTotal` reports how many exist, so when it exceeds the returned length ask again with relations_limit: min(relationsTotal, 50). A value above 50 is REJECTED, not clamped. Annotations come contradiction- and lifecycle-first, so a lower bound never hides one of those — but it does bound what `include_relations` can expand from, since expansion draws on the annotations returned here. Rows and this bound are limited TOGETHER: their product may not exceed 4000 annotations per response, so trade one against the other (e.g. 80 rows at 50, or the row maximum at the default). Over-budget is REJECTED too. On the multi-row surfaces a judged `reason` is truncated; single-item `memory.get_batch({ids:[id],relations_limit:50})` returns complete reasons.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get memory",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "memories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": ["string", "null"]
+                },
+                "content": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string"
+                },
+                "replaces": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "lastSeenAt": {
+                  "type": ["string", "null"]
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "relations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "targetId": {
+                        "type": "string"
+                      },
+                      "judgmentId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": ["string", "null"]
+                      },
+                      "confidence": {
+                        "type": ["number", "null"]
+                      }
+                    },
+                    "required": ["kind", "targetId", "status"],
+                    "additionalProperties": false
+                  }
+                },
+                "relationsTotal": {
+                  "type": "number"
+                },
+                "reviewState": {
+                  "type": "string"
+                },
+                "reviewAfter": {
+                  "type": ["string", "null"]
+                },
+                "reviewEscalated": {
+                  "type": "boolean"
+                },
+                "entities": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "value"],
+                    "additionalProperties": false
+                  }
+                },
+                "entitiesTotal": {
+                  "type": "number"
+                },
+                "head": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "title", "content", "status"],
+                  "additionalProperties": false
+                },
+                "predecessors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "title", "status", "createdAt"],
+                    "additionalProperties": false
+                  }
+                },
+                "predecessorCount": {
+                  "type": "number"
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "headTruncated": {
+                  "type": "boolean"
+                },
+                "confirmationCount": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "title",
+                "scope",
+                "projectId",
+                "content",
+                "tags",
+                "status",
+                "replaces",
+                "createdAt",
+                "lastSeenAt",
+                "topicKey",
+                "relations",
+                "relationsTotal",
+                "entities",
+                "entitiesTotal",
+                "head",
+                "predecessors",
+                "predecessorCount",
+                "truncated",
+                "headTruncated",
+                "confirmationCount"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "errorId": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "code", "message"],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "nextOffset": {
+            "type": ["number", "null"]
+          }
+        },
+        "required": ["memories", "errors", "total", "nextOffset"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.confirm_batch",
+      "description": "Record one shared verdict for `ids: [id, ...]` (1–20 IDs), deduplicated and resolved to chain heads. Atomic: any failed target rolls back all confirmations; never auto-split. Returns `confirmed` and optional `headTruncated`. No date selectors or scalar ID. Affirmation closes `needs_review`. Default `verdict:\"affirm\"`: call it when the user explicitly endorses a memory (\"yes, that's right\", \"still true\") so future retrievals can prioritise it. `verdict:\"refute\"` records the opposite and REQUIRES `reason`: use it only when a memory you actually surfaced and acted on turned out wrong or stale and you have verified that. A refutation edits and archives nothing; it marks the memory `needs_review` immediately, whatever its shelf life, so a human or a later pass re-verifies it — and it does not extend the memory's life the way an affirmation does. Pass `ids: string[]` to record one verdict over several memories in one call — e.g. close out all of memory.context.needsReview when they are all still true. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). Errors: `invalid_input` if `refute` arrives without a reason, `not_found` for an id outside this scope. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "1–20 memory IDs, deduplicated; one shared verdict. Atomic: any failed target rolls back every confirmation. Use a one-element array for one memory."
+          },
+          "sessionId": {
+            "description": "Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.",
+            "type": "string",
+            "minLength": 1
+          },
+          "verdict": {
+            "description": "Default 'affirm' (still true, re-verified). Set 'refute' ONLY when a memory you just surfaced turned out wrong or stale AND you have concretely verified that — never as routine cleanup, never for a memory you have not actually acted on. Refuting does not archive or edit anything; it marks the memory needs_review immediately (bypassing its normal shelf life) so a human or a later pass re-verifies it. Requires `reason`.",
+            "type": "string",
+            "enum": ["affirm", "refute"]
+          },
+          "reason": {
+            "description": "Required when verdict is \"refute\": concretely what proved it wrong or stale.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["ids"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Confirm memory",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "confirmed": {
+            "type": "number"
+          },
+          "headTruncated": {
+            "type": "boolean"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["ok", "confirmed"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.archive",
+      "description": "Retire a memory: flip one active memory in this scope to `archived` so it stops surfacing in recall. Call this ONLY when the user explicitly asks to retire, remove, or forget a specific memory — never as autonomous cleanup or housekeeping while recalling or saving, and never on your own judgement that a memory looks stale. If a replacement exists, do NOT archive: prefer a supersede (memory.save with the same `topic_key`, or memory.judge_batch) which keeps a successor link — archive is the no-successor path for genuine retirement. Also use it as the second half of a user-requested cross-project move: memory.save the memory into the destination project, then memory.archive the original here. Args: { id }. Errors: `not_found` if the id is missing or in another scope, `conflict` if it is not active. Reversible: an operator can undo the archive from the dashboard.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The id of the active memory to retire. Must be in the connection’s scope."
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Archive memory",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "const": "archived"
+          }
+        },
+        "required": ["ok", "id", "status"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.merge",
+      "description": "Merge 2–10 active memories in this scope into ONE new memory that supersedes them all, recorded as a single merge an operator can undo from the dashboard. Use it when several memories each hold part of one fact or convention, instead of saving a new memory and judging it against each original. Two calls with the SAME arguments: (1) WITHOUT `fingerprint`: a preview that writes nothing and returns `originals[]`, the `successor` exactly as it will be stored, `warnings[]` and a `fingerprint`. SHOW that plan to the user — what is merged, the new text and every warning — and confirm only once they agree. (2) WITH that `fingerprint`: commits. Never confirm a preview the user has not seen, and never invent a fingerprint. If anything changed since the preview, nothing is merged and you get `fingerprint_mismatch` with a fresh `preview`: show it again before confirming with its fingerprint. Write `content` as the complete merged memory, because the originals stop surfacing in recall. topic_key: omit it to keep the originals' single key; when they hold different keys, name the one to keep; a key held by an active memory outside `ids` is refused. Confirmations and judgments are not carried over; pending judgments on an original are closed as orphaned, and undoing the merge restores them. The commit response is like memory.save's: close `candidates[]` with memory.judge_batch. Errors: `not_found` (id missing or in another scope), `conflict` (an original not active, or a topic_key clash), `invalid_input`. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ids": {
+            "minItems": 2,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "2–10 distinct ids of active memories in this scope that the merged memory replaces."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["user", "feedback", "project", "reference", "procedural"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The complete merged memory: the originals stop surfacing in recall once it is committed."
+          },
+          "tags": {
+            "minItems": 1,
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Required: 1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5; e.g. dashboard, sqlite, bug-fix."
+          },
+          "topic_key": {
+            "description": "Omit to keep the originals' single topic_key. Required when they hold different keys: name the one to keep.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sessionId": {
+            "description": "Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.",
+            "type": "string",
+            "minLength": 1
+          },
+          "fingerprint": {
+            "description": "Omit to preview (nothing is written). Pass the `fingerprint` of a preview the user has seen to commit exactly that plan. Never invent one.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["ids", "type", "title", "content", "tags"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Merge memories",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "merged": {
+            "type": "boolean"
+          },
+          "originals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "contentPreview": {
+                  "type": "string"
+                },
+                "contentTruncated": {
+                  "type": "boolean"
+                },
+                "reviewState": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "title",
+                "status",
+                "topicKey",
+                "tags",
+                "createdAt",
+                "contentPreview",
+                "contentTruncated",
+                "reviewState"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "successor": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "topicKey": {
+                "type": ["string", "null"]
+              },
+              "replaces": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["type", "title", "content", "tags", "topicKey", "replaces"],
+            "additionalProperties": false
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "ids", "message"],
+              "additionalProperties": false
+            }
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "opId": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "judgmentId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "similarity": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "entityValue": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "judgmentId",
+                "targetId",
+                "title",
+                "snippet",
+                "similarity",
+                "source",
+                "topicKey"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "targetId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "similarity": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "entityValue": {
+                  "type": "string"
+                }
+              },
+              "required": ["targetId", "title", "snippet", "similarity", "source", "topicKey"],
+              "additionalProperties": false
+            }
+          },
+          "convergeWith": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "judgmentRequired": {
+            "type": "boolean"
+          },
+          "candidatesDetected": {
+            "type": "number"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["merged", "originals", "successor", "warnings", "fingerprint"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.session_start",
+      "description": "Start an agent session. In normal operation you do NOT need to call this — the host registers the session automatically (Claude Code/Codex hooks and the Hermes/opencode/Pi providers POST to the sessions endpoint). Call it only when running without that host wiring and you need an explicit session to wrap with memory.session_summary. Args: { agent?, description?, project? (slug, overrides roots) }. Returns: { sessionId, scope, projectId, startedAt, title, reused, agent }. `reused:true` means this call ADOPTED the host's already-active session instead of starting one, so the sessionId is the host's, not a new session; `agent` is the resolved session's own attribution and, when `reused:true`, MAY differ from the `agent` you passed — it is never overwritten, so it reports whose session you are now writing into. Once a session is active on this connection, do NOT call this again — memory.save, memory.confirm_batch and memory.session_summary attach to it automatically. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Start session",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": ["string", "null"]
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["sessionId", "scope", "projectId", "startedAt", "title", "reused", "agent"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.session_end",
+      "description": "End the active session without writing a summary. Prefer memory.session_summary unless the session is being abandoned. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). Returns: { ok: true, sessionId, endedAt, applied: true } on an active row or { ok: true, sessionId, endedAt, applied: false } if the row was already terminal and the call was a no-op.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "End session",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": ["string", "null"]
+          },
+          "applied": {
+            "type": "boolean"
+          }
+        },
+        "required": ["ok", "sessionId", "endedAt", "applied"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.session_summary",
+      "description": "Save the end-of-session summary AND a short title. Write readable prose with normal spaces and punctuation. Condense wording, never join words to fit the cap; keep technical literals unchanged. Call this at the END OF EVERY TURN that did real work — never end a working turn silent; do NOT wait for the literal word \"done\"/\"listo\". The `##` sections you send REPLACE; the ones you omit STAY. REFINE the session's current state, not a turn report: concise, not exhaustive; add new facts to existing ones. Sending only the sections that changed is expected; each states its full current state, never a fragment. CONDENSE, never delete — shrinking a section is fine at the 10000-char cap; making one disappear is not, so write a genuinely empty section as its heading with `none` instead of omitting it. An over-cap MERGE is refused, not truncated — condense the sections and resend. Current state FIRST: memory.context previews the beginning; read memory.session_get_batch({ ids: [sessionId] }).sessions[0] in full before carrying earlier work into a rewrite. COPY it verbatim: paths with line numbers, measurements, test names, error strings; do not paraphrase. Args: { summary (<=10000 chars, server rejects longer with invalid_input), title? (<=100 chars — send on the FIRST write or a real change of direction; omit otherwise, it stays and is never locked), sessionId? (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active) }. Body:\nUse exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\n`## Unfinished+why` = what was still open when this session ended, and why — not a live TODO.\nDoes NOT end the session — use memory.session_end for that.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": ["summary"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Save session summary",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "summaryFinal": {
+            "type": "boolean"
+          },
+          "titleFinal": {
+            "type": "boolean"
+          },
+          "applied": {
+            "type": "boolean"
+          },
+          "discardReason": {
+            "type": "string"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "sessionId",
+          "summary",
+          "title",
+          "summaryFinal",
+          "titleFinal",
+          "applied"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.session_resume",
+      "description": "Return an already-closed session to active, so a resumed conversation reattaches to its original row instead of running unattributed or forking a second one. Call it when you are continuing a conversation whose Rembric session was ended or abandoned (the retirement sweep abandons idle sessions) and you know that session's id — never invent one. Args: { sessionId } — REQUIRED, with no fallback: an omitted id is rejected with invalid_input rather than guessed by recency. Returns: { ok: true, sessionId, status ('active'), startedAt, resumedAt (the new activity stamp; unchanged when the session was already active), previousStatus, previousEndedAt, title }. `previousStatus` and `previousEndedAt` report what this call discarded — `previousEndedAt` is NOT retained on the row afterwards, so this response is the only place it is ever reported. On success the session becomes this connection's session, so later memory.save calls attach to it with no sessionId argument. Resuming an already-active session succeeds and mutates nothing. Errors: session_not_found (unknown id, or a session belonging to another token or project), session_deleted (an operator soft-deleted it — ask them to undelete it).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["sessionId"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Resume session",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "const": "active"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "resumedAt": {
+            "type": "string"
+          },
+          "previousStatus": {
+            "type": "string"
+          },
+          "previousEndedAt": {
+            "type": ["string", "null"]
+          },
+          "title": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "ok",
+          "sessionId",
+          "status",
+          "startedAt",
+          "resumedAt",
+          "previousStatus",
+          "previousEndedAt",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.context",
+      "description": "Get recent context for this scope: recentSessions (summary snippet: its `## Unfinished+why` section if it lists pending work, else the opening), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge_batch, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm_batch, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked \"what did we do\" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small (sessions 3, memories 10, prompts 5, judgments 5) and each has a maximum: sessions 25, prompts 50, memories 100, judgments 50. Above it the call is rejected, not clamped.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 25
+          },
+          "prompts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "memories": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "judgments": {
+            "description": "How many pendingJudgments[] to return. Passing it also LIFTS the age filter, so the un-aged pairs become reachable; omit it for the aged queue-depth warning. Compare against pendingJudgmentsTotal to tell a page from the queue.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "includeArchived": {
+            "type": "boolean"
+          },
+          "focus": {
+            "description": "What the agent is about to work on, to rank relevantMemories[] by. When omitted, the server derives a seed from the active session and recent prompts.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Recent context",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "recentSessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string"
+                },
+                "endedAt": {
+                  "type": ["string", "null"]
+                },
+                "status": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": ["string", "null"]
+                },
+                "summary": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": ["id", "agent", "startedAt", "endedAt", "status", "title", "summary"],
+              "additionalProperties": false
+            }
+          },
+          "recentPrompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "agent": {
+                  "type": ["string", "null"]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "content", "agent", "createdAt"],
+              "additionalProperties": false
+            }
+          },
+          "recentMemories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": ["id", "type", "title", "snippet", "status", "createdAt", "topicKey"],
+              "additionalProperties": false
+            }
+          },
+          "relevantMemories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "via": {
+                  "type": "string",
+                  "enum": ["entity", "ranked"]
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "title",
+                "snippet",
+                "status",
+                "createdAt",
+                "topicKey",
+                "via"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "rankedPass": {
+            "type": "object",
+            "properties": {
+              "abstained": {
+                "type": "boolean"
+              },
+              "abstainReason": {
+                "type": "string"
+              },
+              "gateShortened": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "required": ["abstained"],
+            "additionalProperties": false
+          },
+          "pendingJudgments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "judgmentId": {
+                  "type": "string"
+                },
+                "sourceId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "sourceTitle": {
+                  "type": "string"
+                },
+                "targetTitle": {
+                  "type": "string"
+                },
+                "sourceSnippet": {
+                  "type": "string"
+                },
+                "targetSnippet": {
+                  "type": "string"
+                },
+                "ageMs": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "judgmentId",
+                "sourceId",
+                "targetId",
+                "sourceTitle",
+                "targetTitle",
+                "sourceSnippet",
+                "targetSnippet",
+                "ageMs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pendingJudgmentsTotal": {
+            "type": "number"
+          },
+          "needsReview": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "reviewAfter": {
+                  "type": "string"
+                },
+                "ageMs": {
+                  "type": "number"
+                }
+              },
+              "required": ["id", "type", "title", "snippet", "reviewAfter", "ageMs"],
+              "additionalProperties": false
+            }
+          },
+          "needsReviewTotal": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "scope",
+          "recentSessions",
+          "recentPrompts",
+          "recentMemories",
+          "relevantMemories",
+          "pendingJudgments",
+          "pendingJudgmentsTotal",
+          "needsReview",
+          "needsReviewTotal"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.session_get_batch",
+      "description": "Retrieve FULL current session summaries by `ids: [sessionId, ...]` OR ISO-offset `from`/optional `to`, never both. Period selects activity spans overlapping [from,to): startedAt < to and lastActivityAt (fallback startedAt) >= from; to defaults to server now. Excludes foreign, deleted and contentless sessions. Orders period pages by startedAt DESC/id DESC; not historical snapshots or proof every fact happened then. `limit` default/max 20, `offset` default 0; returns { sessions, errors, total, nextOffset }. Resend the same selection with offset=nextOffset until null; pages are live views. Complete summaries/fallbacks, no byte truncation. Mixed success preserves data beside errors; attempted pages with no success set MCP isError:true (not_found if all missing, otherwise batch_failed). Empty pages succeed. IDs deduplicate before paging; missing/foreign/deleted IDs are indistinguishable not_found errors. Before rewriting a resumed summary, call with { ids: [sessionId] } and read sessions[0] in full; context only has snippets.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ids": {
+            "description": "Session IDs; duplicates removed before paging. Use IDs OR from/to, never both. A one-item array supports summary recovery.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "from": {
+            "description": "ISO timestamp with offset: inclusive interval start. Select session activity spans overlapping [from,to); not a historical summary snapshot. Mutually exclusive with ids.",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "to": {
+            "description": "ISO timestamp with offset: exclusive interval end; defaults to server now. Requires from < to.",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "limit": {
+            "description": "Outcomes per page, including errors; default/max20. Full summaries without byte-based truncation.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "offset": {
+            "description": "Default0. Continue with nextOffset until null; period pages are live reads.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get session",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string"
+                },
+                "endedAt": {
+                  "type": ["string", "null"]
+                },
+                "lastActivityAt": {
+                  "type": ["string", "null"]
+                },
+                "title": {
+                  "type": ["string", "null"]
+                },
+                "summary": {
+                  "type": ["string", "null"]
+                },
+                "summaryFinal": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "agent",
+                "status",
+                "startedAt",
+                "endedAt",
+                "lastActivityAt",
+                "title",
+                "summary",
+                "summaryFinal"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "errorId": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "code", "message"],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "nextOffset": {
+            "type": ["number", "null"]
+          }
+        },
+        "required": ["sessions", "errors", "total", "nextOffset"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.timeline",
+      "description": "Drill into chronological neighbors of a specific memory. Args: { memoryId, before? (default 5), after? (default 5) }; before + after must not exceed 50 — a larger window is rejected with invalid_input, not clamped; use memory.search instead. Returns memories before and after the target within the same session (or, when the target has no session, a ±2h time window with fallback:\"time_window\").",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "memoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "before": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "after": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          }
+        },
+        "required": ["memoryId"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Memory timeline",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "createdAt"],
+            "additionalProperties": false
+          },
+          "before": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": ["id", "type", "title", "content", "status", "createdAt", "sessionId"],
+              "additionalProperties": false
+            }
+          },
+          "after": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": ["id", "type", "title", "content", "status", "createdAt", "sessionId"],
+              "additionalProperties": false
+            }
+          },
+          "fallback": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["target", "before", "after", "fallback"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.capture_passive",
+      "description": "Bulk-save learnings. Required: tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix), applied to every learning. Extract numbered/bulleted items from a \"## Key Learnings\" (or \"### Key Learnings\", colon optional, case-insensitive) section in the given text and save each as a separate memory (type=reference) through the same curation pipeline as memory.save — topic_key handling, inline embedding, save-time candidate detection. When no such section is found, `saved` is 0 and `reason` explains why; this is NOT the same as success. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. The response may include `candidates[]` if any captured learning conflicts with an existing memory — judge them with memory.judge_batch — plus `convergeWith[]` and `related[]`, meaning what they mean in memory.save. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50000
+          },
+          "tags": {
+            "minItems": 1,
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Required: 1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5; e.g. dashboard, sqlite, bug-fix."
+          },
+          "sessionId": {
+            "description": "Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["text", "tags"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Capture learnings",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "saved": {
+            "type": "number"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "judgmentId": {
+                  "type": "string"
+                },
+                "targetId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "similarity": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "entityValue": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "judgmentId",
+                "targetId",
+                "title",
+                "snippet",
+                "similarity",
+                "source",
+                "topicKey"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "targetId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                },
+                "similarity": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "topicKey": {
+                  "type": ["string", "null"]
+                },
+                "entityValue": {
+                  "type": "string"
+                }
+              },
+              "required": ["targetId", "title", "snippet", "similarity", "source", "topicKey"],
+              "additionalProperties": false
+            }
+          },
+          "convergeWith": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "candidatesDetected": {
+            "type": "number"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["saved", "ids", "candidatesDetected"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.save_prompt",
+      "description": "Persist a REUSABLE prompt for the active session/project so future sessions can read it via memory.context.recentPrompts (and so the operator can browse them at /dashboard/prompts). This is a curated library, not a log: do NOT call it routinely, and never once per session as a matter of course. Call it only when the user explicitly asks for a prompt to be saved, or hands you text that is plainly a reusable artifact (a template, a standing instruction, a wording they will want to run again). A first message is NOT eligible merely because it states a goal — that is every first message. Decisions, fixes and discoveries go to memory.save; what happened in a session goes to memory.session_summary. When in doubt, do not call this. REQUIRED fields: content (verbatim text, ≤20k chars) AND title (≤100 chars, scannable label for retrieval lists — a prompt without a title is not searchable in practice). Optional: tags (string[] for categorical filtering — fed into the FTS5 index alongside content), replaces (id of a predecessor prompt to atomically refine — the old row is soft-deleted and the new row links via `replaces[]`), sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). When the refined predecessor does not exist, is in another scope, or is already deleted, the call is rejected with `prompt_not_found` / `prompt_scope_mismatch` / `prompt_already_deleted`. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "replaces": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "description": "Pass this if you know your current session id (your host may surface it) to guarantee correct attachment when multiple sessions could be active. Never invent one — omit if unknown.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["content", "title"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Save prompt",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "replaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["ok", "id", "createdAt"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.search_prompts",
+      "description": "Search curated prompts in the active scope. With `query`, runs an FTS5 MATCH over `content + tags` (token-aware); without it, falls back to recency. Filters: `sessionId`, `agent`, `includeDeleted` (default false). Returns `{ scope, prompts[], total }`. `limit` defaults to 25, max 100 — above that the call is rejected, not clamped. Use when the user references a prior goal/directive and you need to retrieve the exact wording.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "agent": {
+            "type": "string",
+            "minLength": 1
+          },
+          "includeDeleted": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Search prompts",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "tags": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sessionId": {
+                  "type": ["string", "null"]
+                },
+                "projectId": {
+                  "type": ["string", "null"]
+                },
+                "agent": {
+                  "type": ["string", "null"]
+                },
+                "replaces": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "deletedAt": {
+                  "type": ["string", "null"]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "content",
+                "title",
+                "tags",
+                "sessionId",
+                "projectId",
+                "agent",
+                "replaces",
+                "deletedAt",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": ["scope", "prompts", "total"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.doctor",
+      "description": "Read-only operational diagnostics, SERVER-WIDE (all projects): DB/embeddings/entities/consolidation health, `sessions.active`, and review queue depths (`needsReview`, `pendingJudgments`), plus warnings. These counters are NOT scoped — `memory.stats` carries the scoped equivalents (`needsReviewTotal`, `pendingJudgmentsTotal`) and they will differ — for two reasons: population (server-wide vs scoped) and, for `pendingJudgments` only, filtering (doctor counts every pending row; the scoped totals count only adjudicable pairs, both endpoints still active). Use at session start when behavior seems off.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Diagnostics",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "db": {
+            "type": "object",
+            "properties": {
+              "journalMode": {
+                "type": "string"
+              },
+              "integrity": {
+                "type": "string"
+              },
+              "sizeBytes": {
+                "type": "number"
+              }
+            },
+            "required": ["journalMode", "integrity", "sizeBytes"],
+            "additionalProperties": false
+          },
+          "embeddings": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string"
+              },
+              "backlog": {
+                "type": "number"
+              }
+            },
+            "required": ["model", "backlog"],
+            "additionalProperties": false
+          },
+          "entities": {
+            "type": "object",
+            "properties": {
+              "backlog": {
+                "type": "number"
+              }
+            },
+            "required": ["backlog"],
+            "additionalProperties": false
+          },
+          "consolidation": {
+            "type": "object",
+            "properties": {
+              "lastRunAt": {
+                "type": ["string", "null"]
+              },
+              "lastRunOps": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "required": ["lastRunAt", "lastRunOps"],
+            "additionalProperties": false
+          },
+          "sessions": {
+            "type": "object",
+            "properties": {
+              "active": {
+                "type": "number"
+              }
+            },
+            "required": ["active"],
+            "additionalProperties": false
+          },
+          "review": {
+            "type": "object",
+            "properties": {
+              "needsReview": {
+                "type": "number"
+              },
+              "pendingJudgments": {
+                "type": "number"
+              }
+            },
+            "required": ["needsReview", "pendingJudgments"],
+            "additionalProperties": false
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "db",
+          "embeddings",
+          "entities",
+          "consolidation",
+          "sessions",
+          "review",
+          "warnings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.about",
+      "description": "Read-only guidance to update/upgrade Rembric: returns the running server version + the canonical installer commands to update client plugins. Call when the operator asks how to update or upgrade Rembric (server or plugins). Surfaces commands for the operator to run; never executes them.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "About Rembric",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "where": {
+                "type": "string"
+              },
+              "update": {
+                "type": "string"
+              }
+            },
+            "required": ["version", "where", "update"],
+            "additionalProperties": false
+          },
+          "plugins": {
+            "type": "object",
+            "properties": {
+              "note": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "interactive": {
+                "type": "string"
+              },
+              "update_all": {
+                "type": "string"
+              },
+              "subset": {
+                "type": "string"
+              }
+            },
+            "required": ["note", "status", "interactive", "update_all", "subset"],
+            "additionalProperties": false
+          },
+          "docs": {
+            "type": "string"
+          }
+        },
+        "required": ["server", "plugins", "docs"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.stats",
+      "description": "Read-only counters: `memoriesByStatus`, `memoriesByType`, `sessionsByStatus`, `needsReviewTotal`, `pendingJudgmentsTotal` — all scoped to the active project. `memory.doctor` reports same-named counters server-wide, so its numbers will differ.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Stats",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "memoriesByStatus": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "memoriesByType": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "sessionsByStatus": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "needsReviewTotal": {
+            "type": "number"
+          },
+          "pendingJudgmentsTotal": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "scope",
+          "memoriesByStatus",
+          "memoriesByType",
+          "sessionsByStatus",
+          "needsReviewTotal",
+          "pendingJudgmentsTotal"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "project.use",
+      "description": "Activate a project for this MCP session by slug. By default, never creates and never switches mid-session. Pass autocreate:true to mint a new project (slug must match strict regex). Pass confirmSwitch:true to replace the current project (only allowed when no session is active — close it first via memory.session_summary). ASK THE USER before passing either flag.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "autocreate": {
+            "type": "boolean"
+          },
+          "confirmSwitch": {
+            "type": "boolean"
+          }
+        },
+        "required": ["slug"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Use project",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "switched": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "previousSlug": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["slug", "projectId", "created", "switched", "source"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "project.list",
+      "description": "List existing projects. Each entry carries activeMemoryCount — how many memories in that project are still active; archived and superseded rows are not counted. Use when the user references a project that may not be active in this session.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "includeArchived": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "List projects",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": ["string", "null"]
+                },
+                "archived": {
+                  "type": "boolean"
+                },
+                "activeMemoryCount": {
+                  "type": "number"
+                }
+              },
+              "required": ["slug", "displayName", "archived", "activeMemoryCount"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["projects"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "project.current",
+      "description": "Report the project active in this session (slug, projectId, source) plus any pending suggestedSlugs surfaced by roots-based discovery.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Current project",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": ["string", "null"]
+          },
+          "projectId": {
+            "type": ["string", "null"]
+          },
+          "source": {
+            "type": "string"
+          },
+          "suggestedSlugs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["slug", "projectId", "source", "suggestedSlugs"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.suggest_topic_key",
+      "description": "Suggest a stable topic_key for an evolving memory based on type + title/content. Deterministic — no LLM. Call before memory.save when updating a topic you have saved before, so the new row supersedes the previous one atomically instead of fragmenting the result set. The response is scope-aware: `occupied:true` means an active memory already holds the exact suggested key (`occupantId`/`occupantTitle` name it — pass that same key to converge onto it rather than minting a synonym); `nearby[]` lists active keys sharing a prefix, in case one of those is the topic you meant. `topic_key` is null with a `reason` when the title reaches no transliterable word (Han, Kana, Hangul): author your own key, Unicode is accepted — do NOT retry, the heuristic is deterministic. Also check via memory.search({topic_key}) if you want the full history under a key.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["user", "feedback", "project", "reference", "procedural"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          }
+        },
+        "required": ["type"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Suggest topic key",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "topic_key": {
+            "type": ["string", "null"]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "occupied": {
+            "type": "boolean"
+          },
+          "occupantId": {
+            "type": "string"
+          },
+          "occupantTitle": {
+            "type": "string"
+          },
+          "nearby": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "topicKey": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": ["topicKey", "title"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["topic_key", "occupied", "nearby"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.judge_batch",
+      "description": "Close pending judgments from memory.save.candidates[] with { judgments: [{ judgmentId, relation, reason?, confidence?, evidence? }, ...] } (1–20). No scalar arguments or date selection. Relation: supersedes/conflicts_with/related/compatible/scoped/not_conflict. Ordered independent transactions; preserve duplicate IDs and inspect every results[] entry. A failed item does not roll back others. Malformed nested entries reject the whole request before mutations. Supersedes atomically flips the target memory and links its successor. Returns { ok, results }; mixed success is not an MCP error. If all items fail, ok:false and MCP isError:true retain every result (not_found if all missing/foreign, otherwise batch_failed). Judge while context is fresh, never on invented IDs. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "judgments": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "judgmentId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "relation": {
+                  "type": "string",
+                  "enum": [
+                    "supersedes",
+                    "conflicts_with",
+                    "related",
+                    "compatible",
+                    "scoped",
+                    "not_conflict"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "evidence": {}
+              },
+              "required": ["judgmentId", "relation"],
+              "additionalProperties": false
+            },
+            "description": "1–20 ordered judgments, each in its own transaction. Do not deduplicate; inspect every result. A one-item array judges one candidate."
+          }
+        },
+        "required": ["judgments"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Judge memories",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": false
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "judgmentId": {
+                  "type": "string"
+                },
+                "relation": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "judgedAt": {
+                  "type": "string"
+                },
+                "redactions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "private_key",
+                          "jwt",
+                          "github_token",
+                          "gitlab_token",
+                          "anthropic_api_key",
+                          "openai_api_key",
+                          "aws_access_key_id",
+                          "slack_token",
+                          "stripe_secret_key",
+                          "google_api_key",
+                          "npm_token",
+                          "huggingface_token",
+                          "authorization_header",
+                          "url_password",
+                          "assigned_secret"
+                        ]
+                      },
+                      "count": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["kind", "count"],
+                    "additionalProperties": false
+                  }
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "errorId": {
+                  "type": "string"
+                }
+              },
+              "required": ["ok", "judgmentId"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["ok", "results"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "memory.compare",
+      "description": "Proactively record a verdict on two arbitrary memories without a preceding save. Idempotent: re-calling with the same (memoryIdA, memoryIdB) pair updates the existing row. Use when independent analysis finds two memories that are related or contradict; for save-time candidates use memory.judge_batch instead. Credential-shaped text (API keys, tokens, private keys, passwords) is stored as [REDACTED:<kind>] and reported in redactions.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "memoryIdA": {
+            "type": "string",
+            "minLength": 1
+          },
+          "memoryIdB": {
+            "type": "string",
+            "minLength": 1
+          },
+          "relation": {
+            "type": "string",
+            "enum": ["supersedes", "conflicts_with", "related", "compatible", "scoped"]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {}
+        },
+        "required": ["memoryIdA", "memoryIdB", "relation", "confidence"],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Compare memories",
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "idempotentHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "judgmentId": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private_key",
+                    "jwt",
+                    "github_token",
+                    "gitlab_token",
+                    "anthropic_api_key",
+                    "openai_api_key",
+                    "aws_access_key_id",
+                    "slack_token",
+                    "stripe_secret_key",
+                    "google_api_key",
+                    "npm_token",
+                    "huggingface_token",
+                    "authorization_header",
+                    "url_password",
+                    "assigned_secret"
+                  ]
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": ["kind", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["ok", "judgmentId", "relation", "status"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
