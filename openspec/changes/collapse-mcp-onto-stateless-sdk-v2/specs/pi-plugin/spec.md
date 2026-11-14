@@ -41,6 +41,8 @@ No requirement in this capability SHALL assert that every Pi session reaches a t
 - **THEN** no shutdown handler SHALL run and no end SHALL be issued
 - **AND** the row SHALL remain `active` until the stale-active retirement sweep flips it to `abandoned`
 
+## ADDED Requirements
+
 ### Requirement: The Pi extension SHALL declare its session identity on every session-attaching tool call
 
 The extension SHALL declare its identity on each MCP tool call rather than on the transport. For every discovered tool whose server-published `inputSchema` declares a `sessionId` property, when the arguments the model supplied carry no `sessionId`, the extension SHALL add `sessionId: <host session id>` — the id Pi itself generated (`ctx.sessionManager.getSessionId()`) — to the arguments it forwards to `tools/call`. A `sessionId` the model supplied SHALL be forwarded unchanged. The decision SHALL be taken from the discovered schema, never from a list of tool names, and SHALL leave the registered `inputSchema` exactly as the server published it (see "Tools are discovered at runtime over MCP and never enumerated in the plugin"). The argument is id-targeted, so it guesses nothing: it is the only form of session resolution that cannot be confounded by a second live row.
@@ -93,7 +95,10 @@ The injection is additive on the MCP channel and changes nothing in the HTTP lif
 - **THEN** the memory saved by the first process SHALL carry `session_id = <H1>` and the one saved by the second SHALL carry `session_id = <H2>`
 - **AND** neither SHALL be attached by the windowed or sole-active fallback, which is the ambiguity the per-call identifier exists to remove
 
-## RENAMED Requirements
+## REMOVED Requirements
 
-- FROM: `### Requirement: The Pi extension SHALL declare its session identity on the MCP transport`
-- TO: `### Requirement: The Pi extension SHALL declare its session identity on every session-attaching tool call`
+### Requirement: The Pi extension SHALL declare its session identity on the MCP transport
+
+**Reason**: The Pi extension no longer binds the MCP transport with a start-up `memory.session_resume`, because the server keeps no per-connection binding for that call to set. The bind loop, its silent retry, its per-transport failure budget and its re-declaration on a transport re-init are removed.
+
+**Migration**: None required. The extension passes the host session id as `sessionId` on every discovered tool whose input schema declares it, as specified by "The Pi extension SHALL declare its session identity on every session-attaching tool call".

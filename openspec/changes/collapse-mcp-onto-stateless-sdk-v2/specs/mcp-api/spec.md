@@ -6,7 +6,7 @@ The server SHALL expose the Model Context Protocol over the Streamable HTTP tran
 
 The server SHALL NOT mint an `Mcp-Session-Id` header, and SHALL NOT require one on any request. `GET` and `DELETE` on the MCP endpoint SHALL be answered with HTTP `405`: there is no standalone server→client stream to open and no protocol session to tear down.
 
-#### Scenario: A 2025 client initializes without a protocol session
+#### Scenario: Client initiates a session
 
 - **WHEN** an MCP client sends `initialize` with a 2025 `protocolVersion` to `/mcp` using the Streamable HTTP transport
 - **THEN** the server SHALL respond with a valid initialize result advertising the registered tools
@@ -112,82 +112,6 @@ The title predates this change: there are no global memories left to leak, and t
 - **WHEN** the client calls `project.current`, `project.list` or `memory.about`
 - **THEN** each call SHALL succeed
 - **AND** the `project_not_found` refusal that every scope-resolving tool returns on that connection SHALL name the dashboard as the place to create the project, and SHALL NOT name a tool call as a way to create or activate it
-
-### Requirement: The MCP server MUST expose two project-management tools under the `project.*` namespace
-
-The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list` and `project.current` with the following contracts. Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
-
-No tool SHALL activate, switch or create a project. A connection's project is fixed by its URL path, or is the default project on a path-less connection; projects are created from the dashboard. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
-
-`project.list`'s per-project count SHALL be named `activeMemoryCount` and SHALL count only memories whose `status` is `active`, in that project's scope. The name carries the filter because the count's previous name, `memoryCount`, stated neither dimension and was measured disagreeing with the corpus the same connection could read: after `memory.archive` on a project's only memory, `project.list` reported `1` while `memory.search` in that same scope returned `0`. The name is additionally reused elsewhere in the server for a different aggregate (memories saved in one session), so a bare `memoryCount` on this payload is ambiguous in two ways at once. Renaming rather than silently re-filtering is required: a changed value under an unchanged key gives a consumer no signal to re-read the contract.
-
-`activeMemoryCount` SHALL be computed by a repository read that takes the scope as a required parameter (see the `data-access` requirement "`project.list`'s per-project memory count MUST be a scoped repository read"). The scope SHALL be derived from the project row being reported, and the token-authorization filter over project rows SHALL be applied BEFORE any count is taken, so the handler can only count a scope the token was already authorized to read. This ordering is the entire basis on which a handler may name its own scope, and it SHALL NOT be relaxed into a post-filter.
-
-`project.list` SHALL NOT resolve an effective scope from the request context in order to produce the count, and SHALL continue to succeed on a connection whose URL slug resolves to no project (see "the connection is not bricked by the refusal").
-
-`project.list` SHALL NOT report a second, unfiltered per-project total. The per-status breakdown scoped to the request context is `memory.stats`' `memoriesByStatus`, and a second total on this payload would answer the same question on a path that deliberately does not resolve the caller's scope.
-
-`project.list`'s registered top-level description SHALL state that the count is of active memories. This SHALL be in the description string returned by `tools/list`, not only in a schema `describe()`, which some clients do not surface to the model.
-
-#### Scenario: No project-switching or project-creating tool is offered
-
-- **WHEN** an MCP client calls `tools/list` on `/mcp` or on `/mcp/<slug>`
-- **THEN** the response SHALL contain `project.list` and `project.current`
-- **AND** the response SHALL NOT contain `project.use`, nor any other tool that activates, switches or creates a project
-
-#### Scenario: `project.list` returns available slugs
-
-- **WHEN** an MCP client calls `project.list({includeArchived?: false})`
-- **THEN** the server SHALL return `{ projects: Array<{ slug, displayName, archived, activeMemoryCount }> }` ordered by slug ascending, filtering archived rows by default
-- **AND** the payload SHALL NOT contain a `memoryCount` key on any project entry
-
-#### Scenario: `activeMemoryCount` drops when a memory is archived
-
-- **GIVEN** projects `p` and `q`, where `p` holds exactly one memory with `status = 'active'` and `q` holds two
-- **WHEN** an MCP client calls `project.list`, then calls `memory.archive` on `p`'s only memory, then calls `project.list` again
-- **THEN** the first response SHALL report `activeMemoryCount` of 1 for `p`
-- **AND** the second response SHALL report `activeMemoryCount` of 0 for `p`
-- **AND** `q`'s `activeMemoryCount` SHALL be 2 in both responses
-
-#### Scenario: `activeMemoryCount` agrees with what the same connection can retrieve
-
-- **GIVEN** a project holding one `active` memory and one `archived` memory
-- **WHEN** an MCP client on a connection resolving to that project calls `project.list` and `memory.stats`
-- **THEN** `activeMemoryCount` for that project SHALL equal `memory.stats`' `memoriesByStatus.active` for the same scope
-- **AND** `activeMemoryCount` SHALL be strictly less than the project's total row count, so the filter is observable rather than vacuous
-
-#### Scenario: `activeMemoryCount` excludes memories outside the reported project
-
-- **GIVEN** projects `p` and `q` each holding `active` memories, plus at least one `active` memory in the default project
-- **WHEN** a token authorized for both projects calls `project.list`
-- **THEN** each entry's `activeMemoryCount` SHALL count only that entry's own project scope
-- **AND** no entry's `activeMemoryCount` SHALL include any other project's memories
-
-#### Scenario: A project-scoped token sees only its own project and its own count
-
-- **GIVEN** projects `p` and `q` both holding `active` memories, and a token with scope `project:<p.id>`
-- **WHEN** the token calls `project.list`
-- **THEN** the response SHALL contain `p` only, with `p`'s own `activeMemoryCount`
-- **AND** no count for `q` SHALL be computed or returned
-
-#### Scenario: `project.list` still succeeds on a connection whose slug resolves to no project
-
-- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
-- **WHEN** the client calls `project.list`
-- **THEN** the call SHALL succeed and SHALL report `activeMemoryCount` for every project the token may read
-- **AND** the call SHALL NOT be rejected with `project_not_found`
-
-#### Scenario: `project.list`'s description states that the count is of active memories
-
-- **WHEN** an MCP client retrieves the tool description for `project.list` via `tools/list`
-- **THEN** the description SHALL convey that the per-project count covers active memories
-- **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling")
-
-#### Scenario: `project.current` reports resolution provenance
-
-- **WHEN** an MCP client calls `project.current`
-- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'default' | 'none' }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'`
-- **AND** the response SHALL NOT carry a `suggestedSlugs` field
 
 ### Requirement: The MCP `initialize` response MUST ship a protocol-teaching `instructions` block
 
@@ -318,7 +242,7 @@ An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.s
 
 `memory.session_resume` is the tool for which this rule matters most, because it is the only one that can change `status` in the reviving direction: a soft-deleted row SHALL NOT be resumable, so an operator's Delete is not undone by an agent. Its gate SHALL be evaluated in the service against the row read in the same synchronous tick as the write, not only at the tool boundary, for the reason stated in the `sessions` capability under "Sessions MAY be soft-deleted while preserving the audit trail". Resume SHALL NOT clear `deleted_at`; undelete remains an operator-only action.
 
-`memory.session_start` is unaffected: it never resolves an existing row by id, and the row it may adopt is found by an active-session lookup that excludes soft-deleted rows, so it can neither target nor revive a deleted session. It does NOT always insert a new row — see "The MCP server MUST expose four session-lifecycle tools", which specifies the adoption path and its `reused` flag — and this requirement SHALL NOT be read as promising that it does.
+`memory.session_start` is unaffected: it never resolves an existing row by id, and the row it may adopt is found by an active-session lookup that excludes soft-deleted rows, so it can neither target nor revive a deleted session. It does NOT always insert a new row — see "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding", which specifies the adoption path and its `reused` flag — and this requirement SHALL NOT be read as promising that it does.
 
 #### Scenario: memory.session_end targets a soft-deleted session
 
@@ -484,96 +408,6 @@ Annotations are advisory metadata only: they SHALL NOT change tool inputs, outpu
 - **WHEN** any annotated tool is invoked successfully
 - **THEN** the result SHALL still be returned as a `text` content block (no `structuredContent` is required), unchanged from the pre-annotation behavior
 
-### Requirement: Every MCP tool call MUST be authorized against the token's scope
-
-Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → the default project) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. **A tool that accepts an input widening the result set past the resolved scope — `memory.search`'s cross-project argument is the only one — SHALL additionally authorize each project the widening would admit, after the resolved-scope check, and SHALL drop the projects that fail rather than reject the call** (see the `auth` capability). The path-scoping error contract (`scope_locked`, `project_required`, `project_not_found`, `project_suggestion_pending`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
-
-Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read, using the same per-project predicate: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project; a set-scoped token sees exactly its members. **That predicate and the one that builds the widened search set SHALL be the same expression, so `project.list` and a widened `memory.search` can never disagree about a token's reach.**
-
-No MCP tool creates a project, so no tool call needs the project-creation authorization the retired `project.use({autocreate: true})` path carried; projects are created from the dashboard.
-
-#### Scenario: Read-restricted token attempts a formerly-ungated write
-
-- **GIVEN** a token with scope `read:*` or `read:project:<id>`
-- **WHEN** the token invokes `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, or `memory.judge`
-- **THEN** the call SHALL be rejected with code `forbidden` and no row SHALL be written
-
-#### Scenario: Read-restricted token attempts memory.compare
-
-- **GIVEN** a token with scope `read:*` or `read:project:<id>`
-- **WHEN** the token invokes `memory.compare` with any two in-scope memories
-- **THEN** the call SHALL be rejected with code `forbidden`, no `memory_relations` row SHALL be written, and no target memory's `status` SHALL change
-
-#### Scenario: Project-restricted token reads another project's context
-
-- **GIVEN** a token with scope `read:project:A` or `project:A`
-- **WHEN** the token opens `/mcp/B` and calls `memory.context`, `memory.timeline`, `memory.stats`, `memory.search_prompts`, or `memory.session_get`
-- **THEN** the call SHALL be rejected with code `forbidden` and no project-B data SHALL be returned
-
-#### Scenario: Project-restricted token on an unscoped connection resolving global scope
-
-The title predates this change: the scope a path-less connection resolves is the default project.
-
-- **GIVEN** a token with scope `read:project:A` connected to `/mcp` with no active project
-- **WHEN** the token calls a read tool whose effective scope resolves to the default project
-- **THEN** the call SHALL be rejected with code `forbidden`; the same call on a connection at `/mcp/A` SHALL succeed against project A
-- **AND** passing the cross-project argument SHALL NOT make the refused call succeed, because the widening is authorized after the resolved-scope check, not instead of it
-
-#### Scenario: `project.list` is filtered by token scope
-
-- **GIVEN** projects A and B exist and a token with scope `project:A`
-- **WHEN** the token calls `project.list`
-- **THEN** the response SHALL contain project A only
-
-#### Scenario: `project.list` and a widened search agree
-
-- **GIVEN** any token and any set of projects
-- **WHEN** the token calls `project.list` and then `memory.search` with the cross-project argument
-- **THEN** the slugs in `searchedProjects` SHALL be a subset of the non-archived slugs `project.list` returned, and SHALL equal them when none is archived
-
-#### Scenario: Full-access tokens are unaffected
-
-- **GIVEN** a token with scope `*`
-- **WHEN** it invokes any tool on any `/mcp*` connection
-- **THEN** authorization SHALL never reject the call (path-scoping errors still apply)
-
-### Requirement: Scope-sensitive tools MUST share the single async scope resolver
-
-All scope-sensitive tools SHALL resolve the effective project through the same async resolver that `memory.save` uses. The resolver SHALL have exactly two sources: the URL path slug, and — on a path-less connection — the default project. It SHALL NOT consult MCP roots, a per-connection project pin, or any other per-connection state, and it SHALL NOT issue any server→client request. It SHALL NOT return a scopeless result, so no tool can observe an unresolved scope.
-
-The shared resolver SHALL refuse with `project_not_found` rather than returning a scope when the path slug names no project, so no tool routed through it can inherit a fallback by omission — including a tool added after this requirement lands.
-
-A tool that resolves its own project rather than delegating to the resolver SHALL apply the same refusal. One does — `memory.session_start`, which binds the session row to a project — and it SHALL build its message and `suggestedSlugs[]` from the same shared constructor, so the refusals cannot drift in wording or payload. `memory.save` no longer classifies the request before resolving, because it no longer accepts a `scope` argument to classify; it delegates to the resolver like every other tool. That obligation SHALL be verified by enumeration over the registered tool list (below), never by counting resolver call sites — a tool absent from that list of call sites is exactly how this defect reached three separate write paths.
-
-Every tool routed through the resolver SHALL surface that refusal as a structured `mcpError` (`isError: true` with a JSON body carrying `code` and `message`), never as an exception escaping into the transport, because an escaped exception yields an error result with no machine-readable `code`. A tool SHALL therefore resolve scope inside the same error-translating boundary it already uses for authorization failures. Where a tool previously validated its arguments before resolving scope, scope resolution SHALL come first: an unusable connection is reported ahead of a malformed argument, because the call cannot succeed under any arguments.
-
-Coverage SHALL be asserted by enumeration rather than by inspection: a test SHALL drive the registered tool list, invoke every scope-sensitive tool on a connection whose path slug names no project, and assert the structured refusal. Tools exempt from scope resolution SHALL be enumerated explicitly in that test, so a newly registered tool fails it until it is classified.
-
-#### Scenario: A path-less connection resolves to the default project whatever the client advertises
-
-- **GIVEN** an unscoped `/mcp` connection whose client advertises `capabilities.roots` and whose first root's basename names an existing project other than the default project
-- **WHEN** the agent's first tool call is `memory.context`
-- **THEN** the server SHALL return the default project's context
-- **AND** the server SHALL NOT send a `roots/list` request, and a `notifications/roots/list_changed` from the client SHALL change no later call's resolved scope
-
-#### Scenario: Every registered scope-sensitive tool refuses an unresolvable slug
-
-- **GIVEN** a connection whose path slug names no project and a token whose scope is `*`
-- **WHEN** the enumerating test invokes every tool in the registered tool list with minimally valid arguments
-- **THEN** every tool not on the explicit exemption list SHALL return a result carrying `isError: true` and a JSON body whose `code` is `project_not_found`
-
-#### Scenario: A newly registered tool cannot inherit the fallback
-
-- **GIVEN** a change that registers a new scope-sensitive MCP tool
-- **WHEN** the test suite runs without that tool being classified
-- **THEN** the enumerating test SHALL fail rather than the tool silently resolving to the default project
-
-#### Scenario: Scope resolution precedes argument validation
-
-- **GIVEN** a connection whose path slug names no project
-- **WHEN** the client calls `memory.get` with neither `id` nor `ids` (a malformed request)
-- **THEN** the response SHALL carry `code: 'project_not_found'` rather than `code: 'invalid_input'`
-
 ### Requirement: MCP error messages MUST NOT instruct the agent to perform an action it cannot perform
 
 An error message on the MCP surface is read by an agent that will act on it, so a message naming an unreachable remedy costs a wasted turn and, worse, teaches the agent a false model of its own connection. Every structured error message SHALL name only remedies reachable by the party it addresses, and SHALL NOT contradict the `instructions` block delivered on the same connection.
@@ -649,10 +483,10 @@ No tool SHALL switch a path-less connection to another project, and MCP roots SH
 - **THEN** the call SHALL be refused with `code: 'forbidden'`
 - **AND** the message SHALL name the slug `foo` and the `/mcp/foo` URL, and SHALL NOT name `project.use`
 
-#### Scenario: Reaching another project does not merge two projects
+#### Scenario: Switching to another project does not merge two projects
 
 - **GIVEN** a token authorized for both the default project and project `beta`, and memories in each
-- **WHEN** the client, on a connection at `/mcp/beta`, calls `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`, none of them passing the cross-project argument
+- **WHEN** the client switches by reconfiguring its connection from `/mcp` to `/mcp/beta`, the only way left to switch, and calls `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`, none of them passing the cross-project argument
 - **THEN** every response SHALL contain only `beta`'s rows and counters, and none SHALL contain a row or counter from the default project
 
 #### Scenario: A widened search does not change where a subsequent write lands
@@ -676,7 +510,7 @@ The reason is retirement, not tidiness. MCP has no version negotiation (see the 
 
 Strictness SHALL apply uniformly to the whole tool surface and SHALL NOT carry a per-tool exception list — an exempt tool is where the next retired argument goes on meaning something. It SHALL be applied at the single seam where tool input shapes are registered, so a tool added later inherits it rather than opting in, and SHALL reach nested object properties as well as top-level ones.
 
-A refusal for an unknown property is an **argument**-validation failure, not a scope-resolution refusal: it is reported as the transport's own invalid-parameters error and is not required to carry a `DomainError` code. This does not weaken "Scope-sensitive tools MUST share the single async scope resolver", whose subject is the refusal a resolver produces.
+A refusal for an unknown property is an **argument**-validation failure, not a scope-resolution refusal: it is reported as the transport's own invalid-parameters error and is not required to carry a `DomainError` code. This does not weaken "Scope-sensitive tools MUST share the single scope resolver over the URL path and the default project", whose subject is the refusal a resolver produces.
 
 #### Scenario: A retired argument is refused, not dropped
 
@@ -702,7 +536,215 @@ A refusal for an unknown property is an **argument**-validation failure, not a s
 - **WHEN** the client calls a tool with a declared property carrying the wrong type
 - **THEN** the call SHALL be refused exactly as it was before strictness, so the pre-existing failure mode is unchanged and the new refusal is attributable to the unknown property alone
 
-### Requirement: The MCP server MUST expose four session-lifecycle tools
+### Requirement: The MCP server MUST expose a `memory.archive` tool
+
+The server SHALL register an MCP tool `memory.archive` that retires a single memory by flipping its `status` from `active` to `archived`. The tool SHALL accept `{ id: string }` (validated by zod; non-empty) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope exactly like the other single-memory tools (`memory.get`/`memory.confirm`, via `resolveEffectiveScope`) and delegate to `MemoryService.archive(id, scope)`, so archiving is confined to the connection's one effective scope: a `/mcp/<slug>` connection archives in that project's scope; a `/mcp` connection archives in the default project.
+
+A cross-scope or unknown `id` SHALL return the same `not_found`-class error as `memory.get`/`memory.confirm` — there is no cross-scope or cross-project archive path. Archiving a non-`active` memory SHALL return a `conflict`-class error. The tool SHALL NOT delete rows, drop vectors, or expose any purge capability; physical deletion remains operator/admin-only.
+
+#### Scenario: Archiving an active memory in scope succeeds
+
+- **GIVEN** a `/mcp/<slug>` connection scoped to project `P` and an `active` memory `M` in project `P`
+- **WHEN** an MCP client calls `memory.archive` with `{ id: 'M' }`
+- **THEN** the server SHALL flip `M.status` to `archived` in project `P`
+- **AND** the response SHALL confirm the archive (e.g. the archived id and its new status)
+
+#### Scenario: Archiving a memory outside the connection's scope is not found
+
+- **GIVEN** a `/mcp/<slug>` connection scoped to project `P` and an `active` memory `X` in a different project `Q`
+- **WHEN** an MCP client calls `memory.archive` with `{ id: 'X' }`
+- **THEN** the server SHALL return a `not_found`-class error and SHALL NOT change `X.status`
+
+#### Scenario: Archiving a non-active memory conflicts
+
+- **WHEN** an MCP client calls `memory.archive` for a memory whose `status` is `superseded` or `archived`
+- **THEN** the server SHALL return a `conflict`-class error and SHALL NOT change the memory's status
+
+### Requirement: `memory.timeline` session neighbors MUST be filtered by the connection's effective scope
+
+`memory.timeline`'s session-neighbor query (used when the target memory has a non-null `session_id`) SHALL filter neighbors by the connection's effective `project_id` in addition to `session_id`, so a neighbor lying outside the effective scope is never returned. Filtering by `session_id` alone is insufficient because a single session can hold memories in more than one project (rows written before project switching was removed, when a path-less connection could switch project mid-session and save into a second project) and because `session_id` carries no foreign key — so without a scope predicate `memory.timeline` could return another project's memory `content`, violating the cross-scope-read invariant that a target memory's own scope gate is meant to uphold. The time-window fallback neighbor query already applies this filter; the session-neighbor query SHALL match it.
+
+#### Scenario: A same-session memory in another scope is not returned
+
+- **GIVEN** a target memory `<M>` in project A with `session_id = <S>`, and another memory `<G>` in project B that also carries `session_id = <S>`
+- **WHEN** a connection whose effective scope is project A calls `memory.timeline` with `{ memoryId: '<M>' }`
+- **THEN** the returned `before`/`after` neighbors SHALL NOT include `<G>` or its `content`
+
+#### Scenario: In-scope session neighbors are still returned
+
+- **GIVEN** a target memory `<M>` in project A with `session_id = <S>`, and other project-A memories sharing `session_id = <S>`
+- **WHEN** a connection whose effective scope is project A calls `memory.timeline` with `{ memoryId: '<M>', before: 5, after: 5 }`
+- **THEN** the in-scope same-session neighbors SHALL be returned, ordered chronologically, exactly as before this change
+
+## ADDED Requirements
+
+### Requirement: The MCP server MUST expose two project-management tools under the `project.*` namespace
+
+The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list` and `project.current` with the following contracts. Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
+
+No tool SHALL activate, switch or create a project. A connection's project is fixed by its URL path, or is the default project on a path-less connection; projects are created from the dashboard. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
+
+`project.list`'s per-project count SHALL be named `activeMemoryCount` and SHALL count only memories whose `status` is `active`, in that project's scope. The name carries the filter because the count's previous name, `memoryCount`, stated neither dimension and was measured disagreeing with the corpus the same connection could read: after `memory.archive` on a project's only memory, `project.list` reported `1` while `memory.search` in that same scope returned `0`. The name is additionally reused elsewhere in the server for a different aggregate (memories saved in one session), so a bare `memoryCount` on this payload is ambiguous in two ways at once. Renaming rather than silently re-filtering is required: a changed value under an unchanged key gives a consumer no signal to re-read the contract.
+
+`activeMemoryCount` SHALL be computed by a repository read that takes the scope as a required parameter (see the `data-access` requirement "`project.list`'s per-project memory count MUST be a scoped repository read"). The scope SHALL be derived from the project row being reported, and the token-authorization filter over project rows SHALL be applied BEFORE any count is taken, so the handler can only count a scope the token was already authorized to read. This ordering is the entire basis on which a handler may name its own scope, and it SHALL NOT be relaxed into a post-filter.
+
+`project.list` SHALL NOT resolve an effective scope from the request context in order to produce the count, and SHALL continue to succeed on a connection whose URL slug resolves to no project (see "the connection is not bricked by the refusal").
+
+`project.list` SHALL NOT report a second, unfiltered per-project total. The per-status breakdown scoped to the request context is `memory.stats`' `memoriesByStatus`, and a second total on this payload would answer the same question on a path that deliberately does not resolve the caller's scope.
+
+`project.list`'s registered top-level description SHALL state that the count is of active memories. This SHALL be in the description string returned by `tools/list`, not only in a schema `describe()`, which some clients do not surface to the model.
+
+#### Scenario: No project-switching or project-creating tool is offered
+
+- **WHEN** an MCP client calls `tools/list` on `/mcp` or on `/mcp/<slug>`
+- **THEN** the response SHALL contain `project.list` and `project.current`
+- **AND** the response SHALL NOT contain `project.use`, nor any other tool that activates, switches or creates a project
+
+#### Scenario: `project.list` returns available slugs
+
+- **WHEN** an MCP client calls `project.list({includeArchived?: false})`
+- **THEN** the server SHALL return `{ projects: Array<{ slug, displayName, archived, activeMemoryCount }> }` ordered by slug ascending, filtering archived rows by default
+- **AND** the payload SHALL NOT contain a `memoryCount` key on any project entry
+
+#### Scenario: `activeMemoryCount` drops when a memory is archived
+
+- **GIVEN** projects `p` and `q`, where `p` holds exactly one memory with `status = 'active'` and `q` holds two
+- **WHEN** an MCP client calls `project.list`, then calls `memory.archive` on `p`'s only memory, then calls `project.list` again
+- **THEN** the first response SHALL report `activeMemoryCount` of 1 for `p`
+- **AND** the second response SHALL report `activeMemoryCount` of 0 for `p`
+- **AND** `q`'s `activeMemoryCount` SHALL be 2 in both responses
+
+#### Scenario: `activeMemoryCount` agrees with what the same connection can retrieve
+
+- **GIVEN** a project holding one `active` memory and one `archived` memory
+- **WHEN** an MCP client on a connection resolving to that project calls `project.list` and `memory.stats`
+- **THEN** `activeMemoryCount` for that project SHALL equal `memory.stats`' `memoriesByStatus.active` for the same scope
+- **AND** `activeMemoryCount` SHALL be strictly less than the project's total row count, so the filter is observable rather than vacuous
+
+#### Scenario: `activeMemoryCount` excludes memories outside the reported project
+
+- **GIVEN** projects `p` and `q` each holding `active` memories, plus at least one `active` memory in the default project
+- **WHEN** a token authorized for both projects calls `project.list`
+- **THEN** each entry's `activeMemoryCount` SHALL count only that entry's own project scope
+- **AND** no entry's `activeMemoryCount` SHALL include any other project's memories
+
+#### Scenario: A project-scoped token sees only its own project and its own count
+
+- **GIVEN** projects `p` and `q` both holding `active` memories, and a token with scope `project:<p.id>`
+- **WHEN** the token calls `project.list`
+- **THEN** the response SHALL contain `p` only, with `p`'s own `activeMemoryCount`
+- **AND** no count for `q` SHALL be computed or returned
+
+#### Scenario: `project.list` still succeeds on a connection whose slug resolves to no project
+
+- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
+- **WHEN** the client calls `project.list`
+- **THEN** the call SHALL succeed and SHALL report `activeMemoryCount` for every project the token may read
+- **AND** the call SHALL NOT be rejected with `project_not_found`
+
+#### Scenario: `project.list`'s description states that the count is of active memories
+
+- **WHEN** an MCP client retrieves the tool description for `project.list` via `tools/list`
+- **THEN** the description SHALL convey that the per-project count covers active memories
+- **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling")
+
+#### Scenario: `project.current` reports resolution provenance
+
+- **WHEN** an MCP client calls `project.current`
+- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'default' | 'none' }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'`
+- **AND** the response SHALL NOT carry a `suggestedSlugs` field
+
+### Requirement: Every MCP tool call MUST be authorized against the token's scope for the resolved project
+
+Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → the default project) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. **A tool that accepts an input widening the result set past the resolved scope — `memory.search`'s cross-project argument is the only one — SHALL additionally authorize each project the widening would admit, after the resolved-scope check, and SHALL drop the projects that fail rather than reject the call** (see the `auth` capability). The path-scoping error contract (`scope_locked`, `project_not_found`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
+
+Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read, using the same per-project predicate: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project; a set-scoped token sees exactly its members. **That predicate and the one that builds the widened search set SHALL be the same expression, so `project.list` and a widened `memory.search` can never disagree about a token's reach.**
+
+No MCP tool creates a project, so no tool call needs the project-creation authorization the retired `project.use({autocreate: true})` path carried; projects are created from the dashboard.
+
+#### Scenario: Read-restricted token attempts a formerly-ungated write
+
+- **GIVEN** a token with scope `read:*` or `read:project:<id>`
+- **WHEN** the token invokes `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, or `memory.judge`
+- **THEN** the call SHALL be rejected with code `forbidden` and no row SHALL be written
+
+#### Scenario: Read-restricted token attempts memory.compare
+
+- **GIVEN** a token with scope `read:*` or `read:project:<id>`
+- **WHEN** the token invokes `memory.compare` with any two in-scope memories
+- **THEN** the call SHALL be rejected with code `forbidden`, no `memory_relations` row SHALL be written, and no target memory's `status` SHALL change
+
+#### Scenario: Project-restricted token reads another project's context
+
+- **GIVEN** a token with scope `read:project:A` or `project:A`
+- **WHEN** the token opens `/mcp/B` and calls `memory.context`, `memory.timeline`, `memory.stats`, `memory.search_prompts`, or `memory.session_get`
+- **THEN** the call SHALL be rejected with code `forbidden` and no project-B data SHALL be returned
+
+#### Scenario: Project-restricted token on an unscoped connection resolving global scope
+
+The title predates this change: the scope a path-less connection resolves is the default project.
+
+- **GIVEN** a token with scope `read:project:A` connected to `/mcp` with no active project
+- **WHEN** the token calls a read tool whose effective scope resolves to the default project
+- **THEN** the call SHALL be rejected with code `forbidden`; the same call on a connection at `/mcp/A` SHALL succeed against project A
+- **AND** passing the cross-project argument SHALL NOT make the refused call succeed, because the widening is authorized after the resolved-scope check, not instead of it
+
+#### Scenario: `project.list` is filtered by token scope
+
+- **GIVEN** projects A and B exist and a token with scope `project:A`
+- **WHEN** the token calls `project.list`
+- **THEN** the response SHALL contain project A only
+
+#### Scenario: `project.list` and a widened search agree
+
+- **GIVEN** any token and any set of projects
+- **WHEN** the token calls `project.list` and then `memory.search` with the cross-project argument
+- **THEN** the slugs in `searchedProjects` SHALL be a subset of the non-archived slugs `project.list` returned, and SHALL equal them when none is archived
+
+#### Scenario: Full-access tokens are unaffected
+
+- **GIVEN** a token with scope `*`
+- **WHEN** it invokes any tool on any `/mcp*` connection
+- **THEN** authorization SHALL never reject the call (path-scoping errors still apply)
+
+### Requirement: Scope-sensitive tools MUST share the single scope resolver over the URL path and the default project
+
+All scope-sensitive tools SHALL resolve the effective project through the same async resolver that `memory.save` uses. The resolver SHALL have exactly two sources: the URL path slug, and — on a path-less connection — the default project. It SHALL NOT consult MCP roots, a per-connection project pin, or any other per-connection state, and it SHALL NOT issue any server→client request. It SHALL NOT return a scopeless result, so no tool can observe an unresolved scope.
+
+The shared resolver SHALL refuse with `project_not_found` rather than returning a scope when the path slug names no project, so no tool routed through it can inherit a fallback by omission — including a tool added after this requirement lands.
+
+A tool that resolves its own project rather than delegating to the resolver SHALL apply the same refusal. One does — `memory.session_start`, which binds the session row to a project — and it SHALL build its message and `suggestedSlugs[]` from the same shared constructor, so the refusals cannot drift in wording or payload. `memory.save` no longer classifies the request before resolving, because it no longer accepts a `scope` argument to classify; it delegates to the resolver like every other tool. That obligation SHALL be verified by enumeration over the registered tool list (below), never by counting resolver call sites — a tool absent from that list of call sites is exactly how this defect reached three separate write paths.
+
+Every tool routed through the resolver SHALL surface that refusal as a structured `mcpError` (`isError: true` with a JSON body carrying `code` and `message`), never as an exception escaping into the transport, because an escaped exception yields an error result with no machine-readable `code`. A tool SHALL therefore resolve scope inside the same error-translating boundary it already uses for authorization failures. Where a tool previously validated its arguments before resolving scope, scope resolution SHALL come first: an unusable connection is reported ahead of a malformed argument, because the call cannot succeed under any arguments.
+
+Coverage SHALL be asserted by enumeration rather than by inspection: a test SHALL drive the registered tool list, invoke every scope-sensitive tool on a connection whose path slug names no project, and assert the structured refusal. Tools exempt from scope resolution SHALL be enumerated explicitly in that test, so a newly registered tool fails it until it is classified.
+
+#### Scenario: A path-less connection resolves to the default project whatever the client advertises
+
+- **GIVEN** an unscoped `/mcp` connection whose client advertises `capabilities.roots` and whose first root's basename names an existing project other than the default project
+- **WHEN** the agent's first tool call is `memory.context`
+- **THEN** the server SHALL return the default project's context
+- **AND** the server SHALL NOT send a `roots/list` request, and a `notifications/roots/list_changed` from the client SHALL change no later call's resolved scope
+
+#### Scenario: Every registered scope-sensitive tool refuses an unresolvable slug
+
+- **GIVEN** a connection whose path slug names no project and a token whose scope is `*`
+- **WHEN** the enumerating test invokes every tool in the registered tool list with minimally valid arguments
+- **THEN** every tool not on the explicit exemption list SHALL return a result carrying `isError: true` and a JSON body whose `code` is `project_not_found`
+
+#### Scenario: A newly registered tool cannot inherit the fallback
+
+- **GIVEN** a change that registers a new scope-sensitive MCP tool
+- **WHEN** the test suite runs without that tool being classified
+- **THEN** the enumerating test SHALL fail rather than the tool silently resolving to the default project
+
+#### Scenario: Scope resolution precedes argument validation
+
+- **GIVEN** a connection whose path slug names no project
+- **WHEN** the client calls `memory.get` with neither `id` nor `ids` (a malformed request)
+- **THEN** the response SHALL carry `code: 'project_not_found'` rather than `code: 'invalid_input'`
+
+### Requirement: The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding
 
 The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_start`, `memory.session_end`, `memory.session_summary` and `memory.session_resume` with the following contracts. The tools are split by responsibility: `memory.session_start` opens a session, `memory.session_summary` writes summary/title without transitioning, `memory.session_end` is the state transition out of `active`, and `memory.session_resume` is the sole transition back into it.
 
@@ -940,47 +982,28 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 - **AND** the description SHALL state that `previousEndedAt` is not retained on the row after the call
 - **AND** the CI test that compares each description against its `outputSchema`'s required list SHALL cover this tool
 
-### Requirement: The MCP server MUST expose a `memory.archive` tool
+## REMOVED Requirements
 
-The server SHALL register an MCP tool `memory.archive` that retires a single memory by flipping its `status` from `active` to `archived`. The tool SHALL accept `{ id: string }` (validated by zod; non-empty) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope exactly like the other single-memory tools (`memory.get`/`memory.confirm`, via `resolveEffectiveScope`) and delegate to `MemoryService.archive(id, scope)`, so archiving is confined to the connection's one effective scope: a `/mcp/<slug>` connection archives in that project's scope; a `/mcp` connection archives in the default project.
+### Requirement: The MCP server MUST expose three project-management tools under the `project.*` namespace
 
-A cross-scope or unknown `id` SHALL return the same `not_found`-class error as `memory.get`/`memory.confirm` — there is no cross-scope or cross-project archive path. Archiving a non-`active` memory SHALL return a `conflict`-class error. The tool SHALL NOT delete rows, drop vectors, or expose any purge capability; physical deletion remains operator/admin-only.
+**Reason**: `project.use` is removed, together with its `autocreate` and `confirmSwitch` paths, so no tool activates, switches or creates a project. A switch only existed as a pin on per-connection state the server no longer keeps, and agent-side project creation is withdrawn. The `project.list` and `project.current` contracts continue under "The MCP server MUST expose two project-management tools under the `project.*` namespace".
 
-#### Scenario: Archiving an active memory in scope succeeds
+**Migration**: Connect at `/mcp/<slug>` to work in a project; bridge clients do so with a `.rembric` file containing `PROJECT_SLUG` or with `REMBRIC_PROJECT_SLUG`. Create projects from the dashboard. A call to `project.use` is refused because no tool by that name is registered.
 
-- **GIVEN** a `/mcp/<slug>` connection scoped to project `P` and an `active` memory `M` in project `P`
-- **WHEN** an MCP client calls `memory.archive` with `{ id: 'M' }`
-- **THEN** the server SHALL flip `M.status` to `archived` in project `P`
-- **AND** the response SHALL confirm the archive (e.g. the archived id and its new status)
+### Requirement: Every MCP tool call MUST be authorized against the token's scope
 
-#### Scenario: Archiving a memory outside the connection's scope is not found
+**Reason**: The requirement classified `project.use` as a read, classified `project.use({autocreate: true})` on an unknown slug as a project-creating write, and pinned that a full-access token could still create a project that way. `project.use` and agent-side project creation are removed, so neither classification can hold.
 
-- **GIVEN** a `/mcp/<slug>` connection scoped to project `P` and an `active` memory `X` in a different project `Q`
-- **WHEN** an MCP client calls `memory.archive` with `{ id: 'X' }`
-- **THEN** the server SHALL return a `not_found`-class error and SHALL NOT change `X.status`
+**Migration**: None required for authorization. Every remaining classification, the per-project predicate shared by `project.list` and a widened `memory.search`, and the `forbidden` refusal continue under "Every MCP tool call MUST be authorized against the token's scope for the resolved project". Projects are created from the dashboard.
 
-#### Scenario: Archiving a non-active memory conflicts
+### Requirement: Scope-sensitive tools MUST share the single async scope resolver
 
-- **WHEN** an MCP client calls `memory.archive` for a memory whose `status` is `superseded` or `archived`
-- **THEN** the server SHALL return a `conflict`-class error and SHALL NOT change the memory's status
+**Reason**: The resolver no longer awaits MCP roots discovery and no longer reads a `project.use` pin. The scenarios that pinned discovery on the first call in a warm process, recovery after a lost `roots/list`, the pending-suggestion path and the tool-call identity captured for discovery describe behaviour that no longer exists.
 
-### Requirement: `memory.timeline` session neighbors MUST be filtered by the connection's effective scope
+**Migration**: None required. The shared resolver, its `project_not_found` refusal, the enumerating coverage test and scope resolution ahead of argument validation continue under "Scope-sensitive tools MUST share the single scope resolver over the URL path and the default project". A path-less connection resolves to the default project; connect at `/mcp/<slug>` for any other.
 
-`memory.timeline`'s session-neighbor query (used when the target memory has a non-null `session_id`) SHALL filter neighbors by the connection's effective `project_id` in addition to `session_id`, so a neighbor lying outside the effective scope is never returned. Filtering by `session_id` alone is insufficient because a single session can hold memories in more than one project (rows written before project switching was removed, when a path-less connection could switch project mid-session and save into a second project) and because `session_id` carries no foreign key — so without a scope predicate `memory.timeline` could return another project's memory `content`, violating the cross-scope-read invariant that a target memory's own scope gate is meant to uphold. The time-window fallback neighbor query already applies this filter; the session-neighbor query SHALL match it.
+### Requirement: The MCP server MUST expose four session-lifecycle tools
 
-#### Scenario: A same-session memory in another scope is not returned
+**Reason**: The tools no longer read or write a per-connection session binding: `SessionRouter` is removed together with the `Mcp-Session-Id` it was keyed on. `memory.session_start` no longer leads with a bound session, `memory.session_resume` no longer pins one and `memory.session_end` has none to clear, so the scenarios that pinned those bindings describe behaviour that no longer exists.
 
-- **GIVEN** a target memory `<M>` in project A with `session_id = <S>`, and another memory `<G>` in project B that also carries `session_id = <S>`
-- **WHEN** a connection whose effective scope is project A calls `memory.timeline` with `{ memoryId: '<M>' }`
-- **THEN** the returned `before`/`after` neighbors SHALL NOT include `<G>` or its `content`
-
-#### Scenario: In-scope session neighbors are still returned
-
-- **GIVEN** a target memory `<M>` in project A with `session_id = <S>`, and other project-A memories sharing `session_id = <S>`
-- **WHEN** a connection whose effective scope is project A calls `memory.timeline` with `{ memoryId: '<M>', before: 5, after: 5 }`
-- **THEN** the in-scope same-session neighbors SHALL be returned, ordered chronologically, exactly as before this change
-
-## RENAMED Requirements
-
-- FROM: `### Requirement: The MCP server MUST expose three project-management tools under the `project.*` namespace`
-- TO: `### Requirement: The MCP server MUST expose two project-management tools under the `project.*` namespace`
+**Migration**: A client that needs a write attached to a specific session passes its id as `sessionId`; without it, a write attaches to the sole active session for the token and project, or to none when that is ambiguous. Every other contract of the four tools continues under "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding".

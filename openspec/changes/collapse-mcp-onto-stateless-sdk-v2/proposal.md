@@ -39,12 +39,12 @@ None.
 
 ### Modified Capabilities
 
-- `mcp-api`: transport becomes one stateless SDK v2 handler for both eras (no session id, `405` on `GET`/`DELETE`); `project.use` removed (tool list, `scope_locked` wording, authorization of `autocreate`); path-less resolution without roots; session attachment without `SessionRouter`; tool count 24.
+- `mcp-api`: transport becomes one stateless SDK v2 handler for both eras (no session id, `405` on `GET`/`DELETE`); `project.use` removed (tool list, `scope_locked` wording, authorization of `autocreate`); path-less resolution without roots; session attachment without `SessionRouter`; tool count 24. Four requirements whose scenarios pinned removed behaviour are removed and re-added under titles that state the surviving contract: "The MCP server MUST expose two project-management tools under the `project.*` namespace", "Every MCP tool call MUST be authorized against the token's scope for the resolved project", "Scope-sensitive tools MUST share the single scope resolver over the URL path and the default project" and "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding".
 - `projects`: roots auto-detection, `roots/list_changed` refresh and roots-derived suggestions removed; agent-side project creation removed.
-- `sessions`: `memory.session_start({project})` becomes an assertion; the project-switch guard and router-based precedence are removed.
+- `sessions`: `memory.session_start({project})` becomes an assertion; the project-switch guard and router-based precedence are removed, and the precedence requirement is re-added as "Session-tool handlers MUST resolve scope from the URL path or the default project only".
 - `http-api`: HTTP-registered sessions reach MCP tools through `findActiveForTransport` and explicit `sessionId`, not through `SessionRouter`.
-- `mcp-bridge`: no `roots/list` relay; no 404 session recovery; path-less fallback diagnostic names the fix.
-- `pi-plugin`: session identity is declared per tool call through `sessionId`, not by binding the transport with `session_resume`.
+- `mcp-bridge`: no `roots/list` relay; no 404 session recovery; path-less fallback diagnostic names the fix. The compatibility-documentation requirement gains the scenario it was published without, which the rebuilt spec needs in order to validate.
+- `pi-plugin`: session identity is declared per tool call through `sessionId`, not by binding the transport with `session_resume`; the transport-binding requirement is removed and re-added as "The Pi extension SHALL declare its session identity on every session-attaching tool call".
 - `claude-code-plugin`: path-less fallback, new-slug bootstrap and manual-override text no longer describe roots or `project.use`.
 - `mcp-oauth`: endpoints served without the SDK 1.x router with the observable contract unchanged; the one refusal that named `project.use` names `/mcp/<slug>` instead.
 - `auth`: the `project.use` autocreate authorization clause is removed, and refusals no longer name `project.use`.

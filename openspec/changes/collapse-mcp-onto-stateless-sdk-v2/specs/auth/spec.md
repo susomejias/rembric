@@ -114,3 +114,10 @@ A set names projects that exist. No MCP tool creates a project — projects are 
 - **WHEN** the token connects at `/mcp/brand-new` and calls `project.list`, `project.current` and every scope-resolving tool
 - **THEN** every scope-resolving call SHALL be refused with `project_not_found`, and no `projects` row SHALL be created
 - **AND** an admin `*` token making the same calls SHALL likewise create no project, which is the control that the absence of a row comes from the removed creation path and not from the set
+
+#### Scenario: Autocreate is refused for a set token
+
+- **GIVEN** a token with `scope = 'projects'` whose membership set is `{A}`
+- **WHEN** the token calls `project.use({ slug: 'brand-new', autocreate: true })`
+- **THEN** the call SHALL be refused because no tool named `project.use` is registered, and no `projects` row SHALL be created
+- **AND** an admin `*` token making the same call SHALL be refused the same way, which is the control that the refusal comes from the removed tool and not from the set
