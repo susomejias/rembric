@@ -29,11 +29,11 @@
 
 ## 4. PR 4 — OAuth off SDK 1.x
 
-- [ ] 4.1 Rewrite `apps/web/src/lib/oauth.ts` as fetch handlers over `oauth-provider.ts`, using v2's `OAuthError` and metadata types; delete the Express request/response shims and `callRouter`. `oauth-provider.ts` drops its `@modelcontextprotocol/sdk` imports.
-- [ ] 4.2 The characterization suite from 1.2 passes unchanged, and the wire harness reports zero OAuth differences.
-- [ ] 4.3 Remove `@modelcontextprotocol/sdk` from every `package.json` and the lockfile; `grep -r "@modelcontextprotocol/sdk" --include=*.ts --include=*.json` outside `node_modules` and `openspec/changes/archive` returns nothing.
+- [x] 4.1 Rewrite `apps/web/src/lib/oauth.ts` as fetch handlers over `oauth-provider.ts`, using v2's `OAuthError` and metadata types; delete the Express request/response shims and `callRouter`. `oauth-provider.ts` drops its `@modelcontextprotocol/sdk` imports. Endpoints live in `oauth-router.ts`, body parsing and CORS in `oauth-http.ts`, the limiters in `oauth-rate-limit.ts`, the 1.x zod schemas copied verbatim in `oauth-schemas.ts`; a scratch differential against the 1.x router (299 requests) differed on none (`measurements/wire-diff/pr4-diff-classification.md`).
+- [x] 4.2 The characterization suite from 1.2 passes unchanged, and the wire harness reports zero OAuth differences. `oauth-wire.test.ts` (40) and `oauth-surface.test.ts` (16) pass with no snapshot or assertion edit. The harness reports three OAuth differences, all the `500 server_error` → `400 invalid_grant` fix this file's design names in "Open Questions" (shapes 081, 093, 096); every non-OAuth block equals PR 3's (`base-vs-candidate-pr4.txt`, `pr4-diff-classification.md`).
+- [x] 4.3 Remove `@modelcontextprotocol/sdk` from every `package.json` and the lockfile; `grep -r "@modelcontextprotocol/sdk" --include=*.ts --include=*.json` outside `node_modules` and `openspec/changes/archive` returns nothing. Removed with the then-unused `express` and `@types/express`; the grep returns nothing. The lockfile still resolves `@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)` as a transitive of the `shadcn` devDependency CLI, which nothing in the repository imports.
 - [ ] 4.4 Run the `security-review` skill on the PR 4 diff and resolve every confirmed finding.
-- [ ] 4.5 Add the `supply-chain-hygiene` delta: the `@rembric/mcp-bridge` zero-dependency rationale (`openspec/specs/supply-chain-hygiene/spec.md` near line 300) no longer calls `@modelcontextprotocol/sdk` an `apps/web` dependency nor cites the `roots/list` relay; `openspec validate collapse-mcp-onto-stateless-sdk-v2 --strict` passes.
+- [x] 4.5 Add the `supply-chain-hygiene` delta: the `@rembric/mcp-bridge` zero-dependency rationale (`openspec/specs/supply-chain-hygiene/spec.md` near line 300) no longer calls `@modelcontextprotocol/sdk` an `apps/web` dependency nor cites the `roots/list` relay; `openspec validate collapse-mcp-onto-stateless-sdk-v2 --strict` passes.
 
 ## 5. Close
 
