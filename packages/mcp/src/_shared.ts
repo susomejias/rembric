@@ -96,7 +96,6 @@ export function isAuthorizedFor(action: 'read' | 'write', scope: Scope): boolean
 }
 
 function remedyFor(ctx: RequestContext, scope: Scope, projects: ProjectsService): string {
-  if (ctx.requestedSlug !== null) return '';
   const pinned = pinnedProjectId(ctx.scope);
   if (pinned !== null) return pinRemedy(pinned, scope, projects);
   if (isProjectSetScope(ctx.scope)) return setRemedy(ctx.memberProjectIds, scope, projects);
