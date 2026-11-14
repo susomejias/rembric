@@ -54,6 +54,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@modelcontextprotocol/core':
+        specifier: 2.4.0
+        version: 2.4.0
       '@modelcontextprotocol/server':
         specifier: 2.4.0
         version: 2.4.0

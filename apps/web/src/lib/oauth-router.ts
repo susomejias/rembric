@@ -1,11 +1,13 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 import {
+  buildOAuthProtectedResourceMetadata,
   OAuthError,
   OAuthErrorCode,
+  oauthMetadataResponse,
+  type AuthMetadataOptions,
   type OAuthClientInformationFull,
   type OAuthMetadata,
-  type OAuthProtectedResourceMetadata,
 } from '@modelcontextprotocol/server';
 
 import {
@@ -16,6 +18,7 @@ import {
   readBody,
   redirectReply,
   refuseMethod,
+  toResponse,
   type OAuthReply,
   type ReplyHeaders,
 } from './oauth-http';
@@ -40,7 +43,7 @@ export interface OAuthRouterOptions {
 }
 
 export interface OAuthRouter {
-  handle(request: Request): Promise<OAuthReply | null>;
+  handle(request: Request): Promise<Response | null>;
 }
 
 type Serve = (
@@ -54,7 +57,6 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
   const { provider, issuerUrl } = options;
-  checkIssuerUrl(issuerUrl);
 
   const endpoint = (path: string): URL => new URL(path, issuerUrl);
   const asMetadata: OAuthMetadata = {
@@ -70,14 +72,16 @@ export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
     revocation_endpoint_auth_methods_supported: ['client_secret_post'],
     registration_endpoint: endpoint('/register').href,
   };
-  const resourceUrl = new URL(asMetadata.issuer);
-  const prMetadata: OAuthProtectedResourceMetadata = {
-    resource: resourceUrl.href,
-    authorization_servers: [asMetadata.issuer],
-    scopes_supported: options.scopesSupported,
-    resource_name: options.resourceName,
+  const metadata: AuthMetadataOptions = {
+    oauthMetadata: asMetadata,
+    resourceServerUrl: new URL(asMetadata.issuer),
+    scopesSupported: options.scopesSupported,
+    resourceName: options.resourceName,
+    dangerouslyAllowInsecureIssuerUrl: ['true', '1'].includes(
+      process.env['MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL'] ?? '',
+    ),
   };
-  const resourcePath = resourceUrl.pathname === '/' ? '' : resourceUrl.pathname;
+  buildOAuthProtectedResourceMetadata(metadata);
 
   const limiters = {
     authorize: createRateLimiter({
@@ -112,14 +116,6 @@ export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
       (request, rest) => serveToken(provider, limiters.token, request, rest),
     ],
     [
-      `/.well-known/oauth-protected-resource${resourcePath}`,
-      (request, rest) => serveMetadata(prMetadata, request, rest),
-    ],
-    [
-      '/.well-known/oauth-authorization-server',
-      (request, rest) => serveMetadata(asMetadata, request, rest),
-    ],
-    [
       endpoint('/register').pathname,
       (request, rest) => serveRegister(provider, limiters.register, request, rest),
     ],
@@ -131,32 +127,18 @@ export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
 
   return {
     async handle(request) {
+      const document = oauthMetadataResponse(request, metadata);
+      if (document !== undefined) return document;
       const url = new URL(request.url);
       for (const [mount, serve] of routes) {
         const rest = mountRemainder(url.pathname, mount);
         if (rest === null) continue;
         const reply = await serve(request, rest, url);
-        if (reply !== null) return reply;
+        if (reply !== null) return toResponse(request, reply);
       }
       return null;
     },
   };
-}
-
-function checkIssuerUrl(issuer: URL): void {
-  const insecureAllowed = ['true', '1'].includes(
-    process.env['MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL'] ?? '',
-  );
-  if (
-    issuer.protocol !== 'https:' &&
-    issuer.hostname !== 'localhost' &&
-    issuer.hostname !== '127.0.0.1' &&
-    !insecureAllowed
-  ) {
-    throw new Error('Issuer URL must be HTTPS');
-  }
-  if (issuer.hash) throw new Error(`Issuer URL must not have a fragment: ${issuer.href}`);
-  if (issuer.search) throw new Error(`Issuer URL must not have a query string: ${issuer.href}`);
 }
 
 function mountRemainder(pathname: string, mount: string): string | null {
@@ -166,16 +148,6 @@ function mountRemainder(pathname: string, mount: string): string | null {
   if (path === prefix || path === `${prefix}/`) return '/';
   if (path.startsWith(`${prefix}/`)) return pathname.slice(base.length);
   return null;
-}
-
-function serveMetadata(document: object, request: Request, rest: string): OAuthReply | null {
-  const headers: ReplyHeaders = new Map();
-  const preflight = corsPreflight(request, headers);
-  if (preflight !== null) return preflight;
-  const refused = refuseMethod(request, headers, ['GET', 'OPTIONS']);
-  if (refused !== null) return refused;
-  if (rest !== '/') return null;
-  return jsonReply(200, headers, document);
 }
 
 async function serveAuthorize(

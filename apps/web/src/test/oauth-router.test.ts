@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 import { TokensService } from '@rembric/core';
 import { createDb, createRepositories, type DbHandle } from '@rembric/db';
@@ -148,6 +149,70 @@ describe('request body limit', () => {
       paddedRegistration(BODY_LIMIT_BYTES + 1),
       '198.51.100.31',
     );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, code: 'internal_error' });
+  });
+});
+
+describe('request body parsing', () => {
+  async function publicClient(hop: string): Promise<string> {
+    const registered = await register(
+      { redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' },
+      hop,
+    );
+    return ((await registered.json()) as { client_id: string }).client_id;
+  }
+
+  it('refuses a repeated form parameter instead of keeping the last value', async () => {
+    const clientId = await publicClient('198.51.100.41');
+    const form = `grant_type=refresh_token&grant_type=refresh_token&refresh_token=unknown&client_id=${clientId}`;
+
+    const response = await post(
+      '/token',
+      'application/x-www-form-urlencoded',
+      form,
+      '198.51.100.41',
+    );
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe('invalid_request');
+  });
+
+  it('refuses a declared length over 100 KiB before reading the body', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+    const request = new Request(`${ISSUER}/register`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(BODY_LIMIT_BYTES + 1),
+        'x-forwarded-for': '198.51.100.44',
+      },
+      body: JSON.stringify({ redirect_uris: [REDIRECT] }),
+    });
+
+    const response = await routePost(request, { params: Promise.resolve({ path: ['register'] }) });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, code: 'internal_error' });
+  });
+
+  it('refuses a compressed body with the internal-error body', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+    const clientId = await publicClient('198.51.100.43');
+    const request = new Request(`${ISSUER}/token`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'content-encoding': 'gzip',
+        'x-forwarded-for': '198.51.100.43',
+      },
+      body: gzipSync(`grant_type=refresh_token&refresh_token=unknown&client_id=${clientId}`),
+    });
+
+    const response = await routePost(request, { params: Promise.resolve({ path: ['token'] }) });
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ ok: false, code: 'internal_error' });
