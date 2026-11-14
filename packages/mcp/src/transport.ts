@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  WebStandardStreamableHTTPServerTransport,
+  type McpServer,
+} from '@modelcontextprotocol/server';
 
 interface Session {
   server: McpServer;
-  transport: StreamableHTTPServerTransport;
+  transport: WebStandardStreamableHTTPServerTransport;
 }
 
 export interface ServerFactoryContext {
@@ -32,7 +34,7 @@ export class McpTransportManager {
   async getOrCreate(
     sessionId: string | undefined,
     factoryCtx: ServerFactoryContext,
-  ): Promise<StreamableHTTPServerTransport> {
+  ): Promise<WebStandardStreamableHTTPServerTransport> {
     if (sessionId) {
       const existing = this.sessions.get(sessionId);
       if (existing) return existing.transport;
@@ -41,7 +43,7 @@ export class McpTransportManager {
     const server = this.serverFactory(factoryCtx);
     const allowedHosts = this.options.allowedHosts ?? [];
     const allowedOrigins = this.options.allowedOrigins ?? [];
-    const transport = new StreamableHTTPServerTransport({
+    const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableDnsRebindingProtection: allowedHosts.length > 0 || allowedOrigins.length > 0,
       allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,

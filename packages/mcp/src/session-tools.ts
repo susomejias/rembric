@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { RedactionTally, SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';

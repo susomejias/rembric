@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { projectEntities } from '@rembric/core';
 import { iterateEntityMatches } from '@rembric/core';
 import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';

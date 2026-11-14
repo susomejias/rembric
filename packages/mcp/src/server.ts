@@ -1,8 +1,9 @@
-import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  RootsListChangedNotificationSchema,
+  McpServer,
+  type CallToolResult,
+  type ServerContext,
   type ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@modelcontextprotocol/server';
 import type { MemoryService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { PromptsService } from '@rembric/core';
@@ -86,6 +87,12 @@ import {
   sessionSummaryOutput,
   sessionSummarySchema,
 } from './session-tools.js';
+import {
+  advertisedAsDraft07,
+  invalidParams,
+  serveToolCalls,
+  type DispatchedTool,
+} from './tool-dispatch.js';
 
 export interface CreateMcpServerOptions {
   memory: MemoryService;
@@ -176,6 +183,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   );
   const aboutHandler = createAboutHandler(version);
 
+  const tools = new Map<string, DispatchedTool>();
   const registerTool = <InputArgs extends ZodRawShape, OutputArgs extends ZodRawShape>(
     name: string,
     config: {
@@ -184,13 +192,36 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       outputSchema?: OutputArgs;
       annotations: ToolAnnotations;
     },
-    cb: ToolCallback<InputArgs>,
+    cb: (
+      args: z.output<ZodObject<InputArgs, z.core.$strict>>,
+      ctx: ServerContext,
+    ) => CallToolResult | Promise<CallToolResult>,
   ): void => {
-    server.registerTool<OutputArgs, ZodObject<InputArgs, z.core.$strict>>(
+    const { outputSchema, ...rest } = config;
+    const input = advertisedAsDraft07(z.object(config.inputSchema).strict());
+    const output =
+      outputSchema === undefined ? undefined : advertisedAsDraft07(z.object(outputSchema));
+    const call = (args: z.output<typeof input>, ctx: ServerContext): Promise<CallToolResult> =>
+      Promise.resolve(runWithToolCallId(ctx.mcpReq.id, () => cb(args, ctx)));
+    const registered = server.registerTool(
       name,
-      { ...config, inputSchema: z.object(config.inputSchema).strict() },
-      (args, extra) => runWithToolCallId(extra.requestId, () => cb(args, extra)),
+      { ...rest, inputSchema: input, ...(output === undefined ? {} : { outputSchema: output }) },
+      call,
     );
+    registered.execution = { taskSupport: 'forbidden' };
+    tools.set(name, {
+      registered,
+      output,
+      call: async (args, ctx) => {
+        const parsed = await input.safeParseAsync(args);
+        if (!parsed.success) {
+          throw invalidParams(
+            `Input validation error: Invalid arguments for tool ${name}: ${parsed.error.message}`,
+          );
+        }
+        return call(parsed.data, ctx);
+      },
+    });
   };
 
   // ── Memory tools: save / search / get / confirm + context / timeline ─
@@ -541,7 +572,9 @@ Does NOT end the session — use memory.session_end for that.`,
     relationsHandlers.compare,
   );
 
-  server.server.setNotificationHandler(RootsListChangedNotificationSchema, () => {
+  serveToolCalls(server, tools);
+
+  server.server.setNotificationHandler('notifications/roots/list_changed', () => {
     markRefreshPending(server);
   });
 

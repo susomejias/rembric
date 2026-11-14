@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@rembric/db": "workspace:*",
     "slugify": "^1.6.9",
     "ulid": "^2.3.0"

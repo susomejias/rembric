@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import type { RequestId } from '@modelcontextprotocol/sdk/types.js';
+import type { RequestId } from '@modelcontextprotocol/server';
 
 /** JSON-RPC id of the executing tool call, captured at the `registerTool` funnel. */
 const storage = new AsyncLocalStorage<RequestId>();

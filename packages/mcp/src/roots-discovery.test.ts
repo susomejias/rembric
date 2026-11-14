@@ -1,10 +1,12 @@
-import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
-  ErrorCode,
-  McpError,
+  ProtocolError,
+  ProtocolErrorCode,
+  SdkError,
+  SdkErrorCode,
   type ListRootsResult,
   type RequestId,
-} from '@modelcontextprotocol/sdk/types.js';
+  type RequestOptions,
+} from '@modelcontextprotocol/server';
 import { SessionRouter } from '@rembric/core';
 import { describe, expect, it } from 'vitest';
 
@@ -124,7 +126,8 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
 
   it('consumes the slot when the client returns a JSON-RPC error', async () => {
     const h = harness({
-      listRoots: () => Promise.reject(new McpError(ErrorCode.MethodNotFound, 'no roots here')),
+      listRoots: () =>
+        Promise.reject(new ProtocolError(ProtocolErrorCode.MethodNotFound, 'no roots here')),
     });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
     expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(true);
@@ -140,11 +143,20 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
   it('leaves the slot unconsumed when the request times out', async () => {
     const h = harness({
       listRoots: () =>
-        Promise.reject(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out')),
+        Promise.reject(new SdkError(SdkErrorCode.RequestTimeout, 'Request timed out')),
     });
     await maybeDiscoverViaRoots(h.deps, h.ctx);
     expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
   });
+
+  it.each([-32000, -32001])(
+    'leaves the slot unconsumed when the client answers with the SDK 1.x no-answer code %i',
+    async (code) => {
+      const h = harness({ listRoots: () => Promise.reject(new ProtocolError(code, 'relayed')) });
+      await maybeDiscoverViaRoots(h.deps, h.ctx);
+      expect(isDiscoveryRun(h.deps.server, h.ctx.tokenId, h.ctx.mcpSessionId)).toBe(false);
+    },
+  );
 
   it('leaves the slot unconsumed when the transport cannot route the request', async () => {
     const h = harness({
@@ -186,7 +198,7 @@ describe('maybeDiscoverViaRoots outcome classification', () => {
       listRoots: () => {
         attempt += 1;
         return attempt === 1
-          ? Promise.reject(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out'))
+          ? Promise.reject(new SdkError(SdkErrorCode.RequestTimeout, 'Request timed out'))
           : Promise.resolve({ roots: [{ uri: 'file:///x/known' }] });
       },
     });
