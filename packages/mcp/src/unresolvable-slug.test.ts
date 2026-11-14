@@ -397,7 +397,7 @@ describe('error messages name only reachable remedies', () => {
     expect(body.message as string).not.toContain('undefined');
   });
 
-  it('a pinned token denied a read on a path-scoped connection is not told to reconnect', async () => {
+  it('a pinned token denied a read on another path-scoped connection is told its URL', async () => {
     const other = projects.create({ slug: 'other-project' });
     const pinned = mintTestToken(db.handle, { project: other, access: 'read' }).token;
     const r = await runWithContext(
@@ -412,7 +412,8 @@ describe('error messages name only reachable remedies', () => {
     const { isError, body } = decode(r);
     expect(isError).toBe(true);
     expect(body.code).toBe('forbidden');
-    expect(body.message as string).not.toContain('reconnect at');
+    expect(body.message as string).toContain("reconnect at '/mcp/other-project'");
+    expect(body.message as string).not.toContain('project.use');
   });
 });
 
