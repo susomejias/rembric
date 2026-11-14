@@ -2,10 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  type FetchLike,
+} from '@modelcontextprotocol/client';
 import { ProjectsService } from '@rembric/core';
 import type * as CoreModule from '@rembric/core';
 import { createRepositories } from '@rembric/db';
@@ -135,7 +136,7 @@ describe('roots discovery routing (in-process route handler)', () => {
     let calls = 0;
     let rootUri: string | null = opts.rootUri;
     if (advertiseRoots) {
-      client.setRequestHandler(ListRootsRequestSchema, async () => {
+      client.setRequestHandler('roots/list', async () => {
         calls += 1;
         const silentFrom = opts.answerLimit;
         if (

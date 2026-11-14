@@ -3,8 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { redactionPlaceholder, SUMMARY_MAX_CHARS, SUMMARY_TRUNCATE_MARKER } from '@rembric/core';
 import type * as CoreModule from '@rembric/core';
 import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
