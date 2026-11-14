@@ -9,7 +9,6 @@ import { getServices } from './services';
 export { rateLimitIdentity } from './oauth-rate-limit';
 
 const OAUTH_EXACT_PATHS = new Set(['/authorize', '/token', '/register', '/revoke']);
-const BODYLESS_STATUSES = new Set([204, 205, 304]);
 
 export function isOAuthPath(pathname: string): boolean {
   return OAUTH_EXACT_PATHS.has(pathname) || pathname.startsWith('/.well-known/oauth-');
@@ -74,18 +73,14 @@ export async function handleOAuthRequest(request: Request, pathname: string): Pr
   const router = getOAuthRouter();
   if (router === null) return notFoundResponse(pathname);
 
-  let reply;
+  let response;
   try {
-    reply = await router.handle(request);
+    response = await router.handle(request);
   } catch (err) {
     console.error('[oauth] authorization-server request failed', err);
     return Response.json({ ok: false, code: 'internal_error' }, { status: 500 });
   }
-  if (reply === null) return notFoundResponse(pathname);
-
-  const bodyless = request.method.toUpperCase() === 'HEAD' || BODYLESS_STATUSES.has(reply.status);
-  const body = bodyless || reply.body === null ? null : new TextEncoder().encode(reply.body);
-  return new Response(body, { status: reply.status, headers: Object.fromEntries(reply.headers) });
+  return response ?? notFoundResponse(pathname);
 }
 
 function notFoundResponse(path: string): Response {

@@ -304,42 +304,42 @@ function accessTokenAlive(accessToken: string): boolean {
 describe('metadata and CORS', () => {
   it('GET authorization-server metadata', async () => {
     expect(await wire(await get('/.well-known/oauth-authorization-server'))).toMatchInlineSnapshot(`
-        {
-          "body": {
-            "authorization_endpoint": "http://127.0.0.1:3100/authorize",
-            "code_challenge_methods_supported": [
-              "S256",
-            ],
-            "grant_types_supported": [
-              "authorization_code",
-              "refresh_token",
-            ],
-            "issuer": "http://127.0.0.1:3100/",
-            "registration_endpoint": "http://127.0.0.1:3100/register",
-            "response_types_supported": [
-              "code",
-            ],
-            "revocation_endpoint": "http://127.0.0.1:3100/revoke",
-            "revocation_endpoint_auth_methods_supported": [
-              "client_secret_post",
-            ],
-            "scopes_supported": [
-              "mcp",
-              "read",
-            ],
-            "token_endpoint": "http://127.0.0.1:3100/token",
-            "token_endpoint_auth_methods_supported": [
-              "client_secret_post",
-              "none",
-            ],
-          },
-          "headers": {
-            "access-control-allow-origin": "*",
-            "content-type": "application/json; charset=utf-8",
-          },
-          "status": 200,
-        }
-      `);
+      {
+        "body": {
+          "authorization_endpoint": "http://127.0.0.1:3100/authorize",
+          "code_challenge_methods_supported": [
+            "S256",
+          ],
+          "grant_types_supported": [
+            "authorization_code",
+            "refresh_token",
+          ],
+          "issuer": "http://127.0.0.1:3100/",
+          "registration_endpoint": "http://127.0.0.1:3100/register",
+          "response_types_supported": [
+            "code",
+          ],
+          "revocation_endpoint": "http://127.0.0.1:3100/revoke",
+          "revocation_endpoint_auth_methods_supported": [
+            "client_secret_post",
+          ],
+          "scopes_supported": [
+            "mcp",
+            "read",
+          ],
+          "token_endpoint": "http://127.0.0.1:3100/token",
+          "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "none",
+          ],
+        },
+        "headers": {
+          "access-control-allow-origin": "*",
+          "content-type": "application/json",
+        },
+        "status": 200,
+      }
+    `);
   });
 
   it('GET protected-resource metadata', async () => {
@@ -358,7 +358,7 @@ describe('metadata and CORS', () => {
         },
         "headers": {
           "access-control-allow-origin": "*",
-          "content-type": "application/json; charset=utf-8",
+          "content-type": "application/json",
         },
         "status": 200,
       }
@@ -410,16 +410,16 @@ describe('metadata and CORS', () => {
   it('OPTIONS preflight on authorization-server metadata', async () => {
     expect(await wire(await preflight('/.well-known/oauth-authorization-server')))
       .toMatchInlineSnapshot(`
-      {
-        "body": "",
-        "headers": {
-          "access-control-allow-headers": "content-type",
-          "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
-          "access-control-allow-origin": "*",
-        },
-        "status": 204,
-      }
-    `);
+        {
+          "body": "",
+          "headers": {
+            "access-control-allow-headers": "content-type",
+            "access-control-allow-methods": "GET, HEAD, OPTIONS",
+            "access-control-allow-origin": "*",
+          },
+          "status": 204,
+        }
+      `);
   });
 });
 
@@ -1190,37 +1190,37 @@ describe('405 for an unsupported method', () => {
   it('POST authorization-server metadata', async () => {
     expect(await wire(await post(jsonPost('/.well-known/oauth-authorization-server', {}))))
       .toMatchInlineSnapshot(`
-      {
-        "body": {
-          "error": "method_not_allowed",
-          "error_description": "The method POST is not allowed for this endpoint",
-        },
-        "headers": {
-          "access-control-allow-origin": "*",
-          "allow": "GET, OPTIONS",
-          "content-type": "application/json; charset=utf-8",
-        },
-        "status": 405,
-      }
-    `);
+        {
+          "body": {
+            "error": "method_not_allowed",
+            "error_description": "The method POST is not allowed for this endpoint",
+          },
+          "headers": {
+            "access-control-allow-origin": "*",
+            "allow": "GET, HEAD, OPTIONS",
+            "content-type": "application/json",
+          },
+          "status": 405,
+        }
+      `);
   });
 
   it('POST protected-resource metadata', async () => {
     expect(await wire(await post(jsonPost('/.well-known/oauth-protected-resource', {}))))
       .toMatchInlineSnapshot(`
-      {
-        "body": {
-          "error": "method_not_allowed",
-          "error_description": "The method POST is not allowed for this endpoint",
-        },
-        "headers": {
-          "access-control-allow-origin": "*",
-          "allow": "GET, OPTIONS",
-          "content-type": "application/json; charset=utf-8",
-        },
-        "status": 405,
-      }
-    `);
+        {
+          "body": {
+            "error": "method_not_allowed",
+            "error_description": "The method POST is not allowed for this endpoint",
+          },
+          "headers": {
+            "access-control-allow-origin": "*",
+            "allow": "GET, HEAD, OPTIONS",
+            "content-type": "application/json",
+          },
+          "status": 405,
+        }
+      `);
   });
 });
 
