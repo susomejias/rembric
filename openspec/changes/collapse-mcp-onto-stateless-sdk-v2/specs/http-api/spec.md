@@ -95,12 +95,12 @@ The route SHALL NOT be reachable at `/api/sessions/:id/resume` (no slug segment)
 - **THEN** the response SHALL be `403` `{ ok: false, code: 'forbidden', message }`
 - **AND** the row SHALL be unchanged
 
-#### Scenario: A session resumed over HTTP is reached by its explicit id under ambiguity
+#### Scenario: The route does not pin the SessionRouter
 
 - **GIVEN** a session `<S>` resumed over HTTP and a second `active` session `<T>` for the same `(token, project)`
 - **WHEN** the agent calls `memory.save` over MCP on `/mcp/foo` without `sessionId`, and then again with `sessionId: <S>`
-- **THEN** the first saved row SHALL carry `session_id = NULL`
-- **AND** the second saved row SHALL carry `session_id = <S>`, which is the control that the resumed session is reachable
+- **THEN** the first saved row SHALL carry `session_id = NULL`, because the resume bound `<S>` to no connection and the `SessionRouter` it once declined to pin is removed
+- **AND** the second saved row SHALL carry `session_id = <S>`, which is the control that the resumed session is reachable by its explicit id
 
 ## RENAMED Requirements
 
