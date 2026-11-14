@@ -37,6 +37,7 @@ The failed-attempt lockout and the OAuth rate limits key on one client identity.
 - **Set higher than the real number of proxies:** a client can choose its own identity again. Count exactly.
 - The proxy must set or append the client address it saw (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
 - An invalid value is treated as `0`, with one warning in the container log at startup.
+- **The container port must be reachable only through the proxy.** With a non-zero value, a client that reaches the published port directly can write its own `X-Forwarded-For` and choose its identity. Publish the port on loopback or an internal network (see the loopback override below), or firewall it.
 
 ### Same host as your agent — loopback override
 

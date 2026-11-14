@@ -19,4 +19,4 @@
 ## 4. Verification
 
 - [x] 4.1 Mutation checks for every new guard; OpenSpec delta gates and `openspec validate --strict`
-- [ ] 4.2 Independent security verification of the change
+- [x] 4.2 Independent security verification of the change
