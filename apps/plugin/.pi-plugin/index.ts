@@ -3,12 +3,7 @@ import { Text } from '@earendil-works/pi-tui';
 
 // These two specifiers are rewritten to `./bin/` at publish time.
 import type { SessionProtocol } from '../bin/rembric-plugin-core.mjs';
-import {
-  createSessionProtocol,
-  diag,
-  POST_TIMEOUT_MS,
-  underscoreToolNames,
-} from '../bin/rembric-plugin-core.mjs';
+import { createSessionProtocol, diag, underscoreToolNames } from '../bin/rembric-plugin-core.mjs';
 import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 
 type JsonSchema = Record<string, unknown>;
@@ -37,6 +32,8 @@ type ToolDefinition = {
     toolCallId: string,
     params: unknown,
     signal?: AbortSignal,
+    onUpdate?: unknown,
+    ctx?: ExtensionContext,
   ) => Promise<ToolExecuteResult>;
   renderCall?: (args: unknown, theme: ThemeLike, context: ToolRenderContext) => RenderComponent;
   renderResult?: (
@@ -91,7 +88,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
   let negotiatedVersion = PROTOCOL_VERSION;
   let nextId = 1;
   let serverInstructions: string | null = null;
-  let discovered: DiscoveredTool[] = [];
 
   function headers(): Record<string, string> {
     const out: Record<string, string> = {
@@ -179,10 +175,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
       return serverInstructions;
     },
 
-    sessionResumeToolName(): string | null {
-      return discovered.find((tool) => tool.name.endsWith('session_resume'))?.name ?? null;
-    },
-
     async listTools(deadline: AbortSignal): Promise<DiscoveredTool[]> {
       const tools: DiscoveredTool[] = [];
       let cursor: string | undefined;
@@ -191,7 +183,6 @@ function createMcpClient(endpoint: string, apiToken: string) {
         tools.push(...((page.tools as DiscoveredTool[] | undefined) ?? []));
         cursor = typeof page.nextCursor === 'string' ? page.nextCursor : undefined;
       } while (cursor);
-      discovered = tools;
       return tools;
     },
 
@@ -208,22 +199,15 @@ function createMcpClient(endpoint: string, apiToken: string) {
         .join('\n');
       return { text, isError: result.isError === true };
     },
-
-    async close(): Promise<void> {
-      if (!mcpSessionId) return;
-      await fetch(endpoint, {
-        method: 'DELETE',
-        headers: headers(),
-        signal: AbortSignal.timeout(POST_TIMEOUT_MS),
-      }).catch(() => {});
-    },
-    sessionId(): string | null {
-      return mcpSessionId;
-    },
   };
 }
 
 type McpClient = ReturnType<typeof createMcpClient>;
+
+function declaresSessionId(schema: JsonSchema): boolean {
+  const properties = schema.properties;
+  return typeof properties === 'object' && properties !== null && 'sessionId' in properties;
+}
 
 function renameToolsInDescriptions<T>(node: T): T {
   if (Array.isArray(node)) return node.map((item) => renameToolsInDescriptions(item)) as T;
@@ -293,11 +277,15 @@ export default function rembric(pi: ExtensionApi): void {
     process.env.GENTLE_PI_AGENTS_CHILD === '1' ||
     process.env.PI_SUBAGENT_CHILD === '1';
   const trackForced = process.env.REMBRIC_TRACK_SESSION === '1';
-  let boundKey: string | null = null;
-  let lastBindAttemptKey: string | null = null;
-  let bindFailures = 0;
-  let missingResumeToolWarned = false;
-  const BIND_FAILURE_LIMIT = 3;
+
+  function withHostSessionId(
+    params: Record<string, unknown>,
+    ctx: ExtensionContext | undefined,
+  ): Record<string, unknown> {
+    if (params.sessionId !== undefined || !core || !ctx) return params;
+    const hostSessionId = ctx.sessionManager.getSessionId();
+    return core.isRegistered(hostSessionId) ? { ...params, sessionId: hostSessionId } : params;
+  }
 
   pi.on('session_start', async (_event, ctx) => {
     if (core) return;
@@ -328,15 +316,17 @@ export default function rembric(pi: ExtensionApi): void {
       const deadline = discoveryDeadline();
       await client.initialize(deadline);
       for (const tool of await client.listTools(deadline)) {
+        const attachesSession = declaresSessionId(tool.inputSchema);
         pi.registerTool({
           name: tool.name.replace(/\./g, '_'),
           label: tool.name,
           description: underscoreToolNames(tool.description ?? tool.name),
           parameters: renameToolsInDescriptions(tool.inputSchema) as JsonSchema,
-          execute: async (_toolCallId, params, signal) => {
+          execute: async (_toolCallId, params, signal, _onUpdate, toolCtx) => {
+            const args = (params ?? {}) as Record<string, unknown>;
             const { text, isError } = await client.callTool(
               tool.name,
-              (params ?? {}) as Record<string, unknown>,
+              attachesSession ? withHostSessionId(args, toolCtx) : args,
               signal,
             );
             if (isError) throw new Error(text);
@@ -381,39 +371,6 @@ export default function rembric(pi: ExtensionApi): void {
     if (suppress) core.markSubAgent(sessionId);
     core.beginTurn(sessionId);
     await core.ensureSession(sessionId);
-    const resumeTool = mcp?.sessionResumeToolName() ?? null;
-    const mcpSessionId = mcp?.sessionId() ?? null;
-    const bindKey = mcpSessionId && resumeTool ? `${mcpSessionId}::${sessionId}` : null;
-    if (mcp && bindKey === null && !missingResumeToolWarned) {
-      missingResumeToolWarned = true;
-      diag('session_resume not discovered; identity declaration skipped');
-    }
-    if (bindKey !== lastBindAttemptKey) {
-      lastBindAttemptKey = bindKey;
-      bindFailures = 0;
-    }
-    if (
-      !suppress &&
-      mcp &&
-      resumeTool &&
-      bindKey &&
-      bindKey !== boundKey &&
-      bindFailures < BIND_FAILURE_LIMIT
-    ) {
-      try {
-        const declared = await mcp.callTool(resumeTool, { sessionId });
-        if (declared.isError) {
-          bindFailures += 1;
-          diag(`session_resume bind failed: ${declared.text.slice(0, 120)}`);
-        } else {
-          boundKey = bindKey;
-          bindFailures = 0;
-        }
-      } catch (err) {
-        bindFailures += 1;
-        diag(`session_resume bind failed: ${err instanceof Error ? err.message : 'error'}`);
-      }
-    }
     core.appendUserMessage(sessionId, prompt);
 
     const result: BeforeAgentStartResult = {};
@@ -457,10 +414,7 @@ export default function rembric(pi: ExtensionApi): void {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     const closes = CLOSING_SHUTDOWN_REASONS.has(event.reason ?? '') && !isSelfResume(event, ctx);
-    await Promise.all([
-      closes ? core.endSession(sessionId) : core.flushSessionSummary(sessionId),
-      mcp?.close(),
-    ]);
+    await (closes ? core.endSession(sessionId) : core.flushSessionSummary(sessionId));
     core.forgetSession(sessionId);
   });
 }

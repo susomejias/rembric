@@ -76,6 +76,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const baseUrl = serverUrl ? serverUrl.replace(/\/$/, '') : '';
 
   const knownSessions = new Set();
+  const registeredSessions = new Set();
   const subAgentSessions = new Set();
   const sessionMessages = new Map();
   const pendingFlush = new Map();
@@ -142,6 +143,10 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return knownSessions.has(sessionId);
   }
 
+  function isRegistered(sessionId) {
+    return registeredSessions.has(sessionId);
+  }
+
   async function ensureSession(sessionId) {
     if (!sessionId) return;
     if (subAgentSessions.has(sessionId)) return;
@@ -157,6 +162,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
       processResumed = ensure.ok && ensure.created === false;
     }
     sessionCreated.set(sessionId, ensure.ok === true && ensure.created === true);
+    if (ensure.ok) registeredSessions.add(sessionId);
     if (ensure.ok) await rembricPost(`/api/${slug}/sessions/${sessionId}/resume`, {});
   }
 
@@ -359,6 +365,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
 
   function forgetSession(sessionId) {
     knownSessions.delete(sessionId);
+    registeredSessions.delete(sessionId);
     subAgentSessions.delete(sessionId);
     firstPromptEmitted.delete(sessionId);
     resumedReadEmitted.delete(sessionId);
@@ -384,6 +391,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     isSubAgent,
     markSubAgent,
     isKnown,
+    isRegistered,
     ensureSession,
     nudgesForTurn,
     markToolUsed,
