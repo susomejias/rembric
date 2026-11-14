@@ -15,8 +15,8 @@ URL:    http(s)://your-host:8787/mcp[/<project-slug>]
 Header: Authorization: Bearer <agent-token>
 ```
 
-- `/mcp` → the default project. A project is always active; the agent switches with `project.use({slug})`.
-- `/mcp/<slug>` → path-scoped. The agent's home project is fixed to that slug and cannot be switched for the life of the connection; every write lands there and no argument names another destination. Reads are the same as anywhere else — the opt-in `across_projects` search below works here too, because the path fixes which project is home, not which projects the token may read. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.use`/`project.list`/`project.current`/`memory.about` stay available so the connection can be repaired from inside the session.
+- `/mcp` → the default project. A project is always active; to work in another one, connect at `/mcp/<slug>` (for the bridge clients, a `.rembric` file or `REMBRIC_PROJECT_SLUG`). No tool switches or creates a project; projects are created from the dashboard.
+- `/mcp/<slug>` → path-scoped. The agent's home project is fixed to that slug and cannot be switched for the life of the connection; every write lands there and no argument names another destination. Reads are the same as anywhere else — the opt-in `across_projects` search below works here too, because the path fixes which project is home, not which projects the token may read. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.list`/`project.current`/`memory.about` stay available, and the refusal points at the dashboard, where the project is created.
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
 
@@ -518,13 +518,11 @@ Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Stre
 
 If your client is stdio-only, use `npx -y @rembric/mcp-bridge@<exact-version>` as a stdio↔HTTP shim, with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the environment. The package accepts no URL, header, or token arguments.
 
-## Roots-discovered slugs that name no project
+## Path-less connections
 
-When you connect to `/mcp` (path-less) and roots-based discovery surfaces a slug that does not yet exist as a project, writes land in the default project rather than being refused. Nothing is lost and nothing leaks: the destination is an ordinary project, `project.current` names it, and the corpus is append-only, so a misfiled memory is re-saved under the right project.
+A connection to `/mcp` (path-less) always resolves to the default project. The working directory never chooses the project: add a `.rembric` file (or set `REMBRIC_PROJECT_SLUG`) to reach `/mcp/<slug>`. Projects are created from the dashboard; no tool creates one.
 
-To file the work under its own project, `project.use({slug, autocreate: true})` first. Never autocreate or autopin silently — minting a project is the user's call.
-
-Earlier releases refused these writes with `project_suggestion_pending`, on the stated reasoning that write tools would otherwise "fall through to global" silently. `memory.save` never did — its `scope` argument defaulted to `project` and a path-less save was refused loudly. The gate was load-bearing for `memory.session_start`, `memory.save_prompt` and `memory.capture_passive`, which without it wrote user-wide rows silently. That scope no longer exists, so neither does the gate.
+Earlier releases refused some path-less writes with `project_suggestion_pending`, on the stated reasoning that write tools would otherwise "fall through to global" silently. `memory.save` never did — its `scope` argument defaulted to `project` and a path-less save was refused loudly. The gate was load-bearing for `memory.session_start`, `memory.save_prompt` and `memory.capture_passive`, which without it wrote user-wide rows silently. That scope no longer exists, so neither does the gate.
 
 ## Surviving compaction
 
