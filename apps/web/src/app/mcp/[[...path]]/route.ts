@@ -4,6 +4,7 @@ import {
 } from '@modelcontextprotocol/server';
 import { runWithContext } from '@rembric/core';
 
+import { clientIdentity } from '../../../lib/client-identity';
 import { verifyMcpBearerToken } from '../../../lib/mcp-auth';
 import { getMcpSurface } from '../../../lib/mcp-server';
 import { applyMcpRateLimit } from '../../../lib/rate-limit';
@@ -91,13 +92,4 @@ export const DELETE = handle;
 const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
 function isValidSlug(slug: string): boolean {
   return slug.length > 0 && slug.length <= 128 && SLUG_RE.test(slug);
-}
-
-function clientIdentity(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return 'unknown';
 }

@@ -14,6 +14,7 @@ import {
 import { createDiagnostics } from '@rembric/db';
 import { createMcpServer, parseRunSummary, type DoctorReport } from '@rembric/mcp';
 
+import { maxRequestBodyBytes } from './api';
 import { getServices, type Services } from './services';
 import { REMBRIC_VERSION } from './version';
 
@@ -65,14 +66,9 @@ function buildSurface(services: Services): McpHttpSurface {
       onerror: (error: Error): void => {
         console.error('[mcp] transport error', { message: error.message, stack: error.stack });
       },
-      maxRequestBodySize: maxRequestBodySize(),
+      maxRequestBodySize: maxRequestBodyBytes(),
     },
   );
-}
-
-function maxRequestBodySize(): number | undefined {
-  const parsed = Number(process.env['MAX_BODY_BYTES']);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function logInternalError(err: unknown, context: string): string {

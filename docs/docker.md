@@ -29,6 +29,15 @@ Set `REMBRIC_SERVER_URL` on the plugin side to the reachable hostname:
 
 The bearer token is the real security boundary; every endpoint requires `Authorization: Bearer <token>`. Belt-and-suspenders defenses (firewall the port to your trust boundary, Tailscale ACLs, reverse-proxy with mTLS, etc.) are operator's call.
 
+### Behind a reverse proxy
+
+The failed-attempt lockout and the OAuth rate limits key on one client identity. By default it is the TCP peer address of the connection, and any `X-Forwarded-For` the client sends is ignored. Behind a reverse proxy that peer is always the proxy, so set `REMBRIC_TRUSTED_PROXY_HOPS` in `.env` to the number of proxies in front of the container (`1` for a single proxy). With `n` trusted hops the identity is the `X-Forwarded-For` entry `n` places left of the peer address, which is the client address your proxy recorded; anything the client wrote further left is ignored.
+
+- **Unset behind a proxy:** every client shares the proxy's bucket, so one client's failed logins can lock everyone out for `AUTH_LOCKOUT_MS`, and the OAuth rate limits are shared too.
+- **Set higher than the real number of proxies:** a client can choose its own identity again. Count exactly.
+- The proxy must set or append the client address it saw (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
+- An invalid value is treated as `0`, with one warning in the container log at startup.
+
 ### Same host as your agent — loopback override
 
 If Rembric and your agent live on the same machine and you want the stricter posture, restrict the publish to loopback via an override file. **This is opt-in** — the default compose binds to all interfaces.

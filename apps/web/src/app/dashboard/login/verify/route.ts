@@ -3,6 +3,7 @@ import type { NextRequest, NextResponse } from 'next/server';
 import { safeNext, type LoginErrorCode } from '../clients';
 
 import { isDomainError } from '@/lib/auth';
+import { clientIdentity } from '@/lib/client-identity';
 import { relativeRedirect } from '@/lib/http-redirect';
 import { getServices } from '@/lib/services';
 import { createSessionCookie } from '@/lib/session';
@@ -13,7 +14,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const tokenPlain = stringField(form.get('token'));
   const next = safeNext(stringField(form.get('next')));
 
-  const identity = networkIdentity(request);
+  const identity = clientIdentity(request);
   const locked = services.authLockout.check(identity);
   if (locked.locked) return backToLogin(request, 'locked', next);
 
@@ -62,13 +63,4 @@ function backToLogin(
   const params = new URLSearchParams({ error: code });
   if (next !== null) params.set('next', next);
   return relativeRedirect(`/dashboard/login?${params}`, request);
-}
-
-function networkIdentity(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return 'unknown';
 }

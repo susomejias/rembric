@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
+import { DEFAULT_MAX_REQUEST_BODY_SIZE, readRequestBody } from '@modelcontextprotocol/server';
 import { type AgentSessionsService, type RequestContext } from '@rembric/core';
 
 import { AuthError, authenticate, isDomainError } from './auth';
+import { clientIdentity } from './client-identity';
 import { getServices } from './services';
 
 export interface ApiErrorBody {
@@ -62,7 +64,7 @@ function internalError(err: unknown, context: string): Response {
   );
 }
 
-export function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 500 {
+export function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 413 | 500 {
   switch (code) {
     case 'invalid_input':
     case 'invalid_scope':
@@ -89,6 +91,8 @@ export function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 500 {
     case 'conflict':
     case 'session_deleted':
       return 409;
+    case 'payload_too_large':
+      return 413;
     default:
       return 500;
   }
@@ -101,12 +105,32 @@ export function domainErr(err: unknown): Response {
   return internalError(err, 'unhandled API request error');
 }
 
-export async function readJson(request: Request): Promise<unknown> {
+export function maxRequestBodyBytes(): number {
+  const parsed = Number(process.env['MAX_BODY_BYTES']);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_REQUEST_BODY_SIZE;
+}
+
+export type JsonBody = { ok: true; body: unknown } | { ok: false; response: Response };
+
+export async function readJson(request: Request): Promise<JsonBody> {
+  const maxBytes = maxRequestBodyBytes();
+  let text: string;
   try {
-    const body: unknown = await request.json();
-    return body;
+    const read = await readRequestBody(request, maxBytes);
+    if (read.tooLarge) {
+      await request.body?.cancel();
+      const code = 'payload_too_large';
+      const message = `request body exceeds ${maxBytes} bytes`;
+      return { ok: false, response: json(errorBody(code, message), statusForCode(code)) };
+    }
+    text = read.text;
   } catch {
-    return undefined;
+    return { ok: true, body: undefined };
+  }
+  try {
+    return { ok: true, body: JSON.parse(text) as unknown };
+  } catch {
+    return { ok: true, body: undefined };
   }
 }
 
@@ -114,7 +138,7 @@ export type AuthOutcome = { ok: true; ctx: RequestContext } | { ok: false; respo
 
 export async function authenticateRequest(request: Request, slug: string): Promise<AuthOutcome> {
   const services = getServices();
-  const identity = networkIdentity(request);
+  const identity = clientIdentity(request);
   const locked = services.authLockout.check(identity);
   if (locked.locked) {
     return {
@@ -139,15 +163,6 @@ export async function authenticateRequest(request: Request, slug: string): Promi
     }
     return { ok: false, response: internalError(err, 'unhandled API authentication error') };
   }
-}
-
-function networkIdentity(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return 'unknown';
 }
 
 export function rejectIfDeleted(

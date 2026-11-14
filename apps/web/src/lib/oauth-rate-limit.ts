@@ -1,10 +1,11 @@
-import { isIP, isIPv6 } from 'node:net';
+import { isIPv6 } from 'node:net';
 
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
 
 import type { OAuthReply, ReplyHeaders } from './oauth-http';
 
-const CLIENT_IDENTITY_UNKNOWN = '0.0.0.0';
+export { clientIdentity as rateLimitIdentity } from './client-identity';
+
 const IPV6_SUBNET_HEXTETS = 3;
 
 export interface RateLimitPolicy {
@@ -15,15 +16,6 @@ export interface RateLimitPolicy {
 
 export interface RateLimiter {
   consume(identity: string, headers: ReplyHeaders): Promise<OAuthReply | null>;
-}
-
-export function rateLimitIdentity(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim() ?? '';
-    if (isIP(first) !== 0) return first;
-  }
-  return CLIENT_IDENTITY_UNKNOWN;
 }
 
 export function rateLimitKey(ip: string): string {

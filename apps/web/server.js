@@ -17,6 +17,7 @@
  * the bug being repaired. Plain JS with no imports beyond Node builtins: it runs
  * before any build output and the runtime image is distroless (no shell).
  */
+import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -66,6 +67,44 @@ export function applyListenPort(env) {
   return port;
 }
 
+export function resolveTrustedProxyHops(env, warn) {
+  const raw = String(env.REMBRIC_TRUSTED_PROXY_HOPS ?? '').trim();
+  if (raw === '') return 0;
+  const hops = Number(raw);
+  if (/^\d+$/.test(raw) && Number.isSafeInteger(hops)) return hops;
+  warn(
+    `REMBRIC_TRUSTED_PROXY_HOPS must be a non-negative integer, received ${JSON.stringify(raw)}; trusting no proxy`,
+  );
+  return 0;
+}
+
+export function trustedClientAddress(forwardedFor, remoteAddress, hops) {
+  if (!remoteAddress) return undefined;
+  const forwarded = Array.isArray(forwardedFor) ? forwardedFor.join(',') : (forwardedFor ?? '');
+  const chain = forwarded
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  chain.push(remoteAddress);
+  return chain[Math.max(0, chain.length - 1 - hops)];
+}
+
+export function trustForwardedFor(createServer, hops) {
+  return (...args) => {
+    const server = createServer(...args);
+    server.prependListener('request', (req) => {
+      const identity = trustedClientAddress(
+        req.headers['x-forwarded-for'],
+        req.socket.remoteAddress,
+        hops,
+      );
+      if (identity === undefined) delete req.headers['x-forwarded-for'];
+      else req.headers['x-forwarded-for'] = identity;
+    });
+    return server;
+  };
+}
+
 function describe(err) {
   return err instanceof Error ? err.message : String(err);
 }
@@ -92,6 +131,11 @@ async function main() {
   console.error(
     `[launcher] REMBRIC_PORT=${process.env.REMBRIC_PORT ?? '(unset)'} → listening on port ${port}`,
   );
+
+  const hops = resolveTrustedProxyHops(process.env, (message) =>
+    console.error(`[launcher] ${message}`),
+  );
+  http.createServer = trustForwardedFor(http.createServer, hops);
 
   const serverPath = join(dirname(fileURLToPath(import.meta.url)), NEXT_SERVER_FILE);
   await import(pathToFileURL(serverPath).href);
