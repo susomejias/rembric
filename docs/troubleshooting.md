@@ -23,6 +23,10 @@ Older deployments configured a chat LLM, a consolidation cron, or an external em
 
 Another process holds the port. `lsof -i :8787` to find it, or set `REMBRIC_PORT`. A force-killed instance can leave the WAL dirty — SQLite recovers on restart.
 
+### Everyone gets `429 rate_limited` after a few failed logins, or `[launcher] a request arrived with X-Forwarded-For while REMBRIC_TRUSTED_PROXY_HOPS=0`
+
+Rembric runs behind a reverse proxy or tunnel and `REMBRIC_TRUSTED_PROXY_HOPS` is unset, so every client shares the proxy's address for the lockout and the OAuth rate limits. Set it in `.env` to the number of proxies in front of the container (`1` for nginx, Caddy, Traefik or a Cloudflare Tunnel) and run `docker compose up -d`. See [Updating to v0.31.0 behind a reverse proxy or tunnel](./updates.md#updating-to-v0310-behind-a-reverse-proxy-or-tunnel-one-time).
+
 ## Embeddings (in-process)
 
 ### `embedding worker error: …` in the logs

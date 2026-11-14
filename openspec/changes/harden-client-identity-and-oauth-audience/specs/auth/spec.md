@@ -51,3 +51,10 @@ The pre-auth identity SHALL be the source socket address unless the operator dec
 - **WHEN** the same identity presents a valid token to `/mcp`
 - **THEN** the request SHALL be refused as rate-limited before the token is verified, exactly as on `/api`, `/healthz` and the dashboard login
 - **AND** a `/mcp` request that presents no credential (the OAuth discovery step that receives the `401` challenge) SHALL NOT count as a failed attempt
+
+#### Scenario: A forwarded request with no trusted proxy is reported once
+
+- **GIVEN** `REMBRIC_TRUSTED_PROXY_HOPS` is `0` (or unset) and the production launcher is running
+- **WHEN** requests arrive carrying `X-Forwarded-For`
+- **THEN** the launcher SHALL print one warning, for the first of them only, naming the connection address the forwarded clients share and the variable to set
+- **AND** at startup it SHALL print the hop count in use, so an operator can confirm the configuration from the container log

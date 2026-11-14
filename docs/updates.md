@@ -186,6 +186,48 @@ Your running container is **not** harmed: the swap fails while launching the upg
 
 **After this** you are on ≥ v0.21.15 and the dashboard one-click update works normally again — the orchestrator launches the upgrader with `/nodejs/bin/node`, and recreated containers use the image's own health check, independent of your local compose file.
 
+## Updating to v0.31.0 behind a reverse proxy or tunnel (one-time)
+
+From **v0.31.0**, the failed-login lockout and the OAuth rate limits identify a client by the **address of the TCP connection**, not by the `X-Forwarded-For` header the client sends. Before, a client could write any `X-Forwarded-For` it liked and pick its own bucket, which let it walk past the lockout. Nothing changes if clients reach Rembric directly (same host, LAN, Tailscale or WireGuard to the published port).
+
+**Who must act:** every installation where something sits between the clients and the container — nginx, Caddy, Traefik, a Cloudflare Tunnel (`cloudflared`), Cloudflare's proxied DNS, or any other reverse proxy. Behind it, the connection address is always the proxy's, so after the update every client shares one bucket: a single agent retrying with a revoked token, or a few mistyped dashboard logins, locks **everyone** out for `AUTH_LOCKOUT_MS` (60 s by default), and the OAuth limits (for example 20 client registrations per hour) become one shared budget.
+
+**What to do,** before or right after updating — add the number of proxies in front of the container to `.env` and recreate the container:
+
+```ini
+# .env
+REMBRIC_TRUSTED_PROXY_HOPS=1
+```
+
+```bash
+docker compose up -d
+```
+
+| In front of the container                                 | Value                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Nothing (direct, LAN, Tailscale/WireGuard to the port)    | `0` (default)                                                                   |
+| One reverse proxy: nginx, Caddy, Traefik                  | `1`                                                                             |
+| Cloudflare Tunnel (`cloudflared`)                         | `1` — Cloudflare's edge appends the visitor address and `cloudflared` adds none |
+| Cloudflare proxied DNS in front of your own reverse proxy | `2`                                                                             |
+
+Count exactly. A value higher than the real number of proxies lets a client choose its own address again, and so does a container port that can be reached without going through the proxy: publish it on loopback or an internal network (see [`docker.md`](./docker.md#behind-a-reverse-proxy)).
+
+**How to tell which case you are in.** The container log states the value at startup:
+
+```
+[launcher] REMBRIC_TRUSTED_PROXY_HOPS=1: client identity is 1 proxy hop(s) left of the connection address
+```
+
+With `0`, the first request that arrives carrying `X-Forwarded-For` prints a one-time warning naming the connection address every forwarded client is sharing:
+
+```
+[launcher] a request arrived with X-Forwarded-For while REMBRIC_TRUSTED_PROXY_HOPS=0, so every client behind 172.18.0.3 shares one rate-limit and lockout identity. If a reverse proxy or tunnel fronts Rembric, set REMBRIC_TRUSTED_PROXY_HOPS=1 (docs/updates.md).
+```
+
+If you see that line and a proxy or tunnel does front Rembric, set the variable. If nothing should be in front, the warning means a client sent the header itself, and `0` is already ignoring it.
+
+**Not covered:** `pnpm start` and `pnpm run dev` run Next.js without the production launcher and still take `X-Forwarded-For` as sent. Only expose the Docker image.
+
 ## Testing the flow locally
 
 For development, point the release feed at a stub and serve the image from a local registry:

@@ -64,6 +64,38 @@ describe('trustForwardedFor', () => {
     expect(seen['x-forwarded-for']).toBe('192.0.2.1');
   });
 
+  it('warns once when a forwarded request arrives with no trusted proxy', () => {
+    const warn = vi.fn();
+    const createServer: CreateServer = (listener) => new EventEmitter().on('request', listener);
+    const server = (trustForwardedFor(createServer, 0, warn) as CreateServer)(() => {});
+    const forwarded = () => ({
+      headers: { 'x-forwarded-for': '203.0.113.9' },
+      socket: { remoteAddress: '172.18.0.3' },
+    });
+
+    server.emit('request', { headers: {}, socket: { remoteAddress: '172.18.0.3' } });
+    expect(warn).not.toHaveBeenCalled();
+    server.emit('request', forwarded());
+    server.emit('request', forwarded());
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('172.18.0.3');
+    expect(warn.mock.calls[0]?.[0]).toContain('REMBRIC_TRUSTED_PROXY_HOPS=1');
+  });
+
+  it('does not warn when a proxy hop is trusted', () => {
+    const warn = vi.fn();
+    const createServer: CreateServer = (listener) => new EventEmitter().on('request', listener);
+    const server = (trustForwardedFor(createServer, 1, warn) as CreateServer)(() => {});
+
+    server.emit('request', {
+      headers: { 'x-forwarded-for': '203.0.113.9' },
+      socket: { remoteAddress: '172.18.0.3' },
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('removes the header rather than keep a client value when the socket address is gone', () => {
     const seen = serve(0, { headers: { 'x-forwarded-for': '203.0.113.9' }, socket: {} });
     expect('x-forwarded-for' in seen).toBe(false);
@@ -170,6 +202,7 @@ describe('the launcher rewrites X-Forwarded-For before the generated server sees
   it('an invalid value warns once and trusts no proxy', async () => {
     const { port, stderr } = await launch({ REMBRIC_TRUSTED_PROXY_HOPS: 'two' });
     expect(await seenForwardedFor(port, { 'x-forwarded-for': '198.51.100.7' })).toBe('127.0.0.1');
-    expect(stderr().match(/REMBRIC_TRUSTED_PROXY_HOPS/g)).toHaveLength(1);
+    expect(stderr().match(/must be a non-negative integer/g)).toHaveLength(1);
+    expect(stderr().match(/arrived with X-Forwarded-For/g)).toHaveLength(1);
   });
 });

@@ -89,10 +89,17 @@ export function trustedClientAddress(forwardedFor, remoteAddress, hops) {
   return chain[Math.max(0, chain.length - 1 - hops)];
 }
 
-export function trustForwardedFor(createServer, hops) {
+export function trustForwardedFor(createServer, hops, warn = () => {}) {
+  let warned = false;
   return (...args) => {
     const server = createServer(...args);
     server.prependListener('request', (req) => {
+      if (hops === 0 && !warned && req.headers['x-forwarded-for'] !== undefined) {
+        warned = true;
+        warn(
+          `a request arrived with X-Forwarded-For while REMBRIC_TRUSTED_PROXY_HOPS=0, so every client behind ${req.socket.remoteAddress ?? 'that peer'} shares one rate-limit and lockout identity. If a reverse proxy or tunnel fronts Rembric, set REMBRIC_TRUSTED_PROXY_HOPS=1 (docs/updates.md).`,
+        );
+      }
       const identity = trustedClientAddress(
         req.headers['x-forwarded-for'],
         req.socket.remoteAddress,
@@ -132,10 +139,12 @@ async function main() {
     `[launcher] REMBRIC_PORT=${process.env.REMBRIC_PORT ?? '(unset)'} → listening on port ${port}`,
   );
 
-  const hops = resolveTrustedProxyHops(process.env, (message) =>
-    console.error(`[launcher] ${message}`),
+  const warn = (message) => console.error(`[launcher] ${message}`);
+  const hops = resolveTrustedProxyHops(process.env, warn);
+  console.error(
+    `[launcher] REMBRIC_TRUSTED_PROXY_HOPS=${hops}: client identity is ${hops === 0 ? 'the connection address' : `${hops} proxy hop(s) left of the connection address`}`,
   );
-  http.createServer = trustForwardedFor(http.createServer, hops);
+  http.createServer = trustForwardedFor(http.createServer, hops, warn);
 
   const serverPath = join(dirname(fileURLToPath(import.meta.url)), NEXT_SERVER_FILE);
   await import(pathToFileURL(serverPath).href);
