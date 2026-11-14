@@ -1,0 +1,147 @@
+same  001  initialize 2025-06-18 path-less /mcp
+same  002  notifications/initialized
+same  003  tools/list
+same  004  ping
+same  005  unknown JSON-RPC method
+same  006  initialize 2025-03-26 path-less /mcp
+same  007  tools/list on a 2025-03-26 session
+same  008  tools/call project.current
+same  009  tools/call project.list
+same  010  tools/call memory.about
+same  011  tools/call memory.stats
+same  012  tools/call memory.doctor
+same  013  tools/call memory.session_start
+same  014  tools/call memory.save
+same  015  tools/call memory.save (topic_key, no sessionId)
+same  016  tools/call memory.save (validation error: no tags)
+same  017  tools/call memory.search
+same  018  tools/call memory.context
+same  019  tools/call memory.get_batch
+same  020  tools/call memory.timeline
+same  021  tools/call memory.confirm_batch
+same  022  tools/call memory.compare
+same  023  tools/call memory.judge_batch (unknown judgment)
+same  024  tools/call memory.suggest_topic_key
+same  025  tools/call memory.save_prompt
+same  026  tools/call memory.search_prompts
+same  027  tools/call memory.capture_passive
+same  028  tools/call memory.merge (preview)
+same  029  tools/call memory.merge (with fingerprint)
+same  030  tools/call memory.archive
+same  031  tools/call memory.session_summary
+same  032  tools/call memory.session_get_batch
+same  033  tools/call memory.session_end
+same  034  tools/call memory.session_resume
+same  035  tools/call memory.session_end (after resume)
+same  036  tools/call memory.session_start({project}) default slug
+same  037  tools/call project.use while a session is active
+same  038  tools/call memory.session_end (project session)
+same  039  tools/call project.use (unknown slug, no autocreate)
+same  040  tools/call project.use (default slug)
+same  041  tools/call unknown tool
+same  042  GET standalone SSE stream (keepalive window)
+same  043  GET /mcp without a session id
+same  044  DELETE /mcp with the session id
+same  045  tools/list with the deleted session id
+same  046  DELETE /mcp without a session id
+same  047  tools/list with an unknown mcp-session-id
+same  048  tools/list with no session id and no initialize
+same  049  initialize /mcp/<default slug>
+same  050  tools/call project.current on /mcp/<default slug>
+same  051  tools/call project.use on /mcp/<default slug> (locked)
+same  052  initialize /mcp/<unknown slug>
+same  053  tools/call project.current on /mcp/<unknown slug>
+same  054  initialize /mcp/<invalid slug>
+same  055  initialize with no bearer
+same  056  initialize with an invalid bearer
+same  057  initialize with a non-Bearer Authorization scheme
+same  058  initialize with Accept: application/json only
+same  059  initialize with Content-Type: text/plain
+same  060  initialize with a malformed JSON body
+same  061  JSON-RPC batch (initialize + tools/list)
+DIFF  062  initialize with a body over the default 4 MiB cap
+same  063  initialize with a disallowed Origin
+DIFF  064  initialize with the allowed Origin (control)
+same  065  initialize with a disallowed Host
+same  066  2026-07-28 server/discover
+same  067  2026-07-28 tools/list with envelope
+same  068  2026-07-28 notifications/cancelled
+same  069  2026-07-28 header without envelope (malformed)
+same  070  envelope claiming 2025-06-18
+same  071  GET /.well-known/oauth-authorization-server
+same  072  GET /.well-known/oauth-protected-resource
+same  073  GET /.well-known/oauth-protected-resource/mcp
+same  074  POST /register (valid public client)
+same  075  POST /register (invalid metadata: no redirect_uris)
+same  076  GET /authorize (unregistered client)
+same  077  GET /authorize (plain PKCE method)
+same  078  OPTIONS /token (CORS preflight)
+same  079  GET /token (405)
+same  080  POST /token (unregistered client)
+same  081  POST /token (registered client, unknown code)
+same  082  POST /token (unsupported grant_type)
+same  083  POST /revoke (unknown token)
+same  084  POST /dashboard/login (admin token)
+same  085  grant authorize GET (registered client, S256)
+same  086  grant consent page GET (dashboard session)
+same  087  grant consent POST decision=approve
+same  088  POST /token (authorization_code, wrong verifier)
+same  089  second authorize GET (registered client, S256)
+same  090  second consent page GET (dashboard session)
+same  091  second consent POST decision=approve
+same  092  POST /token (authorization_code, valid)
+same  093  POST /token (authorization_code, reused code)
+DIFF  094  initialize with the OAuth access token
+same  095  POST /token (refresh_token rotation)
+same  096  POST /token (refresh_token reuse)
+same  097  initialize with the rotated access token after reuse detection
+same  098  denied authorize GET (registered client, S256)
+same  099  denied consent page GET (dashboard session)
+same  100  denied consent POST decision=deny
+same  101  POST /revoke (owner, access token)
+
+--- 062  initialize with a body over the default 4 MiB cap  (- base http://localhost:3101, + candidate http://localhost:3102)
+- body.message: "request body exceeds the 4194304-byte limit"
++ body.message: "request body exceeds the 2048-byte limit"
+
+--- 064  initialize with the allowed Origin (control)  (- base http://localhost:3101, + candidate http://localhost:3102)
+- status: 200
++ status: 403
+- headers.cache-control: "no-cache, no-transform"
++ headers.cache-control: (absent)
+- headers.content-type: "text/event-stream"
++ headers.content-type: "application/json"
+- headers.mcp-session-id: "<uuid:5>"
++ headers.mcp-session-id: (absent)
+- headers.x-accel-buffering: "no"
++ headers.x-accel-buffering: (absent)
+- body.sse.0.event: "message"
++ body.sse.0.event: (absent)
+- body.sse.0.data.result.protocolVersion: "2025-06-18"
++ body.sse.0.data.result.protocolVersion: (absent)
+- body.sse.0.data.result.capabilities.tools.listChanged: true
++ body.sse.0.data.result.capabilities.tools.listChanged: (absent)
+- body.sse.0.data.result.serverInfo.name: "rembric"
++ body.sse.0.data.result.serverInfo.name: (absent)
+- body.sse.0.data.result.serverInfo.version: "0.30.12"
++ body.sse.0.data.result.serverInfo.version: (absent)
+- body.sse.0.data.result.instructions: "Rembric is this project's long-term memory: only what you write to it outlives this conversation. Run this loop yourself; host reminders may help, never wait for them.\nRECALL: memory.context/memory.search for new-area/diagnosis/recall if you lack prior detail.\nSAVE: fix/decision/discovery/config/pattern/preference→memory.save(title≤100,content,tags) as soon as it is settled, not at the end: one fact per memory, written so a later session can act on it without this chat. A session summary never replaces it. topic_key? updates an evolving fact; candidates[]→memory.judge_batch({judgments:[…]}).\nTags required, normally 1–5 useful reusable lowercase ASCII kebab-case: dashboard/sqlite/bug-fix.\nPass known sessionId; never guess.\nREAD:memory.get_batch(creation)/memory.session_get_batch(activity):ids OR from/to;full current data/errors,limit≤20,offset=nextOffset until null;all failed=isError.\nSUMMARIZE: Before ending each work turn: memory.session_summary(title≤100,summary≤10000). The `##` sections you send REPLACE; the ones you omit STAY. Current state first: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nsession_not_found (no host registered one)→memory.session_start once, then retry.\nmemory.about\n\nProject always active: roots or default project; project.use to switch."
++ body.sse.0.data.result.instructions: (absent)
+- body.sse.0.data.jsonrpc: "2.0"
++ body.sse.0.data.jsonrpc: (absent)
+- body.sse.0.data.id: 1
++ body.sse.0.data.id: (absent)
+- body.jsonrpc: (absent)
++ body.jsonrpc: "2.0"
+- body.error.code: (absent)
++ body.error.code: -32000
+- body.error.message: (absent)
++ body.error.message: "Invalid Origin header: <origin>"
+- body.id: (absent)
++ body.id: null
+
+--- 094  initialize with the OAuth access token  (- base http://localhost:3101, + candidate http://localhost:3102)
+- headers.mcp-session-id: "<uuid:6>"
++ headers.mcp-session-id: "<uuid:5>"
+
+101 request shapes, 3 with differences, 33.2s

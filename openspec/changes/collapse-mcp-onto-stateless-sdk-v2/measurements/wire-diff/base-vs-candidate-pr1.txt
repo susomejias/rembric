@@ -1,0 +1,103 @@
+same  001  initialize 2025-06-18 path-less /mcp
+same  002  notifications/initialized
+same  003  tools/list
+same  004  ping
+same  005  unknown JSON-RPC method
+same  006  initialize 2025-03-26 path-less /mcp
+same  007  tools/list on a 2025-03-26 session
+same  008  tools/call project.current
+same  009  tools/call project.list
+same  010  tools/call memory.about
+same  011  tools/call memory.stats
+same  012  tools/call memory.doctor
+same  013  tools/call memory.session_start
+same  014  tools/call memory.save
+same  015  tools/call memory.save (topic_key, no sessionId)
+same  016  tools/call memory.save (validation error: no tags)
+same  017  tools/call memory.search
+same  018  tools/call memory.context
+same  019  tools/call memory.get_batch
+same  020  tools/call memory.timeline
+same  021  tools/call memory.confirm_batch
+same  022  tools/call memory.compare
+same  023  tools/call memory.judge_batch (unknown judgment)
+same  024  tools/call memory.suggest_topic_key
+same  025  tools/call memory.save_prompt
+same  026  tools/call memory.search_prompts
+same  027  tools/call memory.capture_passive
+same  028  tools/call memory.merge (preview)
+same  029  tools/call memory.merge (with fingerprint)
+same  030  tools/call memory.archive
+same  031  tools/call memory.session_summary
+same  032  tools/call memory.session_get_batch
+same  033  tools/call memory.session_end
+same  034  tools/call memory.session_resume
+same  035  tools/call memory.session_end (after resume)
+same  036  tools/call memory.session_start({project}) default slug
+same  037  tools/call project.use while a session is active
+same  038  tools/call memory.session_end (project session)
+same  039  tools/call project.use (unknown slug, no autocreate)
+same  040  tools/call project.use (default slug)
+same  041  tools/call unknown tool
+same  042  GET standalone SSE stream (keepalive window)
+same  043  GET /mcp without a session id
+same  044  DELETE /mcp with the session id
+same  045  tools/list with the deleted session id
+same  046  DELETE /mcp without a session id
+same  047  tools/list with an unknown mcp-session-id
+same  048  tools/list with no session id and no initialize
+same  049  initialize /mcp/<default slug>
+same  050  tools/call project.current on /mcp/<default slug>
+same  051  tools/call project.use on /mcp/<default slug> (locked)
+same  052  initialize /mcp/<unknown slug>
+same  053  tools/call project.current on /mcp/<unknown slug>
+same  054  initialize /mcp/<invalid slug>
+same  055  initialize with no bearer
+same  056  initialize with an invalid bearer
+same  057  initialize with a non-Bearer Authorization scheme
+same  058  initialize with Accept: application/json only
+same  059  initialize with Content-Type: text/plain
+same  060  initialize with a malformed JSON body
+same  061  JSON-RPC batch (initialize + tools/list)
+same  062  initialize with a body over the default 4 MiB cap
+same  063  initialize with a disallowed Origin
+same  064  initialize with the allowed Origin (control)
+same  065  initialize with a disallowed Host
+same  066  2026-07-28 server/discover
+same  067  2026-07-28 tools/list with envelope
+same  068  2026-07-28 notifications/cancelled
+same  069  2026-07-28 header without envelope (malformed)
+same  070  envelope claiming 2025-06-18
+same  071  GET /.well-known/oauth-authorization-server
+same  072  GET /.well-known/oauth-protected-resource
+same  073  GET /.well-known/oauth-protected-resource/mcp
+same  074  POST /register (valid public client)
+same  075  POST /register (invalid metadata: no redirect_uris)
+same  076  GET /authorize (unregistered client)
+same  077  GET /authorize (plain PKCE method)
+same  078  OPTIONS /token (CORS preflight)
+same  079  GET /token (405)
+same  080  POST /token (unregistered client)
+same  081  POST /token (registered client, unknown code)
+same  082  POST /token (unsupported grant_type)
+same  083  POST /revoke (unknown token)
+same  084  POST /dashboard/login (admin token)
+same  085  grant authorize GET (registered client, S256)
+same  086  grant consent page GET (dashboard session)
+same  087  grant consent POST decision=approve
+same  088  POST /token (authorization_code, wrong verifier)
+same  089  second authorize GET (registered client, S256)
+same  090  second consent page GET (dashboard session)
+same  091  second consent POST decision=approve
+same  092  POST /token (authorization_code, valid)
+same  093  POST /token (authorization_code, reused code)
+same  094  initialize with the OAuth access token
+same  095  POST /token (refresh_token rotation)
+same  096  POST /token (refresh_token reuse)
+same  097  initialize with the rotated access token after reuse detection
+same  098  denied authorize GET (registered client, S256)
+same  099  denied consent page GET (dashboard session)
+same  100  denied consent POST decision=deny
+same  101  POST /revoke (owner, access token)
+
+101 request shapes, 0 with differences, 33.2s
