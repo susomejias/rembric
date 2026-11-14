@@ -59,17 +59,17 @@ same  058  initialize with Accept: application/json only
 same  059  initialize with Content-Type: text/plain
 same  060  initialize with a malformed JSON body
 same  061  JSON-RPC batch (initialize + tools/list)
-same  062  initialize with a body over the default 4 MiB cap
-same  063  initialize with a disallowed Origin
+DIFF  062  initialize with a body over the default 4 MiB cap
+DIFF  063  initialize with a disallowed Origin
 DIFF  064  initialize with the allowed Origin (control)
-same  065  initialize with a disallowed Host
+DIFF  065  initialize with a disallowed Host
 DIFF  066  2026-07-28 server/discover
 DIFF  067  2026-07-28 tools/list with envelope
 DIFF  068  2026-07-28 notifications/cancelled
 same  069  2026-07-28 header without envelope (malformed)
 same  070  envelope claiming 2025-06-18
-same  071  GET /.well-known/oauth-authorization-server
-same  072  GET /.well-known/oauth-protected-resource
+DIFF  071  GET /.well-known/oauth-authorization-server
+DIFF  072  GET /.well-known/oauth-protected-resource
 same  073  GET /.well-known/oauth-protected-resource/mcp
 same  074  POST /register (valid public client)
 same  075  POST /register (invalid metadata: no redirect_uris)
@@ -12632,11 +12632,35 @@ same  101  POST /revoke (owner, access token)
 - body.sse.0.data.result.structuredContent.suggestedSlugs: []
 + body.sse.0.data.result.structuredContent.suggestedSlugs: (absent)
 
+--- 062  initialize with a body over the default 4 MiB cap  (- base http://localhost:3101, + candidate http://localhost:3102)
+- body.ok: false
++ body.ok: (absent)
+- body.code: "payload_too_large"
++ body.code: (absent)
+- body.message: "request body exceeds the 4194304-byte limit"
++ body.message: (absent)
+- body.jsonrpc: (absent)
++ body.jsonrpc: "2.0"
+- body.error.code: (absent)
++ body.error.code: -32000
+- body.error.message: (absent)
++ body.error.message: "Payload Too Large: Request body must not exceed 4194304 bytes"
+- body.id: (absent)
++ body.id: null
+
+--- 063  initialize with a disallowed Origin  (- base http://localhost:3101, + candidate http://localhost:3102)
+- body.error.message: "Invalid Origin header: https://evil.example"
++ body.error.message: "Invalid Origin: evil.example"
+
 --- 064  initialize with the allowed Origin (control)  (- base http://localhost:3101, + candidate http://localhost:3102)
 - headers.mcp-session-id: "<uuid:5>"
 + headers.mcp-session-id: (absent)
 - body.sse.0.data.result.instructions: "Rembric is this project's long-term memory: only what you write to it outlives this conversation. Run this loop yourself; host reminders may help, never wait for them.\nRECALL: memory.context/memory.search for new-area/diagnosis/recall if you lack prior detail.\nSAVE: fix/decision/discovery/config/pattern/preference→memory.save(title≤100,content,tags) as soon as it is settled, not at the end: one fact per memory, written so a later session can act on it without this chat. A session summary never replaces it. topic_key? updates an evolving fact; candidates[]→memory.judge_batch({judgments:[…]}).\nTags required, normally 1–5 useful reusable lowercase ASCII kebab-case: dashboard/sqlite/bug-fix.\nPass known sessionId; never guess.\nREAD:memory.get_batch(creation)/memory.session_get_batch(activity):ids OR from/to;full current data/errors,limit≤20,offset=nextOffset until null;all failed=isError.\nSUMMARIZE: Before ending each work turn: memory.session_summary(title≤100,summary≤10000). The `##` sections you send REPLACE; the ones you omit STAY. Current state first: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nsession_not_found (no host registered one)→memory.session_start once, then retry.\nmemory.about\n\nProject always active: roots or default project; project.use to switch."
 + body.sse.0.data.result.instructions: "Rembric is this project's long-term memory: only what you write to it outlives this conversation. Run this loop yourself; host reminders may help, never wait for them.\nRECALL: memory.context/memory.search for new-area/diagnosis/recall if you lack prior detail.\nSAVE: fix/decision/discovery/config/pattern/preference→memory.save(title≤100,content,tags) as soon as it is settled, not at the end: one fact per memory, written so a later session can act on it without this chat. A session summary never replaces it. topic_key? updates an evolving fact; candidates[]→memory.judge_batch({judgments:[…]}).\nTags required, normally 1–5 useful reusable lowercase ASCII kebab-case: dashboard/sqlite/bug-fix.\nPass known sessionId; never guess.\nREAD:memory.get_batch(creation)/memory.session_get_batch(activity):ids OR from/to;full current data/errors,limit≤20,offset=nextOffset until null;all failed=isError.\nSUMMARIZE: Before ending each work turn: memory.session_summary(title≤100,summary≤10000). The `##` sections you send REPLACE; the ones you omit STAY. Current state first: Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\nsession_not_found (no host registered one)→memory.session_start once, then retry.\nmemory.about\n\nProject always active: the default project; reach another at /mcp/<slug>."
+
+--- 065  initialize with a disallowed Host  (- base http://localhost:3101, + candidate http://localhost:3102)
+- body.error.message: "Invalid Host header: rebind.example:80"
++ body.error.message: "Invalid Host: rebind.example"
 
 --- 066  2026-07-28 server/discover  (- base http://localhost:3101, + candidate http://localhost:3102)
 - status: 400
@@ -16232,6 +16256,20 @@ same  101  POST /revoke (owner, access token)
 - body: (absent)
 + body: "<empty>"
 
+--- 071  GET /.well-known/oauth-authorization-server  (- base http://localhost:3101, + candidate http://localhost:3102)
+- headers.content-type: "application/json; charset=utf-8"
++ headers.content-type: "application/json"
+- body.token_endpoint_auth_methods_supported.0: "client_secret_post"
++ body.token_endpoint_auth_methods_supported.0: "none"
+- body.token_endpoint_auth_methods_supported.1: "none"
++ body.token_endpoint_auth_methods_supported.1: (absent)
+- body.revocation_endpoint_auth_methods_supported.0: "client_secret_post"
++ body.revocation_endpoint_auth_methods_supported.0: "none"
+
+--- 072  GET /.well-known/oauth-protected-resource  (- base http://localhost:3101, + candidate http://localhost:3102)
+- headers.content-type: "application/json; charset=utf-8"
++ headers.content-type: "application/json"
+
 --- 081  POST /token (registered client, unknown code)  (- base http://localhost:3101, + candidate http://localhost:3102)
 - status: 500
 + status: 400
@@ -16256,4 +16294,4 @@ same  101  POST /revoke (owner, access token)
 - body.error: "server_error"
 + body.error: "invalid_grant"
 
-101 request shapes, 60 with differences, 33.1s
+101 request shapes, 65 with differences, 33.1s
