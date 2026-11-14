@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.31.0](https://github.com/susomejias/rembric/compare/server-v0.30.12...server-v0.31.0) (2026-11-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **web:** an OAuth connector on /mcp/<slug> receives a token that reaches that project only, and an unknown or foreign resource is refused with invalid_target. Tokens issued before the upgrade keep their binding.
+* **web:** behind a reverse proxy, set REMBRIC_TRUSTED_PROXY_HOPS (usually 1); without it every client shares the proxy's rate-limit and lockout bucket. An oversized /api body now answers 413 instead of 400.
+* **web:** REMBRIC_MCP_ALLOWED_HOSTS and REMBRIC_MCP_ALLOWED_ORIGINS entries now match by hostname (ports and schemes are accepted but ignored), refusals read "Invalid Host: <hostname>" or "Invalid Origin: <hostname>", a rebinding request gets 403 before any 401 challenge, and an over-cap POST /mcp answers the SDK's JSON-RPC 413 error instead of the payload_too_large body with Connection: close.
+* **mcp:** the server no longer mints Mcp-Session-Id; GET and DELETE on /mcp answer 405 and there is no 404/-32001; a request sent before initialize is served instead of answering 400. The server never issues roots/list, ignores roots/list_changed, and project.current no longer returns suggestedSlugs, so a path-less /mcp connection uses the default project. The project.use tool is removed (tools/list goes from 25 to 24), including project creation through autocreate: create projects from the dashboard. memory.session_start({project}) no longer activates a project and answers scope_locked on a mismatch. A write without sessionId attaches to the sole active session for the token and project, or to none when several are active, and repeating memory.session_start under that ambiguity mints a new row each time.
+
+### Features
+
+* **mcp:** serve both eras from one stateless handler, drop connection state ([6ca3e96](https://github.com/susomejias/rembric/commit/6ca3e96299eb986f8f2f81d39fbaa1e7ae87359e))
+
+
+### Bug Fixes
+
+* **web:** bind OAuth grants to the connector project and lock out bad /mcp bearers ([537cfd6](https://github.com/susomejias/rembric/commit/537cfd63440ba53d544e157043f90696c987abb6))
+* **web:** bound OAuth bodies and registration errors with the MCP SDK ([73d08fb](https://github.com/susomejias/rembric/commit/73d08fb71a795bbf86110f06e799ae6ce2052ec0))
+* **web:** cap and gate /mcp with the MCP SDK's transport helpers ([29d5cdb](https://github.com/susomejias/rembric/commit/29d5cdbd72d20b9de28e6bd397b8b1f17031a7ea))
+* **web:** parse OAuth forms in linear time under a 1000-parameter cap ([c3e4233](https://github.com/susomejias/rembric/commit/c3e4233356fa78cd9316d8ad09e54dcd9448eccb))
+* **web:** take client identity from the socket and bound /api bodies ([8413fd7](https://github.com/susomejias/rembric/commit/8413fd73c558ba9cb244f6ebbd97367e9527ddde))
+
+
+### Refactor
+
+* **mcp:** port the tool server to MCP SDK v2 2.4.0 keeping the 1.x wire ([eb7e552](https://github.com/susomejias/rembric/commit/eb7e5525c8ef161d30c4204e7229a3bfe149a5f2))
+* **web:** lean the OAuth layer on the MCP SDK and Web APIs ([5e09fe4](https://github.com/susomejias/rembric/commit/5e09fe4263a55a057c2c0e1c150f453c738fbc1a))
+* **web:** serve the OAuth authorization server on Web Request/Response ([29414c1](https://github.com/susomejias/rembric/commit/29414c1fe08e1305b6150743a40d24fc22d17383))
+
+
+### Documentation
+
+* **openspec:** close the PR 3 commit task ([d30d021](https://github.com/susomejias/rembric/commit/d30d0218b2fd9da78e8159d0c9d3187bc3abb84f))
+* **openspec:** express the removed MCP behaviours as explicit removals ([d786b59](https://github.com/susomejias/rembric/commit/d786b59ac7cc3e1d76657d20472a6e8bef7b75e4))
+* **openspec:** record the final PR 4 wire diff and the Pi 0.40.0 upgrade gap ([761595b](https://github.com/susomejias/rembric/commit/761595b8c459b23005cb2e8b194f934a32375f63))
+* spell out the reverse-proxy step for existing installations ([731f414](https://github.com/susomejias/rembric/commit/731f414a10946b5ae367bf89db7f5f16334ca01a))
+
 ## [0.30.12](https://github.com/susomejias/rembric/compare/server-v0.30.11...server-v0.30.12) (2026-11-13)
 
 
