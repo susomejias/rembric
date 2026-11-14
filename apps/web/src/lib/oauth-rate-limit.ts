@@ -1,5 +1,7 @@
 import { isIP, isIPv6 } from 'node:net';
 
+import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
+
 import type { OAuthReply, ReplyHeaders } from './oauth-http';
 
 const CLIENT_IDENTITY_UNKNOWN = '0.0.0.0';
@@ -12,12 +14,7 @@ export interface RateLimitPolicy {
 }
 
 export interface RateLimiter {
-  consume(identity: string, headers: ReplyHeaders): OAuthReply | null;
-}
-
-interface Window {
-  hits: number;
-  resetAt: number;
+  consume(identity: string, headers: ReplyHeaders): Promise<OAuthReply | null>;
 }
 
 export function rateLimitIdentity(request: Request): string {
@@ -50,42 +47,27 @@ function expandIPv6(address: string): number[] {
 }
 
 export function createRateLimiter(policy: RateLimitPolicy): RateLimiter {
-  let current = new Map<string, Window>();
-  let previous = new Map<string, Window>();
-  const sweep = setInterval(() => {
-    previous = current;
-    current = new Map();
-  }, policy.windowMs);
-  sweep.unref();
-
-  const windowFor = (key: string, now: number): Window => {
-    let entry = current.get(key);
-    if (entry === undefined) {
-      entry = previous.get(key) ?? { hits: 0, resetAt: now + policy.windowMs };
-      previous.delete(key);
-      current.set(key, entry);
-    }
-    if (entry.resetAt <= now) {
-      entry.hits = 0;
-      entry.resetAt = now + policy.windowMs;
-    }
-    return entry;
-  };
-
   const windowSeconds = Math.ceil(policy.windowMs / 1000);
+  const limiter = new RateLimiterMemory({ points: policy.limit, duration: windowSeconds });
   const refusal = JSON.stringify({ error: 'too_many_requests', error_description: policy.message });
 
   return {
-    consume(identity, headers) {
-      const now = Date.now();
-      const entry = windowFor(rateLimitKey(identity), now);
-      entry.hits += 1;
-      const resetSeconds = String(Math.max(0, Math.ceil((entry.resetAt - Date.now()) / 1000)));
+    async consume(identity, headers) {
+      let res: RateLimiterRes;
+      let allowed = true;
+      try {
+        res = await limiter.consume(rateLimitKey(identity));
+      } catch (rejection) {
+        if (!(rejection instanceof RateLimiterRes)) throw rejection;
+        res = rejection;
+        allowed = false;
+      }
+      const resetSeconds = String(Math.max(0, Math.ceil(res.msBeforeNext / 1000)));
       headers.set('ratelimit-policy', `${policy.limit};w=${windowSeconds}`);
       headers.set('ratelimit-limit', String(policy.limit));
-      headers.set('ratelimit-remaining', String(Math.max(policy.limit - entry.hits, 0)));
+      headers.set('ratelimit-remaining', String(res.remainingPoints));
       headers.set('ratelimit-reset', resetSeconds);
-      if (entry.hits <= policy.limit) return null;
+      if (allowed) return null;
       headers.set('retry-after', resetSeconds);
       return { status: 429, headers, body: refusal };
     },

@@ -321,7 +321,7 @@ describe('metadata and CORS', () => {
           ],
           "revocation_endpoint": "http://127.0.0.1:3100/revoke",
           "revocation_endpoint_auth_methods_supported": [
-            "client_secret_post",
+            "none",
           ],
           "scopes_supported": [
             "mcp",
@@ -329,7 +329,6 @@ describe('metadata and CORS', () => {
           ],
           "token_endpoint": "http://127.0.0.1:3100/token",
           "token_endpoint_auth_methods_supported": [
-            "client_secret_post",
             "none",
           ],
         },
