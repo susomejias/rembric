@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 
 import { POST as oauthPost } from '../app/(oauth)/[...path]/route';
 import { POST as loginPost } from '../app/dashboard/login/verify/route';
-import { DELETE, POST } from '../app/mcp/[[...path]]/route';
+import { DELETE, GET, POST } from '../app/mcp/[[...path]]/route';
 import { resetMcpRateLimiterForTests } from '../lib/rate-limit';
 import { getServices } from '../lib/services';
 import { getSession } from '../lib/session';
@@ -188,6 +188,75 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       clientInfo: { name: 'c', version: '0' },
     },
   };
+
+  describe('transport contract pinned before the SDK v2 collapse', () => {
+    it('answers a request with no bearer with an RFC 6750 challenge naming the resource metadata', async () => {
+      const res = await POST(
+        new Request(`${ORIGIN}/mcp`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+          },
+          body: JSON.stringify(initializeBody),
+        }),
+        ctx,
+      );
+      expect(res.status).toBe(401);
+      expect(res.headers.get('www-authenticate')).toMatchInlineSnapshot(
+        `"Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="https://rembric.example.com/.well-known/oauth-protected-resource""`,
+      );
+    });
+
+    it('control: the same request with a bearer is not challenged', async () => {
+      const res = await POST(mcpRequest(initializeBody), ctx);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('www-authenticate')).toBeNull();
+    });
+
+    it('answers a POST whose Accept omits text/event-stream with 406', async () => {
+      const res = await POST(mcpRequest(initializeBody, { accept: 'application/json' }), ctx);
+      expect(res.status).toBe(406);
+      expect(await res.json()).toMatchInlineSnapshot(`
+        {
+          "error": {
+            "code": -32000,
+            "message": "Not Acceptable: Client must accept both application/json and text/event-stream",
+          },
+          "id": null,
+          "jsonrpc": "2.0",
+        }
+      `);
+    });
+
+    it('keeps the standalone GET stream alive with a comment frame', async () => {
+      const init = await POST(mcpRequest(initializeBody), ctx);
+      const sessionId = init.headers.get('mcp-session-id');
+      if (sessionId === null) throw new Error('fixture: initialize did not establish a session');
+
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      try {
+        const stream = await GET(
+          mcpRequest(
+            undefined,
+            { 'mcp-session-id': sessionId, accept: 'text/event-stream' },
+            'GET',
+          ),
+          ctx,
+        );
+        expect(stream.status).toBe(200);
+        expect(stream.headers.get('content-type')).toContain('text/event-stream');
+        const reader = stream.body!.getReader();
+        vi.advanceTimersByTime(15_000);
+        const { value } = await reader.read();
+        expect(new TextDecoder().decode(value)).toBe(': keepalive\n\n');
+        await reader.cancel();
+      } finally {
+        vi.useRealTimers();
+      }
+      await DELETE(mcpRequest(undefined, { 'mcp-session-id': sessionId }, 'DELETE'), ctx);
+    });
+  });
 
   describe('2026-07-28 era negotiation', () => {
     const MODERN = '2026-07-28';
