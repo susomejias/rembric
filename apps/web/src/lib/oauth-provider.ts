@@ -50,10 +50,10 @@ export interface OAuthProvider {
   exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string): OAuthTokens;
   verifyAccessToken(token: string): Promise<AuthInfo>;
   revokeToken(client: OAuthClientInformationFull, request: OAuthTokenRevocationRequest): void;
+  connectorResource(slug: string): URL | null;
 }
 
 const CONSENT_PATH = '/dashboard/oauth/consent';
-const SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
 
 const DOMAIN_ERROR_CODES: Record<DomainOAuthErrorCode, OAuthErrorCode> = {
   invalid_request: OAuthErrorCode.InvalidRequest,
@@ -64,20 +64,40 @@ const DOMAIN_ERROR_CODES: Record<DomainOAuthErrorCode, OAuthErrorCode> = {
   access_denied: OAuthErrorCode.AccessDenied,
 };
 
-function projectIdFromResource(
+function boundProjectId(
   resource: URL | undefined,
+  origin: string,
   projects: ProjectsService,
 ): string | null {
   if (!resource) return null;
+  if (
+    resource.origin !== origin ||
+    resource.username !== '' ||
+    resource.password !== '' ||
+    resource.search !== '' ||
+    resource.hash !== ''
+  ) {
+    throw invalidTarget(resource);
+  }
   const path = resource.pathname.replace(/\/+$/, '');
-  if (!path.startsWith('/mcp/')) return null;
-  const slug = path.slice('/mcp/'.length).split('/')[0];
-  if (!slug || slug.length > 128 || !SLUG_RE.test(slug)) return null;
-  return projects.findBySlug(slug)?.id ?? null;
+  if (path === '' || path === '/mcp') return null;
+  const project = path.startsWith('/mcp/')
+    ? projects.findBySlug(path.slice('/mcp/'.length))
+    : undefined;
+  if (!project) throw invalidTarget(resource);
+  return project.id;
+}
+
+function invalidTarget(resource: URL): OAuthError {
+  return new OAuthError(
+    OAuthErrorCode.InvalidTarget,
+    `resource '${resource.href}' is not an MCP connector of this server`,
+  );
 }
 
 export function createOAuthProvider(opts: OAuthProviderOptions): OAuthProvider {
   const { oauth, projects, issuer, areqKey } = opts;
+  const origin = new URL(issuer).origin;
   const now = opts.now ?? (() => new Date());
   const consentTtl = opts.consentTtlSeconds ?? 600;
 
@@ -110,7 +130,7 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthProvider {
         codeChallenge: params.codeChallenge,
         scope: params.scopes.join(' '),
         state: params.state,
-        projectId: projectIdFromResource(params.resource, projects),
+        projectId: boundProjectId(params.resource, origin, projects),
         exp: Math.floor(now().getTime() / 1000) + consentTtl,
       };
       const blob = signAuthRequest(req, areqKey);
@@ -150,6 +170,11 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthProvider {
 
     revokeToken(client, request) {
       oauth.revokeByToken(request.token, client.client_id);
+    },
+
+    connectorResource(slug) {
+      if (projects.findBySlug(slug) === undefined) return null;
+      return new URL(`/mcp/${slug}`, origin);
     },
   };
 }

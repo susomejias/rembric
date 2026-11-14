@@ -38,7 +38,7 @@ export async function verifyMcpBearerToken(input: {
     };
   }
 
-  const resourceMetadataUrl = protectedResourceMetadataUrl(services);
+  const resourceMetadataUrl = protectedResourceMetadataUrl(services, slug);
 
   let domainRefusal: Response | null = null;
   let requestContext: RequestContext | null = null;
@@ -93,6 +93,7 @@ export async function verifyMcpBearerToken(input: {
     authInfo = await verifyBearerToken(authorization, { verifier, resourceMetadataUrl });
   } catch (err) {
     if (domainRefusal !== null) return { ok: false, response: domainRefusal };
+    if (authorization && OAuthError.isInstance(err)) lockout.recordFailure(identity);
     return { ok: false, response: bearerAuthChallengeResponse(err, { resourceMetadataUrl }) };
   }
 
@@ -149,11 +150,12 @@ function syntheticOAuthToken(clientId: string, scope: TokenScope, projectId: str
   };
 }
 
-function protectedResourceMetadataUrl(services: Services): string | undefined {
+function protectedResourceMetadataUrl(services: Services, slug: string | null): string | undefined {
   const issuer = process.env['REMBRIC_PUBLIC_URL'];
   if (services.oauth === null || issuer === undefined || issuer.length === 0) return undefined;
   try {
-    return getOAuthProtectedResourceMetadataUrl(new URL(issuer));
+    const resource = slug === null ? new URL(issuer) : new URL(`/mcp/${slug}`, issuer);
+    return getOAuthProtectedResourceMetadataUrl(resource);
   } catch {
     return undefined;
   }

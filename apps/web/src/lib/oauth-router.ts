@@ -49,6 +49,7 @@ export interface OAuthRouter {
 type Serve = (request: Request) => Promise<OAuthReply>;
 
 const MINUTE_MS = 60 * 1000;
+const CONNECTOR_METADATA_PATH = /^\/\.well-known\/oauth-protected-resource\/mcp\/([^/]+)\/?$/;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
@@ -111,12 +112,25 @@ export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
 
   return {
     async handle(request) {
-      const document = oauthMetadataResponse(request, metadata);
+      const document =
+        oauthMetadataResponse(request, metadata) ?? connectorMetadata(provider, metadata, request);
       if (document !== undefined) return document;
       const serve = routes.get(new URL(request.url).pathname);
       return serve === undefined ? null : toResponse(request, await serve(request));
     },
   };
+}
+
+function connectorMetadata(
+  provider: OAuthProvider,
+  metadata: AuthMetadataOptions,
+  request: Request,
+): Response | undefined {
+  const slug = CONNECTOR_METADATA_PATH.exec(new URL(request.url).pathname)?.[1];
+  if (slug === undefined) return undefined;
+  const resourceServerUrl = provider.connectorResource(slug);
+  if (resourceServerUrl === null) return undefined;
+  return oauthMetadataResponse(request, { ...metadata, resourceServerUrl });
 }
 
 async function serveAuthorize(
