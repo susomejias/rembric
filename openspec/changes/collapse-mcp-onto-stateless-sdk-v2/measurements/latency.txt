@@ -1,0 +1,27 @@
+tools/call latency, base (wire-base, origin/main f9f769e5, server 0.30.12) vs candidate (feat/mcp-stateless-single-handler, PR 3)
+
+Instrument: end-to-end HTTP round trip of one JSON-RPC tools/call, measured client-side with
+performance.now() around fetch() plus reading the full response body (measurements/latency.mjs).
+Sequential calls from one Node 22.23.0 process on the same machine; POST to path-less /mcp.
+Base: initialize once, then every call carries the minted Mcp-Session-Id (sessionful 2025 leg).
+Candidate: initialize once, then every call carries no session id (stateless, one server per request).
+Servers: `next dev` started by measurements/wire-diff/start-server.sh on localhost:3101 (base) and
+localhost:3102 (candidate), fresh `mktemp -d` data, immediately after the PR 3 wire-diff run, so both
+hold the same catalogue data. Embedder absent (FTS5 fallback), as in the harness.
+Per tool: 30 warm-up calls discarded, then 300 measured calls. Two full runs, alternating base/candidate.
+Arguments: memory.search {query: "wire diff"}; project.current {}.
+
+run  server     tool             n    p50 ms  p90 ms  min ms  max ms
+1    base       memory.search    300  4.02    4.57    2.25    19.98
+1    candidate  memory.search    300  4.32    5.26    2.68    18.00
+1    base       project.current  300  3.45    3.94    1.90    6.80
+1    candidate  project.current  300  3.74    4.24    2.14    7.46
+2    base       memory.search    300  3.92    4.38    2.30    17.85
+2    candidate  memory.search    300  4.39    5.06    2.83    15.06
+2    base       project.current  300  3.46    4.18    1.99    9.46
+2    candidate  project.current  300  3.63    4.59    1.95    142.59
+
+Reading: the per-request server construction (createMcpServer + transport per request) costs about
+0.2-0.5 ms at p50 and 0.3-0.7 ms at p90 on this instrument, i.e. +5-12% of a 3.5-4.4 ms round trip.
+The 142.59 ms max in run 2 is a single outlier (p90 unaffected). `next dev` adds framework overhead
+equally to both sides; absolute numbers under a production build would be lower.
