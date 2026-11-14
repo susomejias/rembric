@@ -89,11 +89,13 @@ export function createOAuthProvider(opts: OAuthProviderOptions): OAuthProvider {
         : undefined;
     },
     registerClient(metadata) {
-      const created = oauth.registerClient({
-        clientName: metadata.client_name ?? null,
-        redirectUris: metadata.redirect_uris,
-        tokenEndpointAuthMethod: metadata.token_endpoint_auth_method,
-      });
+      const created = settled(() =>
+        oauth.registerClient({
+          clientName: metadata.client_name ?? null,
+          redirectUris: metadata.redirect_uris,
+          tokenEndpointAuthMethod: metadata.token_endpoint_auth_method,
+        }),
+      );
       return toClientInfo(created.clientId, oauth.redirectUrisFor(created), created.clientName);
     },
   };

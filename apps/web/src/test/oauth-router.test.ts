@@ -5,6 +5,7 @@ import { gzipSync } from 'node:zlib';
 
 import { TokensService } from '@rembric/core';
 import { createDb, createRepositories, type DbHandle } from '@rembric/db';
+import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { GET as routeGet, POST as routePost } from '../app/(oauth)/[...path]/route';
@@ -117,6 +118,47 @@ describe('domain errors raised from another bundle copy of @rembric/core', () =>
   });
 });
 
+describe('client registration refused by the domain', () => {
+  it('answers 400 invalid_request for a non-loopback http redirect_uri', async () => {
+    const response = await register(
+      { redirect_uris: ['http://evil.example/cb'], token_endpoint_auth_method: 'none' },
+      '198.51.100.51',
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'invalid_request',
+      error_description: "redirect_uri 'http://evil.example/cb' must be https (or http loopback)",
+    });
+  });
+
+  it('answers 400 invalid_request for a confidential client', async () => {
+    const response = await register(
+      { redirect_uris: [REDIRECT], token_endpoint_auth_method: 'client_secret_post' },
+      '198.51.100.51',
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'invalid_request',
+      error_description: 'only public clients (token_endpoint_auth_method=none) are supported',
+    });
+  });
+
+  it('registers a public client with an https redirect_uri', async () => {
+    const response = await register(
+      { redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' },
+      '198.51.100.51',
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      redirect_uris: [REDIRECT],
+      token_endpoint_auth_method: 'none',
+    });
+  });
+});
+
 describe('request body limit', () => {
   function paddedRegistration(totalBytes: number): string {
     const prefix = JSON.stringify({ redirect_uris: [] }).slice(0, -1);
@@ -132,10 +174,10 @@ describe('request body limit', () => {
       '198.51.100.31',
     );
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
-      error: 'server_error',
-      error_description: 'Internal Server Error',
+      error: 'invalid_request',
+      error_description: 'at least one redirect_uri is required',
     });
   });
 
@@ -198,6 +240,67 @@ describe('request body parsing', () => {
     expect(await response.json()).toEqual({ ok: false, code: 'internal_error' });
   });
 
+  function streamed(
+    chunks: number,
+    chunkBytes: number,
+  ): {
+    body: ReadableStream<Uint8Array>;
+    pulled: () => number;
+    cancelled: () => boolean;
+  } {
+    let sent = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent === chunks) {
+          controller.close();
+          return;
+        }
+        sent += 1;
+        controller.enqueue(new Uint8Array(chunkBytes).fill(0x61));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    return { body, pulled: () => sent, cancelled: () => cancelled };
+  }
+
+  function streamedPost(path: string, body: ReadableStream<Uint8Array>): Promise<Response> {
+    const init = {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+      duplex: 'half',
+    };
+    const request = new Request(`${ISSUER}${path}`, init);
+    return routePost(request, { params: Promise.resolve({ path: [path.slice(1)] }) });
+  }
+
+  it('stops reading a streamed body without a declared length once it passes 100 KiB', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+    const chunkBytes = 16 * 1024;
+    const source = streamed(640, chunkBytes);
+
+    const response = await streamedPost('/token', source.body);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, code: 'internal_error' });
+    expect(source.pulled()).toBeLessThanOrEqual(BODY_LIMIT_BYTES / chunkBytes + 2);
+    expect(source.cancelled()).toBe(true);
+  });
+
+  it('reads a streamed body without a declared length that stays under 100 KiB', async () => {
+    const source = streamed(4, 1024);
+
+    const response = await streamedPost('/token', source.body);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: 'invalid_request' });
+    expect(source.pulled()).toBe(4);
+  });
+
   it('refuses a compressed body with the internal-error body', async () => {
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     onTestFinished(() => quiet.mockRestore());
@@ -240,6 +343,25 @@ describe('rate-limit identity', () => {
 
     expect((await register({ redirect_uris: [] }, '::ffff:198.51.100.77')).status).toBe(429);
     expect((await register({ redirect_uris: [] }, '198.51.100.78')).status).not.toBe(429);
+  });
+});
+
+describe('rate limiter failure', () => {
+  it('answers the internal-error body instead of a 429', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broken = vi
+      .spyOn(RateLimiterMemory.prototype, 'consume')
+      .mockRejectedValue(new Error('limiter storage failed'));
+    onTestFinished(() => {
+      broken.mockRestore();
+      quiet.mockRestore();
+    });
+
+    const response = await register({ redirect_uris: [REDIRECT] }, '198.51.100.61');
+
+    expect(broken).toHaveBeenCalled();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, code: 'internal_error' });
   });
 });
 

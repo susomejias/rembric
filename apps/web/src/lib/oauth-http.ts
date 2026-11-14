@@ -1,4 +1,4 @@
-import { OAuthError, OAuthErrorCode } from '@modelcontextprotocol/server';
+import { OAuthError, OAuthErrorCode, readRequestBody } from '@modelcontextprotocol/server';
 
 export type ReplyHeaders = Map<string, string>;
 
@@ -87,12 +87,12 @@ export async function readBody(request: Request, kind: BodyKind): Promise<unknow
   const encoding = headers.get('content-encoding')?.trim().toLowerCase() || 'identity';
   if (encoding !== 'identity')
     throw new BodyParseError(`unsupported content encoding "${encoding}"`);
-  if (Number(headers.get('content-length') ?? 0) > BODY_LIMIT_BYTES) {
+  const read = await readRequestBody(request, BODY_LIMIT_BYTES);
+  if (read.tooLarge) {
+    await request.body?.cancel();
     throw new BodyParseError('entity too large');
   }
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > BODY_LIMIT_BYTES) throw new BodyParseError('entity too large');
-  const text = new TextDecoder().decode(bytes);
+  const { text } = read;
 
   if (kind === 'json') return text.length === 0 ? {} : (JSON.parse(text) as unknown);
   const form = new Map<string, string[]>();

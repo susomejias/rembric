@@ -46,11 +46,7 @@ export interface OAuthRouter {
   handle(request: Request): Promise<Response | null>;
 }
 
-type Serve = (
-  request: Request,
-  rest: string,
-  url: URL,
-) => OAuthReply | null | Promise<OAuthReply | null>;
+type Serve = (request: Request) => Promise<OAuthReply>;
 
 const MINUTE_MS = 60 * 1000;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -65,11 +61,11 @@ export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
     response_types_supported: ['code'],
     code_challenge_methods_supported: ['S256'],
     token_endpoint: endpoint('/token').href,
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
+    token_endpoint_auth_methods_supported: ['none'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
     scopes_supported: options.scopesSupported,
     revocation_endpoint: endpoint('/revoke').href,
-    revocation_endpoint_auth_methods_supported: ['client_secret_post'],
+    revocation_endpoint_auth_methods_supported: ['none'],
     registration_endpoint: endpoint('/register').href,
   };
   const metadata: AuthMetadataOptions = {
@@ -106,67 +102,37 @@ export function createOAuthRouter(options: OAuthRouterOptions): OAuthRouter {
     }),
   };
 
-  const routes: [string, Serve][] = [
-    [
-      endpoint('/authorize').pathname,
-      (request, rest, url) => serveAuthorize(provider, limiters.authorize, request, rest, url),
-    ],
-    [
-      endpoint('/token').pathname,
-      (request, rest) => serveToken(provider, limiters.token, request, rest),
-    ],
-    [
-      endpoint('/register').pathname,
-      (request, rest) => serveRegister(provider, limiters.register, request, rest),
-    ],
-    [
-      endpoint('/revoke').pathname,
-      (request, rest) => serveRevoke(provider, limiters.revoke, request, rest),
-    ],
-  ];
+  const routes = new Map<string, Serve>([
+    ['/authorize', (request) => serveAuthorize(provider, limiters.authorize, request)],
+    ['/token', (request) => serveToken(provider, limiters.token, request)],
+    ['/register', (request) => serveRegister(provider, limiters.register, request)],
+    ['/revoke', (request) => serveRevoke(provider, limiters.revoke, request)],
+  ]);
 
   return {
     async handle(request) {
       const document = oauthMetadataResponse(request, metadata);
       if (document !== undefined) return document;
-      const url = new URL(request.url);
-      for (const [mount, serve] of routes) {
-        const rest = mountRemainder(url.pathname, mount);
-        if (rest === null) continue;
-        const reply = await serve(request, rest, url);
-        if (reply !== null) return toResponse(request, reply);
-      }
-      return null;
+      const serve = routes.get(new URL(request.url).pathname);
+      return serve === undefined ? null : toResponse(request, await serve(request));
     },
   };
-}
-
-function mountRemainder(pathname: string, mount: string): string | null {
-  const base = mount.replace(/\/+$/, '');
-  const path = pathname.toLowerCase();
-  const prefix = base.toLowerCase();
-  if (path === prefix || path === `${prefix}/`) return '/';
-  if (path.startsWith(`${prefix}/`)) return pathname.slice(base.length);
-  return null;
 }
 
 async function serveAuthorize(
   provider: OAuthProvider,
   limiter: RateLimiter,
   request: Request,
-  rest: string,
-  url: URL,
-): Promise<OAuthReply | null> {
+): Promise<OAuthReply> {
   const headers: ReplyHeaders = new Map();
   const refused = refuseMethod(request, headers, ['GET', 'POST']);
   if (refused !== null) return refused;
   const body = await readBody(request, 'form');
-  const limited = limiter.consume(rateLimitIdentity(request), headers);
+  const limited = await limiter.consume(rateLimitIdentity(request), headers);
   if (limited !== null) return limited;
-  if (rest !== '/') return null;
 
   headers.set('cache-control', 'no-store');
-  const params = request.method === 'POST' ? body : queryParams(url);
+  const params = request.method === 'POST' ? body : queryParams(new URL(request.url));
 
   let client: OAuthClientInformationFull;
   let redirectUri: string;
@@ -282,19 +248,17 @@ async function serveToken(
   provider: OAuthProvider,
   limiter: RateLimiter,
   request: Request,
-  rest: string,
-): Promise<OAuthReply | null> {
+): Promise<OAuthReply> {
   const headers: ReplyHeaders = new Map();
   const preflight = corsPreflight(request, headers);
   if (preflight !== null) return preflight;
   const refused = refuseMethod(request, headers, ['POST']);
   if (refused !== null) return refused;
   const body = await readBody(request, 'form');
-  const limited = limiter.consume(rateLimitIdentity(request), headers);
+  const limited = await limiter.consume(rateLimitIdentity(request), headers);
   if (limited !== null) return limited;
   const { client, refusal } = authenticateClient(provider, body, headers);
   if (refusal !== undefined) return refusal;
-  if (rest !== '/') return null;
 
   headers.set('cache-control', 'no-store');
   try {
@@ -340,17 +304,15 @@ async function serveRegister(
   provider: OAuthProvider,
   limiter: RateLimiter,
   request: Request,
-  rest: string,
-): Promise<OAuthReply | null> {
+): Promise<OAuthReply> {
   const headers: ReplyHeaders = new Map();
   const preflight = corsPreflight(request, headers);
   if (preflight !== null) return preflight;
   const refused = refuseMethod(request, headers, ['POST']);
   if (refused !== null) return refused;
   const body = await readBody(request, 'json');
-  const limited = limiter.consume(rateLimitIdentity(request), headers);
+  const limited = await limiter.consume(rateLimitIdentity(request), headers);
   if (limited !== null) return limited;
-  if (rest !== '/') return null;
 
   headers.set('cache-control', 'no-store');
   try {
@@ -368,19 +330,17 @@ async function serveRevoke(
   provider: OAuthProvider,
   limiter: RateLimiter,
   request: Request,
-  rest: string,
-): Promise<OAuthReply | null> {
+): Promise<OAuthReply> {
   const headers: ReplyHeaders = new Map();
   const preflight = corsPreflight(request, headers);
   if (preflight !== null) return preflight;
   const refused = refuseMethod(request, headers, ['POST']);
   if (refused !== null) return refused;
   const body = await readBody(request, 'form');
-  const limited = limiter.consume(rateLimitIdentity(request), headers);
+  const limited = await limiter.consume(rateLimitIdentity(request), headers);
   if (limited !== null) return limited;
   const { client, refusal } = authenticateClient(provider, body, headers);
   if (refusal !== undefined) return refusal;
-  if (rest !== '/') return null;
 
   headers.set('cache-control', 'no-store');
   try {
