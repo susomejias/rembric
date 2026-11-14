@@ -39,7 +39,6 @@ function reachOf(scope: TokenScope, memberProjectIds: readonly string[] = []): R
     memberProjectIds,
     project: null,
     requestedSlug: null,
-    mcpSessionId: null,
   };
 }
 

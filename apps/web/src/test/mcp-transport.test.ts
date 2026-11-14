@@ -44,7 +44,6 @@ type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { raw: { close: () => void }; close: () => void };
   __rembricMcpSurface?: { close?: () => Promise<void> };
-  __rembricSessionRouter?: unknown;
 };
 
 const globalForApp = globalThis as MutableGlobal;
@@ -54,7 +53,6 @@ function resetAppGlobals(): void {
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
-  delete globalForApp.__rembricSessionRouter;
 }
 
 const ORIGIN = 'http://127.0.0.1:8787';
@@ -990,7 +988,8 @@ describe('MCP protocol conformance', () => {
   it('emits scope-aware instructions in the initialize result', async () => {
     const globalClient = await connect();
     const globalInstructions = globalClient.getInstructions();
-    expect(globalInstructions).toMatch(/project\.use/);
+    expect(globalInstructions).toContain('/mcp/<slug>');
+    expect(globalInstructions).not.toMatch(/project\.use|roots/);
     expect(globalInstructions).not.toContain('X-Rembric-Project');
     expect(globalInstructions).toContain(SUMMARY_SECTIONS);
     expect((globalInstructions ?? '').length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
@@ -1043,11 +1042,12 @@ describe('MCP protocol conformance', () => {
         'memory.capture_passive',
         'memory.doctor',
         'memory.stats',
-        'project.use',
         'project.list',
         'project.current',
       ]),
     );
+    expect(names).not.toContain('project.use');
+    expect(names).toHaveLength(24);
     await client.close();
   });
 
@@ -1756,7 +1756,7 @@ describe('MCP protocol conformance', () => {
     it.each([
       ['memory.context', 1521],
       ['memory.search_prompts', 428],
-      ['memory.session_start', 1103],
+      ['memory.session_start', 1142],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
       ['memory.save', 1891],
@@ -2167,7 +2167,6 @@ describe('MCP protocol conformance', () => {
       'memory.session_resume',
       'memory.judge_batch',
       'memory.compare',
-      'project.use',
     ]);
 
     const client = await connect();
@@ -2226,12 +2225,6 @@ describe('MCP protocol conformance', () => {
       },
     });
     expect(capture.structuredContent).toBeDefined();
-
-    const use = await client.callTool({
-      name: 'project.use',
-      arguments: { slug: 'outputschema-proj', autocreate: true },
-    });
-    expect(use.structuredContent).toBeDefined();
 
     const list = await client.callTool({ name: 'project.list', arguments: {} });
     expect(list.structuredContent).toBeDefined();
@@ -2330,14 +2323,9 @@ describe('MCP protocol conformance', () => {
     await pathless.close();
   });
 
-  it('project.list returns the default project as an ordinary entry, and project.use activates it', async () => {
+  it('project.list returns the default project as an ordinary entry, and /mcp/<its slug> reaches it', async () => {
     const dflt = defaultProject(services.db);
-    const sibling = await connect();
-    await sibling.callTool({
-      name: 'project.use',
-      arguments: { slug: 'listed-sibling', autocreate: true },
-    });
-    await sibling.close();
+    services.projects.create({ slug: 'listed-sibling' });
 
     const client = await connect();
     const listed = readJson(
@@ -2362,23 +2350,17 @@ describe('MCP protocol conformance', () => {
     expect(typeof entry!.displayName).toBe('string');
     expect(typeof entry!.activeMemoryCount).toBe('number');
     expect(listed.projects.length).toBeGreaterThan(1);
+    await client.close();
 
-    const used = readJson(
-      (await client.callTool({
-        name: 'project.use',
-        arguments: { slug: dflt.slug },
-      })) as ToolResult,
-    ) as { slug: string; created: boolean };
-    expect(used).toMatchObject({ slug: dflt.slug, created: false });
-
+    const scoped = await connect({ projectSlug: dflt.slug });
     const stats = readJson(
-      (await client.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult,
+      (await scoped.callTool({ name: 'memory.stats', arguments: {} })) as ToolResult,
     ) as { scope: string };
     expect(stats.scope).toBe(`project:${dflt.id}`);
-    await client.close();
+    await scoped.close();
   });
 
-  it('seven read surfaces stay closed across a two-step project.use', async () => {
+  it('seven read surfaces stay closed on a path-scoped connection', async () => {
     const dflt = defaultProject(services.db);
     const ENTITY = 'src/closed-scope-probe.ts';
     const seed = async (slug: string | undefined, marker: string) => {
@@ -2398,44 +2380,14 @@ describe('MCP protocol conformance', () => {
       return saved.id;
     };
 
-    const a = await connect();
-    readJson(
-      (await a.callTool({
-        name: 'project.use',
-        arguments: { slug: 'closed-a', autocreate: true },
-      })) as ToolResult,
-    );
-    await a.close();
-    const b = await connect();
-    readJson(
-      (await b.callTool({
-        name: 'project.use',
-        arguments: { slug: 'closed-b', autocreate: true },
-      })) as ToolResult,
-    );
-    await b.close();
+    services.projects.create({ slug: 'closed-a' });
+    services.projects.create({ slug: 'closed-b' });
 
     const defaultId = await seed(dflt.slug, 'in-default');
     const aId = await seed('closed-a', 'in-a');
     const bId = await seed('closed-b', 'in-b');
 
-    const client = await connect();
-    expect(
-      readJson(
-        (await client.callTool({
-          name: 'project.use',
-          arguments: { slug: 'closed-a' },
-        })) as ToolResult,
-      ),
-    ).toMatchObject({ slug: 'closed-a' });
-    expect(
-      readJson(
-        (await client.callTool({
-          name: 'project.use',
-          arguments: { slug: 'closed-b', confirmSwitch: true },
-        })) as ToolResult,
-      ),
-    ).toMatchObject({ slug: 'closed-b', switched: true });
+    const client = await connect({ projectSlug: 'closed-b' });
 
     const call = async (name: string, args: Record<string, unknown>) => {
       const result = (await client.callTool({ name, arguments: args })) as ToolResult;
@@ -2493,52 +2445,33 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('project.use pins after a path-less memory.session_start, and the switch gates still refuse a real pin', async () => {
+  it('memory.session_start({project}) on a path-less connection asserts, and activates nothing', async () => {
+    const dflt = defaultProject(services.db);
+    services.projects.create({ slug: 'assert-other' });
     const client = await connect();
+
+    const refused = (await client.callTool({
+      name: 'memory.session_start',
+      arguments: { agent: 'assert', project: 'assert-other' },
+    })) as ToolResult;
+    expect(refused.isError).toBe(true);
+    expect(readJson(refused)).toMatchObject({
+      code: 'scope_locked',
+      message: `connection resolves to the default project '${dflt.slug}'; cannot start a session for project 'assert-other'`,
+    });
+
+    const current = readJson(
+      (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+    );
+    expect(current).toEqual({ slug: dflt.slug, projectId: dflt.id, source: 'default' });
 
     const started = readJson(
       (await client.callTool({
         name: 'memory.session_start',
-        arguments: { agent: 'pin-after-start' },
+        arguments: { agent: 'assert', project: dflt.slug },
       })) as ToolResult,
-    ) as { sessionId: string };
-    expect(started.sessionId).toMatch(/^[0-9A-Z]+$/);
-
-    const used = (await client.callTool({
-      name: 'project.use',
-      arguments: { slug: 'pin-after-start-a', autocreate: true },
-    })) as ToolResult;
-    if (used.isError) throw new Error(`project.use refused: ${JSON.stringify(readJson(used))}`);
-    expect(readJson(used)).toMatchObject({
-      slug: 'pin-after-start-a',
-      created: true,
-      switched: false,
-      source: 'tool-explicit',
-    });
-
-    const unconfirmed = (await client.callTool({
-      name: 'project.use',
-      arguments: { slug: 'pin-after-start-b', autocreate: true },
-    })) as ToolResult;
-    expect(unconfirmed.isError).toBe(true);
-    expect(readJson(unconfirmed)).toMatchObject({
-      code: 'project_switch_requires_confirm',
-      currentSlug: 'pin-after-start-a',
-      targetSlug: 'pin-after-start-b',
-    });
-
-    const confirmed = (await client.callTool({
-      name: 'project.use',
-      arguments: { slug: 'pin-after-start-b', autocreate: true, confirmSwitch: true },
-    })) as ToolResult;
-    expect(confirmed.isError).toBe(true);
-    expect(readJson(confirmed)).toMatchObject({
-      code: 'session_active_must_end',
-      activeSessionId: started.sessionId,
-      currentSlug: 'pin-after-start-a',
-      targetSlug: 'pin-after-start-b',
-    });
-
+    ) as { projectId: string };
+    expect(started.projectId).toBe(dflt.id);
     await client.close();
   });
 
@@ -2557,8 +2490,8 @@ describe('MCP protocol conformance', () => {
     const body = readJson(refused) as { code: string; message: string };
     expect(body.code).toBe('forbidden');
     expect(body.message).toContain(`project '${defaultProject(services.db).id}'`);
-    expect(body.message).toContain("project.use({slug: 'pinned-remedy-proj'})");
     expect(body.message).toContain("reconnect at '/mcp/pinned-remedy-proj'");
+    expect(body.message).not.toContain('project.use');
     await pathless.close();
 
     const scoped = await connect({ token: pinned.plaintext, projectSlug: own.slug });
@@ -2690,17 +2623,12 @@ describe('MCP protocol conformance', () => {
   it('accepts a maximal legitimate argument set on the tools strictness most affects', async () => {
     const projectsSvc = new ProjectsService(createRepositories(services.db.db));
     const target = projectsSvc.create({ slug: 'strictness-controls-proj' });
-    const client = await connect();
+    const client = await connect({ projectSlug: target.slug });
     const call = async (name: string, args: Record<string, unknown>): Promise<ToolResult> => {
       const r = (await client.callTool({ name, arguments: args })) as ToolResult;
       expect(r.isError, `${name}: ${JSON.stringify(readJson(r))}`).toBeFalsy();
       return r;
     };
-
-    const used = readJson(await call('project.use', { slug: target.slug, autocreate: false })) as {
-      projectId: string;
-    };
-    expect(used.projectId).toBe(target.id);
 
     const started = readJson(
       await call('memory.session_start', {
@@ -2881,7 +2809,6 @@ describe('MCP protocol conformance', () => {
     await unresolvable.close();
 
     const scoped = await connect({ projectSlug: dflt.slug });
-    await record('path-scoped / switch away', scoped, 'project.use', { slug: 'somewhere-else' });
     await record('path-scoped / session_start elsewhere', scoped, 'memory.session_start', {
       project: 'somewhere-else',
     });
@@ -2889,6 +2816,12 @@ describe('MCP protocol conformance', () => {
       ids: ['01JJJJJJJJJJJJJJJJJJJJJJJJ'],
     });
     await scoped.close();
+
+    const pathless = await connect();
+    await record('path-less / session_start elsewhere', pathless, 'memory.session_start', {
+      project: 'somewhere-else',
+    });
+    await pathless.close();
 
     const denied = await connect({ token: pinned.plaintext });
     await record('path-less / token denied the default project', denied, 'memory.context', {});
@@ -2899,22 +2832,19 @@ describe('MCP protocol conformance', () => {
     const expected: Record<string, { code: string; message: string }> = {
       'unresolvable slug / save': {
         code: 'project_not_found',
-        message:
-          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+        message: "project 'no-such-project-here' does not exist; create it from the dashboard",
       },
       'unresolvable slug / search': {
         code: 'project_not_found',
-        message:
-          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+        message: "project 'no-such-project-here' does not exist; create it from the dashboard",
       },
       'unresolvable slug / context': {
         code: 'project_not_found',
-        message:
-          "project 'no-such-project-here' does not exist; create it from the dashboard or call project.use({slug, autocreate: true})",
+        message: "project 'no-such-project-here' does not exist; create it from the dashboard",
       },
-      'path-scoped / switch away': {
+      'path-less / session_start elsewhere': {
         code: 'scope_locked',
-        message: `connection is path-scoped to '${dflt.slug}'; cannot switch via tool`,
+        message: `connection resolves to the default project '${dflt.slug}'; cannot start a session for project 'somewhere-else'`,
       },
       'path-scoped / session_start elsewhere': {
         code: 'scope_locked',
@@ -2928,8 +2858,7 @@ describe('MCP protocol conformance', () => {
         code: 'forbidden',
         message:
           `token scope 'read:project:${elsewhere.id}' does not authorize read on project '${dflt.id}'` +
-          `; this token is pinned to project 'refusal-enum-proj' — ` +
-          `call project.use({slug: 'refusal-enum-proj'}) or reconnect at '/mcp/refusal-enum-proj'`,
+          `; this token is pinned to project 'refusal-enum-proj' — reconnect at '/mcp/refusal-enum-proj'`,
       },
     };
     expect(refusals.map((r) => r.where).sort()).toEqual(Object.keys(expected).sort());
@@ -2945,10 +2874,11 @@ describe('MCP protocol conformance', () => {
       expect(body, `${where}: tells the agent to set a scope`).not.toMatch(/set scope|scope=/i);
     }
     expect(refusals.filter((r) => r.code === 'scope_locked').map((r) => r.where)).toEqual([
-      'path-scoped / switch away',
       'path-scoped / session_start elsewhere',
+      'path-less / session_start elsewhere',
     ]);
-    expect(refusals.some((r) => /project\.use\(\{slug/.test(r.body))).toBe(true);
+    expect(refusals.filter((r) => /project\.use/.test(r.body))).toEqual([]);
+    expect(refusals.some((r) => /reconnect at '\/mcp\//.test(r.body))).toBe(true);
   });
 
   it('rejects an invalid token before reaching tool dispatch', async () => {
@@ -4050,16 +3980,10 @@ describe('MCP protocol conformance', () => {
   });
 
   it('memory.stats totals (needsReviewTotal, pendingJudgmentsTotal) are scope-isolated (task 5.3)', async () => {
+    services.projects.create({ slug: 'stats-totals-proj-a' });
+    services.projects.create({ slug: 'stats-totals-proj-b' });
     const projA = await connect({ projectSlug: 'stats-totals-proj-a' });
     const projB = await connect({ projectSlug: 'stats-totals-proj-b' });
-    await projA.callTool({
-      name: 'project.use',
-      arguments: { slug: 'stats-totals-proj-a', autocreate: true },
-    });
-    await projB.callTool({
-      name: 'project.use',
-      arguments: { slug: 'stats-totals-proj-b', autocreate: true },
-    });
 
     const saveOne = (await projA.callTool({
       name: 'memory.save',
@@ -4112,18 +4036,10 @@ describe('MCP protocol conformance', () => {
   it("project.list's activeMemoryCount drops when a memory is archived, and is per-project", async () => {
     const P = 'active-count-proj-p';
     const Q = 'active-count-proj-q';
+    services.projects.create({ slug: P });
+    services.projects.create({ slug: Q });
     const pClient = await connect({ projectSlug: P });
     const qClient = await connect({ projectSlug: Q });
-    for (const [client, slug] of [
-      [pClient, P],
-      [qClient, Q],
-    ] as const) {
-      const used = (await client.callTool({
-        name: 'project.use',
-        arguments: { slug, autocreate: true },
-      })) as ToolResult;
-      expect(used.isError, `project.use ${slug}`).toBeFalsy();
-    }
 
     interface ListEntry {
       slug: string;
@@ -4197,37 +4113,52 @@ describe('MCP protocol conformance', () => {
     await qClient.close();
   });
 
-  it('memory.context as the FIRST call on an unscoped connection with a discoverable root returns project scope', async () => {
-    const repos = createRepositories(services.db.db);
-    const projectsSvc = new ProjectsService(repos);
-    const project = projectsSvc.create({ slug: 'integration-roots-ctx-proj' });
-    repos.memory.insert({
-      id: '01TESTROOTSCTXMARKER00000A',
-      scope: 'project',
-      projectId: project.id,
-      type: 'project',
-      title: 'roots-discovered context marker',
-      content: 'roots-discovered context marker',
-      tags: [],
-      status: 'active',
-      replaces: [],
-      createdAt: new Date(),
-      lastSeenAt: new Date(),
+  it('a path-less client advertising roots resolves to the default project and is never sent roots/list', async () => {
+    const dflt = defaultProject(services.db);
+    const named = services.projects.create({ slug: 'integration-roots-ctx-proj' });
+    services.memory.save(
+      { type: 'project', title: 'named by a root', content: 'named-by-a-root marker' },
+      projectScope(named.id),
+    );
+    let rootsRequests = 0;
+    const transport = new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), {
+      fetch: routeFetch,
+      requestInit: { headers: { Authorization: `Bearer ${adminToken}` } },
     });
+    const client = new Client(
+      { name: 'rembric-roots-client', version: '0.0.0' },
+      { capabilities: { roots: { listChanged: true } } },
+    );
+    client.setRequestHandler('roots/list', () => {
+      rootsRequests += 1;
+      return { roots: [{ uri: `file:///tmp/${named.slug}`, name: named.slug }] };
+    });
+    await client.connect(transport);
 
-    const client = await connect({ rootUri: `file:///tmp/${project.slug}` });
     const ctx = (await client.callTool({ name: 'memory.context', arguments: {} })) as ToolResult;
     expect(ctx.isError).toBeFalsy();
     const payload = readJson(ctx) as { scope: string; recentMemories: { snippet: string }[] };
-    expect(payload.scope).toBe(`project:${project.id}`);
-    expect(
-      payload.recentMemories.some((m) => m.snippet.includes('roots-discovered context marker')),
-    ).toBe(true);
+    expect(payload.scope).toBe(`project:${dflt.id}`);
+    expect(payload.recentMemories.some((m) => m.snippet.includes('named-by-a-root'))).toBe(false);
 
+    await client.sendRootsListChanged();
+    const current = readJson(
+      (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
+    );
+    expect(current).toEqual({ slug: dflt.slug, projectId: dflt.id, source: 'default' });
+    expect(rootsRequests).toBe(0);
     await client.close();
+
+    const scoped = await connect({ projectSlug: named.slug, rootUri: `file:///tmp/${named.slug}` });
+    const scopedCtx = readJson(
+      (await scoped.callTool({ name: 'memory.context', arguments: {} })) as ToolResult,
+    ) as { scope: string; recentMemories: { snippet: string }[] };
+    expect(scopedCtx.scope).toBe(`project:${named.id}`);
+    expect(scopedCtx.recentMemories.some((m) => m.snippet.includes('named-by-a-root'))).toBe(true);
+    await scoped.close();
   });
 
-  it('memory.capture_passive writes to the default project when roots surface an unminted slug', async () => {
+  it('memory.capture_passive writes to the default project whatever the roots name', async () => {
     const dflt = defaultProject(services.db);
     const client = await connect({ rootUri: 'file:///tmp/integration-unminted-slug' });
     const result = (await client.callTool({
@@ -4243,9 +4174,9 @@ describe('MCP protocol conformance', () => {
 
     const current = readJson(
       (await client.callTool({ name: 'project.current', arguments: {} })) as ToolResult,
-    ) as { projectId: string | null; suggestedSlugs: string[] };
-    expect(current.projectId).toBe(dflt.id);
-    expect(current.suggestedSlugs).toEqual(['integration-unminted-slug']);
+    ) as Record<string, unknown>;
+    expect(current['projectId']).toBe(dflt.id);
+    expect(current).not.toHaveProperty('suggestedSlugs');
 
     await client.close();
   });

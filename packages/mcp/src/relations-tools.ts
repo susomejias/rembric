@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import {
   type DomainError,
   RedactionTally,
@@ -7,7 +6,6 @@ import {
 } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
-import type { SessionRouter } from '@rembric/core';
 import { MEMORY_TYPES, type Repositories, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
@@ -109,12 +107,9 @@ export const compareOutput = {
 
 export interface RelationsToolDeps extends ErrorReportingDeps {
   relations: RelationsService;
-  router: SessionRouter;
   projects: ProjectsService;
   /** Required for memory.suggest_topic_key's occupied/nearby scoped reads. */
   repos?: Pick<Repositories, 'memory'>;
-  /** Set by `createMcpServer` after construction to enable roots discovery. */
-  getServer?: () => McpServer;
 }
 
 export function buildRelationsHandlers(deps: RelationsToolDeps) {

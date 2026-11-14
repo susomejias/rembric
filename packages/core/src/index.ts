@@ -9,7 +9,6 @@ export {
 export * from './embeddings/embedder.js';
 export * from './embeddings/state.js';
 export * from './server-context/request-context.js';
-export * from './server-context/session-router.js';
 export * from './server-context/tool-call-context.js';
 export * from './services/index.js';
 export * from './services/agent-sessions.js';

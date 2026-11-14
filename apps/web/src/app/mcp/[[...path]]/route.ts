@@ -54,11 +54,8 @@ async function handle(request: Request, context: RouteContext): Promise<Response
   if (rebinding !== null) return rebinding;
 
   const { authInfo, requestContext } = auth;
-  const sessionId = request.headers.get('mcp-session-id');
 
-  return runWithContext({ ...requestContext, mcpSessionId: sessionId }, () =>
-    getMcpSurface().fetch(request, { authInfo, requestedSlug: slug }),
-  );
+  return runWithContext(requestContext, () => getMcpSurface().fetch(request, { authInfo }));
 }
 
 const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024;

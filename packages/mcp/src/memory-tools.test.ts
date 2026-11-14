@@ -4,7 +4,6 @@ import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import {
   createRepositories,
   memoryRelations,
@@ -55,7 +54,6 @@ function fakeContext(project: Project | null): RequestContext {
     memberProjectIds: [],
     project,
     requestedSlug: project?.slug ?? null,
-    mcpSessionId: null,
   };
 }
 
@@ -1298,10 +1296,8 @@ describe('memory.get_batch — batch (ids)', () => {
   });
 });
 
-describe('memory.* — router-activated project on an unscoped /mcp connection', () => {
-  const MCP_SESSION = 'mcp-sess-1';
-
-  function unscopedContextWithSession(): RequestContext {
+describe('memory.* — the connection resolves the project on its own', () => {
+  function connectionContext(project: Project | null = null): RequestContext {
     const token: Token = {
       id: 'tk_test',
       name: 'test-token',
@@ -1317,28 +1313,24 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
       token,
       scope: ADMIN_TOKEN_SCOPE,
       memberProjectIds: [],
-      project: null,
-      requestedSlug: null,
-      mcpSessionId: MCP_SESSION,
+      project,
+      requestedSlug: project?.slug ?? null,
     };
   }
 
-  let router: SessionRouter;
-  let routerHandlers: ReturnType<typeof buildMemoryHandlers>;
+  let connectionHandlers: ReturnType<typeof buildMemoryHandlers>;
 
   beforeEach(() => {
-    router = new SessionRouter();
-    routerHandlers = buildMemoryHandlers({ logInternalError, memory, router, projects });
+    connectionHandlers = buildMemoryHandlers({ logInternalError, memory, projects });
   });
 
-  it('memory.save({scope:project}) succeeds after project.use activates a project', async () => {
-    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
-    const r = await runWithContext(unscopedContextWithSession(), () =>
+  it('memory.save lands in the project named by the connection path', async () => {
+    const r = await runWithContext(connectionContext(projectA), () =>
       Promise.resolve(
-        routerHandlers.save({
+        connectionHandlers.save({
           type: 'user',
-          title: 'router-activated save',
-          content: 'router-activated save',
+          title: 'path-scoped save',
+          content: 'path-scoped save',
         }),
       ),
     );
@@ -1349,10 +1341,10 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     expect(persisted?.projectId).toBe(projectA.id);
   });
 
-  it('memory.save without router activation lands in the default project', async () => {
-    const r = await runWithContext(unscopedContextWithSession(), () =>
+  it('memory.save on a path-less connection lands in the default project', async () => {
+    const r = await runWithContext(connectionContext(), () =>
       Promise.resolve(
-        routerHandlers.save({
+        connectionHandlers.save({
           type: 'user',
           title: 'no project pinned',
           content: 'no project pinned',
@@ -1363,7 +1355,7 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     expect(memory.unsafeGetById(parseText<{ id: string }>(r).id)?.projectId).toBe(defaultProjectId);
   });
 
-  it("memory.search returns the router-activated project's memories, not the default one's", async () => {
+  it("memory.search returns the path-scoped project's memories, not the default one's", async () => {
     memory.save(
       { type: 'user', title: 'default project only', content: 'default project only' },
       projectScope(defaultProjectId),
@@ -1372,9 +1364,8 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
       { type: 'user', title: 'in project A', content: 'in project A' },
       projectScope(projectA.id),
     );
-    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
-    const r = await runWithContext(unscopedContextWithSession(), () =>
-      Promise.resolve(routerHandlers.search({})),
+    const r = await runWithContext(connectionContext(projectA), () =>
+      Promise.resolve(connectionHandlers.search({})),
     );
     const { memories } = parseText<{
       memories: { id: string; scope: string; projectId: string | null }[];
@@ -1383,119 +1374,17 @@ describe('memory.* — router-activated project on an unscoped /mcp connection',
     expect(memories.every((m) => m.scope === 'project' && m.projectId === projectA.id)).toBe(true);
   });
 
-  it('memory.get_batch on a project id resolves once the router has activated that project', async () => {
+  it('memory.get_batch on a project id resolves on a connection scoped to that project', async () => {
     const saved = memory.save(
       { type: 'user', title: 'gettable', content: 'gettable' },
       projectScope(projectA.id),
     );
-    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
-    const r = await runWithContext(unscopedContextWithSession(), () =>
-      Promise.resolve(routerHandlers.get({ ids: [saved.id], relations_limit: 50 })),
+    const r = await runWithContext(connectionContext(projectA), () =>
+      Promise.resolve(connectionHandlers.get({ ids: [saved.id], relations_limit: 50 })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
     const payload = parseText<{ memories: { id: string }[] }>(r).memories[0]!;
     expect(payload.id).toBe(saved.id);
-  });
-});
-
-describe('memory.save — eager roots discovery race (option B fix)', () => {
-  const MCP_SESSION = 'mcp-sess-eager';
-
-  function unscopedContextWithSession(): RequestContext {
-    const token: Token = {
-      id: 'tk_test',
-      name: 'test-token',
-      hash: 'hash',
-      scope: ADMIN_TOKEN_SCOPE,
-      projectId: null,
-      createdAt: new Date(),
-      expiresAt: null,
-      revokedAt: null,
-      deletedAt: null,
-    };
-    return {
-      token,
-      scope: ADMIN_TOKEN_SCOPE,
-      memberProjectIds: [],
-      project: null,
-      requestedSlug: null,
-      mcpSessionId: MCP_SESSION,
-    };
-  }
-
-  const fakeServer = {} as unknown as Parameters<
-    typeof buildMemoryHandlers
-  >[0]['getServer'] extends (() => infer S) | undefined
-    ? S
-    : never;
-
-  let router: SessionRouter;
-  let routerHandlers: ReturnType<typeof buildMemoryHandlers>;
-
-  beforeEach(() => {
-    router = new SessionRouter();
-    routerHandlers = buildMemoryHandlers({
-      logInternalError,
-      memory,
-      router,
-      projects,
-      getServer: () => fakeServer,
-    });
-  });
-
-  it('memory.save awaits an in-flight discovery promise and resolves the activated project', async () => {
-    let resolveDiscovery: () => void = () => undefined;
-    const discoveryPromise = new Promise<void>((resolve) => {
-      resolveDiscovery = resolve;
-    }).then(() => {
-      router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'roots');
-    });
-    router.setDiscoveryPromise('tk_test', MCP_SESSION, discoveryPromise);
-
-    const pending = runWithContext(unscopedContextWithSession(), async () =>
-      routerHandlers.save({
-        type: 'project',
-        title: 'eager-discovery save',
-        content: 'eager-discovery save',
-      }),
-    );
-    resolveDiscovery();
-    const r = await pending;
-
-    expect(isErrorResponse(r)).toBeFalsy();
-    const { id } = parseText<{ id: string }>(r);
-    const persisted = memory.unsafeGetById(id);
-    expect(persisted?.scope).toBe('project');
-    expect(persisted?.projectId).toBe(projectA.id);
-  });
-
-  it('memory.search awaits the same in-flight discovery promise', async () => {
-    const saved = memory.save(
-      {
-        type: 'user',
-        title: 'visible only with project scope',
-        content: 'visible only with project scope',
-      },
-      projectScope(projectA.id),
-    );
-
-    let resolveDiscovery: () => void = () => undefined;
-    const discoveryPromise = new Promise<void>((resolve) => {
-      resolveDiscovery = resolve;
-    }).then(() => {
-      router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'roots');
-    });
-    router.setDiscoveryPromise('tk_test', MCP_SESSION, discoveryPromise);
-
-    const pending = runWithContext(unscopedContextWithSession(), async () =>
-      routerHandlers.search({}),
-    );
-    resolveDiscovery();
-    const r = await pending;
-
-    const { memories } = parseText<{ memories: { id: string; projectId: string | null }[] }>(r);
-    expect(memories.some((m) => m.id === saved.id)).toBe(true);
-    expect(memories.every((m) => m.projectId === projectA.id)).toBe(true);
   });
 });
 
@@ -1615,46 +1504,56 @@ describe('memory.save — session attachment via HTTP-created sessions', () => {
     expect(persisted?.sessionId).toBeNull();
   });
 
-  it('SessionRouter entry takes precedence over the DB fallback', async () => {
-    const router = new SessionRouter();
-    const MCP_SESSION = 'mcp-sess-precedence';
-    // DB has a session for the (token, project).
+  it('an explicit owned sessionId attaches even while two sessions are active', async () => {
     agentSessions.ensure({
       id: 'sess-db-fallback',
       tokenId: realTokenId,
       projectId: projectA.id,
       agent: 'db',
     });
-    // Router explicitly points at a different session.
     agentSessions.ensure({
-      id: 'sess-router-explicit',
+      id: 'sess-explicit',
       tokenId: realTokenId,
       projectId: projectA.id,
-      agent: 'router',
+      agent: 'explicit',
     });
-    router.setActiveSession(realTokenId, MCP_SESSION, 'sess-router-explicit');
+    const save = (title: string, sessionId?: string) =>
+      runWithContext(ctxWithRealToken(projectA), () =>
+        fallbackHandlers.save({ type: 'project', title, content: title, sessionId }),
+      );
 
-    const handlersWithRouter = buildMemoryHandlers({
-      logInternalError,
-      memory,
-      projects,
-      agentSessions,
-      router,
+    const attached = parseText<{ id: string }>(await save('explicit precedence', 'sess-explicit'));
+    expect(memory.unsafeGetById(attached.id)?.sessionId).toBe('sess-explicit');
+
+    const unattached = parseText<{ id: string }>(await save('no explicit id'));
+    expect(memory.unsafeGetById(unattached.id)?.sessionId).toBeNull();
+  });
+
+  it('refuses an explicit sessionId owned by another token and saves nothing', async () => {
+    const { TokensService } = await import('@rembric/core');
+    const other = new TokensService(createRepositories(db.handle.db), db.handle.db).create({
+      name: 'someone-else',
+      scope: '*',
     });
-    const ctxWithSession: RequestContext = {
-      ...ctxWithRealToken(projectA),
-      mcpSessionId: MCP_SESSION,
-    };
-    const r = await runWithContext(ctxWithSession, () =>
-      handlersWithRouter.save({
+    agentSessions.ensure({
+      id: 'sess-foreign',
+      tokenId: other.token.id,
+      projectId: projectA.id,
+      agent: 'foreign',
+    });
+    const count = (): unknown => db.handle.raw.prepare('SELECT count(*) AS n FROM memory').get();
+    const before = count();
+    const r = await runWithContext(ctxWithRealToken(projectA), () =>
+      fallbackHandlers.save({
         type: 'project',
-        title: 'router precedence',
-        content: 'router precedence',
+        title: 'foreign session',
+        content: 'foreign session',
+        sessionId: 'sess-foreign',
       }),
     );
-    const { id } = parseText<{ id: string }>(r);
-    const persisted = memory.unsafeGetById(id);
-    expect(persisted?.sessionId).toBe('sess-router-explicit');
+    expect(isErrorResponse(r)).toBe(true);
+    expect(parseText<{ code: string }>(r).code).toBe('session_not_found');
+    expect(count()).toEqual(before);
   });
 });
 
@@ -1750,12 +1649,7 @@ describe('memory.confirm_batch — session attachment (fix-audited-defects)', ()
 });
 
 describe('memory.search — no argument widens the resolved scope', () => {
-  const MCP_SESSION = 'mcp-sess-gate';
-
-  function scopedCtx(
-    scope: TokenScope,
-    opts: { project?: Project | null; mcpSessionId?: string | null },
-  ): RequestContext {
+  function scopedCtx(scope: TokenScope, opts: { project?: Project | null }): RequestContext {
     const token: Token = {
       id: 'tk_test',
       name: 'test-token',
@@ -1773,11 +1667,8 @@ describe('memory.search — no argument widens the resolved scope', () => {
       memberProjectIds: [],
       project: opts.project ?? null,
       requestedSlug: opts.project?.slug ?? null,
-      mcpSessionId: opts.mcpSessionId ?? null,
     };
   }
-
-  let router: SessionRouter;
   let gateHandlers: ReturnType<typeof buildMemoryHandlers>;
   let repos: ReturnType<typeof createRepositories>;
 
@@ -1786,8 +1677,7 @@ describe('memory.search — no argument widens the resolved scope', () => {
 
   beforeEach(() => {
     repos = createRepositories(db.handle.db);
-    router = new SessionRouter();
-    gateHandlers = buildMemoryHandlers({ logInternalError, memory, router, projects, repos });
+    gateHandlers = buildMemoryHandlers({ logInternalError, memory, projects, repos });
     memory.save(
       {
         type: 'user',
@@ -1805,16 +1695,6 @@ describe('memory.search — no argument widens the resolved scope', () => {
   it('a `*` token on a path-scoped connection receives only that project on the ranked branch', async () => {
     const r = await runWithContext(scopedCtx(ADMIN_TOKEN_SCOPE, { project: projectA }), () =>
       Promise.resolve(gateHandlers.search({ query: 'convention' })),
-    );
-    expect(isErrorResponse(r)).toBeFalsy();
-    expect(rows(r).map((m) => m.title)).toEqual(['project-A convention']);
-  });
-
-  it('a `*` token on a project.use-derived scope receives only that project', async () => {
-    router.setActiveProject('tk_test', MCP_SESSION, projectA.id, 'tool-explicit');
-    const r = await runWithContext(
-      scopedCtx(ADMIN_TOKEN_SCOPE, { mcpSessionId: MCP_SESSION }),
-      () => Promise.resolve(gateHandlers.search({ query: 'convention' })),
     );
     expect(isErrorResponse(r)).toBeFalsy();
     expect(rows(r).map((m) => m.title)).toEqual(['project-A convention']);
@@ -1863,7 +1743,6 @@ describe('an unresolvable path slug establishes no scope', () => {
       memberProjectIds: [],
       project: null,
       requestedSlug: 'no-such-project',
-      mcpSessionId: null,
     };
     const r = await runWithContext(ctx, () =>
       Promise.resolve(handlers.search({ query: 'user-wide' })),

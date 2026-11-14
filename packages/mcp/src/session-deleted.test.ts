@@ -4,7 +4,6 @@ import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import { createRepositories, tokens as tokensSchema, type Token } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -14,13 +13,11 @@ import { buildSessionHandlers } from '@rembric/mcp';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-const MCP_SESSION_ID = 'mcp-sess-test';
 const SCOPE: TokenScope = '*';
 
 let db: TestDb;
 let projects: ProjectsService;
 let memory: MemoryService;
-let router: SessionRouter;
 let agentSessions: AgentSessionsService;
 let prompts: PromptsService;
 let tokens: TokensService;
@@ -36,7 +33,6 @@ function makeContext(token: Token, overrides: Partial<RequestContext> = {}): Req
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: MCP_SESSION_ID,
     ...overrides,
   };
 }
@@ -56,7 +52,6 @@ beforeEach(() => {
   db = createTestDb();
   projects = new ProjectsService(createRepositories(db.handle.db));
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
-  router = new SessionRouter();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
   prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
   tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
@@ -76,7 +71,6 @@ beforeEach(() => {
     memory,
     projects,
     prompts,
-    router,
     doctor: () => ({
       db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
       embeddings: { model: 'fake-test-embedder', backlog: 0 },

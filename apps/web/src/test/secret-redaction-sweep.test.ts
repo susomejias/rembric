@@ -32,7 +32,6 @@ type MutableGlobal = typeof globalThis & {
   __rembricServices?: unknown;
   __rembricDb?: { raw: { close: () => void }; close: () => void };
   __rembricMcpSurface?: { close?: () => Promise<void> };
-  __rembricSessionRouter?: unknown;
 };
 
 const globalForApp = globalThis as MutableGlobal;
@@ -42,7 +41,6 @@ function resetAppGlobals(): void {
   delete globalForApp.__rembricServices;
   delete globalForApp.__rembricDb;
   delete globalForApp.__rembricMcpSurface;
-  delete globalForApp.__rembricSessionRouter;
 }
 
 const ORIGIN = 'http://127.0.0.1:8787';

@@ -115,23 +115,21 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
 
   afterEach(() => errorSpy.mockRestore());
 
-  function rpc(body: unknown, sessionId?: string): Promise<Response> {
+  function rpc(body: unknown): Promise<Response> {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
     };
-    if (sessionId !== undefined) headers['mcp-session-id'] = sessionId;
     return surface.fetch(
       new Request(`${ORIGIN}/mcp`, { method: 'POST', headers, body: JSON.stringify(body) }),
-      { authInfo: AUTH_INFO, requestedSlug: null },
+      { authInfo: AUTH_INFO },
     );
   }
 
   async function rpcJson(
     body: unknown,
-    sessionId?: string,
   ): Promise<{ response: Response; json: Record<string, unknown> }> {
-    const response = await rpc(body, sessionId);
+    const response = await rpc(body);
     const text = await response.text();
     const payload =
       text.startsWith('event:') || text.startsWith('data:')
@@ -150,7 +148,7 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
     return { response, json };
   }
 
-  async function openSession(): Promise<string> {
+  async function initialize(): Promise<void> {
     const init = await rpcJson({
       jsonrpc: '2.0',
       id: 1,
@@ -162,24 +160,18 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
       },
     });
     expect(init.response.status).toBe(200);
-    const sessionId = init.response.headers.get('mcp-session-id');
-    if (sessionId === null) throw new Error('fixture: initialize did not establish a session');
-    await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
-    return sessionId;
+    await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' });
   }
 
   it('answers a failing tool with a generic message plus an id, and logs the real error under it', async () => {
-    const sessionId = await openSession();
+    await initialize();
 
-    const { json } = await rpcJson(
-      {
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'memory.search', arguments: { query: 'anything' } },
-      },
-      sessionId,
-    );
+    const { json } = await rpcJson({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'memory.search', arguments: { query: 'anything' } },
+    });
 
     const result = json.result as
       | { isError?: boolean; content?: Array<{ text?: string }> }
@@ -209,23 +201,22 @@ describe('MCP internal_error shape (logInternalError over the real surface)', ()
     expect(String(logged?.[0])).toContain('[mcp]');
   });
 
-  it('keeps the session serving after a tool failure', async () => {
-    const sessionId = await openSession();
+  it('keeps serving after a tool failure', async () => {
+    await initialize();
 
-    await rpcJson(
-      {
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'memory.search', arguments: { query: 'anything' } },
-      },
-      sessionId,
-    );
+    await rpcJson({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'memory.search', arguments: { query: 'anything' } },
+    });
 
-    const { response, json } = await rpcJson(
-      { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} },
-      sessionId,
-    );
+    const { response, json } = await rpcJson({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/list',
+      params: {},
+    });
     expect(response.status).toBe(200);
     expect(json.result).toBeDefined();
   });

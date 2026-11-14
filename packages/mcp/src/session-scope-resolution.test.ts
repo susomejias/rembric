@@ -4,7 +4,6 @@ import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import { createRepositories, projectScope, tokens as tokensSchema, type Token } from '@rembric/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -17,13 +16,11 @@ import { seedProject } from './test-support/default-project.js';
 import { createTestDb, defaultProject, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-const MCP_SESSION_ID = 'mcp-sess-scope-test';
 const SCOPE: TokenScope = '*';
 
 let db: TestDb;
 let projects: ProjectsService;
 let memory: MemoryService;
-let router: SessionRouter;
 let agentSessions: AgentSessionsService;
 let prompts: PromptsService;
 let tokens: TokensService;
@@ -41,7 +38,6 @@ function makeContext(token: Token, overrides: Partial<RequestContext> = {}): Req
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: MCP_SESSION_ID,
     ...overrides,
   };
 }
@@ -63,7 +59,6 @@ beforeEach(() => {
   defaultProjectId = defaultProject(db.handle).id;
   projects = new ProjectsService(createRepositories(db.handle.db));
   memory = new MemoryService(createRepositories(db.handle.db), db.handle.db);
-  router = new SessionRouter();
   agentSessions = new AgentSessionsService(createRepositories(db.handle.db), db.handle.db);
   prompts = new PromptsService(createRepositories(db.handle.db), db.handle.db);
   tokens = new TokensService(createRepositories(db.handle.db), db.handle.db);
@@ -82,7 +77,6 @@ beforeEach(() => {
     memory,
     projects,
     prompts,
-    router,
     doctor: () => ({
       db: { journalMode: 'wal', integrity: 'ok', sizeBytes: 0 },
       embeddings: { model: 'fake-test-embedder', backlog: 0 },
@@ -102,8 +96,8 @@ beforeEach(() => {
 
 afterEach(() => db.cleanup());
 
-describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
-  it('memory.context returns the router-pinned project scope, not global', async () => {
+describe('resolveEffectiveScope — path-scoped /mcp/<slug>', () => {
+  it('memory.context returns the path-scoped project scope', async () => {
     const project = projects.create({ slug: 'foo', displayName: null });
     memory.save(
       {
@@ -115,11 +109,9 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
       projectScope(project.id),
     );
 
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.context({})),
-    );
+    const r = await runWithContext(pathCtx, () => Promise.resolve(handlers.context({})));
     const { isError, payload } = decode(r);
 
     expect(isError).toBeFalsy();
@@ -129,7 +121,7 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(recent[0]?.snippet).toContain('project-scoped memory of foo');
   });
 
-  it('memory.timeline succeeds when called with the router-pinned scope', async () => {
+  it('memory.timeline succeeds in the path-scoped scope', async () => {
     const project = projects.create({ slug: 'bar', displayName: null });
     const target = memory.save(
       {
@@ -140,9 +132,9 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
       },
       projectScope(project.id),
     );
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
+    const r = await runWithContext(pathCtx, () =>
       Promise.resolve(handlers.timeline({ memoryId: target.id })),
     );
     const { isError, payload } = decode(r);
@@ -152,7 +144,7 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(t?.id).toBe(target.id);
   });
 
-  it('memory.stats counts the pinned project, not the default one', async () => {
+  it('memory.stats counts the path-scoped project, not the default one', async () => {
     const project = projects.create({ slug: 'baz', displayName: null });
     memory.save(
       {
@@ -182,11 +174,9 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
       },
       projectScope(defaultProjectId),
     );
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.stats()),
-    );
+    const r = await runWithContext(pathCtx, () => Promise.resolve(handlers.stats()));
     const { isError, payload } = decode(r);
 
     expect(isError).toBeFalsy();
@@ -194,11 +184,11 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(byStatus.active).toBe(2);
   });
 
-  it('memory.save_prompt persists with the router-pinned project_id', async () => {
+  it('memory.save_prompt persists with the path-scoped project_id', async () => {
     const project = projects.create({ slug: 'qux', displayName: null });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
+    const r = await runWithContext(pathCtx, () =>
       Promise.resolve(handlers.savePrompt({ content: 'remember this', title: 'reminder' })),
     );
     const { isError, payload } = decode(r);
@@ -206,17 +196,16 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(isError).toBeFalsy();
     expect(payload.ok).toBe(true);
 
-    // The persisted prompt SHOULD be scoped to the pinned project.
     const recents = prompts.recentForContext({ projectId: project.id, limit: 5 });
     expect(recents.length).toBe(1);
     expect(recents[0]?.content).toBe('remember this');
   });
 
-  it('memory.capture_passive writes into the router-pinned project scope', async () => {
+  it('memory.capture_passive writes into the path-scoped project scope', async () => {
     const project = projects.create({ slug: 'cap', displayName: null });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
+    const r = await runWithContext(pathCtx, () =>
       Promise.resolve(
         handlers.capturePassive({
           text: '## Key Learnings:\n- one learning to capture\n',
@@ -228,9 +217,7 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
     expect(isError).toBeFalsy();
     expect(payload.saved).toBe(1);
 
-    const ctx = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.context({})),
-    );
+    const ctx = await runWithContext(pathCtx, () => Promise.resolve(handlers.context({})));
     const decoded = decode(ctx);
     expect(decoded.payload.scope).toBe(`project:${project.id}`);
     const recent = decoded.payload.recentMemories as Array<{ snippet: string }>;
@@ -239,7 +226,7 @@ describe('resolveEffectiveScope — path-less /mcp with router pin', () => {
 });
 
 describe('resolveEffectiveScope — fallback to the default project', () => {
-  it('path-less /mcp with empty router → memory.context returns the default project', async () => {
+  it('path-less /mcp → memory.context returns the default project', async () => {
     memory.save(
       {
         type: 'reference',
@@ -261,7 +248,7 @@ describe('resolveEffectiveScope — fallback to the default project', () => {
     expect(recent.some((m) => m.snippet.includes('a note in the default project'))).toBe(true);
   });
 
-  it('does not leak across tokens — other token sees no project pin from admin', async () => {
+  it('another token on path-less /mcp reads the default project, not a project the admin wrote to', async () => {
     const project = projects.create({ slug: 'admin-only', displayName: null });
     memory.save(
       {
@@ -272,8 +259,6 @@ describe('resolveEffectiveScope — fallback to the default project', () => {
       },
       projectScope(project.id),
     );
-    // Pin under admin token, NOT under the other token.
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
 
     const r = await runWithContext(makeContext(otherToken), () =>
       Promise.resolve(handlers.context({})),
@@ -287,8 +272,8 @@ describe('resolveEffectiveScope — fallback to the default project', () => {
   });
 });
 
-describe('resolveEffectiveScope — path-scoped connections override router', () => {
-  it('ctx.requestedSlug set + ctx.project null → refuses, ignores router pin', async () => {
+describe('resolveEffectiveScope — path-scoped connections', () => {
+  it('ctx.requestedSlug set + ctx.project null → refuses', async () => {
     const leftoverProject = projects.create({ slug: 'leftover', displayName: null });
     memory.save(
       {
@@ -299,7 +284,6 @@ describe('resolveEffectiveScope — path-scoped connections override router', ()
       },
       projectScope(leftoverProject.id),
     );
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, leftoverProject.id, 'tool-explicit');
 
     const r = await runWithContext(
       makeContext(adminToken, { requestedSlug: 'nonexistent', project: null }),
@@ -312,9 +296,9 @@ describe('resolveEffectiveScope — path-scoped connections override router', ()
     expect(payload.recentMemories).toBeUndefined();
   });
 
-  it('ctx.project set (path-scoped, valid slug) → uses ctx.project regardless of router', async () => {
+  it('ctx.project set (path-scoped, valid slug) → uses ctx.project and no other project', async () => {
     const pathProject = projects.create({ slug: 'pathy', displayName: null });
-    const routerProject = projects.create({ slug: 'router-pinned', displayName: null });
+    const otherProject = projects.create({ slug: 'other-project', displayName: null });
     memory.save(
       {
         type: 'project',
@@ -327,14 +311,12 @@ describe('resolveEffectiveScope — path-scoped connections override router', ()
     memory.save(
       {
         type: 'project',
-        title: 'router-pinned memory',
-        content: 'router-pinned memory',
+        title: 'other-project memory',
+        content: 'other-project memory',
         source: { tokenName: adminToken.name, agent: 'test' },
       },
-      projectScope(routerProject.id),
+      projectScope(otherProject.id),
     );
-    // Router has a different project pinned than ctx.project — ctx wins.
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, routerProject.id, 'tool-explicit');
 
     const r = await runWithContext(
       makeContext(adminToken, { requestedSlug: 'pathy', project: pathProject }),
@@ -346,21 +328,19 @@ describe('resolveEffectiveScope — path-scoped connections override router', ()
     expect(payload.scope).toBe(`project:${pathProject.id}`);
     const recent = payload.recentMemories as Array<{ snippet: string }>;
     expect(recent.some((m) => m.snippet.includes('pathy memory'))).toBe(true);
-    expect(recent.some((m) => m.snippet.includes('router-pinned memory'))).toBe(false);
+    expect(recent.some((m) => m.snippet.includes('other-project memory'))).toBe(false);
   });
 });
 
 describe('memory.search_prompts — scope resolution', () => {
-  it('returns prompts from the router-pinned project, not global', async () => {
+  it('returns prompts from the path-scoped project only', async () => {
     const project = projects.create({ slug: 'pinned', displayName: null });
     // One prompt in the pinned project; one global decoy.
     prompts.save({ content: 'pinned prompt content', title: 'pinned', projectId: project.id });
     prompts.save({ content: 'global decoy', title: 'decoy', projectId: null });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
-      Promise.resolve(handlers.searchPrompts({})),
-    );
+    const r = await runWithContext(pathCtx, () => Promise.resolve(handlers.searchPrompts({})));
     const { isError, payload } = decode(r);
 
     expect(isError).toBeFalsy();
@@ -369,7 +349,7 @@ describe('memory.search_prompts — scope resolution', () => {
     expect(list.map((p) => p.content)).toEqual(['pinned prompt content']);
   });
 
-  it("returns the default project's prompts when no router pin and no path scope", async () => {
+  it("returns the default project's prompts on a path-less connection", async () => {
     prompts.save({
       content: 'default project only',
       title: 'default only',
@@ -377,7 +357,6 @@ describe('memory.search_prompts — scope resolution', () => {
     });
     const project = projects.create({ slug: 'unused', displayName: null });
     prompts.save({ content: 'project noise', title: 'noise', projectId: project.id });
-    // No router pin, no ctx.project.
 
     const r = await runWithContext(makeContext(adminToken), () =>
       Promise.resolve(handlers.searchPrompts({})),
@@ -390,12 +369,11 @@ describe('memory.search_prompts — scope resolution', () => {
     expect(list.map((p) => p.content)).toEqual(['default project only']);
   });
 
-  it('returns the path-scoped project, ignoring stale router pin', async () => {
+  it('returns the path-scoped project only', async () => {
     const pathProject = projects.create({ slug: 'pathprompt', displayName: null });
-    const routerProject = projects.create({ slug: 'routerprompt', displayName: null });
+    const otherProject = projects.create({ slug: 'otherprompt', displayName: null });
     prompts.save({ content: 'pathy prompt', title: 'pathy', projectId: pathProject.id });
-    prompts.save({ content: 'router prompt', title: 'routerish', projectId: routerProject.id });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, routerProject.id, 'tool-explicit');
+    prompts.save({ content: 'other prompt', title: 'other', projectId: otherProject.id });
 
     const r = await runWithContext(
       makeContext(adminToken, { requestedSlug: 'pathprompt', project: pathProject }),
@@ -413,14 +391,14 @@ describe('memory.search_prompts — scope resolution', () => {
 describe('memory.save_prompt — refine flow via MCP', () => {
   it('atomic refine via replaces succeeds and emits the chain', async () => {
     const project = projects.create({ slug: 'refine-project', displayName: null });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const first = await runWithContext(makeContext(adminToken), () =>
+    const first = await runWithContext(pathCtx, () =>
       Promise.resolve(handlers.savePrompt({ content: 'initial take', title: 'initial' })),
     );
     const firstPayload = decode(first).payload as { id: string };
 
-    const second = await runWithContext(makeContext(adminToken), () =>
+    const second = await runWithContext(pathCtx, () =>
       Promise.resolve(
         handlers.savePrompt({
           content: 'refined take',
@@ -442,9 +420,9 @@ describe('memory.save_prompt — refine flow via MCP', () => {
 
   it('refine with a non-existent predecessor surfaces prompt_not_found', async () => {
     const project = projects.create({ slug: 'refine-missing', displayName: null });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
+    const r = await runWithContext(pathCtx, () =>
       Promise.resolve(
         handlers.savePrompt({
           content: 'orphan refine',
@@ -467,9 +445,9 @@ describe('memory.save_prompt — refine flow via MCP', () => {
       title: 'foreign',
       projectId: projectA.id,
     });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, projectB.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: projectB.slug, project: projectB });
 
-    const r = await runWithContext(makeContext(adminToken), () =>
+    const r = await runWithContext(pathCtx, () =>
       Promise.resolve(
         handlers.savePrompt({
           content: 'cross-scope',
@@ -486,11 +464,11 @@ describe('memory.save_prompt — refine flow via MCP', () => {
 
   it('refine of an already-deleted predecessor surfaces prompt_already_deleted', async () => {
     const project = projects.create({ slug: 'refine-deleted', displayName: null });
-    router.setActiveProject(adminToken.id, MCP_SESSION_ID, project.id, 'tool-explicit');
+    const pathCtx = makeContext(adminToken, { requestedSlug: project.slug, project });
     const first = prompts.save({ content: 'first', title: 'first', projectId: project.id });
     prompts.softDelete(first.id);
 
-    const r = await runWithContext(makeContext(adminToken), () =>
+    const r = await runWithContext(pathCtx, () =>
       Promise.resolve(
         handlers.savePrompt({ content: 'second', title: 'second', replaces: first.id }),
       ),

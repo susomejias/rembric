@@ -75,7 +75,6 @@ export async function verifyMcpBearerToken(input: {
         memberProjectIds: resolved.memberProjectIds,
         project,
         requestedSlug: slug,
-        mcpSessionId: null,
       };
       return {
         token,

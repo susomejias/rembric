@@ -10,7 +10,6 @@ import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Repositories, type Scope, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -40,7 +39,6 @@ function ctx(): RequestContext {
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: 'mcp-sess-context-gates',
   };
 }
 
@@ -112,7 +110,6 @@ beforeEach(() => {
     agentSessions: new AgentSessionsService(repos, db.handle.db),
     prompts: new PromptsService(repos, db.handle.db),
     relations: new RelationsService(repos, db.handle.db),
-    router: new SessionRouter(),
     orphanAfterMs: 86_400_000,
   });
 });

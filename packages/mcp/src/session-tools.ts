@@ -1,9 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { RedactionTally, SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
-import type { ProjectResolutionSource, SessionRouter } from '@rembric/core';
-import { projectScope, type AgentSession, type Scope } from '@rembric/db';
+import { type AgentSession, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
 import {
@@ -12,7 +10,6 @@ import {
   requireScope,
   resolveEffectiveScope,
   resolveSessionId,
-  routerKey,
   unresolvableSlug,
   unresolvableSlugError,
 } from './_shared.js';
@@ -84,11 +81,8 @@ export const sessionGetSchema = {
 export interface SessionToolDeps extends ErrorReportingDeps {
   agentSessions: AgentSessionsService;
   projects: ProjectsService;
-  router: SessionRouter;
   /** Fire-and-forget consolidation sweep, invoked after session start. */
   sweep?: (projectId: string | null) => void;
-  /** Back-reference for roots-based discovery; set by createMcpServer. */
-  getServer?: () => McpServer;
 }
 
 export const sessionStartOutput = {
@@ -180,31 +174,21 @@ async function handleSessionStart(
   }
 
   let scope: Scope;
-  let source: ProjectResolutionSource;
-  if (args.project === undefined) {
-    try {
-      ({ scope, source } = await resolveEffectiveScope(deps));
-    } catch (err) {
-      return errToMcp(err, deps.logInternalError);
-    }
-  } else {
-    if (ctx.requestedSlug && ctx.requestedSlug !== args.project) {
-      return mcpError(
-        'scope_locked',
-        `connection is path-scoped to '${ctx.requestedSlug}'; cannot start a session for project '${args.project}'`,
-      );
-    }
-    const found = deps.projects.findBySlug(args.project);
-    if (!found) {
-      return mcpError('project_not_found', `project '${args.project}' not found`, {
-        suggestedSlugs: deps.projects.findSimilarSlugs(args.project),
-      });
-    }
-    if (found.archivedAt) {
-      return mcpError('project_archived', `project '${found.slug}' is archived`);
-    }
-    scope = projectScope(found.id);
-    source = 'tool-explicit';
+  let slug: string;
+  try {
+    const resolved = await resolveEffectiveScope(deps);
+    scope = resolved.scope;
+    slug = resolved.project.slug;
+  } catch (err) {
+    return errToMcp(err, deps.logInternalError);
+  }
+  if (args.project !== undefined && args.project !== slug) {
+    return mcpError(
+      'scope_locked',
+      ctx.requestedSlug === null
+        ? `connection resolves to the default project '${slug}'; cannot start a session for project '${args.project}'`
+        : `connection is path-scoped to '${slug}'; cannot start a session for project '${args.project}'`,
+    );
   }
   const projectId = scope.projectId;
 
@@ -214,27 +198,9 @@ async function handleSessionStart(
     return errToMcp(err, deps.logInternalError);
   }
 
-  const key = routerKey();
-  const boundId = key
-    ? (deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId ?? null)
-    : null;
-  const bound = boundId ? deps.agentSessions.getById(boundId) : undefined;
-  let session: AgentSession | null;
-  if (
-    bound &&
-    bound.status === 'active' &&
-    bound.deletedAt === null &&
-    bound.tokenId === ctx.token.id &&
-    bound.projectId === projectId
-  ) {
-    session = bound;
-  } else {
-    session =
-      deps.agentSessions.findActiveForTransport({
-        tokenId: ctx.token.id,
-        projectId,
-      }) ?? deps.agentSessions.findSoleActiveForReuse({ tokenId: ctx.token.id, projectId });
-  }
+  let session: AgentSession | null =
+    deps.agentSessions.findActiveForTransport({ tokenId: ctx.token.id, projectId }) ??
+    deps.agentSessions.findSoleActiveForReuse({ tokenId: ctx.token.id, projectId });
   let reused = false;
   const redactions = new RedactionTally();
   if (session) {
@@ -258,13 +224,6 @@ async function handleSessionStart(
   }
 
   deps.sweep?.(projectId);
-
-  if (key) {
-    deps.router.setActiveSession(key.tokenId, key.mcpSessionId, session.id);
-    if (projectId !== null && source !== 'default') {
-      deps.router.setActiveProject(key.tokenId, key.mcpSessionId, projectId, source);
-    }
-  }
 
   return ok({
     sessionId: session.id,
@@ -299,10 +258,6 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
     const { row: ended, applied } = deps.agentSessions.end(sessionId, {
       tokenId: ctx.token.id,
     });
-    const key = routerKey();
-    if (key && ended.status !== 'abandoned') {
-      deps.router.clearSession(key.tokenId, key.mcpSessionId);
-    }
     return ok({ ok: true, sessionId: ended.id, endedAt: ended.endedAt, applied });
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
@@ -372,10 +327,6 @@ async function handleSessionResume(deps: SessionToolDeps, args: { sessionId: str
       return mcpError('session_not_found', `session '${args.sessionId}' not found`);
     }
     const resumed = deps.agentSessions.resume(args.sessionId, { tokenId: ctx.token.id });
-    const key = routerKey();
-    if (key) {
-      deps.router.setActiveSession(key.tokenId, key.mcpSessionId, resumed.id);
-    }
     return ok({
       ok: true,
       sessionId: resumed.id,

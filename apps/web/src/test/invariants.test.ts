@@ -1338,8 +1338,8 @@ describe('MCP tool-handler module layout invariant', () => {
     }
   });
 
-  it('errToMcp and routerKey are each defined in exactly one module', () => {
-    for (const sym of ['errToMcp', 'routerKey']) {
+  it('errToMcp and resolveSessionId are each defined in exactly one module', () => {
+    for (const sym of ['errToMcp', 'resolveSessionId']) {
       const definers = sourceFiles.filter((f) =>
         new RegExp(`(?:export )?function ${sym}\\b`).test(readFileSync(join(mcpDir, f), 'utf8')),
       );
@@ -1352,7 +1352,7 @@ describe('MCP tool-handler module layout invariant', () => {
 });
 
 describe('server-context single-instance invariant', () => {
-  const CONTEXT_MODULES = ['request-context', 'session-router', 'tool-call-context'] as const;
+  const CONTEXT_MODULES = ['request-context', 'tool-call-context'] as const;
   const barrelSpecifiers = CONTEXT_MODULES.map((m) => `./server-context/${m}.js`);
 
   it('each context module exists exactly once, under packages/core/src/server-context/', () => {
@@ -1374,7 +1374,7 @@ describe('server-context single-instance invariant', () => {
 
   it('the only path import of them anywhere is the core barrel', () => {
     const hits = execSync(
-      `git -C ${repoRoot} grep -n -E "from '[^']*/(request-context|session-router|tool-call-context)\\.js'" -- apps/ packages/ || true`,
+      `git -C ${repoRoot} grep -n -E "from '[^']*/(request-context|tool-call-context)\\.js'" -- apps/ packages/ || true`,
       { encoding: 'utf8' },
     )
       .split('\n')
@@ -1388,7 +1388,7 @@ describe('server-context single-instance invariant', () => {
   it('every application-side consumer imports them from @rembric/core', () => {
     const consumers = [
       { file: 'apps/web/src/app/mcp/[[...path]]/route.ts', symbol: 'runWithContext' },
-      { file: 'apps/web/src/lib/mcp-server.ts', symbol: 'SessionRouter' },
+      { file: 'apps/web/src/lib/mcp-server.ts', symbol: 'tryGetRequestContext' },
       { file: 'apps/web/src/lib/api.ts', symbol: 'RequestContext' },
       { file: 'apps/web/src/lib/auth.ts', symbol: 'RequestContext' },
       { file: 'apps/web/src/lib/mcp-auth.ts', symbol: 'RequestContext' },
@@ -1423,7 +1423,6 @@ describe('server-context single-instance invariant', () => {
       memberProjectIds: [],
       project: null,
       requestedSlug: null,
-      mcpSessionId: null,
     };
 
     expect(() => mcp.isPathScoped()).toThrow(/request context missing/);
@@ -1433,28 +1432,30 @@ describe('server-context single-instance invariant', () => {
     );
     await expect(
       core.runWithContext({ ...ctx, requestedSlug: 'context-guard' }, () =>
-        Promise.resolve(mcp.routerKey()),
+        Promise.resolve(mcp.unresolvableSlug()),
       ),
-    ).resolves.toBeNull();
+    ).resolves.toBe('context-guard');
   });
 });
 
-describe('roots-discovery state ownership invariant', () => {
-  const src = readFileSync(join(mcpRoot, 'roots-discovery.ts'), 'utf8');
+describe('stateless MCP surface invariant', () => {
+  const surface = ['apps/web/src/lib/mcp-server.ts', 'apps/web/src/app/mcp/[[...path]]/route.ts'];
 
-  it('declares no module-level mutable registry of per-transport state', () => {
-    const registries = src.match(/^(?:const|let|var)\s+\w+[^=\n]*=\s*new\s+(?:Set|Map|Array)\b/gm);
-    expect(registries, 'per-transport state must hang off the connection, not the module').toBe(
-      null,
-    );
+  it('the HTTP surface keeps no per-connection registry and reads no session header', () => {
+    for (const file of surface) {
+      const src = readFileSync(join(repoRoot, file), 'utf8');
+      expect(src, file).not.toMatch(/mcp-session-id|sessionIdGenerator|mcpSessionId/i);
+      expect(src, file).not.toMatch(/new\s+(?:Map|Set|WeakMap)\b/);
+    }
   });
 
-  it('owns that state through a WeakMap keyed by the connection server', () => {
-    expect(/^const\s+\w+\s*=\s*new\s+WeakMap<McpServer,/m.test(src)).toBe(true);
-  });
-
-  it('clears no collection, so no helper can reset every transport at once', () => {
-    expect(src).not.toMatch(/\.clear\(\)/);
+  it('no MCP module issues a server-to-client request or keys state by connection', () => {
+    for (const file of readdirSync(mcpRoot).filter(
+      (f) => f.endsWith('.ts') && !f.endsWith('.test.ts'),
+    )) {
+      const src = readFileSync(join(mcpRoot, file), 'utf8');
+      expect(src, file).not.toMatch(/roots\/list|listRoots|setNotificationHandler|mcpSessionId/);
+    }
   });
 });
 

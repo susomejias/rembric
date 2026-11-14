@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { deriveTitle, type MemoryService, RedactionTally } from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
@@ -6,7 +5,6 @@ import type { DoctorReport } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { RelationsService } from '@rembric/core';
 import type { CandidateOptions } from '@rembric/core';
-import type { SessionRouter } from '@rembric/core';
 import { type Repositories, type Scope } from '@rembric/db';
 import { z } from 'zod';
 
@@ -92,7 +90,6 @@ export interface ObservabilityToolDeps extends ErrorReportingDeps {
   memory: MemoryService;
   agentSessions: AgentSessionsService;
   repos: Pick<Repositories, 'memory' | 'relations' | 'vectors' | 'entities' | 'termStatistics'>;
-  router: SessionRouter;
   projects: ProjectsService;
   doctor: () => DoctorReport;
   /** Save-time curation deps — same pipeline `memory.save` uses. */
@@ -104,8 +101,6 @@ export interface ObservabilityToolDeps extends ErrorReportingDeps {
     content: string,
     projectId: string,
   ) => Promise<boolean>;
-  /** Set by `createMcpServer` after construction to enable roots discovery. */
-  getServer?: () => McpServer;
 }
 
 export function buildObservabilityHandlers(deps: ObservabilityToolDeps) {

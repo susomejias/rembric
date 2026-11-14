@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { projectEntities } from '@rembric/core';
 import { iterateEntityMatches } from '@rembric/core';
 import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';
@@ -32,7 +31,6 @@ import type { PromptsService } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { CountedTool, UsageCounters } from '@rembric/core';
-import type { SessionRouter } from '@rembric/core';
 import {
   MEMORY_STATUSES,
   MEMORY_TYPES,
@@ -52,7 +50,6 @@ import {
   requireScope,
   resolveEffectiveScope,
   resolveSearchScope,
-  routerKey,
   searchedProjectSlugs,
   serializeMemory,
   snippet,
@@ -607,8 +604,6 @@ export interface MemoryToolDeps extends ErrorReportingDeps {
     content: string,
     projectId: string,
   ) => Promise<boolean>;
-  /** Optional — required to evaluate the project-suggestion gate on save, and scope resolution for context/timeline. */
-  router?: SessionRouter;
   /** Every connection resolves to a project, so scope resolution cannot proceed without this. */
   projects: ProjectsService;
   agentSessions?: AgentSessionsService;
@@ -616,7 +611,6 @@ export interface MemoryToolDeps extends ErrorReportingDeps {
   prompts?: PromptsService;
   /** Optional — pending relations older than this surface in `memory.context`. */
   orphanAfterMs?: number;
-  getServer?: () => McpServer;
   usageCounters?: UsageCounters;
 }
 
@@ -669,13 +663,6 @@ function resolveActiveSessionId(
     return explicit;
   }
   const ctx = getRequestContext();
-  if (ctx.mcpSessionId && deps.router) {
-    const entry = deps.router.get(ctx.token.id, ctx.mcpSessionId);
-    if (entry?.rembricSessionId) {
-      deps.agentSessions?.touchActivity(entry.rembricSessionId);
-      return entry.rembricSessionId;
-    }
-  }
   if (deps.agentSessions) {
     const row = deps.agentSessions.findActiveForTransport({
       tokenId: ctx.token.id,
@@ -1193,15 +1180,11 @@ function deriveFocusSeed(
   const project = projectId ? deps.projects.getById(projectId) : undefined;
   if (project) parts.push(project.displayName ?? project.slug);
 
-  if (deps.router && deps.agentSessions) {
-    const key = routerKey();
-    const routerHit = key ? deps.router.get(key.tokenId, key.mcpSessionId)?.rembricSessionId : null;
-    const session = routerHit
-      ? deps.agentSessions.getById(routerHit)
-      : deps.agentSessions.findActiveForTransport({
-          tokenId: getRequestContext().token.id,
-          projectId,
-        });
+  if (deps.agentSessions) {
+    const session = deps.agentSessions.findActiveForTransport({
+      tokenId: getRequestContext().token.id,
+      projectId,
+    });
     if (session?.title) parts.push(session.title);
   }
 
@@ -1222,7 +1205,7 @@ async function handleContext(
     focus?: string;
   },
 ) {
-  if (!deps.repos || !deps.agentSessions || !deps.prompts || !deps.router) {
+  if (!deps.repos || !deps.agentSessions || !deps.prompts) {
     return mcpError('internal_error', 'memory.context is not wired with its required dependencies');
   }
   let scope: Scope;
@@ -1388,7 +1371,7 @@ async function handleTimeline(
   deps: MemoryToolDeps,
   args: { memoryId: string; before?: number; after?: number },
 ) {
-  if (!deps.repos || !deps.router) {
+  if (!deps.repos) {
     return mcpError(
       'internal_error',
       'memory.timeline is not wired with its required dependencies',

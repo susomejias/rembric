@@ -5,7 +5,6 @@ import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { pinnedProjectId, TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
-import { SessionRouter } from '@rembric/core';
 import { createRepositories, type Project, type Repositories, type Token } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,13 +23,10 @@ import {
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
 
-const MCP_SESSION_ID = 'mcp-sess-authz-test';
-
 let db: TestDb;
 let repos: Repositories;
 let projects: ProjectsService;
 let memory: MemoryService;
-let router: SessionRouter;
 let agentSessions: AgentSessionsService;
 let prompts: PromptsService;
 let relations: RelationsService;
@@ -76,7 +72,6 @@ function ctxFor(scope: TokenScope, overrides: Partial<RequestContext> = {}): Req
     memberProjectIds: [],
     project: null,
     requestedSlug: null,
-    mcpSessionId: MCP_SESSION_ID,
     ...overrides,
   };
 }
@@ -108,7 +103,6 @@ beforeEach(() => {
   repos = createRepositories(db.handle.db);
   projects = new ProjectsService(repos);
   memory = new MemoryService(repos, db.handle.db);
-  router = new SessionRouter();
   agentSessions = new AgentSessionsService(repos, db.handle.db);
   prompts = new PromptsService(repos, db.handle.db);
   relations = new RelationsService(repos, db.handle.db);
@@ -133,7 +127,6 @@ beforeEach(() => {
     memory,
     projects,
     prompts,
-    router,
     relations,
     doctor,
     logInternalError,
@@ -286,14 +279,10 @@ describe('read-restricted token cannot invoke a write-classified tool', () => {
 });
 
 describe('project-restricted token cannot read or write outside its project', () => {
+  const atB = (): Partial<RequestContext> => ({ project: projectB, requestedSlug: projectB.slug });
+
   it('memory.context: project:A token on a connection resolved to project B → forbidden', async () => {
-    router.setActiveProject(
-      tokenFor(`project:${projectA.id}`).id,
-      MCP_SESSION_ID,
-      projectB.id,
-      'tool-explicit',
-    );
-    const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
+    const r = await runWithContext(ctxFor(`project:${projectA.id}`, atB()), () =>
       memoryHandlers.context({}),
     );
     const { isError, payload } = decode(r);
@@ -302,13 +291,11 @@ describe('project-restricted token cannot read or write outside its project', ()
   });
 
   it('memory.timeline: project:A token on a connection resolved to project B → forbidden', async () => {
-    const tokenId = tokenFor(`project:${projectA.id}`).id;
     const target = memory.save(
       { type: 'project', title: 'in b', content: 'in b' },
       { kind: 'project', projectId: projectB.id },
     );
-    router.setActiveProject(tokenId, MCP_SESSION_ID, projectB.id, 'tool-explicit');
-    const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
+    const r = await runWithContext(ctxFor(`project:${projectA.id}`, atB()), () =>
       memoryHandlers.timeline({ memoryId: target.id }),
     );
     const { isError, payload } = decode(r);
@@ -317,9 +304,7 @@ describe('project-restricted token cannot read or write outside its project', ()
   });
 
   it('memory.stats: read:project:A token resolved to project B → forbidden', async () => {
-    const tokenId = tokenFor(`read:project:${projectA.id}`).id;
-    router.setActiveProject(tokenId, MCP_SESSION_ID, projectB.id, 'tool-explicit');
-    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`), () =>
+    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`, atB()), () =>
       observabilityHandlers.stats(),
     );
     const { isError, payload } = decode(r);
@@ -328,9 +313,7 @@ describe('project-restricted token cannot read or write outside its project', ()
   });
 
   it('memory.search_prompts: read:project:A token resolved to project B → forbidden', async () => {
-    const tokenId = tokenFor(`read:project:${projectA.id}`).id;
-    router.setActiveProject(tokenId, MCP_SESSION_ID, projectB.id, 'tool-explicit');
-    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`), () =>
+    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`, atB()), () =>
       promptHandlers.searchPrompts({}),
     );
     const { isError, payload } = decode(r);
@@ -341,8 +324,7 @@ describe('project-restricted token cannot read or write outside its project', ()
   it('memory.session_get_batch: project:A token resolved to project B → forbidden', async () => {
     const tokenId = tokenFor(`project:${projectA.id}`).id;
     const sess = agentSessions.start({ tokenId, projectId: projectB.id, agent: 'x' });
-    router.setActiveProject(tokenId, MCP_SESSION_ID, projectB.id, 'tool-explicit');
-    const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
+    const r = await runWithContext(ctxFor(`project:${projectA.id}`, atB()), () =>
       sessionHandlers.sessionGet({ ids: [sess.id] }),
     );
     const { isError, payload } = decode(r);
@@ -351,8 +333,8 @@ describe('project-restricted token cannot read or write outside its project', ()
   });
 });
 
-describe('project-restricted token on an unscoped connection resolving global scope', () => {
-  it('memory.context is forbidden while unscoped, then succeeds against project A after project.use', async () => {
+describe('project-restricted token on an unscoped connection resolving the default project', () => {
+  it('memory.context is forbidden path-less, and succeeds on a connection at its own project', async () => {
     const ctxScope: TokenScope = `read:project:${projectA.id}`;
     memory.save(
       { type: 'project', title: 'in a', content: 'in a' },
@@ -364,12 +346,8 @@ describe('project-restricted token on an unscoped connection resolving global sc
     expect(rejectedDecoded.isError).toBe(true);
     expect(rejectedDecoded.payload.code).toBe('forbidden');
 
-    const used = await runWithContext(ctxFor(ctxScope), () =>
-      Promise.resolve(projectHandlers.use({ slug: projectA.slug })),
-    );
-    expect(decode(used).isError).toBeFalsy();
-
-    const succeeded = await runWithContext(ctxFor(ctxScope), () => memoryHandlers.context({}));
+    const atA = ctxFor(ctxScope, { project: projectA, requestedSlug: projectA.slug });
+    const succeeded = await runWithContext(atA, () => memoryHandlers.context({}));
     const succeededDecoded = decode(succeeded);
     expect(succeededDecoded.isError).toBeFalsy();
     expect(succeededDecoded.payload.scope).toBe(`project:${projectA.id}`);
@@ -388,8 +366,8 @@ describe('full-access token is never rejected by authorization', () => {
     const read = await runWithContext(ctx, () => memoryHandlers.context({}));
     expect(decode(read).isError).toBeFalsy();
 
-    router.setActiveProject(tokenFor('*').id, MCP_SESSION_ID, projectA.id, 'tool-explicit');
-    const projectRead = await runWithContext(ctx, () => memoryHandlers.context({}));
+    const atA = ctxFor('*', { project: projectA, requestedSlug: projectA.slug });
+    const projectRead = await runWithContext(atA, () => memoryHandlers.context({}));
     expect(decode(projectRead).isError).toBeFalsy();
 
     const list = await runWithContext(ctx, () => Promise.resolve(projectHandlers.list({})));
@@ -479,56 +457,5 @@ describe('project.list is filtered by token scope', () => {
       { slug: projectB.slug, displayName: null, archived: false, activeMemoryCount: 1 },
     ]);
     expect(scopesRead).toEqual([projectB.id]);
-  });
-});
-
-describe('project.use({autocreate: true}) requires write authorization', () => {
-  it('a `read:*` token cannot autocreate a new project', async () => {
-    const r = await runWithContext(ctxFor('read:*'), () =>
-      Promise.resolve(projectHandlers.use({ slug: 'brand-new-slug', autocreate: true })),
-    );
-    const { isError, payload } = decode(r);
-    expect(isError).toBe(true);
-    expect(payload.code).toBe('forbidden');
-    expect(projects.findBySlug('brand-new-slug')).toBeUndefined();
-  });
-
-  it('a `read:project:<id>` token cannot autocreate a new project', async () => {
-    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`), () =>
-      Promise.resolve(projectHandlers.use({ slug: 'another-new-slug', autocreate: true })),
-    );
-    const { isError, payload } = decode(r);
-    expect(isError).toBe(true);
-    expect(payload.code).toBe('forbidden');
-    expect(projects.findBySlug('another-new-slug')).toBeUndefined();
-  });
-
-  it('a `project:<id>` token cannot autocreate a new project', async () => {
-    const r = await runWithContext(ctxFor(`project:${projectA.id}`), () =>
-      Promise.resolve(projectHandlers.use({ slug: 'yet-another-slug', autocreate: true })),
-    );
-    const { isError, payload } = decode(r);
-    expect(isError).toBe(true);
-    expect(payload.code).toBe('forbidden');
-    expect(projects.findBySlug('yet-another-slug')).toBeUndefined();
-  });
-
-  it('a `*` token can still autocreate a new project', async () => {
-    const r = await runWithContext(ctxFor('*'), () =>
-      Promise.resolve(projectHandlers.use({ slug: 'admin-created-slug', autocreate: true })),
-    );
-    const { isError, payload } = decode(r);
-    expect(isError).toBeFalsy();
-    expect(payload.created).toBe(true);
-    expect(projects.findBySlug('admin-created-slug')).toBeDefined();
-  });
-
-  it('autocreate against an already-existing slug is unaffected by the write check', async () => {
-    const r = await runWithContext(ctxFor(`read:project:${projectA.id}`), () =>
-      Promise.resolve(projectHandlers.use({ slug: projectA.slug, autocreate: true })),
-    );
-    const { isError, payload } = decode(r);
-    expect(isError).toBeFalsy();
-    expect(payload.created).toBe(false);
   });
 });
