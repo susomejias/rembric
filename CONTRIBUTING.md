@@ -135,6 +135,8 @@ pnpm run dev    # tsc --watch in one terminal
 pnpm start      # run the built server (after pnpm run build)
 ```
 
+`pnpm start` and `pnpm run dev` run Next.js without the production launcher (`apps/web/server.js`), so they take `X-Forwarded-For` as the client sends it: rate limits and the authentication lockout can be bypassed. Use them locally; expose only the Docker image.
+
 ## Adding a dependency
 
 Read [`.agents/skills/npm-security-best-practices/SKILL.md`](.agents/skills/npm-security-best-practices/SKILL.md)
