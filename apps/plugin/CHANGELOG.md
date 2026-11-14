@@ -4,6 +4,22 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.41.0](https://github.com/susomejias/rembric/compare/plugin-v0.40.0...plugin-v0.41.0) (2026-11-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugin:** the bridge no longer relays server-initiated requests (roots/list) or re-initializes on HTTP 404; errors reach the host unchanged. A path-less connection uses the server's default project and the diagnostic names .rembric PROJECT_SLUG or REMBRIC_PROJECT_SLUG. Pi no longer binds its session with memory.session_resume or sends DELETE on shutdown.
+
+### Features
+
+* **plugin:** drop the roots relay, session recovery and the Pi bind loop ([bb98ebb](https://github.com/susomejias/rembric/commit/bb98ebbf52f0a933f9768759f172e2165c441ca5))
+
+
+### Documentation
+
+* **openspec:** close the PR 3 commit task ([d30d021](https://github.com/susomejias/rembric/commit/d30d0218b2fd9da78e8159d0c9d3187bc3abb84f))
+
 ## [0.40.0](https://github.com/susomejias/rembric/compare/plugin-v0.39.0...plugin-v0.40.0) (2026-11-04)
 
 
