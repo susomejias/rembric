@@ -434,7 +434,7 @@ To reclaim file-level disk after a large purge, run `VACUUM` against the SQLite 
 
 ## Architecture
 
-Single Node process, single SQLite file, packaged as a multi-arch Docker image (`linux/amd64`, `linux/arm64`). Agents reach it over HTTP(S) + a bearer token at `/mcp/<slug>` (or `/mcp` + `project.use`); the operator dashboard is served from the same process.
+Single Node process, single SQLite file, packaged as a multi-arch Docker image (`linux/amd64`, `linux/arm64`). Agents reach it over HTTP(S) + a bearer token at `/mcp/<slug>` (or `/mcp` for the default project); the operator dashboard is served from the same process.
 
 Four load-bearing invariants:
 
@@ -494,7 +494,7 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
         └───────────┬──────────────────────────────────┬───────────────┘
                     │                                  │
      MCP: HTTP(S) + Bearer                Session lifecycle: HTTP(S)
-     /mcp/<slug>  or  /mcp + project.use  POST /api/<slug>/sessions{,/:id/end,/:id/summary}
+     /mcp/<slug>  or  /mcp (default)      POST /api/<slug>/sessions{,/:id/end,/:id/summary}
                     │                     (hooks + in-process providers; never MCP)
                     ▼                                  ▼
    ┌───────────────────────────────────────────────────────────────────────┐
@@ -514,15 +514,14 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
    │  │    capture_passive}      │        │         │ /tokens          │   │
    │  │  memory.session_*        │        │         │ /maintenance     │   │
    │  │  memory.*_prompt(s)      │        │         │ /oauth  /update  │   │
-   │  │  project.{use,list,      │        │         │                  │   │
-   │  │    current}              │        │         │                  │   │
+   │  │  project.{list,current}  │        │         │                  │   │
    │  └────────────┬─────────────┘        │         └────────┬─────────┘   │
    │               ▼                      ▼                  ▼             │
    │  ┌─────────────────────────────────────────────────────────────────┐  │
    │  │  Service layer  (owns scope resolution + transactions)          │  │
    │  │   MemoryService · PromptsService · RelationsService             │  │
    │  │   ProjectsService · TokensService · AgentSessionsService         │  │
-   │  │   EntitiesService · OAuthService · SessionRouter                │  │
+   │  │   EntitiesService · OAuthService                                │  │
    │  │   hybrid-search · review (derived) · save-time-candidates       │  │
    │  └──────────────────────────────┬──────────────────────────────────┘  │
    │                                 ▼                                     │

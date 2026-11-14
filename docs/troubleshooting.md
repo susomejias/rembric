@@ -139,7 +139,7 @@ The agent sent a plain token. Configure the MCP entry to set `Authorization: Bea
 
 Three possibilities:
 
-1. **Scope mismatch.** `/mcp` connections see the default project, or whatever `project.use` pinned; `/mcp/<slug>` sees only that project. Crossed scopes return empty by design.
+1. **Scope mismatch.** `/mcp` connections see the default project; `/mcp/<slug>` sees only that project. Crossed scopes return empty by design.
 2. **FTS5 query syntax.** Default tokenizer treats `-`, `:`, `.` as separators. `agent-name` searches as two tokens.
 3. **Decay archived it.** Check the dashboard with `status=archived` (overview counters at `/dashboard` show archived totals too).
 
@@ -163,18 +163,16 @@ The same error naming `all_projects` means the client is sending a name that was
 
 ### `code: scope_locked`
 
-You connected to `/mcp/<slug>` and then asked to work in a different project — `project.use({slug: other})` or `memory.session_start({project: other})`. A path-scoped connection is locked to its own project, so use that slug instead. The agent cannot change its own URL — the bridge derives the path from `.rembric`, so only an operator can point the client somewhere else.
+`memory.session_start({project: other})` named a project other than the one the connection resolved: the `/mcp/<slug>` project, or the default project on a path-less `/mcp`. The argument asserts the connection's project; it never switches it, so use that slug instead or omit it. The agent cannot change its own URL — the bridge derives the path from `.rembric`, so only an operator can point the client somewhere else.
 
 ### `code: project_not_found`
 
 The slug in the URL path names no project, so the connection has no scope to operate in and every memory tool refuses. It is **not** silently treated as a user-wide connection. The response carries `suggestedSlugs[]` (nearest existing slugs by edit distance), which usually names the intended project after a typo.
 
-Three remedies:
+Two remedies:
 
 1. **Correct the slug.** Fix `PROJECT_SLUG` in the repo's `.rembric` (or the `REMBRIC_PROJECT` env var) to match an existing project.
 2. **Create the project.** Add it at `/dashboard/projects`, using the exact slug the client is requesting.
-3. **Let the agent create it.** `project.use({slug: '<the path slug>', autocreate: true})` works from the refusing connection itself and needs a token authorized to write.
-
-`project.use`, `project.list`, `project.current` and `memory.about` keep working throughout — they resolve no scope, so the connection is never stuck.
+   `project.list`, `project.current` and `memory.about` keep working throughout — they resolve no scope, so the connection is never stuck.
 
 A committed `.rembric` is the usual cause: `apps/plugin/README.md` recommends committing it when a team shares one Rembric project, and every teammate whose own server lacks that project gets this error.

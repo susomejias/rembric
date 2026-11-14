@@ -67,7 +67,7 @@ until curl -sf -H "Authorization: Bearer $REMBRIC_ADMIN_TOKEN" \
 ## 5. Probe the change's surface
 
 - **HTTP**: `curl … | jq` against `http://127.0.0.1:3000/api/<slug>/…` with `Authorization: Bearer …` and `Content-Type: application/json`. Parse responses with `jq`, not regex.
-- **MCP**: POST JSON-RPC to `/mcp/<slug>` (path-scoped) or `/mcp` (unscoped). Send `Accept: application/json, text/event-stream` — the response is SSE-framed, so strip a leading `data: ` before `JSON.parse`. Handshake first (`initialize` → store the `mcp-session-id` header → `notifications/initialized`), then `tools/call`.
+- **MCP**: POST JSON-RPC to `/mcp/<slug>` (path-scoped) or `/mcp` (unscoped). Send `Accept: application/json, text/event-stream` — the response is SSE-framed, so strip a leading `data: ` before `JSON.parse`. Handshake first (`initialize` → `notifications/initialized`), then `tools/call`; the server is stateless, so no session header is minted or needed.
 - **DB**: read the host SQLite file directly with node, from the pnpm store, with `cwd` inside `apps/web`. The file is `$REMBRIC_DATA_DIR/data.db` (default `~/.rembric/data.db`):
 
   ```bash
