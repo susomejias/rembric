@@ -172,6 +172,8 @@ Compose auto-merges the override on every `up`. Point your agent at `http://127.
 
 ### Upgrading
 
+> **Upgrading to v0.31.0 behind a reverse proxy or tunnel** (nginx, Caddy, Traefik, Cloudflare Tunnel…): set `REMBRIC_TRUSTED_PROXY_HOPS` in `.env` (usually `1`) or every client will share one lockout and rate-limit identity. [What changed and which value to use](./docs/updates.md#updating-to-v0310-behind-a-reverse-proxy-or-tunnel-one-time).
+
 **Auto-updater from the UI.** The dashboard checks for new releases (once a day, [opt-out](./docs/updates.md)) and shows a badge + changelog modal when one is out. Mount the Docker socket and the same modal gains a one-click **Update** button that backs up the database, pulls the new image, swaps the container with health-check and rollback, and reloads the page on the new version — see [docs/updates.md](./docs/updates.md) for setup and the security trade-off. Without the socket nothing breaks: you get the notification plus the manual flow below.
 
 Docker manages versions for you. With `REMBRIC_VERSION` unset in `.env`, the compose file pulls `:latest`:
