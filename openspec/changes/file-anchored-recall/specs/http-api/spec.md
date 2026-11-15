@@ -44,4 +44,4 @@ The route SHALL do no work beyond one service call and the usage counter. It SHA
 #### Scenario: Only POST is served
 
 - **WHEN** a client sends `GET /api/foo/sessions/S/file-recall`
-- **THEN** the response SHALL be the same method-not-allowed answer every POST-only API route gives
+- **THEN** the response SHALL be the `404 not_found` answer every POST-only session route gives through `methodFallback`
