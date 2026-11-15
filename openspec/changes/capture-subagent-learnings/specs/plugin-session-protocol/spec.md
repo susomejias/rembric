@@ -9,14 +9,13 @@ A subagent's `## Key Learnings` are saved without the parent agent's cooperation
 | Claude Code | `PreToolUse` matched on `SubagentHandback`; `SubagentStop` | `tool_input.message`; `last_assistant_message` | stdin `session_id` |
 | Codex CLI | `SubagentStop` | `last_assistant_message` | stdin `session_id` |
 | opencode 2.x | `session.inbox.enqueued` with a synthetic item whose `payload.metadata.source` is `subagent` | `payload.text`, without its `<subagent …>` wrapper | the event's `sessionID` |
-| opencode 1.x | `tool.execute.after` for tool `task` | `output.output`, the content of `<task_result>` | the hook input's `sessionID` |
 | Pi | `tool_execution_end` for a recognised subagent tool; `message_end` for a recognised completion message | the result's or message's text content | the extension's own session id |
 | Hermes | `subagent_stop` | `child_summary` | `parent_session_id` |
 
 Every client SHALL:
 
 - **pre-filter**: forward a report only when it contains the string `key learnings` in any letter case. This is deliberately looser than the server's heading match, so it can never drop a report the server would accept. The server's match stays authoritative.
-- **redact**: strip `<private>…</private>` spans with that client's existing redaction helper before sending.
+- **redact**: replace `<private>…</private>` spans with `[REDACTED]` through that client's existing redaction helper before sending.
 - **send only** `report`, plus `agentType` when the host names the subagent's type. It SHALL NOT send the task prompt, the transcript or any other field.
 - **stay silent and non-blocking**: forwarding SHALL contribute nothing to the model's context. It SHALL NOT delay, deny or alter the subagent's completion or the parent's receipt of the report, and SHALL NOT change any tool result.
 - **fail safe**: a failed POST SHALL produce exactly one stderr diagnostic, per "Failed lifecycle POSTs MUST emit one stderr diagnostic in every client", and nothing else.
@@ -28,7 +27,7 @@ The JavaScript clients (opencode, Pi) SHALL send through one function of the sha
 
 - **GIVEN** a parent session `P` and a subagent report `R` whose text contains `<private>k</private>` and ends in a `## Key Learnings` list
 - **WHEN** each client's forwarder handles `R`, each tested separately
-- **THEN** each SHALL POST to `/api/<slug>/sessions/P/learnings` a body whose `report` equals `R` with the private span removed
+- **THEN** each SHALL POST to `/api/<slug>/sessions/P/learnings` a body whose `report` equals `R` with the private span replaced by `[REDACTED]`, as that client's existing redaction helper does
 - **AND** no client SHALL emit anything into the model's context
 
 #### Scenario: A report without the phrase is never sent
@@ -46,7 +45,7 @@ The JavaScript clients (opencode, Pi) SHALL send through one function of the sha
 
 A client that observes tool completion SHALL do so only to forward a subagent report, filtered to subagent tools by name, and SHALL NOT reach the model.
 
-The `PostToolUse` save nudge was removed (#235) because it counted tool calls to decide when to inject text into the model's context. That decision stands for context injection. Some hosts expose a subagent's report only after its tool completes: Pi on `tool_execution_end`, opencode 1.x on `tool.execute.after`. On those hosts, a client MAY observe tool completion for the sole purpose of forwarding a subagent report, under three conditions:
+The `PostToolUse` save nudge was removed (#235) because it counted tool calls to decide when to inject text into the model's context. That decision stands for context injection. Pi exposes a subagent's report only after the extension's tool completes, on `tool_execution_end`. On such a host, a client MAY observe tool completion for the sole purpose of forwarding a subagent report, under three conditions:
 
 - the observer SHALL act only on tools named in that client's list of subagent tools, and return immediately for every other tool;
 - it SHALL NOT modify the tool result, add context, or produce any model-visible output;
@@ -56,7 +55,7 @@ The Claude Code and Codex manifests SHALL keep declaring no `PostToolUse` entry 
 
 #### Scenario: A non-subagent tool is ignored
 
-- **WHEN** the Pi extension observes `tool_execution_end` for tool `bash`, or the opencode 1.x plugin observes `tool.execute.after` for tool `edit`
+- **WHEN** the Pi extension observes `tool_execution_end` for tool `bash`
 - **THEN** it SHALL make no request and leave the result unchanged
 
 #### Scenario: A subagent tool result is forwarded unchanged

@@ -11,7 +11,6 @@ How each host exposes a finished subagent, from the hosts' own docs and source (
 | Claude Code                 | `SubagentStop.last_assistant_message`; in auto mode on ≥ 2.1.271, `PreToolUse`/`PostToolUse` on `SubagentHandback` → `tool_input.message`                                                                                                                              | `session_id` — documented only as "Current session identifier"; the example pairs it with the parent transcript |
 | Codex CLI ≥ `rust-v0.133.0` | `SubagentStop.last_assistant_message` ("Latest subagent assistant message, if available")                                                                                                                                                                              | `session_id` — "Subagent hooks use the parent session id."                                                      |
 | opencode 2.x                | `session.inbox.enqueued`, `item.type: "synthetic"`, `item.payload.metadata.source: "subagent"`, report in `item.payload.text` wrapped in `<subagent …>…</subagent>`                                                                                                    | `data.sessionID`                                                                                                |
-| opencode 1.x                | `tool.execute.after` on `task`, `output.output` = `<task …><task_result>…</task_result></task>`                                                                                                                                                                        | `input.sessionID`                                                                                               |
 | Hermes ≥ v2026.4.23         | general hook `subagent_stop(child_summary=…)`, redacted, head+tail-trimmed when over `delegation.max_summary_chars`                                                                                                                                                    | `parent_session_id` kwarg                                                                                       |
 | Pi                          | no core event; extension tools `subagent` (example, pi-subagents), `subagent_run` / `subagent_continue` / `subagent_result` (gentle-pi) on `tool_execution_end`; background completions as custom messages `subagent-notify`, `gentle-agents.message` on `message_end` | the extension's own session id                                                                                  |
 
@@ -44,7 +43,7 @@ The parent session is the attribution target, so it goes in the path and gets th
 
 ### 2. Server-assigned tags
 
-A hook cannot choose "useful reusable" tags, and `memory.capture_passive`'s contract requires 1–64. The route passes `['subagent-learning']`, plus `agentType` when supplied and non-empty, through the same service-boundary normalisation (`normalizeTags`) — `Explore` → `explore`, `my-plugin:reviewer` → `my-plugin-reviewer`. If `agentType` normalises to nothing it is dropped rather than failing the request.
+A hook cannot choose "useful reusable" tags, and `memory.capture_passive`'s contract requires 1–64. The route passes `['subagent-learning']`, plus `agentType` when supplied and non-empty, through the same service-boundary normalisation (`normalizeTags`) — `Explore` → `explore`, `my-plugin:reviewer` → `my-pluginreviewer` (the shared normalization drops the colon). If `agentType` normalises to nothing it is dropped rather than failing the request.
 
 - _Alternative: relax the tag requirement for this path._ Rejected: tagless rows are what the required-tags change set out to stop.
 - _Alternative: client-chosen tags._ Rejected: five clients would each need a policy, and none has better information than `agentType`.
@@ -91,9 +90,11 @@ In auto mode on ≥ 2.1.271 the report never reaches `last_assistant_message`; i
 
 Codex requires JSON on stdout for `SubagentStop` when the hook exits 0. The entry declares `"timeout": 3` and the script prints `{}` after its POST (2-second budget), mirroring the `Stop` entry. There is no handback tool on Codex, so `last_assistant_message` is the report.
 
-### 9. opencode: inbox event on 2.x, `tool.execute.after` on 1.x
+### 9. opencode: the inbox event on 2.x only
 
-On 2.x the `subagent` tool always runs in the background, so its tool output never holds the report, `session.idle` is deprecated and unpublished, and the plugin `session` domain has no `messages` method. The inbox item is the one place the report reaches the parent, already tagged with the parent id. On 1.x, `tool.execute.after` on `task` is awaited by the host and carries the child's last text part inside `<task_result>`. Both strip the wrapper element before forwarding.
+On 2.x the `subagent` tool always runs in the background, so its tool output never holds the report. `session.idle` is deprecated and unpublished, and the plugin `session` domain has no `messages` method. The inbox item is the one place the report reaches the parent, already tagged with the parent id. The stream carries the event's payload under `data` (`packages/plugin/src/promise/adapter.ts:331-341`, `packages/schema/src/event.ts:108-116` at 2.3.0). The forwarder removes the `<subagent>` wrapper and the trailing `Background work still running:` block (`subagent-completion.ts:37-53`).
+
+The 1.x export is left unchanged. The published `opencode-plugin` spec keeps v1 free of tool hooks ("The v1 entry point is unchanged"), and the same v2-only scope was chosen for file-anchored recall. A 1.x route would need `tool.execute.after` on `task`. That route would also miss background completions, which 1.x delivers as a synthetic prompt part (`task.ts:226-250` at v1.19.5).
 
 ### 10. Pi: parent-side observation of known subagent tools and messages
 
@@ -105,7 +106,7 @@ Both are parent-side. `subagent_stop` passes `parent_session_id` explicitly, so 
 
 ### 12. Post-tool observers: permitted narrowly
 
-#235 removed a `PostToolUse` hook that counted tool calls to decide when to inject a save reminder into the model's context — a context-pollution and cadence problem. Observing a subagent tool's result to forward it over HTTP has neither property. Where a host exposes the report only after a tool completes (Pi, opencode 1.x), a post-tool observer is allowed if it is filtered to subagent tools by name and contributes nothing to the model's context. The Claude Code and Codex manifests keep their `PostToolUse` prohibition.
+#235 removed a `PostToolUse` hook that counted tool calls to decide when to inject a save reminder into the model's context — a context-pollution and cadence problem. Observing a subagent tool's result to forward it over HTTP has neither property. Where a host exposes the report only after a tool completes (Pi), a post-tool observer is allowed if it is filtered to subagent tools by name and contributes nothing to the model's context. The Claude Code and Codex manifests keep their `PostToolUse` prohibition.
 
 ### 13. What the clients send
 
@@ -118,7 +119,8 @@ Each client strips `<private>…</private>` spans before sending, reusing the ex
 - [Risk] Candidates detected on the hook path accumulate as pending judgments → They resurface through the existing aged-pendings path. The same-session skip removes the largest duplicate source.
 - [Trade-off] The content skip is exact-match only, so a near-duplicate (reworded item) is saved and flagged as a candidate → Accepted because semantic dedupe is exactly what candidate judgment exists for.
 - [Risk] Pi tool and message names are per-package contracts that can change → One table in one file, covered by a test per name. An unrecognised package is simply not captured, which is today's behaviour.
-- [Risk] A trimmed report (Hermes head+tail, gentle-pi 16 KB, Pi example `truncateModelOutput`) could cut the learnings block → The block closes the report and head+tail trimming keeps the tail. Task 1.4 checks which end the Pi example truncates.
+- [Risk] A trimmed report could cut the learnings block. Hermes and gentle-pi trim head+tail, which keeps the closing block. The Pi example extension's `truncateModelOutput` keeps the HEAD (`truncateHead`, first 2000 lines / 50 KB, `examples/extensions/subagent/index.ts:234-245`), so a report over that size loses its closing block in `result.content` → Accepted. The full output exists only in that extension's private `details` shape, and the example is a sample rather than a maintained package.
+- [Risk] Pi delivers a custom message appended while the agent is idle without `triggerTurn` to session listeners only, not to extensions (`src/core/agent-session.ts:1102-1106,2512-2521`), so such a background completion is not captured → Accepted. Deliveries that steer, follow up or trigger a turn reach the extension. Task 1.4 records how gentle-pi and pi-subagents deliver.
 - [Risk] Claude Code in `-p` mode kills async hooks at teardown, so the last subagent's report can be lost → Accepted. Interactive sessions are unaffected, and there is no synchronous alternative that does not delay the subagent.
 - [Risk] A host version without the event (Codex < 0.133.0, Hermes < v2026.4.23) → The entry never fires. Task 1.2 confirms an unknown event name in `hooks.codex.json` is ignored rather than rejected on an older Codex.
 - [Trade-off] The route accepts reports up to the body bound but parses only the last 50,000 code points → Accepted because the learnings block closes the report.
