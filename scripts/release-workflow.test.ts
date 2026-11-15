@@ -14,10 +14,12 @@ function jobBlock(name: string): string {
   return next === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + next);
 }
 
-const serialGroup = (group: string): RegExp =>
+const serialGroup = (group: string, extra = ''): RegExp =>
   new RegExp(
-    `\\n {4}concurrency:\\n {6}group: ${group}-\\$\\{\\{ github\\.ref \\}\\}\\n {6}cancel-in-progress: false\\n`,
+    `\\n {4}concurrency:\\n {6}group: ${group}-\\$\\{\\{ github\\.ref \\}\\}\\n {6}cancel-in-progress: false\\n${extra}`,
   );
+
+const queuedGroup = (group: string): RegExp => serialGroup(group, ' {6}queue: max\\n');
 
 describe('release-please flow', () => {
   it('rebuilds every open release PR from main on each run, keeping one PR per component', () => {
@@ -30,8 +32,8 @@ describe('release-please flow', () => {
     expect(jobBlock('release-please')).toMatch(serialGroup('release-please'));
   });
 
-  it('serializes each publish job in its own group', () => {
-    expect(jobBlock('publish-docker')).toMatch(serialGroup('publish-docker'));
-    expect(jobBlock('publish-npm')).toMatch(serialGroup('publish-npm'));
+  it('queues every publish in its own group, so an already-tagged release is never dropped', () => {
+    expect(jobBlock('publish-docker')).toMatch(queuedGroup('publish-docker'));
+    expect(jobBlock('publish-npm')).toMatch(queuedGroup('publish-npm'));
   });
 });

@@ -9,7 +9,7 @@ Releasing server 0.31.0 and plugin 0.41.0 on 2026-11-15 hit three problems in th
 ## What Changes
 
 - `release-please-config.json` sets `"always-update": true`, release-please's documented option for keeping release PRs up to date with the base branch (`docs/manifest-releaser.md`), so each run rebuilds every open release PR from the current `main`. `separate-pull-requests` stays `true`: each component still releases on its own.
-- `.github/workflows/release-please.yml` moves the `concurrency` guard from the workflow to the `release-please` job (same group, `cancel-in-progress: false`) and gives `publish-docker` and `publish-npm` their own serial groups. Tag-minting stays serialized; a publish in progress no longer queues the next release; two Docker publishes still never overlap.
+- `.github/workflows/release-please.yml` moves the `concurrency` guard from the workflow to the `release-please` job (same group, `cancel-in-progress: false`) and gives `publish-docker` and `publish-npm` their own serial groups with `queue: max`, so a waiting publish is queued, never replaced. Tag-minting stays serialized; a publish in progress no longer queues the next release; two Docker publishes still never overlap.
 - `scripts/npm-publish.mjs` waits after `npm publish` until the registry serves the exact version with its provenance attestation, for up to 15 minutes, and fails the step otherwise.
 
 ## What is lost
