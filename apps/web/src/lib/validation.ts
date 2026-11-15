@@ -220,6 +220,44 @@ export function parseRecallHints(value: unknown): ValidationOutcome<RecallHintsB
   return { ok: true, data: { prompt: body['prompt'] as string } };
 }
 
+export interface FileRecallBody {
+  path: string;
+  siblings?: string[];
+}
+
+const FILE_RECALL_PATH_MAX = 1024;
+const FILE_RECALL_SIBLINGS_MAX = 64;
+
+export function parseFileRecall(value: unknown): ValidationOutcome<FileRecallBody> {
+  const root = rootIssues(value);
+  if (root) return { ok: false, message: join(root) };
+  const body = asRecord(value);
+  const issues: Issue[] = [...stringIssues('path', body['path'], { max: FILE_RECALL_PATH_MAX })];
+  const siblings = body['siblings'];
+  if (siblings !== undefined) {
+    if (!Array.isArray(siblings)) {
+      issues.push(invalidType('siblings', 'array', siblings));
+    } else if (siblings.length > FILE_RECALL_SIBLINGS_MAX) {
+      issues.push({
+        path: 'siblings',
+        message: `Too big: expected array to have <=${FILE_RECALL_SIBLINGS_MAX} items`,
+      });
+    } else {
+      siblings.forEach((sibling: unknown, i) =>
+        issues.push(...stringIssues(`siblings.${i}`, sibling, { max: FILE_RECALL_PATH_MAX })),
+      );
+    }
+  }
+  if (issues.length > 0) return { ok: false, message: join(issues) };
+  return {
+    ok: true,
+    data: {
+      path: body['path'] as string,
+      ...(siblings !== undefined && { siblings: siblings as string[] }),
+    },
+  };
+}
+
 export interface MemoryRecallBody {
   query: string;
   limit?: number;

@@ -16,6 +16,7 @@ export type RecallSnapshot = Record<string, RecallCounterCell>;
 export class UsageCounters {
   private readonly byToken = new Map<string, Map<CountedTool, number>>();
   private readonly recallByToken = new Map<string, RecallCounterCell>();
+  private readonly fileRecallByToken = new Map<string, RecallCounterCell>();
 
   /** Increment one (token, tool) cell. Called only on a SUCCESSFUL tool call. */
   record(tokenId: string, tool: CountedTool): void {
@@ -43,20 +44,41 @@ export class UsageCounters {
 
   /** Record one recall-hints request's outcome for `tokenId`. */
   recordRecall(tokenId: string, linesServed: number): void {
-    let cell = this.recallByToken.get(tokenId);
-    if (!cell) {
-      cell = { requests: 0, nonEmpty: 0, linesServed: 0 };
-      this.recallByToken.set(tokenId, cell);
-    }
-    cell.requests += 1;
-    if (linesServed > 0) cell.nonEmpty += 1;
-    cell.linesServed += linesServed;
+    countInto(this.recallByToken, tokenId, linesServed);
+  }
+
+  /** Record one file-recall request's outcome for `tokenId`. */
+  recordFileRecall(tokenId: string, linesServed: number): void {
+    countInto(this.fileRecallByToken, tokenId, linesServed);
   }
 
   /** Read-only view for the admin debug surface, same authorization as `snapshot()`. */
   recallSnapshot(): RecallSnapshot {
-    const out: RecallSnapshot = {};
-    for (const [tokenId, cell] of this.recallByToken) out[tokenId] = { ...cell };
-    return out;
+    return snapshotOf(this.recallByToken);
   }
+
+  fileRecallSnapshot(): RecallSnapshot {
+    return snapshotOf(this.fileRecallByToken);
+  }
+}
+
+function countInto(
+  cells: Map<string, RecallCounterCell>,
+  tokenId: string,
+  linesServed: number,
+): void {
+  let cell = cells.get(tokenId);
+  if (!cell) {
+    cell = { requests: 0, nonEmpty: 0, linesServed: 0 };
+    cells.set(tokenId, cell);
+  }
+  cell.requests += 1;
+  if (linesServed > 0) cell.nonEmpty += 1;
+  cell.linesServed += linesServed;
+}
+
+function snapshotOf(cells: Map<string, RecallCounterCell>): RecallSnapshot {
+  const out: RecallSnapshot = {};
+  for (const [tokenId, cell] of cells) out[tokenId] = { ...cell };
+  return out;
 }

@@ -23,6 +23,7 @@ export async function GET(
     ok: true,
     counters: deps.usageCounters.snapshot(),
     recall: deps.usageCounters.recallSnapshot(),
+    fileRecall: deps.usageCounters.fileRecallSnapshot(),
   });
 }
 

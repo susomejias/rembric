@@ -18,7 +18,8 @@ to call `memory.session_start` over MCP.
 | POST   | `/api/:slug/sessions/:id/resume`       | `{ ok, sessionId, status, startedAt, resumedAt, previousStatus, previousEndedAt, title }` |
 | POST   | `/api/:slug/sessions/:id/turn`         | `{ ok, sessionId, lines }`                                                                |
 | POST   | `/api/:slug/sessions/:id/recall-hints` | `{ ok, lines }`                                                                           |
-| GET    | `/api/:slug/debug/counters`            | `{ ok, counters, recall }` — admin token only                                             |
+| POST   | `/api/:slug/sessions/:id/file-recall`  | `{ ok, lines, exhausted }`                                                                |
+| GET    | `/api/:slug/debug/counters`            | `{ ok, counters, recall, fileRecall }` — admin token only                                 |
 | POST   | `/api/:slug/memory/recall`             | `{ ok, memories, formatted }`                                                             |
 
 Auth is identical to `/mcp`: `Authorization: Bearer <token>`, the admin token or

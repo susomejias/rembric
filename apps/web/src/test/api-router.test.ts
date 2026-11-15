@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { NUDGE_FLOOR_MS, type CreatedToken } from '@rembric/core';
+import { extractEntities, NUDGE_FLOOR_MS, type CreatedToken } from '@rembric/core';
 import { projectScope, type Project } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +10,10 @@ import { GET as fallbackGet, POST as fallbackPost } from '../app/api/[...path]/r
 import { GET as countersGet, POST as countersPost } from '../app/api/[slug]/debug/counters/route';
 import { POST as recallPost } from '../app/api/[slug]/memory/recall/route';
 import { POST as endPost } from '../app/api/[slug]/sessions/[id]/end/route';
+import {
+  GET as fileRecallGet,
+  POST as fileRecallPost,
+} from '../app/api/[slug]/sessions/[id]/file-recall/route';
 import { POST as hintsPost } from '../app/api/[slug]/sessions/[id]/recall-hints/route';
 import { POST as resumePost } from '../app/api/[slug]/sessions/[id]/resume/route';
 import { POST as summaryPost } from '../app/api/[slug]/sessions/[id]/summary/route';
@@ -754,6 +758,91 @@ describe('POST /:slug/memory/recall — refusals', () => {
   });
 });
 
+describe('POST /:slug/sessions/:id/file-recall', () => {
+  const SESSION = 'sess-filerecall1';
+  const PATH = 'packages/db/src/migrate.ts';
+
+  beforeEach(() => {
+    const services = getServices();
+    services.agentSessions.ensure({
+      id: SESSION,
+      tokenId: reader.token.id,
+      projectId: project.id,
+      agent: 'claude-code',
+    });
+    const content = `migrations in ${PATH} run inside BEGIN IMMEDIATE`;
+    const saved = services.memory.save(
+      { type: 'project', title: 'Migration runner wraps every body', content },
+      projectScope(project.id),
+    );
+    services.repos.entities.linkMemory(
+      saved.id,
+      project.id,
+      extractEntities(saved.title, content),
+      new Date(),
+    );
+  });
+
+  const post = (body: unknown, token = reader.plaintext) =>
+    call(
+      fileRecallPost,
+      request('POST', `/api/${project.slug}/sessions/${SESSION}/file-recall`, { token, body }),
+      sessionCtx(SESSION),
+    );
+
+  it('answers a linked file with its block, and counts the firing', async () => {
+    const r = await post({ path: PATH, siblings: [PATH] });
+    expect(r.status).toBe(200);
+    expect(r.json.ok).toBe(true);
+    expect(r.json.exhausted).toBe(false);
+    expect((r.json.lines as string[])[0]).toBe(`rembric: memories about ${PATH}:`);
+    const cell = getServices().usageCounters.fileRecallSnapshot()[reader.token.id];
+    expect(cell).toEqual({
+      requests: 1,
+      nonEmpty: 1,
+      linesServed: (r.json.lines as string[]).length,
+    });
+  });
+
+  it('refuses malformed bodies and ignores unknown keys', async () => {
+    for (const bad of [
+      { path: 7 },
+      { path: 'a.ts', siblings: 'a.ts' },
+      { path: 'a.ts', siblings: Array.from({ length: 65 }, (_, i) => `d${i}/a.ts`) },
+      { path: 'x'.repeat(1025) },
+    ]) {
+      const r = await post(bad);
+      expect(r.status, JSON.stringify(bad).slice(0, 60)).toBe(400);
+      expect(r.json.code).toBe('invalid_input');
+    }
+    const control = await post({ path: 'src/a.ts', extra: 1 });
+    expect(control.status).toBe(200);
+  });
+
+  it('403 for a token that cannot read the project, with a reader control', async () => {
+    const outsider = getServices().tokens.create({
+      name: 'outsider',
+      project: otherProject,
+      access: 'read',
+    });
+    const refused = await post({ path: PATH }, outsider.plaintext);
+    expect(refused.status).toBe(403);
+    expect((await post({ path: PATH })).status).toBe(200);
+  });
+
+  it('serves POST only', async () => {
+    const r = await body(
+      fileRecallGet(
+        request('GET', `/api/${project.slug}/sessions/${SESSION}/file-recall`, {
+          token: reader.plaintext,
+        }),
+      ),
+    );
+    expect(r.status).toBe(404);
+    expect(r.json.code).toBe('not_found');
+  });
+});
+
 describe('request body bound', () => {
   type Sent = ReturnType<typeof call>;
   const SESSION = 'sess-bodycap1';
@@ -773,6 +862,11 @@ describe('request body bound', () => {
       (req) => call(hintsPost, req, sessionCtx(SESSION)),
     ],
     ['resume', `/sessions/${SESSION}/resume`, (req) => call(resumePost, req, sessionCtx(SESSION))],
+    [
+      'file-recall',
+      `/sessions/${SESSION}/file-recall`,
+      (req) => call(fileRecallPost, req, sessionCtx(SESSION)),
+    ],
   ];
 
   beforeEach(async () => {

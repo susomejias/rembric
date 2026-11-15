@@ -1,4 +1,15 @@
-import { and, eq, getTableColumns, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { ulid } from 'ulid';
 
 import type { Db } from '../client.js';
@@ -135,6 +146,44 @@ export class EntitiesRepository {
       .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
       .where(and(...conditions))
       .orderBy(sql`${memory.createdAt} desc`, sql`${memory.id} desc`)
+      .limit(opts.limit)
+      .all();
+  }
+
+  /** Every filter runs before the limit: a dedupe applied after it would starve the page. */
+  findActiveMemoriesForPaths(opts: {
+    scope: SearchScope;
+    values: readonly string[];
+    types: readonly MemoryType[];
+    excludeSessionId: string;
+    excludeMemoryIds: readonly string[];
+    limit: number;
+  }): (Memory & { pathCount: number })[] {
+    if (opts.values.length === 0 || opts.limit <= 0) return [];
+    const pathCount = sql<number>`(
+      SELECT count(*) FROM ${memoryEntityLinks} AS l2
+      JOIN ${memoryEntities} AS e2 ON e2.id = l2.entity_id
+      WHERE l2.memory_id = ${memory.id} AND e2.kind = 'path'
+    )`;
+    const conditions = [
+      entityScopeCondition(opts.scope),
+      eq(memoryEntities.kind, 'path'),
+      inArray(memoryEntities.value, [...opts.values]),
+      eq(memory.status, 'active'),
+      inArray(memory.type, [...opts.types]),
+      or(isNull(memory.sessionId), sql`${memory.sessionId} != ${opts.excludeSessionId}`),
+    ];
+    if (opts.excludeMemoryIds.length > 0) {
+      conditions.push(notInArray(memory.id, [...opts.excludeMemoryIds]));
+    }
+    return this.db
+      .select({ ...getTableColumns(memory), pathCount })
+      .from(memoryEntityLinks)
+      .innerJoin(memoryEntities, eq(memoryEntityLinks.entityId, memoryEntities.id))
+      .innerJoin(memory, eq(memoryEntityLinks.memoryId, memory.id))
+      .where(and(...conditions))
+      .groupBy(memory.id)
+      .orderBy(pathCount, sql`${memory.createdAt} desc`, sql`${memory.id} desc`)
       .limit(opts.limit)
       .all();
   }

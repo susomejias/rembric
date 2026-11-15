@@ -2,7 +2,15 @@ import { deriveTitle } from '@rembric/core';
 import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { EntitiesRepository, memory, projects, projectScope, type NewMemory } from '@rembric/db';
+import {
+  agentSessions,
+  EntitiesRepository,
+  memory,
+  projects,
+  projectScope,
+  tokens,
+  type NewMemory,
+} from '@rembric/db';
 
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
@@ -47,6 +55,90 @@ describe('EntitiesRepository', () => {
       .values(row({ id, content: 'x', ...opts }))
       .run();
   }
+
+  describe('findActiveMemoriesForPaths', () => {
+    const base = {
+      scope: projectScope('p0'),
+      types: ['project', 'feedback', 'procedural'] as const,
+      excludeSessionId: 'sess-caller',
+      excludeMemoryIds: [] as string[],
+      limit: 10,
+    };
+
+    function linkPaths(id: string, paths: string[]): void {
+      repo.linkMemory(
+        id,
+        'p0',
+        paths.map((value) => ({ kind: 'path' as const, value })),
+        new Date(),
+      );
+    }
+
+    it('orders by fewest linked paths, then newest, and returns a memory matched twice once', () => {
+      insertMemory('broad-newest', { createdAt: new Date(3_000) });
+      insertMemory('narrow-old', { createdAt: new Date(1_000) });
+      insertMemory('narrow-new', { createdAt: new Date(2_000) });
+      linkPaths('broad-newest', ['src/a.ts', 'src/b.ts', 'src/c.ts']);
+      linkPaths('narrow-old', ['src/a.ts']);
+      linkPaths('narrow-new', ['src/a.ts', 'a.ts']);
+      const found = repo.findActiveMemoriesForPaths({ ...base, values: ['src/a.ts', 'a.ts'] });
+      expect(found.map((m) => [m.id, m.pathCount])).toEqual([
+        ['narrow-old', 1],
+        ['narrow-new', 2],
+        ['broad-newest', 3],
+      ]);
+    });
+
+    it('drops archived, non-learning, own-session and foreign-project memories, with a control', () => {
+      t.handle.db
+        .insert(tokens)
+        .values({ id: 'tok', name: 't', hash: 'h', scope: '*', createdAt: new Date(500) })
+        .run();
+      t.handle.db
+        .insert(agentSessions)
+        .values(
+          ['sess-caller', 'sess-other'].map((id) => ({
+            id,
+            tokenId: 'tok',
+            projectId: 'p0',
+            agent: 'claude-code',
+            startedAt: new Date(500),
+          })),
+        )
+        .run();
+      insertMemory('control', { sessionId: 'sess-other' });
+      insertMemory('archived', { status: 'archived' });
+      insertMemory('reference', { type: 'reference' });
+      insertMemory('own', { sessionId: 'sess-caller' });
+      insertMemory('foreign', { projectId: 'p1' });
+      for (const id of ['control', 'archived', 'reference', 'own']) linkPaths(id, ['src/x.ts']);
+      repo.linkMemory('foreign', 'p1', [{ kind: 'path', value: 'src/x.ts' }], new Date());
+      expect(
+        repo.findActiveMemoriesForPaths({ ...base, values: ['src/x.ts'] }).map((m) => m.id),
+      ).toEqual(['control']);
+    });
+
+    it('excludes already-shown ids before the limit, so the next eligible row still surfaces', () => {
+      insertMemory('shown-1', { createdAt: new Date(3_000) });
+      insertMemory('shown-2', { createdAt: new Date(2_000) });
+      insertMemory('fresh', { createdAt: new Date(1_000) });
+      for (const id of ['shown-1', 'shown-2', 'fresh']) linkPaths(id, ['src/y.ts']);
+      const found = repo.findActiveMemoriesForPaths({
+        ...base,
+        values: ['src/y.ts'],
+        excludeMemoryIds: ['shown-1', 'shown-2'],
+        limit: 1,
+      });
+      expect(found.map((m) => m.id)).toEqual(['fresh']);
+    });
+
+    it('matches only the given values, never another path entity', () => {
+      insertMemory('other');
+      linkPaths('other', ['src/z.ts']);
+      expect(repo.findActiveMemoriesForPaths({ ...base, values: ['src/y.ts'] })).toEqual([]);
+      expect(repo.findActiveMemoriesForPaths({ ...base, values: [] })).toEqual([]);
+    });
+  });
 
   describe('linkMemory + findMemoriesByEntity', () => {
     it('links a memory to entities and finds it back by exact value', () => {
