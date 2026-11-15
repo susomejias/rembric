@@ -63,8 +63,10 @@ const nextConfig = {
       // it is the same expression the loader computes, which is what makes the
       // target unambiguous at build time. `bin/napi-v6/**` would instead carry
       // the 175 MB of win32/darwin prebuilts this process can never load
-      // (measured: 210 MB for every pair, 35 MB for this one).
-      `../../node_modules/onnxruntime-node/bin/napi-v6/${process.platform}/${process.arch}/**`,
+      // (measured: 210 MB for every pair, 35 MB for this one). Only the binding
+      // and its runtime library: on linux/x64 the package's postinstall also
+      // downloads CUDA/TensorRT providers the CPU embedder never loads.
+      `../../node_modules/onnxruntime-node/bin/napi-v6/${process.platform}/${process.arch}/{onnxruntime_binding.node,libonnxruntime.*}`,
     ],
   },
 };
