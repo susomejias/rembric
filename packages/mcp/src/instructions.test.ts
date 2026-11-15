@@ -129,7 +129,9 @@ describe('MCP initialize instructions', () => {
       buildInstructions({ requestedSlug: null }),
       buildInstructions({ requestedSlug: 'rembric' }),
     ]) {
-      expect(text).toContain('SAVE: fix/decision/discovery/config/pattern/preference→memory.save');
+      expect(text).toContain(
+        'SAVE: fix/decision/discovery/config/pattern/preference/failed approach(why,file)→memory.save',
+      );
     }
   });
 
