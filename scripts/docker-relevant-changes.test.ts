@@ -79,10 +79,17 @@ describe('CLI', () => {
   const base = commit('README.md');
   const docs = commit('docs/agents.md');
   const web = commit('apps/web/page.tsx');
+  git('mv', 'apps/web/page.tsx', 'docs/page.tsx');
+  git('-c', 'user.email=ci@example.com', '-c', 'user.name=ci', 'commit', '-qm', 'move');
+  const moved = git('rev-parse', 'HEAD');
 
   it('writes docker=false for a docs-only range and docker=true once the range reaches the image', () => {
     expect(run(base, docs)).toEqual({ status: 0, output: 'docker=false\n' });
     expect(run(base, web)).toEqual({ status: 0, output: 'docker=true\n' });
+  });
+
+  it('counts the source of a rename that moves a file out of the image', () => {
+    expect(run(web, moved)).toEqual({ status: 0, output: 'docker=true\n' });
   });
 
   it('fails instead of guessing when the range cannot be resolved', () => {
