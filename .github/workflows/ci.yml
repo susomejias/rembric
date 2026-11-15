@@ -8,30 +8,18 @@ on:
 permissions:
   contents: read
 
-# Pull requests cancel superseded runs. Pushes to main never do: main's run is
-# the only one that exports the Docker cache every later build imports, and a
-# cancelled export leaves the next pull requests building cold.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Provenance only: proves a published-spec edit arrived through a change folder,
-  # NOT that the spec text is true. A green run says nothing about correctness.
   spec-provenance:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Its own group, never cancelled: the workflow-level group is keyed on
-    # `github.ref`, so all pushes to main share it and a newer push replaces a
-    # pending run. A violating direct push would be cancelled rather than red —
-    # and five of the eight measured violations were direct pushes. Same lesson
-    # release-please already learned.
     concurrency:
       group: spec-provenance-${{ github.sha }}
       cancel-in-progress: false
     steps:
-      # fetch-depth: 0 — a diff-based check cannot resolve a base ref from a
-      # single commit. The other jobs stay shallow; they need no history.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -42,10 +30,6 @@ jobs:
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/check-spec-provenance.mjs --base "$BASE" --head "$HEAD"
 
-      # The historical replay lives here rather than in `test`, which checks out
-      # at depth 1: this measurement is the gate's central evidence and it cannot
-      # run without history. Excluded from the default vitest include so it fails
-      # loudly here instead of silently skipping there.
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -53,15 +37,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Replay the measured violation window
-        # `--root ../..` + a positional filter, rather than running from
-        # `apps/plugin`/`apps/web` directly: an `exclude` always wins over a
-        # positional filter, and the web project excludes this file from its
-        # default run (it needs a full clone). Started from the repo root the
-        # default config applies and the filter narrows the run to this file.
         run: pnpm --filter @rembric/web exec vitest run --root ../.. scripts/check-spec-provenance.history.test.ts
 
-  # Split from `test` so the static checks run beside the suite instead of
-  # ahead of it; neither needs the other's output.
   static:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -83,12 +60,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
-      # Same frozen, integrity-checked install as `test` (see the note there).
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Before lint: its typed rules resolve the workspace packages through
-      # their built `dist/`, which typecheck's `^build` dependency produces.
       - name: Typecheck
         run: pnpm run typecheck
 
@@ -98,8 +72,6 @@ jobs:
       - name: Format
         run: pnpm run format:check
 
-      # A working-tree property, so it runs here on the shallow checkout rather
-      # than in `spec-provenance`, which needs fetch-depth: 0 for its diff.
       - name: Check active OpenSpec deltas are not stale
         run: pnpm run check:delta-freshness
 
@@ -132,24 +104,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
-      # Install with --frozen-lockfile. pnpm 11 enforces three independent
-      # invariants in this step that cover the lockfile-injection attack
-      # class (practice #5 of lirantal/npm-security-best-practices):
-      #   1. Lockfile must exactly match package.json (no silent updates).
-      #   2. Every tarball's integrity hash must match what the lockfile
-      #      claims (defends against URL swap + content tampering).
-      #   3. blockExoticSubdeps in pnpm-workspace.yaml refuses non-registry
-      #      transitive sources (git URLs, off-registry tarballs).
-      # (lockfile-lint v4.x doesn't support pnpm-lock.yaml; the npm-native
-      # defenses + blockExoticSubdeps cover the same threat model.)
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # The embedding model is fetched from the HF CDN at load time on
-      # bare-metal runners (the /app/models bake exists only in the Docker
-      # image). Prefetch it once into a cached local-model dir — keyed on the
-      # pinned revision — so the real-embedder suite resolves it OFFLINE and a
-      # transient CDN blip can no longer false-red the build.
       - name: Cache embedding model
         id: model-cache
         uses: actions/cache@v6
@@ -162,13 +119,6 @@ jobs:
         working-directory: packages/core
         run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
 
-      # The web suite is the whole battery now (the server app is deleted) and
-      # emits the JSON the rescued-test gate below reads. The coverage
-      # thresholds this step used to gate PRs on lived in the retired server
-      # vitest project; the web project carries no coverage block or provider,
-      # so there is nothing to enforce here.
-      # The build must precede the tests: plugin.test.ts asserts the web
-      # production build exists (.next/BUILD_ID) as part of its contract.
       - name: Build (artifact sanity)
         run: pnpm run build
 
@@ -185,8 +135,6 @@ jobs:
           path: apps/web/test-results.json
           if-no-files-found: ignore
 
-      # A rescued test passes after retry but carries stale failureMessages.
-      # Vitest reports it green; this gate fails the run instead.
       - name: Check for rescued tests
         working-directory: apps/web
         run: node ../../scripts/check-rescued-tests.mjs test-results.json
@@ -195,9 +143,6 @@ jobs:
         run: pnpm run e2e:installer
 
   retrieval-eval:
-    # Separate from `test` (design.md Decision 7): this ingests a corpus
-    # through a real embedding model, which does not belong in the inner-loop
-    # unit suite. Reuses the same model cache key as `test` for a warm cache.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -239,11 +184,6 @@ jobs:
         run: pnpm run eval
 
   changes:
-    # Whether a pull request can reach the image or the installer's server
-    # path (scripts/docker-relevant-changes.mjs; unclassified paths count as
-    # reaching it). A push to main always builds: it exports the cache. A range
-    # that cannot be resolved fails this job and leaves its output empty, which
-    # docker-build-check treats as "build".
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -269,19 +209,7 @@ jobs:
 
   docker-build-check:
     needs: changes
-    # The skip lives on the steps, never on the job: a job-level `if` is read
-    # before the matrix expands, so a skipped job reports one unexpanded check
-    # and the required per-arch checks would never report (actions/runner#952).
-    # Only an explicit docker=false skips; a failed `changes` still builds.
     if: ${{ !cancelled() }}
-    # Safety net that mirrors the release-publish path so a build break is
-    # caught at PR time, not at publish. The publish builds the (distroless)
-    # runtime stage NATIVELY on two arches — so this check does too, and boots
-    # it on both: a clean boot that opens /data/data.db and applies every
-    # migration proves the glibc native modules (onnxruntime-node,
-    # better-sqlite3, sqlite-vec) of that arch load. amd64 also drives the real
-    # installer bring-up (install.sh --server --up). Native arm runners are
-    # free for public repos. No QEMU.
     strategy:
       fail-fast: false
       matrix:
@@ -300,13 +228,6 @@ jobs:
       - uses: actions/checkout@v7
         if: needs.changes.outputs.docker != 'false'
 
-      # Same composite action and cache scope as the release publish (mode=load
-      # here vs mode=digest there), so one place defines how the image is built
-      # and main's export is what the publish imports on both arches. Only a
-      # push to main exports: a pull request's cache is readable by that pull
-      # request alone, and exporting it (~400 s of a ~650 s build) only evicted
-      # main's entries from the 10 GB repository budget. Loaded as :latest so
-      # the steps below run it without pulling from GHCR (REMBRIC_NO_PULL).
       - name: Build runtime (prod) target
         if: needs.changes.outputs.docker != 'false'
         uses: ./.github/actions/build-runtime-image
@@ -316,7 +237,6 @@ jobs:
           mode: load
           cache-scope: web-runtime-${{ matrix.arch }}
           export-cache: ${{ github.event_name == 'push' }}
-          # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
           hf-token: ${{ secrets.HF_TOKEN }}
 
       - name: Boot smoke — healthz, data dir, 39 migrations
@@ -324,8 +244,6 @@ jobs:
         run: |
           set -eu
           TOK=ci-boot-token-0123456789
-          # The image runs as uid 10001; a host dir created by a rootful
-          # docker would be root-owned and the server could not open its DB.
           D="$(mktemp -d)"; mkdir -p "$D/data" && chmod 0777 "$D/data"
           docker run -d --name rembric-boot-smoke \
             -e REMBRIC_ADMIN_TOKEN="$TOK" \
@@ -346,14 +264,10 @@ jobs:
             echo "$LOGS"
             exit 1
           fi
-          # DS1/DS3: the boot must resolve the mounted volume, not a fresh
-          # data.db in the container's ephemeral layer.
           echo "$LOGS" \
             | grep -q '\[db\] data file /data/data.db (pre-existing: false)' \
             || { echo "::error::${{ matrix.arch }} boot did not open /data/data.db"; \
                  echo "$LOGS"; exit 1; }
-          # The migrations dir arrives through outputFileTracingIncludes, so
-          # a boot that applies fewer than 39 means that path broke silently.
           applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
           [ "$applied" = 39 ] \
             || { echo "::error::expected 39 migrations, got $applied"; \
@@ -361,23 +275,13 @@ jobs:
           echo "${{ matrix.arch }} boot smoke: healthz=200, /data/data.db, 39 migrations ✓"
           docker rm -f rembric-boot-smoke
 
-      # amd64: real end-to-end of the installer's server bring-up — drive the
-      # actual `install.sh --server --up` against the locally-built image
-      # (REMBRIC_NO_PULL → uses the loaded :latest, no GHCR), then assert.
       - name: Installer e2e — server --up against the built image
         if: matrix.arch == 'amd64' && needs.changes.outputs.docker != 'false'
         run: |
           set -eu
-          TOK=ci-e2e-token-0123456789   # >=16 chars (server rejects shorter)
+          TOK=ci-e2e-token-0123456789
           REPO="$PWD"; T="$(mktemp -d)"; cd "$T"
-          # The image runs as uid 10001; on rootful Linux docker the ./data bind
-          # would be auto-created root-owned and the server couldn't open its DB.
-          # Pre-create it world-writable (Docker Desktop sidesteps this locally).
           mkdir -p data && chmod 0777 data
-          # Non-default port deliberately: it's the only way this step would
-          # have caught #338 (REMBRIC_PORT customised in .env left the
-          # container unreachable — docker-compose.yml hard-coded the
-          # container side of the mapping to 8787 regardless).
           REMBRIC_SRC="$REPO" REMBRIC_NONINTERACTIVE=1 REMBRIC_UPDATE_CHECK=off REMBRIC_NO_PULL=1 \
             sh "$REPO/install.sh" --server --action=install --up --token="$TOK" --port=8799
           ok=
