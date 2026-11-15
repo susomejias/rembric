@@ -4,6 +4,16 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.43.0](https://github.com/susomejias/rembric/compare/plugin-v0.42.0...plugin-v0.43.0) (2026-11-15)
+
+
+### Features
+
+* **mcp:** ask agents to save failed approaches with the reason and file ([f15be9a](https://github.com/susomejias/rembric/commit/f15be9aafb96a7a389ea87b13fad8ad4c51e96e5)), closes [#492](https://github.com/susomejias/rembric/issues/492)
+* **plugin:** forward delegated subagent summaries from Hermes ([8e28a3b](https://github.com/susomejias/rembric/commit/8e28a3b4650fa3c510b51f5172775bbc0ceb1b9e)), closes [#490](https://github.com/susomejias/rembric/issues/490)
+* **plugin:** forward subagent reports from Claude Code and Codex hooks ([86b75be](https://github.com/susomejias/rembric/commit/86b75be58f3d3048e450a5fec45cdf548cc21f5e)), closes [#490](https://github.com/susomejias/rembric/issues/490)
+* **plugin:** forward subagent reports from opencode 2.x and Pi ([4bc10be](https://github.com/susomejias/rembric/commit/4bc10bed81bd23e4e0331908dd25840dd71e2809)), closes [#490](https://github.com/susomejias/rembric/issues/490)
+
 ## [0.42.0](https://github.com/susomejias/rembric/compare/plugin-v0.41.0...plugin-v0.42.0) (2026-11-15)
 
 
