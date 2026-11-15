@@ -23,6 +23,9 @@
 #                                       prints and clears in one step
 #   - rembric_scan_offset/_set <id>  → the per-session transcript byte offset
 #                                       stop-report.sh scans forward from
+#   - rembric_command_paths <cmd>     → the file paths a shell command names
+#   - rembric_patch_paths <patch>     → the files an apply_patch text names
+#   - rembric_file_recall_*           → file-recall claims, siblings and reset
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
 # a plugin-side problem NEVER aborts the host agent.
@@ -493,8 +496,9 @@ rembric_json_escape() {
 }
 
 # POSTs and echoes the response `lines` as one block; silent on non-2xx, timeout or empty array.
+# An optional third argument names a marker file touched when the body says `"exhausted":true`.
 rembric_post_lines() {
-  local path="${1:-}" body="${2:-}"
+  local path="${1:-}" body="${2:-}" exhausted_marker="${3:-}"
   [ -z "$path" ] && return 0
   if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
     printf '[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST %s\n' "$path" >&2
@@ -515,6 +519,9 @@ rembric_post_lines() {
   if [ "$rc" -ne 0 ] || [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
     printf '[rembric] POST %s failed (curl rc=%s status=%s) body=%s\n' "$path" "$rc" "$status" "$detail" >&2
     return 0
+  fi
+  if [ -n "$exhausted_marker" ]; then
+    case "$detail" in *'"exhausted":true'*) : >"$exhausted_marker" 2>/dev/null || true ;; esac
   fi
   # The gate fires at most once per floor (25 min), so the overwhelming
   # majority of responses carry an empty array. Answering those from the raw
@@ -546,6 +553,92 @@ rembric_turn_report() {
 # Recall-hints reader: same contract as the turn report.
 rembric_recall_hints() {
   rembric_post_lines "${1:-}" "${2:-}"
+}
+
+# The shell-path rule pinned by apps/plugin/test/file-recall-fixtures.json, shared
+# with the JS core and the Hermes plugin: split on separators, keep tokens that hold
+# a `/` and end in an extension, or are absolute; at most 5, first-seen order. No
+# glob expansion: `tr` and `read` never see the tokens as patterns.
+rembric_command_paths() {
+  local cmd="${1:-}" tok seen=$'\n' count=0
+  [ -z "$cmd" ] && return 0
+  while IFS= read -r tok; do
+    while :; do
+      case "$tok" in ./*) tok="${tok#./}" ;; *) break ;; esac
+    done
+    [ "${#tok}" -le 1 ] && continue
+    case "$tok" in
+    /*) ;;
+    */*) [[ "$tok" =~ \.[A-Za-z0-9]+$ ]] || continue ;;
+    *) continue ;;
+    esac
+    case "$seen" in *$'\n'"$tok"$'\n'*) continue ;; esac
+    seen="${seen}${tok}"$'\n'
+    printf '%s\n' "$tok"
+    count=$((count + 1))
+    [ "$count" -ge 5 ] && break
+  done < <(printf '%s\n' "$cmd" | tr ' \t\n"\047\140=();|&<>,:' '\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
+  return 0
+}
+
+# The files a Codex apply_patch text adds, updates or deletes.
+rembric_patch_paths() {
+  local patch="${1:-}" line
+  [ -z "$patch" ] && return 0
+  while IFS= read -r line; do
+    case "$line" in
+    '*** Add File: '*) printf '%s\n' "${line#'*** Add File: '}" ;;
+    '*** Update File: '*) printf '%s\n' "${line#'*** Update File: '}" ;;
+    '*** Delete File: '*) printf '%s\n' "${line#'*** Delete File: '}" ;;
+    esac
+  done <<<"$patch"
+  return 0
+}
+
+# Echoes <path>'s repo-relative form when the repository at <cwd> tracks it, else nothing.
+rembric_tracked_path() {
+  local cwd="${1:-}" path="${2:-}"
+  { [ -z "$cwd" ] || [ -z "$path" ]; } && return 0
+  git -C "$cwd" ls-files --full-name --error-unmatch -- "$path" 2>/dev/null | head -n1 || true
+}
+
+# Echoes a JSON array of the tracked paths sharing <rel>'s file name, or nothing past 64.
+rembric_sibling_paths_json() {
+  local cwd="${1:-}" rel="${2:-}" name list count out="" item
+  name="${rel##*/}"
+  case "$name" in '' | *[][*?]*) return 0 ;; esac
+  list="$(git -C "$cwd" ls-files --full-name -- ":(top)*/${name}" ":(top)${name}" 2>/dev/null || true)"
+  [ -z "$list" ] && return 0
+  count="$(printf '%s\n' "$list" | grep -c . || true)"
+  [ "$count" -gt 64 ] && return 0
+  while IFS= read -r item; do
+    [ -z "$item" ] && continue
+    out="${out:+${out},}\"$(rembric_json_escape "$item")\""
+  done <<<"$list"
+  printf '[%s]' "$out"
+}
+
+# The per-session directory of file-recall claims; one atomic `mkdir` per file means
+# parallel hooks never share a writable record.
+rembric_file_recall_dir() {
+  local session_id="${1:-}" safe_id
+  safe_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  printf '%s' "${TMPDIR:-/tmp}/rembric-file-recall/${safe_id}"
+}
+
+rembric_file_recall_claim() {
+  local dir="${1:-}" rel="${2:-}" key
+  { [ -z "$dir" ] || [ -z "$rel" ]; } && return 1
+  key="$(printf '%s' "$rel" | cksum | tr ' ' '-')"
+  mkdir -p "$dir" 2>/dev/null || true
+  mkdir "${dir}/${key}" 2>/dev/null
+}
+
+# Compaction drops what the model was told, so the session may be told again.
+rembric_file_recall_reset() {
+  local session_id="${1:-}"
+  [ -z "$session_id" ] && return 0
+  rm -rf "$(rembric_file_recall_dir "$session_id")" 2>/dev/null || true
 }
 
 # Decode the elements of a JSON array of strings, one per output line —

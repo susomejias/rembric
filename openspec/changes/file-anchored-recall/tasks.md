@@ -26,21 +26,21 @@
 
 ## 3. Claude Code and Codex (PR 3)
 
-- [ ] 3.1 Add to `apps/plugin/test/file-recall-fixtures.json` shell commands with their expected path lists. Include `cat`, `sed -n`, `grep`, `rg -n`, `git show HEAD:<p>`, `rtk read <p>`, quoted paths, absolute paths, `../` paths, a command naming no path, a command naming more than 5 paths, and Codex `apply_patch` texts with Add/Update/Delete lines.
-- [ ] 3.2 Add the path extractor, apply_patch parser, repo-relative normaliser, siblings lister and per-session record (lock directory, line-at-a-time append) to `apps/plugin/scripts/_api.sh`, with a test that runs the extractor over every fixture.
-- [ ] 3.3 Add `apps/plugin/scripts/file-recall.sh <agent>`:
+- [x] 3.1 Add to `apps/plugin/test/file-recall-fixtures.json` shell commands with their expected path lists. Include `cat`, `sed -n`, `grep`, `rg -n`, `git show HEAD:<p>`, `rtk read <p>`, quoted paths, absolute paths, `../` paths, a command naming no path, a command naming more than 5 paths, and Codex `apply_patch` texts with Add/Update/Delete lines.
+- [x] 3.2 Add the path extractor, apply_patch parser, repo-relative normaliser, siblings lister and per-session record (lock directory, line-at-a-time append) to `apps/plugin/scripts/_api.sh`, with a test that runs the extractor over every fixture.
+- [x] 3.3 Add `apps/plugin/scripts/file-recall.sh <agent>`:
   - Claude Code input: `tool_input.file_path`, `notebook_path` or `command`. Codex input: `command` for `Bash` and `apply_patch`.
   - Skips sub-agent calls (`agent_id` present).
   - POSTs with `REMBRIC_POST_MAX_TIME=0.3`.
   - Prints JSON `hookSpecificOutput.additionalContext` only, never `permissionDecision`, and stops after `exhausted`.
   - Runs `trap 'exit 0' ERR` and exits 0 everywhere.
-- [ ] 3.4 Add the `PreToolUse` entry to `apps/plugin/hooks/hooks.json` (matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, env from plugin options, `timeout: 2`, no `async`) and to `apps/plugin/hooks/hooks.codex.json` (matcher `Bash|apply_patch`, `timeout: 2`).
-- [ ] 3.5 Update `apps/plugin/test/hook-manifests.test.ts`:
+- [x] 3.4 Add the `PreToolUse` entry to `apps/plugin/hooks/hooks.json` (matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, env from plugin options, `timeout: 2`, no `async`) and to `apps/plugin/hooks/hooks.codex.json` (matcher `Bash|apply_patch`, `timeout: 2`).
+- [x] 3.5 Update `apps/plugin/test/hook-manifests.test.ts`:
   - seven events and ten handlers on both manifests;
   - the exact ordered invocations, including `file-recall.sh claude-code` and `file-recall.sh codex-cli`;
   - assertions pinning both `PreToolUse` matchers;
   - the existing no-`*.codex.sh` check still passes.
-- [ ] 3.6 Add script tests driven through the real script with a stub server:
+- [x] 3.6 Add script tests driven through the real script with a stub server:
   - a Bash read is injected once, and the second read issues no request;
   - Read, Edit and NotebookEdit inputs;
   - Codex apply_patch, with Codex output that is JSON or nothing;
@@ -48,9 +48,9 @@
   - `agent_id` is skipped;
   - eight concurrent firings leave an untorn record.
     Then mutation-check the sub-agent skip, the once-per-file record, the `exhausted` stop and the no-`permissionDecision` rule.
-- [ ] 3.7 Run e2e against the dev server for Claude Code, using the isolated variant where it applies (`references/e2e-walkthrough.md`): a real session reads a file linked to a memory, and the note appears in context once. Note in the PR what can and cannot be driven.
+- [x] 3.7 Run e2e against the dev server for Claude Code, using the isolated variant where it applies (`references/e2e-walkthrough.md`): a real session reads a file linked to a memory, and the note appears in context once. Note in the PR what can and cannot be driven.
 - [ ] 3.8 Run e2e for Codex CLI the same way. If the interactive hook trust gate blocks it, say so and list the manual steps. **(may need operator)**
-- [ ] 3.9 Docs: `docs/agents.md`, `apps/plugin/README.md`, `apps/plugin/CHANGELOG.md` via the conventional commit.
+- [x] 3.9 Docs: `docs/agents.md`, `apps/plugin/README.md`, `apps/plugin/CHANGELOG.md` via the conventional commit.
 - [ ] 3.10 Get an independent verification of the PR before delivery, for the concurrent per-session record (high-risk item 4).
 
 ## 4. Pi (PR 4)

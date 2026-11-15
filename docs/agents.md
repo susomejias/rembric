@@ -68,6 +68,15 @@ When a session's snippet isn't enough — typically when **resuming work in anot
 
 A curated summary write is merged section-wise: the `##` sections it carries replace their stored counterparts, and the ones it omits keep their stored text. Recovery uses a one-item `ids` array. Unknown properties and retired scalar arguments are refused, not ignored. There is no version history behind the merge: what a write does replace is gone, with no restore, so an agent that cannot see the earlier work should read the stored summary here before rewriting a section.
 
+## Memories about the file in hand
+
+When an agent reads or edits a file, the plugin asks the server for the memories linked to that file and puts up to three of them in front of the model — the most specific first, the first one with the passage that mentions the file, every one with its date and a `needs review` marker when it is past its shelf life. The agent does not have to search: a known bug, a decision or a constraint about the file arrives with the file.
+
+- **What triggers it**: the host's file tools, and any shell command that names a file (`cat`, `sed -n`, `grep`, `rg`, `git show`, `rtk read`…). Only files the repository tracks are ever sent, as repo-relative paths, so the same file matches on every machine and worktree. A command over a whole directory names no file and gets no note.
+- **How much**: each file is asked about once per session, and asked again after a compaction; at most ten files per session get a note, each note at most 1 KB.
+- **What it never does**: block or slow a tool beyond a fraction of a second — a timeout, an older server without the endpoint, or any error simply produces no note.
+- **Clients**: Claude Code and Codex CLI (`PreToolUse`).
+
 ## Complete batch reads by date
 
 For “what have I worked on this week?”, retrieve the full session summaries directly:
@@ -200,7 +209,7 @@ Symptoms of missing envs:
 
 MCP authenticates after install + env exports. Hooks are stable and enabled by default as of `codex-cli 0.142.3+` (the earlier `plugin_hooks` feature flag some versions of this doc used to mention was removed upstream — do not run `codex features enable plugin_hooks`, that flag no longer exists). The only remaining one-time step is trusting the hooks inside Codex; skip it and `/dashboard/sessions` stays empty no matter how many Codex sessions you run.
 
-**Trust the hooks inside Codex.** On startup Codex shows a banner of the form _"N hooks need review before they can run. Open `/hooks` to review them."_ Open `/hooks` from inside Codex and approve each of Rembric's hook types (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `PostCompact`, `Stop`, `SessionEnd`). Leaving `SessionEnd` untrusted is the one that shows up later as sessions never reaching `ended`. The trust persists in `~/.codex/config.toml` under `[hooks.state]`, so this is a one-time-per-hook step — subsequent Codex launches do not re-prompt.
+**Trust the hooks inside Codex.** On startup Codex shows a banner of the form _"N hooks need review before they can run. Open `/hooks` to review them."_ Open `/hooks` from inside Codex and approve each of Rembric's hook types (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PreCompact`, `PostCompact`, `Stop`, `SessionEnd`). Leaving `SessionEnd` untrusted is the one that shows up later as sessions never reaching `ended`. The trust persists in `~/.codex/config.toml` under `[hooks.state]`, so this is a one-time-per-hook step — subsequent Codex launches do not re-prompt.
 
 After trusting the hooks, the `/plugins` panel for `rembric` shows the hook counts and the first new Codex session will POST to `/api/<slug>/sessions` against the Rembric server (visible at `/dashboard/sessions`).
 

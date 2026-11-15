@@ -23,11 +23,12 @@ const handlerCount = (hooks: Record<string, HookGroup[]>): number =>
   );
 
 describe('hooks.json (Claude Code)', () => {
-  it('declares exactly six event types', () => {
+  it('declares exactly seven event types', () => {
     expect(eventTypes(claudeHooks)).toEqual(
       [
         'SessionStart',
         'UserPromptSubmit',
+        'PreToolUse',
         'SessionEnd',
         'PreCompact',
         'PostCompact',
@@ -36,8 +37,8 @@ describe('hooks.json (Claude Code)', () => {
     );
   });
 
-  it('carries exactly nine handler entries', () => {
-    expect(handlerCount(claudeHooks)).toBe(9);
+  it('carries exactly ten handler entries', () => {
+    expect(handlerCount(claudeHooks)).toBe(10);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -61,6 +62,15 @@ describe('hooks.json (Claude Code)', () => {
     ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
   });
 
+  it('declares one synchronous file-recall PreToolUse entry on file tools and Bash', () => {
+    expect(claudeHooks.PreToolUse).toHaveLength(1);
+    const [group] = claudeHooks.PreToolUse;
+    expect(group!.matcher).toBe('Read|Edit|Write|MultiEdit|NotebookEdit|Bash');
+    expect(group!.hooks).toHaveLength(1);
+    expect(group!.hooks[0]!.async).toBeUndefined();
+    expect(group!.hooks[0]!.timeout).toBe(2);
+  });
+
   it('declares exactly one synchronous Stop entry, invoking stop-report.sh', () => {
     const handlers = claudeHooks.Stop.flatMap((group) => group.hooks);
     expect(handlers).toHaveLength(1);
@@ -70,11 +80,12 @@ describe('hooks.json (Claude Code)', () => {
 });
 
 describe('hooks.codex.json (Codex CLI)', () => {
-  it('declares exactly six event types', () => {
+  it('declares exactly seven event types', () => {
     expect(eventTypes(codexHooks)).toEqual(
       [
         'SessionStart',
         'UserPromptSubmit',
+        'PreToolUse',
         'Stop',
         'PreCompact',
         'PostCompact',
@@ -83,8 +94,8 @@ describe('hooks.codex.json (Codex CLI)', () => {
     );
   });
 
-  it('carries exactly nine handler entries', () => {
-    expect(handlerCount(codexHooks)).toBe(9);
+  it('carries exactly ten handler entries', () => {
+    expect(handlerCount(codexHooks)).toBe(10);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -103,6 +114,14 @@ describe('hooks.codex.json (Codex CLI)', () => {
     const postBudget = Number(/REMBRIC_POST_MAX_TIME=(\d+)/.exec(entry.command)?.[1]);
     expect(postBudget).toBeLessThan(entry.timeout as number);
     expect(entry.timeout as number).toBeLessThanOrEqual(3);
+  });
+
+  it('declares one file-recall PreToolUse entry on Bash and apply_patch', () => {
+    expect(codexHooks.PreToolUse).toHaveLength(1);
+    const [group] = codexHooks.PreToolUse;
+    expect(group!.matcher).toBe('Bash|apply_patch');
+    expect(group!.hooks).toHaveLength(1);
+    expect(group!.hooks[0]!.timeout).toBe(2);
   });
 
   it('declares exactly the two literal SessionStart matchers, without fork', () => {
@@ -186,6 +205,7 @@ describe('every hook invokes the script the spec names', () => {
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
       'UserPromptSubmit command scripts/prompt-hints.sh',
+      'PreToolUse command scripts/file-recall.sh claude-code',
       'SessionEnd command scripts/session-end.sh claude-code',
       'PreCompact command scripts/pre-compact.sh claude-code',
       'PostCompact command scripts/post-compaction.sh',
@@ -200,6 +220,7 @@ describe('every hook invokes the script the spec names', () => {
       'UserPromptSubmit command scripts/prompt-search.sh',
       'UserPromptSubmit command scripts/prompt-nudge.sh',
       'UserPromptSubmit command scripts/prompt-hints.sh',
+      'PreToolUse command scripts/file-recall.sh codex-cli',
       'Stop command scripts/stop-report.sh codex-cli',
       'PreCompact command scripts/pre-compact.sh codex-cli',
       'PostCompact command scripts/post-compaction.sh',
