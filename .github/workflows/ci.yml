@@ -142,6 +142,63 @@ jobs:
       - name: Installer e2e (headless)
         run: pnpm run e2e:installer
 
+  test-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REMBRIC_MODEL_CACHE: ${{ github.workspace }}/.model-cache
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Cache pnpm store
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache embedding model
+        id: model-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.model-cache
+          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
+
+      - name: Prefetch embedding model (retried, offline-resolvable)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        working-directory: packages/core
+        run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
+
+      - name: Test db
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          pnpm --filter @rembric/db exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/db.json"
+          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/db.json"
+
+      - name: Test core
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          pnpm --filter @rembric/core exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/core.json"
+          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/core.json"
+
+      - name: Test mcp
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          pnpm --filter @rembric/mcp exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/mcp.json"
+          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/mcp.json"
+
   retrieval-eval:
     runs-on: ubuntu-latest
     timeout-minutes: 10
