@@ -55,13 +55,13 @@
 
 ## 4. Pi (PR 4)
 
-- [ ] 4.1 Add `extractCommandPaths`, `fileRecall` and the per-session sent/exhausted record to `apps/plugin/bin/rembric-plugin-core.mjs`, typed in `rembric-plugin-core.d.mts` and cleared in `forgetSession`. Add a test running `extractCommandPaths` over every fixture.
-- [ ] 4.2 In `apps/plugin/.pi-plugin/index.ts`:
+- [x] 4.1 Add `extractCommandPaths`, `fileRecall` and the per-session sent/exhausted record to `apps/plugin/bin/rembric-plugin-core.mjs`, typed in `rembric-plugin-core.d.mts` and cleared in `forgetSession`. Add a test running `extractCommandPaths` over every fixture.
+- [x] 4.2 In `apps/plugin/.pi-plugin/index.ts`:
   - a guarded `tool_call` handler captures paths (read/edit/write `input.path`, bash `input.command`), resolves them against `ctx.cwd`, lists siblings and calls `fileRecall` keyed by `toolCallId`;
   - a `tool_result` handler appends the text block and returns `structuredContent` unchanged.
-- [ ] 4.3 Add tests in `.pi-plugin/plugin.test.ts`: annotation with `structuredContent` preserved; the timeout control with the result unchanged and no throw or `block`; once per file; sub-agent sessions skipped.
+- [x] 4.3 Add tests in `.pi-plugin/plugin.test.ts`: annotation with `structuredContent` preserved; the timeout control with the result unchanged and no throw or `block`; once per file; sub-agent sessions skipped.
 - [ ] 4.4 Run e2e in an isolated Pi run against the dev server.
-- [ ] 4.5 Docs: the Pi README and the CHANGELOG.
+- [x] 4.5 Docs: the Pi README and the CHANGELOG.
 
 ## 5. Hermes (PR 5)
 

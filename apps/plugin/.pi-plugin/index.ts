@@ -3,7 +3,12 @@ import { Text } from '@earendil-works/pi-tui';
 
 // These two specifiers are rewritten to `./bin/` at publish time.
 import type { SessionProtocol } from '../bin/rembric-plugin-core.mjs';
-import { createSessionProtocol, diag, underscoreToolNames } from '../bin/rembric-plugin-core.mjs';
+import {
+  createSessionProtocol,
+  diag,
+  extractCommandPaths,
+  underscoreToolNames,
+} from '../bin/rembric-plugin-core.mjs';
 import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 
 type JsonSchema = Record<string, unknown>;
@@ -62,6 +67,12 @@ type MessageEndEvent = {
 };
 
 type SessionShutdownEvent = { reason?: string; targetSessionFile?: string };
+
+type ToolCallEvent = { toolCallId: string; toolName: string; input?: Record<string, unknown> };
+
+type ToolResultEvent = { toolCallId: string; content?: ToolContent[]; structuredContent?: unknown };
+
+type ToolResultEventResult = { content: ToolContent[]; structuredContent?: unknown };
 
 type ExtensionApi = {
   registerTool: (definition: ToolDefinition) => void;
@@ -269,6 +280,18 @@ export function renderToolResultLines(
   return [`${outcome}${size}${keyHintText}`];
 }
 
+/** The files a built-in read/edit/write/bash call names, before any repository check. */
+export function toolCallPaths(event: ToolCallEvent): string[] {
+  const input = event.input ?? {};
+  if (['read', 'edit', 'write'].includes(event.toolName)) {
+    return typeof input.path === 'string' && input.path ? [input.path] : [];
+  }
+  if (event.toolName === 'bash') {
+    return typeof input.command === 'string' ? extractCommandPaths(input.command) : [];
+  }
+  return [];
+}
+
 export default function rembric(pi: ExtensionApi): void {
   let core: SessionProtocol | null = null;
   let mcp: McpClient | null = null;
@@ -277,6 +300,7 @@ export default function rembric(pi: ExtensionApi): void {
     process.env.GENTLE_PI_AGENTS_CHILD === '1' ||
     process.env.PI_SUBAGENT_CHILD === '1';
   const trackForced = process.env.REMBRIC_TRACK_SESSION === '1';
+  const pendingFileRecall = new Map<string, Promise<string[]>>();
 
   function withHostSessionId(
     params: Record<string, unknown>,
@@ -410,11 +434,45 @@ export default function rembric(pi: ExtensionApi): void {
     core.scheduleIdleFlush(sessionId);
   });
 
+  // A tool_call failure blocks the tool, so this handler only starts the lookup and never throws.
+  pi.on('tool_call', (event: ToolCallEvent, ctx) => {
+    try {
+      if (!core) return;
+      const candidates = toolCallPaths(event);
+      if (candidates.length === 0) return;
+      const sessionId = ctx.sessionManager.getSessionId();
+      pendingFileRecall.set(
+        event.toolCallId,
+        core.fileRecall(sessionId, ctx.cwd, candidates).catch(() => []),
+      );
+    } catch (err) {
+      diag(`file recall skipped: ${err instanceof Error ? err.message : 'error'}`);
+    }
+  });
+
+  pi.on(
+    'tool_result',
+    async (event: ToolResultEvent): Promise<ToolResultEventResult | undefined> => {
+      const pending = pendingFileRecall.get(event.toolCallId);
+      if (!pending) return undefined;
+      pendingFileRecall.delete(event.toolCallId);
+      const lines = await pending;
+      if (lines.length === 0) return undefined;
+      return {
+        content: [...(event.content ?? []), { type: 'text', text: lines.join('\n') }],
+        ...(event.structuredContent !== undefined && {
+          structuredContent: event.structuredContent,
+        }),
+      };
+    },
+  );
+
   pi.on('session_shutdown', async (event: SessionShutdownEvent, ctx) => {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     const closes = CLOSING_SHUTDOWN_REASONS.has(event.reason ?? '') && !isSelfResume(event, ctx);
     await (closes ? core.endSession(sessionId) : core.flushSessionSummary(sessionId));
     core.forgetSession(sessionId);
+    pendingFileRecall.clear();
   });
 }

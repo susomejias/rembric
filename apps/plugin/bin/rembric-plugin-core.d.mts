@@ -15,6 +15,7 @@ export declare const SESSION_OPENING_NUDGE: string;
 export declare const POST_COMPACT_NUDGE_CORE: string;
 
 export declare function diag(line: string): void;
+export declare function extractCommandPaths(command: string): string[];
 export declare function stripPrivateTags(text: string): string;
 export declare function underscoreToolNames(text: string): string;
 
@@ -56,6 +57,16 @@ export type SessionProtocol = {
    * unregistered/sub-agent session (no request issued in the last two cases).
    */
   recallHints(sessionId: string, prompt: string, timeoutMs?: number): Promise<string[]>;
+  /**
+   * File-anchored recall: for each candidate the repository at `cwd` tracks, POST its
+   * repo-relative path and same-name siblings once per session. Returns the lines to show.
+   */
+  fileRecall(
+    sessionId: string,
+    cwd: string,
+    candidates: string[],
+    timeoutMs?: number,
+  ): Promise<string[]>;
   /** Returns the entries the per-session cap evicted, oldest first. */
   appendUserMessage(sessionId: string, rawText: string): TranscriptEntry[];
   appendAssistantMessage(sessionId: string, rawText: string): TranscriptEntry[];

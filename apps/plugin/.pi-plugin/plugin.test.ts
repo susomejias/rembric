@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type ServerResponse } from 'node:http';
 import { createServer as createSocketServer, type Socket } from 'node:net';
@@ -24,7 +25,10 @@ import {
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
 
-import rembric, { renderToolResultLines } from './index.js';
+import { extractEntities, MemoryService } from '@rembric/core';
+import { projectScope } from '@rembric/db';
+
+import rembric, { renderToolResultLines, toolCallPaths } from './index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
@@ -1835,5 +1839,103 @@ describe('session identity on every session-attaching tool call', () => {
     expect(repos.memory.unsafeGetById(savedId(saveB.text))?.sessionId).toBe(secondId);
     expect(sessions.getById(firstId)?.status).toBe('active');
     expect(sessions.getById(secondId)?.status).toBe('active');
+  });
+});
+
+describe('file-anchored recall', () => {
+  let repoDir = '';
+  let memoryId = '';
+
+  beforeAll(() => {
+    repoDir = mkdtempSync(join(tmpdir(), 'rembric-pi-filerecall-'));
+    writeFileSync(join(repoDir, '.rembric'), `PROJECT_SLUG=${PROJECT_SLUG}\n`);
+    mkdirSync(join(repoDir, 'src', 'billing'), { recursive: true });
+    writeFileSync(join(repoDir, 'src', 'billing', 'ledger.ts'), 'export const x = 1;\n');
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    execFileSync('git', ['add', '-A'], { cwd: repoDir });
+    const content = 'src/billing/ledger.ts must post entries in integer cents.';
+    const saved = new MemoryService(repos, db.handle.db).save(
+      { type: 'project', title: 'Ledger entries are integer cents', content },
+      projectScope(project.id),
+    );
+    repos.entities.linkMemory(
+      saved.id,
+      project.id,
+      extractEntities(saved.title, content),
+      new Date(),
+    );
+    memoryId = saved.id;
+  });
+
+  afterAll(() => rmSync(repoDir, { recursive: true, force: true }));
+
+  it('names the paths of read/edit/write and of bash commands, and nothing else', () => {
+    expect(
+      toolCallPaths({ toolCallId: 'a', toolName: 'read', input: { path: 'src/x.ts' } }),
+    ).toEqual(['src/x.ts']);
+    expect(
+      toolCallPaths({ toolCallId: 'b', toolName: 'bash', input: { command: 'cat src/x.ts' } }),
+    ).toEqual(['src/x.ts']);
+    expect(toolCallPaths({ toolCallId: 'c', toolName: 'grep', input: { pattern: 'x' } })).toEqual(
+      [],
+    );
+  });
+
+  it('appends the linked memory to the tool result and keeps structuredContent', async () => {
+    const harness = makeHarness('pi-filerecall-1', repoDir);
+    await harness.fire('session_start');
+    await harness.fire('before_agent_start', { prompt: 'look at the ledger' });
+    const call = await harness.fire('tool_call', {
+      toolCallId: 'call-a',
+      toolName: 'bash',
+      input: { command: 'cat src/billing/ledger.ts' },
+    });
+    expect(call).toBeUndefined();
+    const result = (await harness.fire('tool_result', {
+      toolCallId: 'call-a',
+      content: [{ type: 'text', text: 'export const x = 1;' }],
+      structuredContent: { exitCode: 0 },
+    })) as { content: { type: string; text?: string }[]; structuredContent?: unknown };
+    expect(result.content[0]).toEqual({ type: 'text', text: 'export const x = 1;' });
+    expect(result.content.at(-1)?.text).toContain('rembric: memories about src/billing/ledger.ts:');
+    expect(result.content.at(-1)?.text).toContain(`[${memoryId}]`);
+    expect(result.structuredContent).toEqual({ exitCode: 0 });
+
+    await harness.fire('tool_call', {
+      toolCallId: 'call-b',
+      toolName: 'read',
+      input: { path: 'src/billing/ledger.ts' },
+    });
+    expect(
+      await harness.fire('tool_result', {
+        toolCallId: 'call-b',
+        content: [{ type: 'text', text: 'y' }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('leaves the tool and its result untouched when the server is unreachable', async () => {
+    const saved = process.env.REMBRIC_SERVER_URL;
+    process.env.REMBRIC_SERVER_URL = 'http://127.0.0.1:9';
+    try {
+      const harness = makeHarness('pi-filerecall-2', repoDir);
+      await harness.fire('session_start');
+      await harness.fire('before_agent_start', { prompt: 'x' });
+      expect(
+        await harness.fire('tool_call', {
+          toolCallId: 'call-c',
+          toolName: 'read',
+          input: { path: 'src/billing/ledger.ts' },
+        }),
+      ).toBeUndefined();
+      expect(
+        await harness.fire('tool_result', {
+          toolCallId: 'call-c',
+          content: [{ type: 'text', text: 'z' }],
+        }),
+      ).toBeUndefined();
+    } finally {
+      process.env.REMBRIC_SERVER_URL = saved;
+    }
   });
 });
