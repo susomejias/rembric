@@ -44,6 +44,30 @@ exit 1
   return { command, calls };
 }
 
+const PROVENANCE = 'OK:{"provenance":{"predicateType":"https://slsa.dev/provenance/v1"}}';
+
+function instantWait(bound: { timeoutMs?: number; intervalMs?: number } = {}): {
+  timeoutMs: number;
+  intervalMs: number;
+  sleeps: number[];
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+} {
+  let clock = 0;
+  const sleeps: number[] = [];
+  return {
+    timeoutMs: bound.timeoutMs ?? 1000,
+    intervalMs: bound.intervalMs ?? 10,
+    sleeps,
+    now: () => clock,
+    sleep: (ms) => {
+      sleeps.push(ms);
+      clock += ms;
+      return Promise.resolve();
+    },
+  };
+}
+
 function packageFixture(): string {
   const directory = mkdtempSync(join(tmpdir(), 'rembric-package-'));
   tempDirs.push(directory);
@@ -55,36 +79,39 @@ function packageFixture(): string {
 }
 
 describe('npm publish retry safety', () => {
-  it('skips a package when the exact version already exists', () => {
+  it('skips a package when the exact version already exists', async () => {
     const packageDir = packageFixture();
     const npm = fakeNpm([
       'OK:"1.2.3"',
       'OK:{"provenance":{"predicateType":"https://slsa.dev/provenance/v1"}}',
     ]);
 
-    expect(publishPackage(packageDir, npm.command)).toBe(false);
+    await expect(publishPackage(packageDir, npm.command)).resolves.toBe(false);
     expect(readFileSync(npm.calls, 'utf8')).toBe(
       'view @rembric/example@1.2.3 version --json\n' +
         'view @rembric/example@1.2.3 dist.attestations --json\n',
     );
   });
 
-  it('fails closed when an existing package has no provenance attestation', () => {
+  it('fails closed when an existing package has no provenance attestation', async () => {
     const packageDir = packageFixture();
     const npm = fakeNpm(['OK:"1.2.3"', 'OK:']);
 
-    expect(() => publishPackage(packageDir, npm.command)).toThrow(
+    await expect(publishPackage(packageDir, npm.command)).rejects.toThrow(
       'published @rembric/example@1.2.3 has no npm provenance attestation',
     );
   });
 
-  it('publishes a missing package after an exact-version 404', () => {
+  it('publishes a missing package after an exact-version 404', async () => {
     const packageDir = packageFixture();
-    const npm = fakeNpm(['E404: E404 Not Found', 'OK:"1.2.3"']);
+    const npm = fakeNpm(['E404: E404 Not Found', 'PUBLISHED', 'OK:"1.2.3"', PROVENANCE]);
 
-    expect(publishPackage(packageDir, npm.command)).toBe(true);
+    await expect(publishPackage(packageDir, npm.command, instantWait())).resolves.toBe(true);
     expect(readFileSync(npm.calls, 'utf8')).toBe(
-      'view @rembric/example@1.2.3 version --json\npublish --provenance --access public\n',
+      'view @rembric/example@1.2.3 version --json\n' +
+        'publish --provenance --access public\n' +
+        'view @rembric/example@1.2.3 version --json\n' +
+        'view @rembric/example@1.2.3 dist.attestations --json\n',
     );
   });
 
@@ -94,6 +121,54 @@ describe('npm publish retry safety', () => {
     expect(() => isPublished('@rembric/example', '1.2.3', npm.command)).toThrow(
       'could not determine whether @rembric/example@1.2.3 is published',
     );
+  });
+});
+
+describe('npm publish waits until the registry serves the version', () => {
+  it('keeps checking while npm has accepted the publish but does not serve it yet', async () => {
+    const packageDir = packageFixture();
+    const npm = fakeNpm([
+      'E404: E404 Not Found',
+      'PUBLISHED',
+      'E404: E404 Not Found',
+      'OK:"1.2.3"',
+      PROVENANCE,
+    ]);
+    const wait = instantWait();
+
+    await expect(publishPackage(packageDir, npm.command, wait)).resolves.toBe(true);
+    expect(wait.sleeps).toEqual([wait.intervalMs]);
+  });
+
+  it('retries while the version is served before its provenance attestation', async () => {
+    const packageDir = packageFixture();
+    const npm = fakeNpm([
+      'E404: E404 Not Found',
+      'PUBLISHED',
+      'OK:"1.2.3"',
+      'OK:',
+      'OK:"1.2.3"',
+      PROVENANCE,
+    ]);
+    const wait = instantWait();
+
+    await expect(publishPackage(packageDir, npm.command, wait)).resolves.toBe(true);
+    expect(wait.sleeps).toHaveLength(1);
+  });
+
+  it('fails visibly when the registry never serves the version within the bound', async () => {
+    const packageDir = packageFixture();
+    const npm = fakeNpm([
+      'E404: E404 Not Found',
+      'PUBLISHED',
+      ...Array.from({ length: 10 }, () => 'E404: E404 Not Found'),
+    ]);
+    const wait = instantWait({ timeoutMs: 30, intervalMs: 10 });
+
+    await expect(publishPackage(packageDir, npm.command, wait)).rejects.toThrow(
+      'npm accepted @rembric/example@1.2.3 but the registry did not serve it within 30 ms',
+    );
+    expect(wait.sleeps).toEqual([10, 10, 10]);
   });
 });
 

@@ -15,16 +15,15 @@ permissions:
   pull-requests: write
   packages: write
 
-# Serialize runs on main so a rapid second merge never cancels the first
-# run's tag-minting. cancel-in-progress: false queues instead of cancelling —
-# the proximate fix for missing component tags (and lost release anchors).
-concurrency:
-  group: release-please-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Serialize tag-minting across runs on main so a rapid second merge never
+    # cancels the first run's release. Scoped to this job so a publish still
+    # running from an earlier release never queues the next one.
+    concurrency:
+      group: release-please-${{ github.ref }}
+      cancel-in-progress: false
     outputs:
       # Multi-component manifest mode: release-please-action exposes
       # `releases_created` (object keyed by package path) and `paths_released`
@@ -55,6 +54,9 @@ jobs:
     # trigger Docker publish.
     needs: release-please
     if: ${{ needs.release-please.outputs.server_release_created == 'true' || github.event.inputs.force_publish == 'true' }}
+    concurrency:
+      group: publish-docker-${{ github.ref }}
+      cancel-in-progress: false
     uses: ./.github/workflows/docker-publish.yml
     with:
       tag: ${{ needs.release-please.outputs.server_tag_name }}
@@ -71,6 +73,9 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.plugin_release_created == 'true' }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-npm-${{ github.ref }}
+      cancel-in-progress: false
     # id-token is the OIDC identity for trusted publishing, scoped to this job so
     # no other job in the run can mint a publish token. No long-lived registry
     # token by policy — openspec/specs/supply-chain-hygiene/spec.md.
