@@ -98,6 +98,17 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/subagent-report.sh codex-cli",
+            "timeout": 3
+          }
+        ]
+      }
     ]
   }
 }

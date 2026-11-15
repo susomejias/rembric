@@ -26,6 +26,9 @@
 #   - rembric_command_paths <cmd>     → the file paths a shell command names
 #   - rembric_patch_paths <patch>     → the files an apply_patch text names
 #   - rembric_file_recall_*           → file-recall claims, siblings and reset
+#   - rembric_stdin_string_field <in> <key> [jq] → one string field of hook stdin
+#   - rembric_subagent_report <agent> <stdin> → forwards a subagent's report
+#                                       to /sessions/<id>/learnings
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
 # a plugin-side problem NEVER aborts the host agent.
@@ -555,6 +558,56 @@ rembric_turn_report() {
 # Recall-hints reader: same contract as the turn report.
 rembric_recall_hints() {
   rembric_post_lines "${1:-}" "${2:-}"
+}
+
+# Echoes a top-level string field of hook stdin (jq path or `jq_path`), or
+# nothing for absent/null/non-string. Both arms drop trailing newlines alike.
+rembric_stdin_string_field() {
+  local input="${1:-}" key="${2:-}" jq_path="${3:-}"
+  { [ -z "$input" ] || [ -z "$key" ]; } && return 0
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$input" | jq -r --arg k "$key" "${jq_path:-.[\$k]} | strings" 2>/dev/null || true
+    return 0
+  fi
+  local raw
+  raw="$(rembric_json_raw_string_field "$input" "$key")"
+  [ -z "$raw" ] && return 0
+  rembric_json_decode_string "$raw"
+  printf '%s' "$REMBRIC_JSON_DECODED"
+}
+
+# Forwards a finished subagent's report (SubagentHandback PreToolUse or
+# SubagentStop stdin) to the parent session's learnings route. Needs
+# rembric_redact_private (_transcript.sh) and sends nothing without it.
+rembric_subagent_report() {
+  local agent="${1:-}" input="${2:-}"
+  [ -z "$input" ] && return 0
+  declare -F rembric_redact_private >/dev/null || return 0
+  local event report agent_type session_id cwd slug body
+  event="$(rembric_stdin_string_field "$input" hook_event_name)"
+  case "$event" in
+  PreToolUse) report="$(rembric_stdin_string_field "$input" message '.tool_input.message')" ;;
+  SubagentStop) report="$(rembric_stdin_string_field "$input" last_assistant_message)" ;;
+  *) return 0 ;;
+  esac
+  agent_type="$(rembric_stdin_string_field "$input" agent_type)"
+  if [ "$event" = SubagentStop ] && [ "$agent" = claude-code ] && [ -z "$agent_type" ]; then
+    return 0
+  fi
+  session_id="$(rembric_session_id_from_stdin_json "$input")"
+  cwd="$(rembric_cwd_from_stdin_json "$input")"
+  [ -z "$cwd" ] && cwd="$PWD"
+  slug="$(rembric_read_project_slug "$cwd")"
+  { [ -z "$session_id" ] || [ -z "$slug" ]; } && return 0
+  report="$(rembric_redact_private "$report")"
+  case "$report" in
+  *[Kk][Ee][Yy]" "[Ll][Ee][Aa][Rr][Nn][Ii][Nn][Gg][Ss]*) ;;
+  *) return 0 ;;
+  esac
+  body="{\"report\":\"$(rembric_json_escape "$report")\""
+  [ -n "$agent_type" ] && body="${body},\"agentType\":\"$(rembric_json_escape "$agent_type")\""
+  local REMBRIC_POST_MAX_TIME="${REMBRIC_POST_MAX_TIME:-2}"
+  rembric_post "/api/${slug}/sessions/${session_id}/learnings" "${body}}"
 }
 
 # The shell-path rule pinned by apps/plugin/test/file-recall-fixtures.json, shared

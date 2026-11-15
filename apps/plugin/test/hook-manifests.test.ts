@@ -22,8 +22,10 @@ const handlerCount = (hooks: Record<string, HookGroup[]>): number =>
     0,
   );
 
+const commandPrefix = (command: string): string => command.replace(/scripts\/.*$/, '');
+
 describe('hooks.json (Claude Code)', () => {
-  it('declares exactly seven event types', () => {
+  it('declares exactly eight event types', () => {
     expect(eventTypes(claudeHooks)).toEqual(
       [
         'SessionStart',
@@ -33,12 +35,13 @@ describe('hooks.json (Claude Code)', () => {
         'PreCompact',
         'PostCompact',
         'Stop',
+        'SubagentStop',
       ].sort(),
     );
   });
 
-  it('carries exactly ten handler entries', () => {
-    expect(handlerCount(claudeHooks)).toBe(10);
+  it('carries exactly twelve handler entries', () => {
+    expect(handlerCount(claudeHooks)).toBe(12);
   });
 
   it('declares no PostToolUse entry', () => {
@@ -62,13 +65,44 @@ describe('hooks.json (Claude Code)', () => {
     ).toEqual(['prompt-search.sh', 'prompt-nudge.sh', 'prompt-hints.sh']);
   });
 
-  it('declares one synchronous file-recall PreToolUse entry on file tools and Bash', () => {
-    expect(claudeHooks.PreToolUse).toHaveLength(1);
-    const [group] = claudeHooks.PreToolUse;
-    expect(group!.matcher).toBe('Read|Edit|Write|MultiEdit|NotebookEdit|Bash');
+  it('declares exactly two PreToolUse entries: file recall, then the SubagentHandback forwarder', () => {
+    expect(claudeHooks.PreToolUse.map((group) => group.matcher)).toEqual([
+      'Read|Edit|Write|MultiEdit|NotebookEdit|Bash',
+      'SubagentHandback',
+    ]);
+  });
+
+  it('keeps the file-recall PreToolUse entry synchronous on file tools and Bash', () => {
+    const group = claudeHooks.PreToolUse[0];
     expect(group!.hooks).toHaveLength(1);
+    expect(group!.hooks[0]!.command).toMatch(/scripts\/file-recall\.sh claude-code$/);
     expect(group!.hooks[0]!.async).toBeUndefined();
     expect(group!.hooks[0]!.timeout).toBe(2);
+  });
+
+  it('forwards a SubagentHandback report asynchronously with the plugin credentials', () => {
+    const group = claudeHooks.PreToolUse[1];
+    expect(group!.hooks).toHaveLength(1);
+    const [entry] = group!.hooks;
+    expect(entry!.type).toBe('command');
+    expect(entry!.command).toMatch(/scripts\/subagent-report\.sh claude-code$/);
+    expect(entry!.async).toBe(true);
+    expect(commandPrefix(entry!.command)).toBe(
+      commandPrefix(claudeHooks.PreToolUse[0]!.hooks[0]!.command),
+    );
+  });
+
+  it('declares one matcher-less asynchronous SubagentStop entry, invoking subagent-report.sh', () => {
+    expect(claudeHooks.SubagentStop).toHaveLength(1);
+    expect(Object.keys(claudeHooks.SubagentStop[0]!)).toEqual(['hooks']);
+    expect(claudeHooks.SubagentStop[0]!.hooks).toHaveLength(1);
+    const [entry] = claudeHooks.SubagentStop[0]!.hooks;
+    expect(entry!.type).toBe('command');
+    expect(entry!.command).toMatch(/scripts\/subagent-report\.sh claude-code$/);
+    expect(entry!.async).toBe(true);
+    expect(commandPrefix(entry!.command)).toBe(
+      commandPrefix(claudeHooks.PreToolUse[0]!.hooks[0]!.command),
+    );
   });
 
   it('declares exactly one synchronous Stop entry, invoking stop-report.sh', () => {
@@ -80,7 +114,7 @@ describe('hooks.json (Claude Code)', () => {
 });
 
 describe('hooks.codex.json (Codex CLI)', () => {
-  it('declares exactly seven event types', () => {
+  it('declares exactly eight event types', () => {
     expect(eventTypes(codexHooks)).toEqual(
       [
         'SessionStart',
@@ -90,12 +124,24 @@ describe('hooks.codex.json (Codex CLI)', () => {
         'PreCompact',
         'PostCompact',
         'SessionEnd',
+        'SubagentStop',
       ].sort(),
     );
   });
 
-  it('carries exactly ten handler entries', () => {
-    expect(handlerCount(codexHooks)).toBe(10);
+  it('carries exactly eleven handler entries', () => {
+    expect(handlerCount(codexHooks)).toBe(11);
+  });
+
+  it('declares one matcher-less synchronous SubagentStop entry with a 3-second timeout', () => {
+    expect(codexHooks.SubagentStop).toHaveLength(1);
+    expect(Object.keys(codexHooks.SubagentStop[0]!)).toEqual(['hooks']);
+    expect(codexHooks.SubagentStop[0]!.hooks).toHaveLength(1);
+    const [entry] = codexHooks.SubagentStop[0]!.hooks;
+    expect(entry!.type).toBe('command');
+    expect(entry!.command).toBe('"${CLAUDE_PLUGIN_ROOT}"/scripts/subagent-report.sh codex-cli');
+    expect(entry!.timeout).toBe(3);
+    expect(entry!.async).toBeUndefined();
   });
 
   it('declares no PostToolUse entry', () => {
@@ -206,10 +252,12 @@ describe('every hook invokes the script the spec names', () => {
       'UserPromptSubmit command scripts/prompt-nudge.sh',
       'UserPromptSubmit command scripts/prompt-hints.sh',
       'PreToolUse command scripts/file-recall.sh claude-code',
+      'PreToolUse command scripts/subagent-report.sh claude-code',
       'SessionEnd command scripts/session-end.sh claude-code',
       'PreCompact command scripts/pre-compact.sh claude-code',
       'PostCompact command scripts/post-compaction.sh',
       'Stop command scripts/stop-report.sh claude-code',
+      'SubagentStop command scripts/subagent-report.sh claude-code',
     ]);
   });
 
@@ -225,6 +273,7 @@ describe('every hook invokes the script the spec names', () => {
       'PreCompact command scripts/pre-compact.sh codex-cli',
       'PostCompact command scripts/post-compaction.sh',
       'SessionEnd command scripts/session-end.sh codex-cli',
+      'SubagentStop command scripts/subagent-report.sh codex-cli',
     ]);
   });
 
