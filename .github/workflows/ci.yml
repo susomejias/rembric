@@ -209,7 +209,38 @@ jobs:
       - name: Retrieval eval
         run: pnpm run eval
 
+  changes:
+    # Whether a pull request can reach the image or the installer's server
+    # path (scripts/docker-relevant-changes.mjs; unclassified paths count as
+    # reaching it). A push to main always builds: it exports the cache. A range
+    # that cannot be resolved fails this job, which reds the run instead of
+    # skipping the build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            node scripts/docker-relevant-changes.mjs --base "$BASE" --head "$HEAD"
+          else
+            echo docker=true >> "$GITHUB_OUTPUT"
+          fi
+
   docker-build-check:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
     # Safety net that mirrors the release-publish path so a build break is
     # caught at PR time, not at publish. The publish builds the (distroless)
     # runtime stage NATIVELY on two arches — so this check does too, and boots
