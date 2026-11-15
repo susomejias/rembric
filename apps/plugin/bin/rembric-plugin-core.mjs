@@ -1,4 +1,13 @@
+import { execFile } from 'node:child_process';
+import { stat } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
+
 export const POST_TIMEOUT_MS = 3000;
+// A tool waits on this one, so it gets the recall-hints budget, not the background one.
+const FILE_RECALL_TIMEOUT_MS = 500;
+const FILE_RECALL_GIT_TIMEOUT_MS = 1000;
+const COMMAND_PATHS_MAX = 5;
+const FILE_RECALL_SIBLINGS_MAX = 64;
 // Turn-START path: it must resolve before the model's first token, so its budget is a fraction of the background POST timeout.
 const RECALL_HINTS_TIMEOUT_MS = 500;
 // The client cuts first: what never leaves the process cannot leak.
@@ -39,6 +48,64 @@ export function underscoreToolNames(text) {
 /** Read per use, not once: an override set after this module loads still wins. */
 function idleDebounceMs() {
   return Number(process.env.REMBRIC_IDLE_DEBOUNCE_MS ?? IDLE_DEBOUNCE_MS);
+}
+
+/** The shell-path rule pinned by apps/plugin/test/file-recall-fixtures.json, shared with _api.sh and Hermes. */
+export function extractCommandPaths(command) {
+  if (!command) return [];
+  const paths = [];
+  for (let token of String(command).split(/[ \t\n"'`=();|&<>,:]+/)) {
+    while (token.startsWith('./')) token = token.slice(2);
+    if (token.length <= 1) continue;
+    const absolute = token.startsWith('/');
+    if (!absolute && !(token.includes('/') && /\.[A-Za-z0-9]+$/.test(token))) continue;
+    if (paths.includes(token)) continue;
+    paths.push(token);
+    if (paths.length >= COMMAND_PATHS_MAX) break;
+  }
+  return paths;
+}
+
+function gitOutput(cwd, args, env = process.env) {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['-c', 'core.quotePath=false', '-C', cwd, ...args],
+      { timeout: FILE_RECALL_GIT_TIMEOUT_MS, env },
+      (err, stdout) => resolve(err ? null : String(stdout)),
+    );
+  });
+}
+
+/** Literal pathspecs: a directory or glob token must never stand in for a file it happens to match. */
+async function trackedRepoPath(cwd, candidate) {
+  const file = await stat(isAbsolute(candidate) ? candidate : join(cwd, candidate)).catch(
+    () => null,
+  );
+  if (!file?.isFile()) return null;
+  const out = await gitOutput(
+    cwd,
+    ['ls-files', '--full-name', '--error-unmatch', '--', candidate],
+    {
+      ...process.env,
+      GIT_LITERAL_PATHSPECS: '1',
+    },
+  );
+  return out?.split('\n')[0] || null;
+}
+
+async function sameNameSiblings(cwd, rel) {
+  const name = rel.split('/').pop() ?? '';
+  if (!name || /[[\]*?]/.test(name)) return undefined;
+  const out = await gitOutput(cwd, [
+    'ls-files',
+    '--full-name',
+    '--',
+    `:(top)*/${name}`,
+    `:(top)${name}`,
+  ]);
+  const list = out?.split('\n').filter(Boolean) ?? [];
+  return list.length > 0 && list.length <= FILE_RECALL_SIBLINGS_MAX ? list : undefined;
 }
 
 export function diag(line) {
@@ -87,6 +154,8 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
   const pendingLines = new Map();
   const turnTitleSent = new Set();
   const toolUsedSessions = new Set();
+  const fileRecallSent = new Map();
+  const fileRecallExhausted = new Set();
   let processResumed = null;
 
   async function doPost(path, body, timeoutMs = POST_TIMEOUT_MS) {
@@ -327,6 +396,39 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return Array.isArray(json?.lines) ? json.lines.filter((l) => typeof l === 'string') : [];
   }
 
+  async function fileRecall(sessionId, cwd, candidates, timeoutMs = FILE_RECALL_TIMEOUT_MS) {
+    if (disabled || !sessionId || !cwd) return [];
+    if (subAgentSessions.has(sessionId) || !knownSessions.has(sessionId)) return [];
+    const lines = [];
+    for (const candidate of candidates.slice(0, COMMAND_PATHS_MAX)) {
+      if (fileRecallExhausted.has(sessionId)) break;
+      const rel = await trackedRepoPath(cwd, candidate);
+      if (!rel) continue;
+      let sent = fileRecallSent.get(sessionId);
+      if (!sent) {
+        sent = new Set();
+        fileRecallSent.set(sessionId, sent);
+      }
+      if (sent.has(rel)) continue;
+      sent.add(rel);
+      const siblings = await sameNameSiblings(cwd, rel);
+      const path = `/api/${slug}/sessions/${sessionId}/file-recall`;
+      const res = await doPost(path, siblings ? { path: rel, siblings } : { path: rel }, timeoutMs);
+      if (!res) break;
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        diag(`POST ${path} ${res.status} body=${detail}`);
+        break;
+      }
+      const json = await res.json().catch(() => null);
+      if (json?.exhausted === true) fileRecallExhausted.add(sessionId);
+      if (Array.isArray(json?.lines)) {
+        lines.push(...json.lines.filter((l) => typeof l === 'string'));
+      }
+    }
+    return lines;
+  }
+
   async function endSession(sessionId) {
     if (subAgentSessions.has(sessionId)) return;
     if (!knownSessions.has(sessionId)) return;
@@ -374,6 +476,8 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     pendingLines.delete(sessionId);
     turnTitleSent.delete(sessionId);
     toolUsedSessions.delete(sessionId);
+    fileRecallSent.delete(sessionId);
+    fileRecallExhausted.delete(sessionId);
     const entries = sessionMessages.get(sessionId) ?? [];
     sessionMessages.delete(sessionId);
     const pending = pendingFlush.get(sessionId);
@@ -398,6 +502,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     beginTurn,
     reportTurn,
     recallHints,
+    fileRecall,
     appendUserMessage,
     appendAssistantMessage,
     upsertAssistantMessage,
