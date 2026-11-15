@@ -63,7 +63,13 @@ type BeforeAgentStartResult = {
 };
 
 type MessageEndEvent = {
-  message?: { role?: string; content?: unknown };
+  message?: { role?: string; content?: unknown; customType?: string };
+};
+
+type ToolExecutionEndEvent = {
+  toolName: string;
+  result?: { content?: unknown };
+  isError?: boolean;
 };
 
 type SessionShutdownEvent = { reason?: string; targetSessionFile?: string };
@@ -87,6 +93,11 @@ const DISCOVERY_TIMEOUT_MS = 10_000;
 
 const CLOSING_SHUTDOWN_REASONS = new Set(['quit', 'new', 'resume', 'fork']);
 const PI_SUBAGENTS_CHILD_TAG = '<active_agent name=';
+
+const SUBAGENT_SURFACES = {
+  tools: new Set(['subagent', 'subagent_run', 'subagent_continue', 'subagent_result']),
+  messages: new Set(['subagent-notify', 'gentle-agents.message']),
+};
 
 function discoveryDeadline(): AbortSignal {
   return AbortSignal.timeout(
@@ -421,10 +432,25 @@ export default function rembric(pi: ExtensionApi): void {
     if (!core) return;
     const sessionId = ctx.sessionManager.getSessionId();
     if (messageIndicatesToolUse(event.message)) core.markToolUsed(sessionId);
+    if (
+      event.message?.role === 'custom' &&
+      SUBAGENT_SURFACES.messages.has(event.message.customType ?? '')
+    ) {
+      void core.postSubagentReport(sessionId, assistantText(event.message.content));
+      return;
+    }
     if (event.message?.role !== 'assistant') return;
     const text = assistantText(event.message.content);
     if (!text) return;
     core.appendAssistantMessage(sessionId, text);
+  });
+
+  pi.on('tool_execution_end', (event: ToolExecutionEndEvent, ctx) => {
+    if (!core || event.isError || !SUBAGENT_SURFACES.tools.has(event.toolName)) return;
+    void core.postSubagentReport(
+      ctx.sessionManager.getSessionId(),
+      assistantText(event.result?.content),
+    );
   });
 
   pi.on('agent_settled', (_event, ctx) => {

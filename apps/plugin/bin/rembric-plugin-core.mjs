@@ -10,6 +10,8 @@ const COMMAND_PATHS_MAX = 5;
 const FILE_RECALL_SIBLINGS_MAX = 64;
 // Turn-START path: it must resolve before the model's first token, so its budget is a fraction of the background POST timeout.
 const RECALL_HINTS_TIMEOUT_MS = 500;
+const SUBAGENT_REPORT_TIMEOUT_MS = 2000;
+const KEY_LEARNINGS_PHRASE = /key learnings/i;
 // The client cuts first: what never leaves the process cannot leak.
 const RECALL_PROMPT_MAX_CHARS = 500;
 const IDLE_DEBOUNCE_MS = 500;
@@ -182,8 +184,8 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     }
   }
 
-  async function rembricPost(path, body) {
-    const res = await doPost(path, body);
+  async function rembricPost(path, body, timeoutMs = POST_TIMEOUT_MS) {
+    const res = await doPost(path, body, timeoutMs);
     if (!res) return false;
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
@@ -429,6 +431,21 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     return lines;
   }
 
+  async function postSubagentReport(parentSessionId, report, agentType) {
+    if (!parentSessionId || typeof report !== 'string') return false;
+    if (subAgentSessions.has(parentSessionId)) return false;
+    if (!knownSessions.has(parentSessionId)) return false;
+    const redacted = stripPrivateTags(report);
+    if (!KEY_LEARNINGS_PHRASE.test(redacted)) return false;
+    const body = { report: redacted };
+    if (typeof agentType === 'string' && agentType) body.agentType = agentType;
+    return await rembricPost(
+      `/api/${slug}/sessions/${parentSessionId}/learnings`,
+      body,
+      SUBAGENT_REPORT_TIMEOUT_MS,
+    );
+  }
+
   async function endSession(sessionId) {
     if (subAgentSessions.has(sessionId)) return;
     if (!knownSessions.has(sessionId)) return;
@@ -503,6 +520,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
     reportTurn,
     recallHints,
     fileRecall,
+    postSubagentReport,
     appendUserMessage,
     appendAssistantMessage,
     upsertAssistantMessage,
