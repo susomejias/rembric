@@ -35,7 +35,7 @@ It is an orchestrator — opencode uses its scripts, Claude/Codex their marketpl
 
 The rest of this file is the Claude Code plugin reference. For Codex see [`docs/agents.md`](../docs/agents.md). For Hermes see [`plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md). For opencode see [`plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md). For Pi see [`plugin/.pi-plugin/README.md`](./.pi-plugin/README.md).
 
-> **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 6 hook types via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
+> **Using Codex CLI?** Hooks are stable and on by default as of `codex-cli 0.142.3+`; the one-time Codex-side step for hooks to fire is approving the 7 hook types via `/hooks` inside Codex. Full walk-through (including the `REMBRIC_*` shell-env requirement and the symptom-vs-cause troubleshooting table) lives in [`docs/agents.md`](../docs/agents.md#trust-hooks-required).
 
 ## Batch tools and recovery
 
@@ -48,11 +48,13 @@ Before rewriting a resumed summary, call `memory.session_get_batch({ ids: [sessi
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
 - **A zero-dependency stdio bridge** (`mcp-bridge/`) that reads `PROJECT_SLUG` from `.rembric`, path-scopes the MCP URL, and recovers a terminated session without replaying earlier tool calls.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
-- **Eight lifecycle hooks** — all `command`-type, all POST to Rembric's HTTP API directly so sessions are tracked regardless of whether the agent remembers to call them:
+- **Ten hooks** — all `command`-type, all calling Rembric's HTTP API directly so sessions are tracked and memory reaches the agent regardless of whether the agent remembers to call a tool:
   - `SessionStart` (matcher `startup|resume|clear|fork`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent), then `/api/<slug>/sessions/<id>/resume`, which returns a row a previous run ended (or the sweep abandoned) to `active` so a reopened conversation keeps its memories. Also nudges the agent to load recent context.
   - `SessionStart` (matcher `compact`) injects a multi-line nudge to read `memory.session_get_batch({ ids: [sessionId] })` / `sessions[0]` in full before rewriting via `memory.session_summary`; use `memory.context` only for missing detail.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
   - `UserPromptSubmit` (matcher-less, every prompt) prints, on plain stdout, whatever the previous turn's report cached: the reminder the SERVER composed from the session's own state — a `memory.save` clause when tool work followed the session's last saved memory, and a session-summary refresh when the summary is stale — plus the session-opening line on a newly created session. It counts nothing — the firing decision belongs to the server.
+  - `UserPromptSubmit` (matcher-less, every prompt) asks `/api/<slug>/sessions/<id>/recall-hints` for memories linked to identifiers in the prompt and prints any lines it returns.
+  - `PreToolUse` (matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`) asks `/api/<slug>/sessions/<id>/file-recall` for the memories linked to the files the tool is about to read or edit — including files a shell command names (`cat`, `sed`, `grep`, `rg`, `git show`, `rtk`…) — and hands them to the model as `additionalContext`. Each file is asked about once per session (again after a compaction), at most ten files per session get a note, and any failure is silent: the tool always runs.
   - `PreCompact` POSTs the live transcript to `/api/<slug>/sessions/<id>/summary` BEFORE compaction wipes context, so the snapshot survives independent of model cooperation.
   - `PostCompact` POSTs the model-authored `compaction_summary` (delivered on stdin) directly to `/api/<slug>/sessions/<id>/summary` — the highest-quality summary we can capture.
   - `Stop` (synchronous, side-effect only) reports the finished turn to `/api/<slug>/sessions/<id>/turn` — whether it invoked a tool, and the first prompt as a provisional title — and caches the reminder lines the server hands back for the next `UserPromptSubmit`. It emits nothing to the model.
@@ -175,15 +177,16 @@ is uploaded as `Connect with [REDACTED] and check the row count.`
 
 ## Token budget
 
-| What                         | Cost      | When                               |
-| ---------------------------- | --------- | ---------------------------------- |
-| 4 command listings           | ≤ 40 tok  | always-on (per turn)               |
-| SessionStart nudge (startup) | ~ 20 tok  | once per session                   |
-| SessionStart nudge (compact) | ~ 120 tok | once per /compact (model-context)  |
-| UserPromptSubmit nudge       | ~ 20 tok  | per matched prompt                 |
-| PreCompact                   | 0 tok     | side effect; no model output       |
-| PostCompact                  | 0 tok     | side effect; no model output       |
-| SessionEnd                   | 0 tok     | side effect; runs after model exit |
+| What                         | Cost      | When                                                         |
+| ---------------------------- | --------- | ------------------------------------------------------------ |
+| 4 command listings           | ≤ 40 tok  | always-on (per turn)                                         |
+| SessionStart nudge (startup) | ~ 20 tok  | once per session                                             |
+| SessionStart nudge (compact) | ~ 120 tok | once per /compact (model-context)                            |
+| UserPromptSubmit nudge       | ~ 20 tok  | per matched prompt                                           |
+| PreToolUse file recall       | ≤ 256 tok | first touch of a file with memories (≤ 10 files per session) |
+| PreCompact                   | 0 tok     | side effect; no model output                                 |
+| PostCompact                  | 0 tok     | side effect; no model output                                 |
+| SessionEnd                   | 0 tok     | side effect; runs after model exit                           |
 
 The proactive-save protocol travels via the MCP `initialize.instructions` (~1 400 chars, paid once per connection by every client) — it does not show up in the plugin's per-turn budget.
 

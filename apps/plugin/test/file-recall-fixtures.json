@@ -1,0 +1,52 @@
+{
+  "commands": [
+    { "command": "cat packages/db/src/migrate.ts", "paths": ["packages/db/src/migrate.ts"] },
+    { "command": "sed -n 1,40p apps/web/src/lib/api.ts", "paths": ["apps/web/src/lib/api.ts"] },
+    {
+      "command": "grep -n foo packages/core/src/services/memory.ts packages/core/src/services/review.ts",
+      "paths": ["packages/core/src/services/memory.ts", "packages/core/src/services/review.ts"]
+    },
+    {
+      "command": "rg -n 'fileRecall' packages/core/src/services/agent-sessions.ts",
+      "paths": ["packages/core/src/services/agent-sessions.ts"]
+    },
+    {
+      "command": "git show HEAD:packages/db/src/schema/memory.ts",
+      "paths": ["packages/db/src/schema/memory.ts"]
+    },
+    { "command": "rtk read apps/plugin/scripts/_api.sh", "paths": ["apps/plugin/scripts/_api.sh"] },
+    {
+      "command": "cat \"apps/web/src/app/api/[slug]/sessions/[id]/end/route.ts\"",
+      "paths": ["apps/web/src/app/api/[slug]/sessions/[id]/end/route.ts"]
+    },
+    { "command": "head -20 ./src/app.ts", "paths": ["src/app.ts"] },
+    { "command": "cat ../other/x.ts /etc/hosts", "paths": ["../other/x.ts", "/etc/hosts"] },
+    { "command": "ls -la && pwd", "paths": [] },
+    {
+      "command": "cat a/1.ts a/2.ts a/3.ts a/4.ts a/5.ts a/6.ts",
+      "paths": ["a/1.ts", "a/2.ts", "a/3.ts", "a/4.ts", "a/5.ts"]
+    },
+    { "command": "grep -rn TODO packages/", "paths": [] },
+    {
+      "command": "node scripts/mutate.mjs --file packages/core/src/x.ts --spec=packages/core/src/x.test.ts",
+      "paths": ["scripts/mutate.mjs", "packages/core/src/x.ts", "packages/core/src/x.test.ts"]
+    },
+    { "command": "cat src/a.ts src/a.ts", "paths": ["src/a.ts"] },
+    { "command": "echo done > out/log.txt", "paths": ["out/log.txt"] },
+    { "command": "cat README.md", "paths": [] },
+    { "command": "grep -n x src/app.ts:12", "paths": ["src/app.ts"] },
+    { "command": "ls *.ts src/*.ts", "paths": ["src/*.ts"] },
+    { "command": "cd / && cat src/app.ts", "paths": ["src/app.ts"] },
+    {
+      "command": "sed -n '1,5p' src/one.ts\ncat src/two.ts",
+      "paths": ["src/one.ts", "src/two.ts"]
+    }
+  ],
+  "patches": [
+    {
+      "patch": "*** Begin Patch\n*** Update File: apps/web/src/lib/validation.ts\n@@\n-a\n+b\n*** Add File: src/new.ts\n+x\n*** Delete File: src/old.ts\n*** End Patch",
+      "paths": ["apps/web/src/lib/validation.ts", "src/new.ts", "src/old.ts"]
+    },
+    { "patch": "*** Begin Patch\n*** End Patch", "paths": [] }
+  ]
+}

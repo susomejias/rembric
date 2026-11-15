@@ -31,6 +31,9 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/resume" '{}'
 fi
 
+# The server releases its file-recall state on that resume; the local claims go too.
+rembric_file_recall_reset "$SESSION_ID"
+
 cat <<'PROTOCOL'
 rembric: Resumed from a compaction. BEFORE continuing:
 1. Call memory.session_get_batch({ ids: [sessionId] }) and read sessions[0] in full.

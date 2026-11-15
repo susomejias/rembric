@@ -46,6 +46,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/file-recall.sh claude-code",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [
