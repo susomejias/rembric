@@ -57,6 +57,7 @@ jobs:
     concurrency:
       group: publish-docker-${{ github.ref }}
       cancel-in-progress: false
+      queue: max
     uses: ./.github/workflows/docker-publish.yml
     with:
       tag: ${{ needs.release-please.outputs.server_tag_name }}
@@ -76,6 +77,7 @@ jobs:
     concurrency:
       group: publish-npm-${{ github.ref }}
       cancel-in-progress: false
+      queue: max
     # id-token is the OIDC identity for trusted publishing, scoped to this job so
     # no other job in the run can mint a publish token. No long-lived registry
     # token by policy — openspec/specs/supply-chain-hygiene/spec.md.

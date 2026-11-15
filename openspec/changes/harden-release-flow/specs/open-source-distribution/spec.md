@@ -62,7 +62,7 @@ The transport package is covered by that same changelog: a change scoped to `app
 - **WHEN** `release-please.yml` runs are triggered for both
 - **THEN** the `release-please` job's `concurrency` guard (`cancel-in-progress: false`) SHALL queue the second run's `release-please` job rather than cancel the first
 - **AND** the first run's tag-minting SHALL complete, so no merged release PR is left untagged (and no anchor is lost)
-- **AND** the guard SHALL be scoped to that job, not to the workflow, so a `publish-docker` or `publish-npm` job still running from an earlier release SHALL NOT hold back the next release; each publish job SHALL serialize in its own group with `cancel-in-progress: false`
+- **AND** the guard SHALL be scoped to that job, not to the workflow, so a `publish-docker` or `publish-npm` job still running from an earlier release SHALL NOT hold back the next release; each publish job SHALL serialize in its own group with `cancel-in-progress: false` and `queue: max`, so a publish waiting behind another is queued rather than replaced and an already-tagged release never loses its Docker image or npm package
 
 #### Scenario: Merging one release PR does not leave the other conflicting
 

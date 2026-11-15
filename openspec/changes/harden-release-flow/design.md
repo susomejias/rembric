@@ -13,7 +13,7 @@ Two release-please components (`server`, `plugin`) release independently through
 
 ### D2. Serialize tag-minting per job, publishing per publish job
 
-The guard exists so a second merge never cancels the first run's tag-minting, which happens in the `release-please` job. Scoping it there keeps that guarantee and stops a running publish from holding the next release. `publish-docker` gets its own serial group because `docker-publish.yml`'s internal group is keyed by tag, so without it two different server releases could publish concurrently and race the `latest` tag; `publish-npm` gets one for the same reason. The per-group pending limit (one pending run; a newer one replaces it) is unchanged from today.
+The guard exists so a second merge never cancels the first run's tag-minting, which happens in the `release-please` job. Scoping it there keeps that guarantee and stops a running publish from holding the next release. `publish-docker` gets its own serial group because `docker-publish.yml`'s internal group is keyed by tag, so without it two different server releases could publish concurrently and race the `latest` tag; `publish-npm` gets one for the same reason. Both publish groups set `queue: max` (up to 100 pending, first-in-first-out, never replaced). Without it the default `single` mode replaces a pending job with the next one: at workflow level that cost nothing, because a replaced run had not tagged yet and the next run tags any merged release PR; at job level the replaced job would be the publish of a release that is already tagged, which nothing re-runs. The `release-please` job keeps the default, since a replaced pending tagging job loses nothing.
 
 ### D3. Confirm availability with the existing check
 
