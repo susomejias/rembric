@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.2](https://github.com/susomejias/rembric/compare/server-v0.31.1...server-v0.31.2) (2026-11-15)
+
+
+### Features
+
+* **api:** capture subagent learnings into the parent session ([500c869](https://github.com/susomejias/rembric/commit/500c86978cbcbac0f3672039124f976a0f62d31a)), closes [#490](https://github.com/susomejias/rembric/issues/490)
+
 ## [0.31.1](https://github.com/susomejias/rembric/compare/server-v0.31.0...server-v0.31.1) (2026-11-15)
 
 
