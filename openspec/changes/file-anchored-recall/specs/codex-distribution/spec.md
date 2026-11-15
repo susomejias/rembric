@@ -4,7 +4,7 @@
 
 Under `codex-cli`, `file-recall.sh` SHALL read `session_id`, `cwd`, `tool_name` and `tool_input.command` from stdin.
 - **`Bash`:** paths come from the command string through the shared extractor.
-- **`apply_patch`:** paths come from the patch's `*** Add File:`, `*** Update File:` and `*** Delete File:` lines.
+- **`apply_patch`:** paths come from the patch's `*** Add File:`, `*** Update File:` and `*** Delete File:` lines: the first five distinct ones, the same cap a shell command gets.
 - **`cwd`:** below Codex 0.166.0, `cwd` is the turn's working directory rather than the command's. Relative paths SHALL be resolved against it, and a path that is not tracked there is dropped, as for every client.
 - **Sub-agents:** a call whose stdin carries `agent_id` SHALL be skipped.
 
