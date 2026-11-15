@@ -10,6 +10,9 @@ import { parseDotenv, readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import RembricPluginV2Default, { RembricPlugin } from './plugin.js';
 
+// A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
+
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginVersion = (
   JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version: string }

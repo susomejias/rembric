@@ -9,6 +9,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import fixtures from './file-recall-fixtures.json' with { type: 'json' };
 
+// A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
+
 const here = dirname(fileURLToPath(import.meta.url));
 const scripts = join(here, '..', 'scripts');
 const fileRecallSh = join(scripts, 'file-recall.sh');

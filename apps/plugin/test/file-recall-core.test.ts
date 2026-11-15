@@ -10,6 +10,9 @@ import { createSessionProtocol, extractCommandPaths } from '../bin/rembric-plugi
 
 import fixtures from './file-recall-fixtures.json' with { type: 'json' };
 
+// A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
+
 describe('shell-path extraction (JS core) agrees with the shared fixture', () => {
   it.each(fixtures.commands.map((c) => [c.command, c.paths] as const))('%j', (command, paths) => {
     expect(extractCommandPaths(command)).toEqual(paths);
