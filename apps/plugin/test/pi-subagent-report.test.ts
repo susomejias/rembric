@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import rembric from './index.js';
+import rembric from '../.pi-plugin/index.js';
 
 const SLUG = 'pi-subagent-report';
 const BODY = 'Checked the parser.\n\n## Key Learnings\n1. The tokenizer folds diacritics.';
