@@ -365,12 +365,13 @@ describe('image packaging invariants', () => {
     expect(/dist\/server-entrypoint\.js/.test(publish)).toBe(false);
   });
 
-  it('release imports its per-arch cache without exporting it, while CI keeps the export default', () => {
+  it('release imports its per-arch cache without exporting it; only main-push CI exports it, into the scope the release reads', () => {
     const action = readFileSync(
       join(repoRoot, '.github/actions/build-runtime-image/action.yml'),
       'utf8',
     );
     const publish = readFileSync(join(repoRoot, '.github/workflows/docker-publish.yml'), 'utf8');
+    const ci = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
     const digest = action
       .split('    - name: Build and push by digest (native — no QEMU)')[1]
       ?.split('    - name: Surface digest')[0];
@@ -384,8 +385,11 @@ describe('image packaging invariants', () => {
     expect(publish).toMatch(/^ {10}export-cache: 'false'$/m);
     expect(publish).not.toMatch(/^ {10}cache-to:/m);
     expect(action).toMatch(
-      /if: inputs\.mode == 'load'[\s\S]*?cache-to: type=gha,mode=max,scope=\$\{\{ inputs\.cache-scope \}\}/,
+      /if: inputs\.mode == 'load'[\s\S]*?cache-to: >-\n\s+\$\{\{ inputs\.export-cache == 'true' &&\s+format\('type=gha,mode=max,scope=\{0\}', inputs\.cache-scope\) \|\| '' \}\}/,
     );
+    expect(ci).toMatch(/^ {10}cache-scope: web-runtime-\$\{\{ matrix\.arch \}\}$/m);
+    expect(ci).toMatch(/^ {10}export-cache: \$\{\{ github\.event_name == 'push' \}\}$/m);
+    expect(ci).not.toMatch(/cache-to:/);
   });
 
   it('release builds the checked-out tag by digest and gates promotion on both smokes', () => {
