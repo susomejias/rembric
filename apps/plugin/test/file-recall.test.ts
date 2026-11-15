@@ -46,7 +46,8 @@ describe('file-recall.sh', () => {
   const LINE = (path: string) => `rembric: memories about ${path}:`;
 
   beforeEach(async () => {
-    requests = [];
+    const received: typeof requests = [];
+    requests = received;
     held = [];
     respond = (path) => ({
       status: 200,
@@ -60,7 +61,7 @@ describe('file-recall.sh', () => {
         try {
           body = JSON.parse(raw) as Record<string, unknown>;
         } catch {}
-        requests.push({ url: req.url ?? '', body });
+        received.push({ url: req.url ?? '', body });
         const answer = (req.url ?? '').endsWith('/file-recall')
           ? respond(String(body['path']))
           : { status: 200, body: { ok: true } };
@@ -98,6 +99,7 @@ describe('file-recall.sh', () => {
 
   afterEach(() => {
     for (const r of held) r.destroy();
+    server.closeAllConnections();
     server.close();
     rmSync(repo, { recursive: true, force: true });
     rmSync(scratch, { recursive: true, force: true });
@@ -306,7 +308,7 @@ describe('file-recall.sh', () => {
 
   it('claims each file atomically under concurrent firings', async () => {
     await Promise.all(Array.from({ length: 8 }, () => bash('cat packages/db/src/migrate.ts')));
-    expect(recallRequests()).toHaveLength(1);
+    expect(recallRequests().map((r) => r.body['path'])).toEqual(['packages/db/src/migrate.ts']);
 
     const runs = await Promise.all(Array.from({ length: 8 }, (_, i) => bash(`cat par/f${i}.ts`)));
     expect(runs.every((r) => r.status === 0)).toBe(true);
