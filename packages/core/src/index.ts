@@ -12,6 +12,7 @@ export * from './server-context/request-context.js';
 export * from './server-context/tool-call-context.js';
 export * from './services/index.js';
 export * from './services/agent-sessions.js';
+export * from './services/file-recall.js';
 export * from './services/embedding-worker.js';
 export * from './services/entities.js';
 export * from './services/entity-backfill-worker.js';

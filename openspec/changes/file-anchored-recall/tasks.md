@@ -5,24 +5,24 @@
 
 ## 2. Server: lookup, service, route (PR 2)
 
-- [ ] 2.1 Add a repository method in `packages/db/src/repositories/entities-repository.ts`. It finds active memories of the given types linked to any of a list of `path` values in one scope, excluding a session id, and returns each memory's linked-path count, ordered by count asc, `created_at` desc, `id` desc. Co-located test covers ordering, the type/status/session filters, and a multi-value match that returns a memory once.
-- [ ] 2.2 Add `fileRecall(sessionId, path, siblings)` to `AgentSessionsService`. It covers:
+- [x] 2.1 Add a repository method in `packages/db/src/repositories/entities-repository.ts`. It finds active memories of the given types linked to any of a list of `path` values in one scope, excluding a session id, and returns each memory's linked-path count, ordered by count asc, `created_at` desc, `id` desc. Co-located test covers ordering, the type/status/session filters, and a multi-value match that returns a memory once.
+- [x] 2.2 Add `fileRecall(sessionId, path, siblings)` to `AgentSessionsService`. It covers:
   - normalisation and repo-relative check;
   - unique-suffix candidates from `siblings`;
   - per-file and per-session caps, `exhausted`, and the per-memory-id dedupe LRU (500 sessions), released on `end`, `softDelete` and `resume`;
   - rendering: header, `- <title> [<id>] (<date>[, needs review])`, a window only on the first memory, secret redaction before the cut, and the 1024-byte bound.
-- [ ] 2.3 Add the file-recall counter to `usage-counters.ts`.
-- [ ] 2.4 Write tests for every scenario of `specs/file-anchored-recall/spec.md`, through the service's public method:
+- [x] 2.3 Add the file-recall counter to `usage-counters.ts`.
+- [x] 2.4 Write tests for every scenario of `specs/file-anchored-recall/spec.md`, through the service's public method:
   - exact and unique-suffix match, and the shared-suffix refusal with its control;
   - ineligible memories with their control;
   - specificity order, window placement, byte bound with multibyte text, and the `needs review` marker;
   - dedupe across files, the cap and `exhausted`, release on resume;
   - `last_seen_at` untouched.
-- [ ] 2.5 Add `parseFileRecall` to `apps/web/src/lib/validation.ts` (path ≤1024, siblings ≤64×≤1024, unknown keys ignored) and the route `apps/web/src/app/api/[slug]/sessions/[id]/file-recall/route.ts`, mirroring `recall-hints` (auth, `project_not_found`, read authorisation, soft-deleted refusal, POST only). Document it in `apps/web/src/app/api/README.md`.
-- [ ] 2.6 Add route tests in `apps/web/src/test/api-router.test.ts` for every scenario of `specs/http-api/spec.md` (200 shape, invalid bodies with the unknown-key control, 403 with its control, method fallback).
-- [ ] 2.7 Mutation-check every new guard with `node scripts/mutate.mjs` (with `--workspace packages/core` for the service), weakening each condition separately: suffix uniqueness, own-session exclusion, type filter, status filter, per-file cap, session cap, dedupe, the byte bound and the release on resume. Each mutation must turn a named test red.
-- [ ] 2.8 Run `pnpm run typecheck`, `pnpm run lint` and `pnpm test` green.
-- [ ] 2.9 Smoke against the local dev server (`pnpm run dev`): save a memory naming a file, then POST file-recall for it and for a suffix with and without siblings. Record the responses in the PR.
+- [x] 2.5 Add `parseFileRecall` to `apps/web/src/lib/validation.ts` (path ≤1024, siblings ≤64×≤1024, unknown keys ignored) and the route `apps/web/src/app/api/[slug]/sessions/[id]/file-recall/route.ts`, mirroring `recall-hints` (auth, `project_not_found`, read authorisation, soft-deleted refusal, POST only). Document it in `apps/web/src/app/api/README.md`.
+- [x] 2.6 Add route tests in `apps/web/src/test/api-router.test.ts` for every scenario of `specs/http-api/spec.md` (200 shape, invalid bodies with the unknown-key control, 403 with its control, method fallback).
+- [x] 2.7 Mutation-check every new guard with `node scripts/mutate.mjs` (with `--workspace packages/core` for the service), weakening each condition separately: suffix uniqueness, own-session exclusion, type filter, status filter, per-file cap, session cap, dedupe, the byte bound and the release on resume. Each mutation must turn a named test red.
+- [x] 2.8 Run `pnpm run typecheck`, `pnpm run lint` and `pnpm test` green.
+- [x] 2.9 Smoke against the local dev server (`pnpm run dev`): save a memory naming a file, then POST file-recall for it and for a suffix with and without siblings. Record the responses in the PR.
 
 ## 3. Claude Code and Codex (PR 3)
 

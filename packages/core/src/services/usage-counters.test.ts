@@ -47,4 +47,19 @@ describe('UsageCounters', () => {
 
     expect(counters.get('t1', 'memory.search')).toBe(1);
   });
+
+  it('counts file-recall firings and lines apart from prompt recall', () => {
+    const counters = new UsageCounters();
+    counters.recordFileRecall('t1', 2);
+    counters.recordFileRecall('t1', 0);
+    counters.recordFileRecall('t1', 1);
+    counters.recordRecall('t1', 5);
+
+    expect(counters.fileRecallSnapshot()).toEqual({
+      t1: { requests: 3, nonEmpty: 2, linesServed: 3 },
+    });
+    expect(counters.recallSnapshot()).toEqual({
+      t1: { requests: 1, nonEmpty: 1, linesServed: 5 },
+    });
+  });
 });

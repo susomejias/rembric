@@ -12,6 +12,14 @@ import { ulid } from 'ulid';
 import type { ExtractedEntity } from './entities.js';
 import { iterateEntityMatches } from './entity-relevance.js';
 import { DomainError } from './errors.js';
+import {
+  candidateValues,
+  FILE_RECALL_FILES_PER_SESSION,
+  FILE_RECALL_PER_FILE_MAX,
+  normalizeRepoPath,
+  renderFileRecall,
+} from './file-recall.js';
+import { deriveReviewState } from './review.js';
 import { RedactionTally } from './secret-redaction.js';
 import { evaluateSessionNudge, NOTICE_MAX_BYTES, type SessionNudgeRow } from './session-nudge.js';
 import {
@@ -328,6 +336,7 @@ export class AgentSessionsService {
     };
     const row = this.updateActiveOrThrow(sessionId, set);
     this.releaseRecallDedupe(sessionId);
+    this._fileRecallState.delete(sessionId);
     return { row, applied: true };
   }
 
@@ -345,6 +354,7 @@ export class AgentSessionsService {
         `sessions.resume: session '${sessionId}' was soft-deleted at ${existing.deletedAt.toISOString()}`,
       );
     }
+    this._fileRecallState.delete(sessionId);
     if (existing.status === 'active') {
       return existing;
     }
@@ -501,6 +511,7 @@ export class AgentSessionsService {
       throw new DomainError('session_not_found', `session '${sessionId}' not found`);
     }
     this.releaseRecallDedupe(sessionId);
+    this._fileRecallState.delete(sessionId);
     return updated;
   }
 
@@ -650,6 +661,73 @@ export class AgentSessionsService {
 
   /** Transient dedupe state: sessionId → Set of `(kind, value)` keys already recalled. */
   private _recallDedupeState = new Map<string, Set<string>>();
+
+  fileRecall(
+    sessionId: string,
+    input: { path: string; siblings?: readonly string[] },
+  ): { lines: string[]; exhausted: boolean } {
+    const session = this.getById(sessionId);
+    if (!session?.projectId) return { lines: [], exhausted: false };
+    const state = this.touchFileRecall(sessionId);
+    if (state.files >= FILE_RECALL_FILES_PER_SESSION) return { lines: [], exhausted: true };
+    const path = normalizeRepoPath(input.path);
+    if (!path) return { lines: [], exhausted: false };
+
+    const rows = this.repos.entities.findActiveMemoriesForPaths({
+      scope: projectScope(session.projectId),
+      values: candidateValues(path, input.siblings ?? []),
+      types: RECALL_MEMORY_TYPES,
+      excludeSessionId: sessionId,
+      excludeMemoryIds: [...state.shown],
+      limit: FILE_RECALL_PER_FILE_MAX,
+    });
+    if (rows.length === 0) return { lines: [], exhausted: false };
+
+    const now = this.now();
+    const review = this.repos.memory.reviewTimestampsByIds(rows.map((m) => m.id));
+    const { lines, renderedIds } = renderFileRecall(
+      path,
+      rows.map((m) => ({
+        id: m.id,
+        title: m.title,
+        content: m.content,
+        createdAt: m.createdAt,
+        needsReview:
+          deriveReviewState(
+            {
+              type: m.type,
+              createdAt: m.createdAt,
+              status: m.status,
+              lastConfirmedAt: review.get(m.id)?.affirmedAt ?? null,
+              lastRefutedAt: review.get(m.id)?.refutedAt ?? null,
+            },
+            now,
+          ).reviewState === 'needs_review',
+      })),
+    );
+    for (const id of renderedIds) state.shown.add(id);
+    state.files += 1;
+    return { lines, exhausted: state.files >= FILE_RECALL_FILES_PER_SESSION };
+  }
+
+  private touchFileRecall(sessionId: string): { shown: Set<string>; files: number } {
+    const existing = this._fileRecallState.get(sessionId);
+    if (existing) {
+      this._fileRecallState.delete(sessionId);
+      this._fileRecallState.set(sessionId, existing);
+      return existing;
+    }
+    const created = { shown: new Set<string>(), files: 0 };
+    this._fileRecallState.set(sessionId, created);
+    if (this._fileRecallState.size > RECALL_DEDUPE_SESSIONS_MAX) {
+      const oldest = this._fileRecallState.keys().next().value;
+      if (oldest !== undefined) this._fileRecallState.delete(oldest);
+    }
+    return created;
+  }
+
+  /** sessionId → memory ids already returned and files that produced lines; released on end, softDelete and resume. */
+  private _fileRecallState = new Map<string, { shown: Set<string>; files: number }>();
 
   memoryCount(sessionId: string): number {
     return this.repos.agentSessions.memoryCount(sessionId);
