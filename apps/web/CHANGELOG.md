@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1](https://github.com/susomejias/rembric/compare/server-v0.31.0...server-v0.31.1) (2026-11-15)
+
+
+### Features
+
+* **recall:** recall the memories linked to a file the agent reaches ([b5bb8f6](https://github.com/susomejias/rembric/commit/b5bb8f6736569b50f161ff0e0ec44d00603415f9)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+
 ## [0.31.0](https://github.com/susomejias/rembric/compare/server-v0.30.12...server-v0.31.0) (2026-11-14)
 
 
