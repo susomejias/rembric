@@ -30,12 +30,8 @@ jobs:
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/check-spec-provenance.mjs --base "$BASE" --head "$HEAD"
 
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-workspace
+
       - name: Replay the measured violation window
         run: pnpm --filter @rembric/web exec vitest run --root ../.. scripts/check-spec-provenance.history.test.ts
 
@@ -45,23 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Cache pnpm store
-        uses: actions/cache@v6
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-workspace
 
       - name: Typecheck
         run: pnpm run typecheck
@@ -81,7 +61,12 @@ jobs:
       - name: Check published specs carry no dangling requirement cross-reference
         run: pnpm run check:spec-crossrefs
 
-  test:
+  test-web:
+    name: test-web (${{ matrix.shard }}/${{ strategy.job-total }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -89,49 +74,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
+      - uses: ./.github/actions/setup-workspace
 
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Cache pnpm store
-        uses: actions/cache@v6
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache embedding model
-        id: model-cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.model-cache
-          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
-
-      - name: Prefetch embedding model (retried, offline-resolvable)
-        if: steps.model-cache.outputs.cache-hit != 'true'
-        working-directory: packages/core
-        run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
-
-      - name: Build (artifact sanity)
-        run: pnpm run build
+      - uses: ./.github/actions/embedding-model
 
       - name: Test
-        run: |
-          pnpm run test:coverage
-          pnpm run test:hermes-plugin
+        working-directory: apps/web
+        run: >-
+          pnpm exec vitest run
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --exclude ../plugin/.pi-plugin/plugin.test.ts
+          --reporter=default --reporter=json --outputFile=test-results.json
 
       - name: Upload test results on failure
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: test-results
+          name: test-results-${{ matrix.shard }}
           path: apps/web/test-results.json
           if-no-files-found: ignore
 
@@ -139,8 +98,30 @@ jobs:
         working-directory: apps/web
         run: node ../../scripts/check-rescued-tests.mjs test-results.json
 
-      - name: Installer e2e (headless)
-        run: pnpm run e2e:installer
+  test-web-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REMBRIC_MODEL_CACHE: ${{ github.workspace }}/.model-cache
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - uses: ./.github/actions/embedding-model
+
+      - name: Build (artifact sanity)
+        run: pnpm run build
+
+      - name: Test the Pi plugin against the production build
+        working-directory: apps/web
+        run: >-
+          pnpm exec vitest run ../plugin/.pi-plugin/plugin.test.ts
+          --reporter=default --reporter=json --outputFile=test-results.json
+
+      - name: Check for rescued tests
+        working-directory: apps/web
+        run: node ../../scripts/check-rescued-tests.mjs test-results.json
 
   test-packages:
     runs-on: ubuntu-latest
@@ -150,54 +131,50 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
+      - id: setup
+        uses: ./.github/actions/setup-workspace
 
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Cache pnpm store
-        uses: actions/cache@v6
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
-
-      - name: Install
-        id: install
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache embedding model
-        id: model-cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.model-cache
-          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
-
-      - name: Prefetch embedding model (retried, offline-resolvable)
-        if: steps.model-cache.outputs.cache-hit != 'true'
-        working-directory: packages/core
-        run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
+      - uses: ./.github/actions/embedding-model
 
       - name: Test db
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           pnpm --filter @rembric/db exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/db.json"
           node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/db.json"
 
       - name: Test core
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           pnpm --filter @rembric/core exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/core.json"
           node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/core.json"
 
       - name: Test mcp
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           pnpm --filter @rembric/mcp exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/mcp.json"
           node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/mcp.json"
+
+      - name: Test the Hermes plugin
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm run test:hermes-plugin
+
+      - name: Installer e2e (headless)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: pnpm run e2e:installer
+
+  test:
+    needs: [static, test-web, test-web-build, test-packages]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every test and static job passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          [ -z "$bad" ] || { echo "::error::not passed: $bad"; exit 1; }
 
   retrieval-eval:
     runs-on: ubuntu-latest
@@ -207,35 +184,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
+      - uses: ./.github/actions/setup-workspace
 
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Cache pnpm store
-        uses: actions/cache@v6
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache embedding model
-        id: model-cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.model-cache
-          key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
-
-      - name: Prefetch embedding model (retried, offline-resolvable)
-        if: steps.model-cache.outputs.cache-hit != 'true'
-        working-directory: packages/core
-        run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"
+      - uses: ./.github/actions/embedding-model
 
       - name: Retrieval eval
         run: pnpm run eval
