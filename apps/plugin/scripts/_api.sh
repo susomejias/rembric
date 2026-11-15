@@ -585,15 +585,21 @@ rembric_command_paths() {
 
 # The files a Codex apply_patch text adds, updates or deletes.
 rembric_patch_paths() {
-  local patch="${1:-}" line
+  local patch="${1:-}" line path seen=$'\n' count=0
   [ -z "$patch" ] && return 0
   while IFS= read -r line; do
     line="${line%$'\r'}"
     case "$line" in
-    '*** Add File: '*) printf '%s\n' "${line#'*** Add File: '}" ;;
-    '*** Update File: '*) printf '%s\n' "${line#'*** Update File: '}" ;;
-    '*** Delete File: '*) printf '%s\n' "${line#'*** Delete File: '}" ;;
+    '*** Add File: '*) path="${line#'*** Add File: '}" ;;
+    '*** Update File: '*) path="${line#'*** Update File: '}" ;;
+    '*** Delete File: '*) path="${line#'*** Delete File: '}" ;;
+    *) continue ;;
     esac
+    case "$seen" in *$'\n'"$path"$'\n'*) continue ;; esac
+    seen="${seen}${path}"$'\n'
+    printf '%s\n' "$path"
+    count=$((count + 1))
+    [ "$count" -ge 5 ] && break
   done <<<"$patch"
   return 0
 }
