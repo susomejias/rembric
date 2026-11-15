@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -1676,6 +1677,145 @@ describe('RembricPluginV2 (opencode 2.x)', () => {
     expect(hooks.size).toBe(0);
     expect(toolHooks.size).toBe(0);
     expect(cleanup).toBeUndefined();
+  });
+
+  describe('file-anchored recall', () => {
+    let recalled: string[];
+    let failRecall: boolean;
+
+    beforeEach(() => {
+      for (const rel of ['src/app.ts', 'src/sub/c.ts', 'lib/b.ts']) {
+        mkdirSync(join(dir, dirname(rel)), { recursive: true });
+        writeFileSync(join(dir, rel), 'x\n');
+      }
+      execFileSync('git', ['init', '-q'], { cwd: dir });
+      execFileSync('git', ['add', '-A'], { cwd: dir });
+      recalled = [];
+      failRecall = false;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (!String(url).endsWith('/file-recall')) return new Response('', { status: 200 });
+        if (failRecall) throw new Error('down');
+        const { path } = JSON.parse(String(init?.body)) as { path: string };
+        recalled.push(path);
+        return Response.json({
+          ok: true,
+          lines: [`rembric: memories about ${path}:`, '- a memory'],
+        });
+      });
+    });
+
+    const lookupsSettled = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+    async function started(sessionID: string, sessionDirectory?: string) {
+      const fake = fakeContext(sessionDirectory);
+      const cleanup = await RembricPluginV2Default.setup(fake.context as never);
+      await handler(fake.hooks, 'prompt')({ sessionID, prompt: { text: 'hi' } } as never);
+      const tool = (event: Record<string, unknown>) =>
+        handler(fake.toolHooks, 'execute.before')({ sessionID, ...event } as never);
+      const nextContext = async () => {
+        const system: Array<{ type: string; text?: string }> = [];
+        await handler(fake.hooks, 'context')({ sessionID, system } as never);
+        return system
+          .map((part) => part.text ?? '')
+          .filter((t) => t === '' || t.startsWith('rembric: memories'));
+      };
+      return { ...fake, cleanup, tool, nextContext };
+    }
+
+    it('reaches the next request once, without the tool waiting on it', async () => {
+      const s = await started('ses_fr_read');
+      const returned = s.tool({ tool: 'read', input: { path: 'src/app.ts' } });
+      expect(returned).toBeUndefined();
+      expect(await s.nextContext()).toEqual(['rembric: memories about src/app.ts:\n- a memory']);
+      expect(await s.nextContext()).toEqual([]);
+      void s.tool({ tool: 'edit', input: { path: join(dir, 'src/app.ts') } });
+      expect(await s.nextContext()).toEqual([]);
+      expect(recalled).toEqual(['src/app.ts']);
+      await s.cleanup?.();
+    });
+
+    it('takes the paths of a shell command, resolved against its workdir', async () => {
+      const s = await started('ses_fr_shell');
+      void s.tool({ tool: 'shell', input: { command: 'sed -n 1,5p lib/b.ts' } });
+      void s.tool({ tool: 'shell', input: { command: 'cat sub/c.ts', workdir: 'src' } });
+      expect(await s.nextContext()).toEqual([
+        'rembric: memories about lib/b.ts:\n- a memory\nrembric: memories about src/sub/c.ts:\n- a memory',
+      ]);
+      await s.cleanup?.();
+    });
+
+    it('ignores a tool that is not a file tool, even with a path', async () => {
+      const s = await started('ses_fr_other');
+      void s.tool({ tool: 'grep', input: { path: 'src/app.ts', pattern: 'x' } });
+      expect(await s.nextContext()).toEqual([]);
+      expect(recalled).toEqual([]);
+      await s.cleanup?.();
+    });
+
+    it('skips a sub-agent session', async () => {
+      const s = await started('ses_fr_parent');
+      s.stream.push({
+        type: 'session.created',
+        data: { sessionID: 'ses_fr_child', parentID: 'ses_fr_parent' },
+      });
+      await settle();
+      void handler(
+        s.toolHooks,
+        'execute.before',
+      )({
+        sessionID: 'ses_fr_child',
+        tool: 'read',
+        input: { path: 'src/app.ts' },
+      } as never);
+      await lookupsSettled();
+      expect(recalled).toEqual([]);
+      s.stream.end();
+      await s.cleanup?.();
+    });
+
+    it('a failed lookup adds nothing and throws nothing', async () => {
+      const s = await started('ses_fr_down');
+      failRecall = true;
+      expect(() => s.tool({ tool: 'read', input: { path: 'src/app.ts' } })).not.toThrow();
+      expect(await s.nextContext()).toEqual([]);
+      await s.cleanup?.();
+    });
+
+    it('skips a session that belongs to another directory', async () => {
+      const s = await started('ses_fr_foreign', '/somewhere/else');
+      void s.tool({ tool: 'read', input: { path: 'src/app.ts' } });
+      await lookupsSettled();
+      expect(recalled).toEqual([]);
+      await s.cleanup?.();
+    });
+
+    it('drops the queued lookups of a deleted session', async () => {
+      const s = await started('ses_fr_deleted');
+      void s.tool({ tool: 'read', input: { path: 'src/app.ts' } });
+      await lookupsSettled();
+      expect(recalled).toEqual(['src/app.ts']);
+      s.stream.push({ type: 'session.deleted', data: { sessionID: 'ses_fr_deleted' } });
+      await settle();
+      expect(await s.nextContext()).toEqual([]);
+      s.stream.end();
+      await s.cleanup?.();
+    });
+
+    it('starts no lookup once the plugin is closed', async () => {
+      const s = await started('ses_fr_closed');
+      void s.tool({ tool: 'read', input: { path: 'src/app.ts' } });
+      expect(await s.nextContext()).toHaveLength(1);
+      await s.cleanup?.();
+      void s.tool({ tool: 'read', input: { path: 'lib/b.ts' } });
+      await lookupsSettled();
+      expect(recalled).toEqual(['src/app.ts']);
+    });
+
+    it('the V1 export registers no tool hook', async () => {
+      const handlers = await RembricPlugin({ directory: dir } as never);
+      expect(Object.keys(handlers)).not.toContain('tool.execute.before');
+      expect(Object.keys(handlers)).not.toContain('tool.execute.after');
+    });
   });
 
   it('captures the assistant transcript from session.text.ended, ordered by ordinal', async () => {

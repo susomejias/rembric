@@ -76,13 +76,13 @@
 
 ## 6. opencode v2 (PR 6)
 
-- [ ] 6.1 In `apps/plugin/.opencode-plugin/plugin.ts`, v2 path only:
+- [x] 6.1 In `apps/plugin/.opencode-plugin/plugin.ts`, v2 path only:
   - widen the `execute.before` input type to `tool`, `sessionID`, `input`;
-  - capture paths, list siblings and await `fileRecall` within budget, never throwing;
-  - queue lines per session, and push them in the existing `context` hook, then clear.
-- [ ] 6.2 Add tests in `.opencode-plugin/plugin.test.ts`: one push on the next context then none; sub-agent sessions skipped; the v1 export registers no tool hook.
+  - capture paths (`read`/`edit`/`write` `path`, `shell` `command` against its `workdir`) and start `fileRecall` without awaiting it, never throwing;
+  - queue the pending lookup per session, and await and push its lines in the existing `context` hook, then clear.
+- [x] 6.2 Add tests in `.opencode-plugin/plugin.test.ts`: one push on the next context then none; sub-agent sessions skipped; the v1 export registers no tool hook.
 - [ ] 6.3 Run e2e in an opencode v2 session against the dev server. **(may need operator: requires an opencode ≥ 2.x install)**
-- [ ] 6.4 Docs: the opencode README and the CHANGELOG.
+- [x] 6.4 Docs: the opencode README and the CHANGELOG.
 
 ## 7. Close
 
