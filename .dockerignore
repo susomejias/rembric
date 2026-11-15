@@ -1,7 +1,7 @@
-node_modules
-dist
-build
-coverage
+**/node_modules
+**/dist
+**/build
+**/coverage
 .git
 .github
 .husky
@@ -32,4 +32,3 @@ AGENTS.md
 
 # Next.js build artifacts (would bloat the Docker context)
 apps/web/.next/
-apps/web/node_modules/

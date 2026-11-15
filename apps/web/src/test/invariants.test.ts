@@ -343,6 +343,15 @@ describe('image packaging invariants', () => {
     expect(new RegExp(`^LABEL\\s+${escaped}\\s*$`, 'm').test(runtimeBlock)).toBe(true);
   });
 
+  it('Dockerfile: the hoisted linker is set for every pnpm call, not only the install', () => {
+    const dockerfile = prodDockerfile();
+    const envAt = dockerfile.search(/^ENV pnpm_config_node_linker=hoisted$/m);
+    const installAt = dockerfile.search(/^RUN pnpm install\b/m);
+    expect(envAt).toBeGreaterThan(-1);
+    expect(installAt).toBeGreaterThan(envAt);
+    expect(dockerfile).not.toMatch(/--config\.node-linker/);
+  });
+
   it('build-runtime-image action parameterizes file + target, defaulting to the web runtime', () => {
     const action = readFileSync(
       join(repoRoot, '.github/actions/build-runtime-image/action.yml'),

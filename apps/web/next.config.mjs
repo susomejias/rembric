@@ -32,18 +32,18 @@ const nextConfig = {
     unoptimized: true,
   },
   // Output tracing follows static imports only, so it misses the files each
-  // runtime loader opens by computed path. `apps/web/node_modules` has no
-  // `.pnpm` in it, so every glob starts at the workspace root.
+  // runtime loader opens by computed path. Every glob starts at the workspace
+  // root, where the image's flat install puts these packages.
   outputFileTracingIncludes: {
     '/*': [
-      // `sqlite-vec` picks its native extension at runtime with an
-      // `import.meta.resolve('sqlite-vec-<platform>-<arch>/vec0.<ext>')`. pnpm
-      // links that optional dependency inside the package's own virtual-store
-      // directory, which is one of the places Node probes when resolving from
-      // `.../sqlite-vec@<v>/node_modules/sqlite-vec/`. Copying the files there
-      // (the glob resolves through the link, so the copy is a real directory)
-      // is what makes the import succeed on every platform the store holds.
-      '../../node_modules/.pnpm/sqlite-vec@*/node_modules/sqlite-vec-*/**',
+      // `sqlite-vec` picks its native extension at runtime with a computed
+      // `require.resolve('sqlite-vec-<platform>-<arch>/vec0.<ext>')`, which
+      // tracing cannot follow. The image installs a flat tree (Dockerfile), where
+      // only the build platform's optional package is present. The package itself
+      // is included whole because tracing keeps only the ESM entry the app
+      // imports, and the image's build gate loads it through `require`.
+      '../../node_modules/sqlite-vec/**',
+      '../../node_modules/sqlite-vec-*/**',
       // `defaultMigrationsDir()` resolves off `import.meta.url`, which Turbopack
       // rewrites to the module's project-root-relative path, so the runner reads
       // `<projectRoot>/packages/db/dist/migrations` — absent from the standalone
@@ -64,7 +64,7 @@ const nextConfig = {
       // target unambiguous at build time. `bin/napi-v6/**` would instead carry
       // the 175 MB of win32/darwin prebuilts this process can never load
       // (measured: 210 MB for every pair, 35 MB for this one).
-      `../../node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v6/${process.platform}/${process.arch}/**`,
+      `../../node_modules/onnxruntime-node/bin/napi-v6/${process.platform}/${process.arch}/**`,
     ],
   },
 };
