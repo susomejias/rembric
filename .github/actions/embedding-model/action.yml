@@ -1,0 +1,18 @@
+name: Embedding model
+description: >
+  Restores the pinned embedding model into REMBRIC_MODEL_CACHE, prefetching it
+  (retried) on a cache miss, so the real-embedder tests resolve it offline.
+
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ env.REMBRIC_MODEL_CACHE }}
+        key: embedder-${{ hashFiles('packages/core/scripts/fetch-model.mjs', 'packages/core/src/embeddings/embedder.ts', 'packages/core/src/embeddings/model-identity.json') }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: packages/core
+      run: node scripts/fetch-model.mjs "$REMBRIC_MODEL_CACHE"

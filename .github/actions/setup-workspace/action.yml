@@ -1,0 +1,24 @@
+name: Set up workspace
+description: >
+  Node from .nvmrc, the pnpm pinned by packageManager, the pnpm store cache and
+  the frozen, integrity-checked install. The caller handles checkout.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+
+    - shell: bash
+      run: corepack enable
+
+    - uses: actions/cache@v6
+      with:
+        path: ~/.local/share/pnpm/store
+        key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pnpm-
+
+    - shell: bash
+      run: pnpm install --frozen-lockfile
