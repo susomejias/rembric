@@ -19,6 +19,7 @@ to call `memory.session_start` over MCP.
 | POST   | `/api/:slug/sessions/:id/turn`         | `{ ok, sessionId, lines }`                                                                |
 | POST   | `/api/:slug/sessions/:id/recall-hints` | `{ ok, lines }`                                                                           |
 | POST   | `/api/:slug/sessions/:id/file-recall`  | `{ ok, lines, exhausted }`                                                                |
+| POST   | `/api/:slug/sessions/:id/learnings`    | `{ ok, saved, skipped, ids, candidatesDetected, reason? }`                                |
 | GET    | `/api/:slug/debug/counters`            | `{ ok, counters, recall, fileRecall }` — admin token only                                 |
 | POST   | `/api/:slug/memory/recall`             | `{ ok, memories, formatted }`                                                             |
 

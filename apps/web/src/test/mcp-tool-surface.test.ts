@@ -49,6 +49,7 @@ const CHANGED_DESCRIPTIONS: Record<string, string> = {
   'memory.session_start': "project? (slug; must name this connection's project, else scope_locked)",
   'memory.session_resume': 'Resuming binds nothing to this connection',
   'project.current': 'Report the project active in this session (slug, projectId, source).',
+  'memory.capture_passive': 'counted in `skipped`',
 };
 
 function canonicalJson(value: unknown): string {
@@ -160,6 +161,22 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
             ...schema,
             properties,
             required: schema.required.filter((r) => r !== 'suggestedSlugs'),
+          },
+        };
+      })
+      .map((t) => {
+        if (t.name !== 'memory.capture_passive') return t;
+        type ObjectSchema = { properties: Record<string, unknown>; required: string[] };
+        const schema = t.outputSchema as ObjectSchema;
+        const liveSchema = byName.get(t.name)?.outputSchema as ObjectSchema;
+        expect(liveSchema.properties['skipped']).toEqual({ type: 'number' });
+        expect([...liveSchema.required].sort()).toEqual([...schema.required, 'skipped'].sort());
+        return {
+          ...t,
+          outputSchema: {
+            ...schema,
+            properties: { ...schema.properties, skipped: liveSchema.properties['skipped'] },
+            required: liveSchema.required,
           },
         };
       });

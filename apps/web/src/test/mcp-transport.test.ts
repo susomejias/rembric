@@ -4180,4 +4180,106 @@ describe('MCP protocol conformance', () => {
 
     await client.close();
   });
+
+  describe('memory.capture_passive same-session duplicate skip', () => {
+    const TEXT =
+      '## Key Learnings\n1. the dedupe parser drops BOMs\n2. the dedupe retries cap at three\n3. the dedupe cache is per project';
+
+    async function setup(slug: string): Promise<{
+      client: Client;
+      projectId: string;
+      sessions: [string, string];
+    }> {
+      const project = services.projects.create({ slug });
+      const created = services.tokens.create({ name: `${slug}-writer`, project, access: 'write' });
+      const sessions: [string, string] = [`${slug}-s`, `${slug}-t`];
+      for (const id of sessions) {
+        services.agentSessions.ensure({
+          id,
+          tokenId: created.token.id,
+          projectId: project.id,
+          agent: 'rembric-test',
+        });
+      }
+      const client = await connect({ token: created.plaintext, projectSlug: slug });
+      return { client, projectId: project.id, sessions };
+    }
+
+    function attached(sessionId: string): { content: string; hasVector: number }[] {
+      return services.db.raw
+        .prepare<[string], { content: string; hasVector: number }>(
+          `SELECT content,
+                  EXISTS (SELECT 1 FROM memory_vec v WHERE v.memory_id = m.id) AS hasVector
+             FROM memory m
+            WHERE session_id = ? AND status = 'active'
+            ORDER BY content`,
+        )
+        .all(sessionId);
+    }
+
+    async function capture(client: Client, sessionId?: string) {
+      const result = (await client.callTool({
+        name: 'memory.capture_passive',
+        arguments: { text: TEXT, tags: ['dedupe'], ...(sessionId ? { sessionId } : {}) },
+      })) as ToolResult;
+      expect(result.isError).toBeFalsy();
+      return result.structuredContent as {
+        saved: number;
+        skipped: number;
+        ids: string[];
+        reason?: string;
+      };
+    }
+
+    it('capturing the same text twice in one session saves it once', async () => {
+      const { client, sessions } = await setup('integration-capture-twice');
+      const [s] = sessions;
+      const first = await capture(client, s);
+      expect(first).toMatchObject({ saved: 3, skipped: 0 });
+      expect(first.reason).toBeUndefined();
+      const second = await capture(client, s);
+      expect(second).toMatchObject({ saved: 0, skipped: 3, ids: [] });
+      expect(second.reason).toMatch(/already captured in this session/);
+      expect(attached(s).map((r) => r.content)).toEqual([
+        'the dedupe cache is per project',
+        'the dedupe parser drops BOMs',
+        'the dedupe retries cap at three',
+      ]);
+      expect(attached(s).every((r) => r.hasVector === 1)).toBe(true);
+      await client.close();
+    });
+
+    it('the skip is per session', async () => {
+      const { client, sessions } = await setup('integration-capture-per-session');
+      const [s, t] = sessions;
+      await capture(client, s);
+      const other = await capture(client, t);
+      expect(other).toMatchObject({ saved: 3, skipped: 0 });
+      expect(attached(t)).toHaveLength(3);
+      expect(attached(s)).toHaveLength(3);
+      await client.close();
+    });
+
+    it('still saves every item, with skipped: 0, when no session resolves', async () => {
+      const project = services.projects.create({ slug: 'integration-capture-no-session' });
+      const created = services.tokens.create({
+        name: 'integration-capture-no-session-writer',
+        project,
+        access: 'write',
+      });
+      const client = await connect({ token: created.plaintext, projectSlug: project.slug });
+      const first = await capture(client);
+      const second = await capture(client);
+      expect(first).toMatchObject({ saved: 3, skipped: 0 });
+      expect(second).toMatchObject({ saved: 3, skipped: 0 });
+      const rows = services.db.raw
+        .prepare<
+          [string],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM memory WHERE project_id = ? AND status = 'active'")
+        .get(project.id);
+      expect(rows?.n).toBe(6);
+      await client.close();
+    });
+  });
 });

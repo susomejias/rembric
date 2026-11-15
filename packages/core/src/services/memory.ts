@@ -154,77 +154,99 @@ export class MemoryService {
     scope: Scope,
     redactions: RedactionTally = new RedactionTally(),
   ): SaveResult {
-    const { title, content, tags, topicKey } = validateSaveFields(input, 'memory.save', redactions);
+    const fields = validateSaveFields(input, 'memory.save', redactions);
+    return this.tx.transaction(() => this.insertValidated(input, fields, scope));
+  }
 
+  saveUnlessSessionDuplicate(
+    input: SaveMemoryInput,
+    scope: Scope,
+    redactions: RedactionTally = new RedactionTally(),
+  ): SaveResult | null {
+    const fields = validateSaveFields(input, 'memory.save', redactions);
+    return this.tx.transaction((): SaveResult | null => {
+      if (
+        input.sessionId &&
+        this.repos.memory.hasActiveWithContentInSession(scope, input.sessionId, fields.content)
+      ) {
+        return null;
+      }
+      return this.insertValidated(input, fields, scope);
+    });
+  }
+
+  private insertValidated(
+    input: SaveMemoryInput,
+    fields: ReturnType<typeof validateSaveFields>,
+    scope: Scope,
+  ): SaveResult {
+    const { title, content, tags, topicKey } = fields;
     const ts = this.now();
     const id = ulid(ts.getTime());
-
-    return this.tx.transaction((): SaveResult => {
-      // Locate any prior active row in the same (scope, project_id, topic_key).
-      let supersededByTopicKey: Memory | null = null;
-      let replacesPrefix: string[] = [];
-      if (topicKey !== null) {
-        const prior = this.repos.memory.findActiveByTopicKey({
-          projectId: scope.projectId,
-          topicKey,
-        });
-        if (prior) {
-          supersededByTopicKey = prior;
-          replacesPrefix = [prior.id];
-        }
-      }
-
-      if (supersededByTopicKey) {
-        this.repos.memory.markSuperseded(supersededByTopicKey.id);
-        orphanPendingOnRetirement(this.repos, this.relationsService(), {
-          retiredIds: [supersededByTopicKey.id],
-          status: 'superseded',
-          cause: 'topic_key revision',
-          at: ts,
-        });
-      }
-
-      const inserted = this.repos.memory.insert({
-        id,
-        scope: 'project',
+    // Locate any prior active row in the same (scope, project_id, topic_key).
+    let supersededByTopicKey: Memory | null = null;
+    let replacesPrefix: string[] = [];
+    if (topicKey !== null) {
+      const prior = this.repos.memory.findActiveByTopicKey({
         projectId: scope.projectId,
-        type: input.type,
-        title,
-        content,
-        tags,
-        status: 'active',
-        replaces: replacesPrefix,
-        createdAt: ts,
-        lastSeenAt: ts,
-        source: input.source ?? null,
-        sessionId: input.sessionId ?? null,
         topicKey,
       });
-      if (!inserted) {
-        throw new DomainError('conflict', 'memory.save: insert did not return a row');
+      if (prior) {
+        supersededByTopicKey = prior;
+        replacesPrefix = [prior.id];
       }
+    }
 
-      if (supersededByTopicKey) {
-        // No same-scope assertion needed: findActiveByTopicKey matched on (scope, project_id).
-        const relId = ulid(ts.getTime());
-        this.repos.relations.insert({
-          id: relId,
-          judgmentId: relId,
-          sourceId: inserted.id,
-          targetId: supersededByTopicKey.id,
-          relation: 'supersedes',
-          status: 'judged',
-          reason: `topic_key='${topicKey ?? ''}' upsert`,
-          confidence: 1,
-          markedByKind: 'agent_topic_key',
-          markedByActor: input.source?.tokenName ?? null,
-          judgedAt: ts,
-          createdAt: ts,
-        });
-      }
+    if (supersededByTopicKey) {
+      this.repos.memory.markSuperseded(supersededByTopicKey.id);
+      orphanPendingOnRetirement(this.repos, this.relationsService(), {
+        retiredIds: [supersededByTopicKey.id],
+        status: 'superseded',
+        cause: 'topic_key revision',
+        at: ts,
+      });
+    }
 
-      return { memory: inserted, supersededByTopicKey };
+    const inserted = this.repos.memory.insert({
+      id,
+      scope: 'project',
+      projectId: scope.projectId,
+      type: input.type,
+      title,
+      content,
+      tags,
+      status: 'active',
+      replaces: replacesPrefix,
+      createdAt: ts,
+      lastSeenAt: ts,
+      source: input.source ?? null,
+      sessionId: input.sessionId ?? null,
+      topicKey,
     });
+    if (!inserted) {
+      throw new DomainError('conflict', 'memory.save: insert did not return a row');
+    }
+
+    if (supersededByTopicKey) {
+      // No same-scope assertion needed: findActiveByTopicKey matched on (scope, project_id).
+      const relId = ulid(ts.getTime());
+      this.repos.relations.insert({
+        id: relId,
+        judgmentId: relId,
+        sourceId: inserted.id,
+        targetId: supersededByTopicKey.id,
+        relation: 'supersedes',
+        status: 'judged',
+        reason: `topic_key='${topicKey ?? ''}' upsert`,
+        confidence: 1,
+        markedByKind: 'agent_topic_key',
+        markedByActor: input.source?.tokenName ?? null,
+        judgedAt: ts,
+        createdAt: ts,
+      });
+    }
+
+    return { memory: inserted, supersededByTopicKey };
   }
 
   get(id: string, scope: Scope): MemoryWithHistory | null {
@@ -917,16 +939,17 @@ export function validateSaveFields(
   };
 }
 
+export function normalizeTag(sent: string, redactions: RedactionTally): string {
+  const tag = redactions.redact(sent);
+  return slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), { lower: true, strict: true });
+}
+
 function normalizeTags(tags: readonly string[], op: string, redactions: RedactionTally): string[] {
   return [
     ...new Set(
       tags.map((sent) => {
         assertNoNul(op, 'tags', sent);
-        const tag = redactions.redact(sent);
-        const normalized = slugify(tag.normalize('NFKC').replace(/[._/\\]+/g, ' '), {
-          lower: true,
-          strict: true,
-        });
+        const normalized = normalizeTag(sent, redactions);
         if (normalized.length === 0) {
           throw new DomainError('invalid_input', `${op}: tags must contain letters or numbers`);
         }

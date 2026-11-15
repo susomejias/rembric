@@ -19,6 +19,7 @@ import {
   undoOp as coreUndoOp,
   undoRun as coreUndoRun,
   vectorIdentityMatches,
+  type CaptureKeyLearningsDeps,
   type ConsolidationRunSummary,
   type Embedder,
   type UndoResult,
@@ -38,6 +39,7 @@ export interface Services {
   memory: MemoryService;
   relations: RelationsService;
   prompts: PromptsService;
+  postSave: Required<Omit<CaptureKeyLearningsDeps, 'memory'>>;
   usageCounters: UsageCounters;
   authLockout: AuthLockout;
   sessionAbandonAfterMs: number;
@@ -103,6 +105,14 @@ function buildServices(): Services {
     });
   };
 
+  const postSave: Services['postSave'] = {
+    relations,
+    repos,
+    candidates: { perSaveMax: envInt('CANDIDATES_PER_SAVE_MAX', 5, { min: 0, max: 25 }) },
+    embedNow: (memoryId, title, content, projectId) =>
+      embeddingWorker().then((worker) => worker.embedNow(memoryId, title, content, projectId)),
+  };
+
   const entityBackfillWorker = new EntityBackfillWorker({ repos, tx: db.db });
 
   const runner = new ConsolidationRunner({
@@ -136,6 +146,7 @@ function buildServices(): Services {
     memory,
     relations,
     prompts,
+    postSave,
     usageCounters,
     authLockout: new AuthLockout({
       maxFailures: envInt('AUTH_LOCKOUT_MAX_FAILURES', 10, { min: 1, max: 10_000 }),

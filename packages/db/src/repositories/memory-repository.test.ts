@@ -1,6 +1,6 @@
 import { deriveTitle } from '@rembric/core';
 import { REFUTED_PRIORITY_MS, REVIEW_TTL_MS } from '@rembric/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   agentSessions,
@@ -704,6 +704,74 @@ describe('MemoryRepository', () => {
         .run();
       expect(repo.lastCreatedAtForSession(projectScope('p0'), 'S1')?.getTime()).toBe(2_000);
       expect(repo.lastCreatedAtForSession(projectScope('p1'), 'S1')?.getTime()).toBe(7_000);
+    });
+  });
+
+  describe('hasActiveWithContentInSession', () => {
+    beforeEach(() => {
+      t.handle.db
+        .insert(tokens)
+        .values([{ id: 'tk1', name: 'test', hash: 'x', scope: '*', createdAt: new Date(500) }])
+        .run();
+      t.handle.db
+        .insert(agentSessions)
+        .values(
+          ['S1', 'S2'].map((id) => ({
+            id,
+            tokenId: 'tk1',
+            projectId: 'p0',
+            agent: 'claude-code',
+            status: 'active' as const,
+            startedAt: new Date(0),
+          })),
+        )
+        .run();
+      t.handle.db
+        .insert(memory)
+        .values([
+          row({ id: '01A', content: 'same text', sessionId: 'S1' }),
+          row({ id: '01B', content: 'retired text', sessionId: 'S1', status: 'archived' }),
+          row({ id: '01C', content: 'other project', sessionId: 'S1', projectId: 'p1' }),
+          row({ id: '01D', content: 'no session', sessionId: null }),
+        ])
+        .run();
+    });
+
+    it('matches only an active row with that exact content, in that session and scope', () => {
+      const p0 = projectScope('p0');
+      expect(repo.hasActiveWithContentInSession(p0, 'S1', 'same text')).toBe(true);
+      expect(repo.hasActiveWithContentInSession(p0, 'S1', 'same text ')).toBe(false);
+      expect(repo.hasActiveWithContentInSession(p0, 'S2', 'same text')).toBe(false);
+      expect(repo.hasActiveWithContentInSession(p0, 'S1', 'retired text')).toBe(false);
+      expect(repo.hasActiveWithContentInSession(p0, 'S1', 'other project')).toBe(false);
+      expect(repo.hasActiveWithContentInSession(projectScope('p1'), 'S1', 'other project')).toBe(
+        true,
+      );
+      expect(repo.hasActiveWithContentInSession(p0, 'S1', 'no session')).toBe(false);
+    });
+
+    it('is served by memory_session_idx', () => {
+      const prepared: string[] = [];
+      const prepare = t.handle.raw.prepare.bind(t.handle.raw);
+      const spy = vi.spyOn(t.handle.raw, 'prepare').mockImplementation((source: string) => {
+        prepared.push(source);
+        return prepare(source);
+      });
+      try {
+        expect(repo.hasActiveWithContentInSession(projectScope('p0'), 'S1', 'same text')).toBe(
+          true,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+      const statement = prepared.find((s) => /\bsession_id\b/.test(s));
+      expect(statement).toBeDefined();
+      const plan = t.handle.raw
+        .prepare(`EXPLAIN QUERY PLAN ${statement!}`)
+        .all('S1', 'p0', 'same text')
+        .map((r) => (r as { detail: string }).detail)
+        .join('\n');
+      expect(plan).toMatch(/USING INDEX memory_session_idx/);
     });
   });
 
