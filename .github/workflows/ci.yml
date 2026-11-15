@@ -275,7 +275,17 @@ jobs:
           [ "$applied" = 39 ] \
             || { echo "::error::expected 39 migrations, got $applied"; \
                  echo "$LOGS"; exit 1; }
-          echo "${{ matrix.arch }} boot smoke: healthz=200, /data/data.db, 39 migrations ✓"
+          warmed=
+          for _ in $(seq 1 30); do
+            LOGS="$(docker logs rembric-boot-smoke 2>&1 || true)"
+            echo "$LOGS" | grep -q '\[process\] embedder warmup failed' && break
+            echo "$LOGS" | grep -q '\[process\] embedder warmed' && { warmed=1; break; }
+            sleep 2
+          done
+          [ -n "$warmed" ] \
+            || { echo "::error::${{ matrix.arch }} embedder did not run an inference"; \
+                 echo "$LOGS"; exit 1; }
+          echo "${{ matrix.arch }} boot smoke: healthz=200, /data/data.db, 39 migrations, embedder inference ✓"
           docker rm -f rembric-boot-smoke
 
       - name: Installer e2e — server --up against the built image
