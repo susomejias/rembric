@@ -56,6 +56,16 @@
             "timeout": 2
           }
         ]
+      },
+      {
+        "matcher": "SubagentHandback",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/subagent-report.sh claude-code",
+            "async": true
+          }
+        ]
       }
     ],
     "SessionEnd": [
@@ -94,6 +104,17 @@
           {
             "type": "command",
             "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/stop-report.sh claude-code"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REMBRIC_SERVER_URL=\"${CLAUDE_PLUGIN_OPTION_SERVER_URL}\" REMBRIC_API_TOKEN=\"${CLAUDE_PLUGIN_OPTION_API_TOKEN}\" \"${CLAUDE_PLUGIN_ROOT}\"/scripts/subagent-report.sh claude-code",
+            "async": true
           }
         ]
       }
