@@ -86,5 +86,5 @@
 
 ## 7. Close
 
-- [ ] 7.1 After PRs 2–6 merge, run `openspec archive file-anchored-recall` in a follow-up commit and confirm `pnpm run check:spec-provenance` passes.
+- [x] 7.1 After PRs 2–6 merge, run `openspec archive file-anchored-recall` in a follow-up commit and confirm `pnpm run check:spec-provenance` passes.
 - [ ] 7.2 Operator, after release: read the file-recall counter for two weeks and confirm median tokens per session below about 300 and hook p95 below 50 ms. Otherwise open a follow-up change to adjust the caps. **(operator)**

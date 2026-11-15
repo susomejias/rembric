@@ -160,3 +160,23 @@ This is stated because it was broken: `_api.sh`'s promise that "every function e
 - **WHEN** the repository is at HEAD
 - **THEN** `apps/plugin/scripts/pre-compact.sh`, `apps/plugin/scripts/post-compaction.sh`, and `apps/plugin/scripts/post-compact.sh` SHALL all exist and be executable
 - **AND** `hooks.codex.json` SHALL reference `pre-compact.sh` from its `PreCompact` entry, `post-compaction.sh` from its `PostCompact` entry, and `post-compact.sh` from its `SessionStart` `"compact"` matcher group
+
+### Requirement: `/rembric:*` slash commands are Claude-Code-only and SHALL be documented as such
+
+Rembric's four `/rembric:*` commands SHALL be treated as Claude-Code-only. They are auto-discovered by Claude Code from `apps/plugin/commands/*.md`; there is no `commands` field in `.claude-plugin/plugin.json` and none in `.codex-plugin/plugin.json`, which declares only `mcpServers` and `hooks`. Codex users therefore get the MCP tools and the hooks but **no slash commands**.
+
+Both this capability and `claude-code-plugin` are currently silent on the asymmetry, so a reader of either has no way to learn it. This capability SHALL state it explicitly, and the Codex section of `docs/agents.md` SHALL state it in the operator-facing install material, so a Codex user does not go looking for `/rembric:remember`. The equivalent Codex path is to ask the agent in plain language; the protocol guidance the agent needs arrives server-side through the MCP `initialize.instructions` handshake, which is client-agnostic and unaffected.
+
+This is a documentation requirement, not a feature gap: adding a Codex command surface is a separate change, and nothing here SHALL be read as committing to one.
+
+#### Scenario: Neither manifest declares a commands field
+
+- **WHEN** `apps/plugin/.codex-plugin/plugin.json` and `apps/plugin/.claude-plugin/plugin.json` are loaded
+- **THEN** neither SHALL declare a `commands` field
+- **AND** `.codex-plugin/plugin.json`'s only capability declarations SHALL be `mcpServers` and `hooks`
+
+#### Scenario: The Codex install material states the asymmetry
+
+- **WHEN** a reader opens the Codex section of `docs/agents.md`
+- **THEN** it SHALL state that `/rembric:*` slash commands are a Claude Code feature and are not available under Codex
+- **AND** it SHALL direct Codex users to ask the agent in plain language instead

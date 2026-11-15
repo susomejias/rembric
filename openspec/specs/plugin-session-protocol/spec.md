@@ -276,7 +276,7 @@ The server cannot resolve which of several concurrently-active sessions an impli
 
 ### Requirement: Per-client lifecycle mapping MUST be honoured
 
-The cross-client write contract maps lifecycle events to HTTP endpoints as follows. Implementations SHALL conform; divergences from this mapping SHALL be considered specification violations.
+The cross-client write contract maps lifecycle events to HTTP endpoints as follows. Implementations SHALL conform; divergences from this mapping SHALL be considered specification violations. Read-only per-tool calls — file-anchored recall (`POST /sessions/<id>/file-recall`) — are not lifecycle writes and are mapped by their own requirement in this capability, not by this table.
 
 | Client      | Lifecycle event                                                         | HTTP call                                                                                                                                                    | `final` |
 | ----------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
@@ -400,21 +400,23 @@ Of the five clients, four POST `/end`: Claude Code, Codex CLI, Hermes and Pi. op
 #### Scenario: Claude Code hooks.json contains the mapped events
 
 - **WHEN** `apps/plugin/hooks/hooks.json` is loaded
-- **THEN** the `hooks` object SHALL contain entries for exactly these six event types and no others: `SessionStart`, `UserPromptSubmit`, `SessionEnd`, `PreCompact`, `PostCompact`, `Stop`
+- **THEN** the `hooks` object SHALL contain entries for exactly these seven event types and no others: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `SessionEnd`, `PreCompact`, `PostCompact`, `Stop`
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, `startup|resume|clear|fork` and `compact`
-- **AND** `UserPromptSubmit` SHALL declare exactly two entries, neither carrying a `matcher` key
+- **AND** `UserPromptSubmit` SHALL declare exactly three entries, none carrying a `matcher` key
+- **AND** `PreToolUse` SHALL declare exactly ONE entry, matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, invoking `file-recall.sh claude-code`
 - **AND** `Stop` SHALL declare exactly ONE entry, invoking `stop-report.sh`, and it SHALL NOT declare `async` — an asynchronous handler is fire-and-forget by the host's contract and could not deliver a response the next turn depends on
-- **AND** the six event types SHALL carry eight handler entries in total
+- **AND** the seven event types SHALL carry ten handler entries in total
 - **AND** the `hooks` object SHALL NOT contain a `PostToolUse` entry
 
 #### Scenario: Codex hooks.codex.json contains the mapped events
 
 - **WHEN** `apps/plugin/hooks/hooks.codex.json` is loaded
-- **THEN** the `hooks` object SHALL contain entries for exactly these six event types and no others: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`
+- **THEN** the `hooks` object SHALL contain entries for exactly these seven event types and no others: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, `startup|resume|clear` and `compact` — Codex has no `fork` source, so unlike Claude Code's manifest this group SHALL NOT declare one
-- **AND** `UserPromptSubmit` SHALL declare exactly two entries, neither carrying a `matcher` key
+- **AND** `UserPromptSubmit` SHALL declare exactly three entries, none carrying a `matcher` key
+- **AND** `PreToolUse` SHALL declare exactly ONE entry, matcher `Bash|apply_patch`, invoking `file-recall.sh codex-cli`
 - **AND** `Stop` SHALL declare exactly ONE entry
-- **AND** the six event types SHALL carry eight handler entries in total
+- **AND** the seven event types SHALL carry ten handler entries in total
 - **AND** the `SessionEnd` entry SHALL declare `"timeout": 3`, the documented maximum for this one event, and SHALL carry no `matcher` key
 - **AND** the `Stop` script SHALL emit `'{}'` to stdout (Codex requires JSON on Stop stdout — plain text is invalid per docs)
 
@@ -993,3 +995,93 @@ Hermes session workers SHALL be created with `agent.memory_provider.spawn_contex
 - **WHEN** the required thread factory is missing or creation/start raises
 - **THEN** no bare-thread or environment fallback SHALL run
 - **AND** a diagnostic without raw exception text or credentials SHALL be visible without interrupting the host
+
+### Requirement: Every client MUST ask for file-anchored recall when the agent reaches a file, the same way
+
+Each client SHALL call `POST /api/<slug>/sessions/<id>/file-recall` (`http-api`) for the files the agent reads or edits, and SHALL put the returned lines in front of the model. The mechanism differs per host only where the host forces it:
+
+| Client                        | Where the path is captured                                                    | How the lines reach the model                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Claude Code                   | `PreToolUse` on `Read`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash`  | `hookSpecificOutput.additionalContext`, documented as "added to Claude's context alongside the tool result" |
+| Codex CLI                     | `PreToolUse` on `Bash`, `apply_patch`                                         | `hookSpecificOutput.additionalContext`, recorded as a developer message                                     |
+| Pi                            | `tool_call`                                                                   | appended as a text block to that call's `tool_result` content                                               |
+| Hermes Agent                  | `transform_tool_result` (file tools) / `transform_terminal_output` (terminal) | appended to that tool's result                                                                              |
+| opencode (v2 plugin API only) | `ctx.tool.hook("execute.before")`                                             | `ctx.session.hook("context")` system push on the next request                                               |
+
+On every host the model sees the note at its next step, together with or right after the tool's result:
+
+- **For a read,** that is the moment the file's content arrives, which is the point of the feature.
+- **For an edit,** the note can only shape the steps that follow the edit. This spec does not promise more.
+
+The rules below hold for every client. Each one is verified per client against that host's official documentation at the version the client targets.
+
+**Path extraction**
+
+- For a file tool, the path SHALL be the tool's own file-path argument.
+- For a shell command, the paths SHALL be the path-like tokens of the command, as pinned by the shared fixture `apps/plugin/test/file-recall-fixtures.json`, capped at 5 per command. A path-like token is a token containing `/` and ending in a `.<extension>`, or an absolute path. This works whatever the command is (`cat`, `sed`, `grep`, `rg`, `git show`, `rtk …`), so no list of commands is maintained.
+- For Codex `apply_patch`, the paths SHALL be those named on `*** Add File:`, `*** Update File:` and `*** Delete File:` lines.
+
+**Path normalisation**
+
+- Each path SHALL be resolved against the working directory the host reports, and made relative to that directory's git top-level.
+- It SHALL be kept only if it names one regular file the repository tracks, matched literally: a directory, a glob, or a bracketed route name such as `app/[id]/page.ts` SHALL never stand in for another file. Non-ASCII names SHALL be sent as themselves, never C-quoted. Nothing outside the repository is ever sent.
+
+**Siblings:** the client SHALL list the tracked paths sharing the file name (`git ls-files -- '*/<name>' '<name>'`). It SHALL send them as `siblings` only when there are at most 64; otherwise it SHALL send none.
+
+**Once per file:** each client SHALL remember, per session, the paths it has already sent and SHALL NOT send one again. Once a response carries `exhausted: true`, it SHALL send nothing more for that session.
+
+**Bounded and fail-open**
+
+- Each client SHALL bound the call: 0.3 s for the bash hook's POST, 500 ms for the JavaScript core, 0.5 s for Hermes. Every host-level hook timeout SHALL sit above that budget. After the first failed request in one firing, a client SHALL send nothing more in that firing.
+- A timeout, a non-2xx response (an older server answers `404`), a non-repository directory, a missing `git`, or any parse failure SHALL produce no output. It SHALL NEVER block, deny or fail the tool.
+
+**Sub-agents:** sub-agent tool calls SHALL be skipped, exactly as prompt-time recall skips sub-agent sessions, so the parent session's dedupe is not spent on a context the parent never sees.
+
+#### Scenario: The same read yields the same note on every client
+
+- **GIVEN** an eligible memory linked to `packages/db/src/migrate.ts` and a fresh session on each of the five clients
+- **WHEN** the agent reads that file, through the host's file tool where it has one and through `cat packages/db/src/migrate.ts` otherwise
+- **THEN** each client SHALL deliver the same rendered block to the model once
+- **AND** a second read of the file in the same session SHALL deliver nothing and SHALL issue no request
+
+#### Scenario: A shell command's paths are extracted by one rule
+
+- **WHEN** the extractor of each language (bash, JavaScript, Python) runs over every command in `file-recall-fixtures.json`
+- **THEN** each SHALL produce exactly the fixture's expected path list
+- **AND** a fixture covering `rtk read <path>`, `rg -n x <path>`, `git show HEAD:<path>` and `sed -n 1,20p <path>` SHALL be present
+
+#### Scenario: The client never sends a path outside the repository
+
+- **WHEN** the agent runs `cat /tmp/notes.txt ../other-repo/x.ts`
+- **THEN** no request SHALL be issued
+
+#### Scenario: Failure leaves the tool untouched
+
+- **GIVEN** a server that does not answer within the client's budget, or answers `404`
+- **WHEN** the agent reads a file
+- **THEN** the tool SHALL run normally and the client SHALL emit no model-visible output
+- **AND** the hook or handler SHALL complete within its budget plus process overhead
+
+### Requirement: The shared JavaScript core MUST own the file-recall call and the shell-path extractor
+
+`apps/plugin/bin/rembric-plugin-core.mjs` SHALL be the single JavaScript implementation, typed in `rembric-plugin-core.d.mts`, of:
+
+- `fileRecall(sessionId, path, siblings)`, which POSTs to the endpoint;
+- `extractCommandPaths(command)`, the shell-path extractor;
+- the per-session record of paths already sent and of exhaustion.
+
+Pi and opencode SHALL import them and SHALL NOT re-implement any of them. Every per-session container the core adds SHALL be cleared in `forgetSession`.
+
+Bash (`apps/plugin/scripts/_api.sh`) and Python (`apps/plugin/.hermes-plugin/__init__.py`) keep their own extractors, by the repository's cross-language rule. They SHALL agree with the core on every fixture in `file-recall-fixtures.json`.
+
+#### Scenario: Pi and opencode use the core's call
+
+- **WHEN** `apps/plugin/.pi-plugin/index.ts` and `apps/plugin/.opencode-plugin/plugin.ts` are read
+- **THEN** both SHALL import `fileRecall` and `extractCommandPaths` from `rembric-plugin-core.mjs`
+- **AND** neither SHALL define a function with either name
+
+#### Scenario: Forgetting a session clears its file-recall state
+
+- **GIVEN** a session that has sent two paths and been told `exhausted: true`
+- **WHEN** `forgetSession` runs for it
+- **THEN** a new session with the same id SHALL be free to send both paths again

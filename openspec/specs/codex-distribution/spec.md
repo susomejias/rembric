@@ -116,7 +116,7 @@ The Codex section of `docs/agents.md` SHALL recommend the **TUI installer** (`ap
 
 ### Requirement: `/rembric:*` slash commands are Claude-Code-only and SHALL be documented as such
 
-Rembric's four `/rembric:*` commands are auto-discovered by Claude Code from `apps/plugin/commands/*.md`; there is no `commands` field in `.claude-plugin/plugin.json` and none in `.codex-plugin/plugin.json`, which declares only `mcpServers` and `hooks`. Codex users therefore get the MCP tools and the hooks but **no slash commands**.
+Rembric's four `/rembric:*` commands SHALL be treated as Claude-Code-only. They are auto-discovered by Claude Code from `apps/plugin/commands/*.md`; there is no `commands` field in `.claude-plugin/plugin.json` and none in `.codex-plugin/plugin.json`, which declares only `mcpServers` and `hooks`. Codex users therefore get the MCP tools and the hooks but **no slash commands**.
 
 Both this capability and `claude-code-plugin` are currently silent on the asymmetry, so a reader of either has no way to learn it. This capability SHALL state it explicitly, and the Codex section of `docs/agents.md` SHALL state it in the operator-facing install material, so a Codex user does not go looking for `/rembric:remember`. The equivalent Codex path is to ask the agent in plain language; the protocol guidance the agent needs arrives server-side through the MCP `initialize.instructions` handshake, which is client-agnostic and unaffected.
 
@@ -191,7 +191,7 @@ Codex CLI and Claude Code invoke the same post-compaction script, so the languag
 
 ### Requirement: Codex hook configuration and its `SessionEnd` budget
 
-The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the Codex-supported events the plugin wires: **six event types across eight handler entries**.
+The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the Codex-supported events the plugin wires: **seven event types across ten handler entries**.
 
 Codex's hook surface differs from Claude Code's in ways the platform forces, and has evolved since this requirement was first written:
 
@@ -199,7 +199,8 @@ Codex's hook surface differs from Claude Code's in ways the platform forces, and
 - **`SessionEnd` carries the tightest time budget of any hook on either host, and it is not the 600-second default.** Verbatim: "If `timeout` is omitted, Codex uses 600 seconds for most hooks. `SessionEnd` uses `1` second by default and supports up to `3` seconds." The plugin's shared curl helper allows a POST 3 seconds (`claude-code-plugin`, `rembric_post`), so an undeclared timeout kills the handler before its request can complete, and a declared `"timeout": 3` with an unchanged POST budget leaves nothing for reading the transcript or emitting the failure diagnostic. The entry SHALL therefore declare `"timeout": 3` — the documented maximum — AND cap its own POST at 2 seconds through the helper's budget override. Neither half is optional: the timeout alone still lets one slow request consume the whole budget, and the override alone still leaves the handler dead at one second. **The deterministic fact extraction that moves onto this path (`sessions`) SHALL NOT change that arithmetic on Codex, because no `codex_cli` fact extractor exists — the call returns empty and the existing transcript formatter runs, exactly as before.** Should one be added later, it SHALL be bounded so the handler still fits the 3-second maximum.
 - Codex DOES support `PreCompact` and `PostCompact` events as of current `codex-cli` releases; the plugin wires both. `apps/plugin/scripts/pre-compact.sh` exists and is invoked from `hooks.codex.json`'s `PreCompact` entry — any statement that it should be removed for lack of a Codex event is false.
 - Codex's `SessionStart` stdin carries a `source` field and the dispatcher matches `SessionStart` matchers against it, so a `matcher: "compact"` group behaves the same way it does for Claude Code. Both matcher groups are declared **explicitly**: `startup|resume|clear` and `compact`. Neither is a default/unmatched group. Codex's documented `source` values are exactly `startup`, `resume`, `clear` and `compact`; there is no `fork` source as there is on Claude Code, so the Codex manifest SHALL NOT declare one and the divergence from `hooks.json` is the hosts', not a plugin inconsistency.
-- Codex's dispatcher does NOT filter `UserPromptSubmit` by matcher; the hook fires on every prompt regardless. The manifest therefore declares NO matcher on either `UserPromptSubmit` entry, and each script self-filters internally.
+- Codex's dispatcher does NOT filter `UserPromptSubmit` by matcher; the hook fires on every prompt regardless. The manifest therefore declares NO matcher on any of its three `UserPromptSubmit` entries (`prompt-search.sh`, `prompt-nudge.sh`, `prompt-hints.sh`), and each script self-filters internally.
+- **`PreToolUse` carries exactly ONE entry, the file-anchored recall hook**, with matcher `Bash|apply_patch` and `"timeout": 2`, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/file-recall.sh codex-cli`. Per the host's documentation, shell commands and `exec_command` match as `Bash` and carry the command string in `tool_input.command`; `apply_patch` matches as `apply_patch` (also `Edit`/`Write`) and carries the patch text in `tool_input.command`; plain-text stdout is ignored, so the hook's whole output is `hookSpecificOutput.additionalContext` JSON or nothing. Its behaviour is specified by this capability's file-recall requirement.
 - Codex's `Stop` hook REQUIRES JSON on stdout: "Stop expects JSON on stdout when it exits 0. Plain text output is invalid for this event." Per official docs. **`Stop` now carries exactly ONE entry**, `stop-report.sh codex-cli`, whose entire model-facing output is that `{}`.
 
 `apps/plugin/scripts/session-end.sh` SHALL take an optional agent-name argument selecting the per-client transcript parser, exactly as `pre-compact.sh <agent>` already does (`claude-code` default, `codex-cli` selecting the `*_codex_cli` helpers). There SHALL be no `session-end.codex.sh`. Both manifests SHALL pass the argument explicitly.
@@ -211,10 +212,11 @@ The authoritative table of which hook POSTs what for both clients is `plugin-ses
 #### Scenario: Hook event coverage
 
 - **WHEN** `apps/plugin/hooks/hooks.codex.json` is loaded
-- **THEN** the `hooks` object SHALL declare exactly these six event types and no others: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`
-- **AND** those six SHALL carry exactly eight handler entries in total
+- **THEN** the `hooks` object SHALL declare exactly these seven event types and no others: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`
+- **AND** those seven SHALL carry exactly ten handler entries in total
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, with the literal matchers `startup|resume|clear` and `compact`
-- **AND** `UserPromptSubmit` SHALL declare exactly two entries, invoking `prompt-search.sh` and `prompt-nudge.sh`, and NEITHER SHALL carry a `matcher` key
+- **AND** `UserPromptSubmit` SHALL declare exactly three entries, invoking `prompt-search.sh`, `prompt-nudge.sh` and `prompt-hints.sh`, and NONE SHALL carry a `matcher` key
+- **AND** `PreToolUse` SHALL declare exactly ONE entry, with matcher `Bash|apply_patch` and `"timeout": 2`, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/file-recall.sh codex-cli`
 - **AND** `Stop` SHALL declare exactly ONE entry, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/stop-report.sh codex-cli`
 - **AND** the `hooks` object SHALL NOT contain `PostToolUse`
 - **AND** every hook entry SHALL be `type: "command"` — Codex does not support `type: "mcp_tool"` for hooks
@@ -228,8 +230,8 @@ The authoritative table of which hook POSTs what for both clients is `plugin-ses
 
 - **WHEN** `apps/plugin/test/hook-manifests.test.ts` is read at HEAD
 - **THEN** the `SessionEnd` assertion SHALL still require the entry to exist, declare `"timeout": 3` and carry no `matcher` key
-- **AND** the event-type set assertion SHALL name six events including `SessionEnd`
-- **AND** the handler-count assertion SHALL be `8`, not `9`
+- **AND** the event-type set assertion SHALL name seven events including `SessionEnd` and `PreToolUse`
+- **AND** the handler-count assertion SHALL be `10`
 - **AND** the ordered invocation list SHALL name `Stop command scripts/stop-report.sh codex-cli` exactly once and SHALL NOT name `stop-sync.sh` or `stop-nudge.sh`
 - **AND** each assertion SHALL still be an exact set or exact count, never a containment check
 
@@ -383,3 +385,29 @@ The `env_vars` list SHALL forward the user's shell `PWD` so the bridge can resol
 
 - **WHEN** a contributor merges a commit modifying any file under `apps/plugin/` (a shared asset OR `apps/plugin/.codex-plugin/`)
 - **THEN** release-please SHALL bump the single unified `plugin` component (tag `plugin-vX.Y.Z`), updating `apps/plugin/.codex-plugin/package.json::version` and `apps/plugin/.codex-plugin/plugin.json::version` (via the `plugin` component's `extra-files`) to the same version as every other client
+
+### Requirement: Codex SHALL receive file-anchored recall through the shared hook, in JSON only
+
+Under `codex-cli`, `file-recall.sh` SHALL read `session_id`, `cwd`, `tool_name` and `tool_input.command` from stdin.
+
+- **`Bash`:** paths come from the command string through the shared extractor.
+- **`apply_patch`:** paths come from the patch's `*** Add File:`, `*** Update File:` and `*** Delete File:` lines: the first five distinct ones, the same cap a shell command gets.
+- **`cwd`:** below Codex 0.166.0, `cwd` is the turn's working directory rather than the command's. Relative paths SHALL be resolved against it, and a path that is not tracked there is dropped, as for every client.
+- **Sub-agents:** a call whose stdin carries `agent_id` SHALL be skipped.
+
+**Output:**
+
+- The script SHALL print only the `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"…"}}` object, or nothing. The host ignores plain-text stdout for this event.
+- It SHALL NOT include `permissionDecision`. On Codex 0.163 a `permissionDecision` of `allow` without `updatedInput` invalidates the hook's output, and that discards the `additionalContext`.
+
+#### Scenario: A patch's files are recalled
+
+- **GIVEN** an eligible memory linked to `apps/web/src/lib/validation.ts`
+- **WHEN** Codex fires `PreToolUse` for `apply_patch` with `tool_input.command` containing `*** Update File: apps/web/src/lib/validation.ts`
+- **THEN** the script SHALL print one JSON object whose `hookSpecificOutput.additionalContext` names that memory
+- **AND** the object SHALL carry no `permissionDecision` key
+
+#### Scenario: Codex output is JSON or nothing
+
+- **WHEN** the hook fires in any situation
+- **THEN** its stdout SHALL be either empty or exactly one JSON object that parses with `hookEventName` `"PreToolUse"`
