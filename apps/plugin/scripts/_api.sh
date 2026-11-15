@@ -496,9 +496,10 @@ rembric_json_escape() {
 }
 
 # POSTs and echoes the response `lines` as one block; silent on non-2xx, timeout or empty array.
-# An optional third argument names a marker file touched when the body says `"exhausted":true`.
+# Optional markers: the third is touched when the body says `"exhausted":true`, the fourth
+# when the request fails (timeout, transport error or non-2xx).
 rembric_post_lines() {
-  local path="${1:-}" body="${2:-}" exhausted_marker="${3:-}"
+  local path="${1:-}" body="${2:-}" exhausted_marker="${3:-}" failed_marker="${4:-}"
   [ -z "$path" ] && return 0
   if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
     printf '[rembric] missing REMBRIC_SERVER_URL or REMBRIC_API_TOKEN; skipping POST %s\n' "$path" >&2
@@ -518,6 +519,7 @@ rembric_post_lines() {
   detail="${response%$'\n'*}"
   if [ "$rc" -ne 0 ] || [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
     printf '[rembric] POST %s failed (curl rc=%s status=%s) body=%s\n' "$path" "$rc" "$status" "$detail" >&2
+    if [ -n "$failed_marker" ]; then : >"$failed_marker" 2>/dev/null || true; fi
     return 0
   fi
   if [ -n "$exhausted_marker" ]; then
@@ -586,6 +588,7 @@ rembric_patch_paths() {
   local patch="${1:-}" line
   [ -z "$patch" ] && return 0
   while IFS= read -r line; do
+    line="${line%$'\r'}"
     case "$line" in
     '*** Add File: '*) printf '%s\n' "${line#'*** Add File: '}" ;;
     '*** Update File: '*) printf '%s\n' "${line#'*** Update File: '}" ;;
@@ -595,11 +598,15 @@ rembric_patch_paths() {
   return 0
 }
 
-# Echoes <path>'s repo-relative form when the repository at <cwd> tracks it, else nothing.
+# Echoes <path>'s repo-relative form when it names one regular file the repository at <cwd>
+# tracks, else nothing. Literal pathspecs: a directory or glob token must never stand in for
+# whichever file it happens to match first; quotePath off: non-ASCII names stay unquoted.
 rembric_tracked_path() {
-  local cwd="${1:-}" path="${2:-}"
+  local cwd="${1:-}" path="${2:-}" abs
   { [ -z "$cwd" ] || [ -z "$path" ]; } && return 0
-  git -C "$cwd" ls-files --full-name --error-unmatch -- "$path" 2>/dev/null | head -n1 || true
+  case "$path" in /*) abs="$path" ;; *) abs="${cwd}/${path}" ;; esac
+  [ -f "$abs" ] || return 0
+  GIT_LITERAL_PATHSPECS=1 git -c core.quotePath=false -C "$cwd" ls-files --full-name --error-unmatch -- "$path" 2>/dev/null || true
 }
 
 # Echoes a JSON array of the tracked paths sharing <rel>'s file name, or nothing past 64.
@@ -607,7 +614,7 @@ rembric_sibling_paths_json() {
   local cwd="${1:-}" rel="${2:-}" name list count out="" item
   name="${rel##*/}"
   case "$name" in '' | *[][*?]*) return 0 ;; esac
-  list="$(git -C "$cwd" ls-files --full-name -- ":(top)*/${name}" ":(top)${name}" 2>/dev/null || true)"
+  list="$(git -c core.quotePath=false -C "$cwd" ls-files --full-name -- ":(top)*/${name}" ":(top)${name}" 2>/dev/null || true)"
   [ -z "$list" ] && return 0
   count="$(printf '%s\n' "$list" | grep -c . || true)"
   [ "$count" -gt 64 ] && return 0

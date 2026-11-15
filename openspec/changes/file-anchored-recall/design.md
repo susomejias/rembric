@@ -174,6 +174,7 @@ Prompt-time recall already skips sub-agent sessions. On Claude Code a sub-agent'
 POST budgets:
 
 - 0.3 s for bash, against a 2 s host hook timeout. `prompt-hints.sh` uses 0.2 s at turn start; file recall waits on a tool, not on the first token.
+- Every client stops a firing at its first failed request, so a hanging server costs one budget per firing (about 0.4 s for bash, git included), not one per named file.
 - 500 ms for the JavaScript core, matching recall hints.
 - 0.5 s for Python.
 
@@ -185,7 +186,9 @@ The route records firings and lines per token next to the existing recall counte
 
 ## Risks / Trade-offs
 
-- **[Risk] Parallel hooks race on Claude Code's per-session record** (the host runs a turn's tool hooks concurrently). → Append-only, line-at-a-time writes under a lock directory. A lost update only repeats a request, which the server's memory-id dedupe absorbs. Covered by a concurrent-run test, and by an independent verifier on that PR (high-risk item 4).
+- **[Risk] Parallel hooks race on Claude Code's per-session record** (the host runs a turn's tool hooks concurrently). → One atomic `mkdir` claim per (session, file): no shared writable file, no torn record. Covered by a concurrent-run test, and by an independent verifier on that PR (high-risk item 4), which measured exactly one request per file across 80 concurrent firings in three trials.
+- **[Trade-off] A file is claimed before its request is sent,** so a request that fails is not retried in that session. Accepted: a degraded server then costs one budget per file rather than one per tool call, and a compaction resets the claims.
+- **[Risk] A shell token is a pathspec to `git`,** so a directory or glob token could resolve to whichever tracked file it matches first, and non-ASCII names come back C-quoted. → Paths are resolved with literal pathspecs and `core.quotePath=false`, and must name a regular file. Found by the PR 3 verifier; each guard is pinned by a test that fails without it.
 - **[Risk] A stale memory steers the agent wrong.** → The A/B saw 0 of 6 misled. Lines carry the date and `needs review`, and the code the agent reads in the same step wins.
 - **[Risk] Notes that merely mention the file are noise.** Precision measured 58% of shown memories useful, and 22 of 29 hit files had at least one useful line. → Specificity ranking, the 3-per-file cap and the 1 KB bound keep the cost of a miss small.
 - **[Risk] Hermes' tool results are JSON strings.** Appending text naively may break a consumer. → A spike against the installed Hermes fixes the form before implementation. The spec requires the result to stay valid JSON.

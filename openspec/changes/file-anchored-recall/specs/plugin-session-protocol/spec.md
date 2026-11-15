@@ -25,14 +25,14 @@ The rules below hold for every client. Each one is verified per client against t
 
 **Path normalisation**
 - Each path SHALL be resolved against the working directory the host reports, and made relative to that directory's git top-level.
-- It SHALL be kept only if the repository tracks it. Nothing outside the repository is ever sent.
+- It SHALL be kept only if it names one regular file the repository tracks, matched literally: a directory, a glob, or a bracketed route name such as `app/[id]/page.ts` SHALL never stand in for another file. Non-ASCII names SHALL be sent as themselves, never C-quoted. Nothing outside the repository is ever sent.
 
 **Siblings:** the client SHALL list the tracked paths sharing the file name (`git ls-files -- '*/<name>' '<name>'`). It SHALL send them as `siblings` only when there are at most 64; otherwise it SHALL send none.
 
 **Once per file:** each client SHALL remember, per session, the paths it has already sent and SHALL NOT send one again. Once a response carries `exhausted: true`, it SHALL send nothing more for that session.
 
 **Bounded and fail-open**
-- Each client SHALL bound the call: 0.3 s for the bash hook's POST, 500 ms for the JavaScript core, 0.5 s for Hermes. Every host-level hook timeout SHALL sit above that budget.
+- Each client SHALL bound the call: 0.3 s for the bash hook's POST, 500 ms for the JavaScript core, 0.5 s for Hermes. Every host-level hook timeout SHALL sit above that budget. After the first failed request in one firing, a client SHALL send nothing more in that firing.
 - A timeout, a non-2xx response (an older server answers `404`), a non-repository directory, a missing `git`, or any parse failure SHALL produce no output. It SHALL NEVER block, deny or fail the tool.
 
 **Sub-agents:** sub-agent tool calls SHALL be skipped, exactly as prompt-time recall skips sub-agent sessions, so the parent session's dedupe is not spent on a context the parent never sees.

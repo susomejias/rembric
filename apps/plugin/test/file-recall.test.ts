@@ -188,6 +188,50 @@ describe('file-recall.sh', () => {
     ]);
   });
 
+  it('never lets a directory or glob token stand in for a file it happens to match', async () => {
+    await bash(`grep -rn TODO ${repo}/src/`);
+    await bash('ls src/*.ts packages/db/src/');
+    expect(recallRequests()).toHaveLength(0);
+    await bash('cat src/a.ts');
+    expect(recallRequests().map((r) => r.body['path'])).toEqual(['src/a.ts']);
+  });
+
+  it('matches a bracketed route path literally, never as a glob', async () => {
+    mkdirSync(join(repo, 'app', '[id]'), { recursive: true });
+    writeFileSync(join(repo, 'app', '[id]', 'page.ts'), 'x');
+    mkdirSync(join(repo, 'app', 'i'), { recursive: true });
+    writeFileSync(join(repo, 'app', 'i', 'page.ts'), 'x');
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    await bash('cat "app/[id]/page.ts"');
+    expect(recallRequests().map((r) => r.body['path'])).toEqual(['app/[id]/page.ts']);
+  });
+
+  it('sends a non-ASCII file name as itself, not C-quoted', async () => {
+    writeFileSync(join(repo, 'src', 'ünï.ts'), 'x');
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    await bash('cat src/ünï.ts');
+    expect(recallRequests()[0]!.body).toEqual({ path: 'src/ünï.ts', siblings: ['src/ünï.ts'] });
+  });
+
+  it('stops a firing at its first failed request and leaves the other files for later', async () => {
+    respond = () => 'hang';
+    const hung = await bash('cat src/a.ts src/b.ts packages/db/src/migrate.ts');
+    expect(hung.stdout).toBe('');
+    expect(recallRequests()).toHaveLength(1);
+    expect(hung.ms).toBeLessThan(1500);
+    respond = (path) => ({ status: 200, body: { ok: true, lines: [LINE(path)] } });
+    await bash('cat src/b.ts');
+    expect(recallRequests().map((r) => r.body['path'])).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('reads a CRLF apply_patch', async () => {
+    const patch = '*** Begin Patch\r\n*** Update File: src/a.ts\r\n@@\r\n-x\r\n+y\r\n*** End Patch';
+    await run(fileRecallSh, { tool_name: 'apply_patch', tool_input: { command: patch } }, [
+      'codex-cli',
+    ]);
+    expect(recallRequests().map((r) => r.body['path'])).toEqual(['src/a.ts']);
+  });
+
   it('never sends a path the repository does not track', async () => {
     const r = await bash('cat /etc/hosts ../outside.ts src/missing.ts');
     expect(r.stdout).toBe('');

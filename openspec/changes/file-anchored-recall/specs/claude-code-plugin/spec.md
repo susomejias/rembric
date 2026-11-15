@@ -67,7 +67,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`. Matcher: `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`. The entry SHALL NOT declare `async`: the host documents that a background hook's `additionalContext` is not delivered.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/file-recall.sh claude-code` with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` taken from the plugin options, and a `timeout` of 2 seconds — above the script's own 0.3-second POST budget and far below the host's 600-second default.
 - Behaviour is specified by this capability's file-recall hook requirement and by `plugin-session-protocol`; not restated here.
-- Output cap: at most `FILE_RECALL_MAX_BYTES` (1024) bytes of `additionalContext` per firing, and nothing on every firing that has no fresh path, no match, or a failure.
+- Output cap: at most `FILE_RECALL_MAX_BYTES` (1024) bytes of `additionalContext` per file the call names, at most five files per firing, and nothing on every firing that has no fresh path, no match, or a failure.
 
 #### SessionEnd
 
@@ -212,9 +212,9 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - A call whose stdin carries `agent_id` comes from a sub-agent and SHALL be skipped.
 
 **Normalisation and request:** for each path it SHALL apply `plugin-session-protocol`'s normalisation, siblings and once-per-file rules.
-- The per-session record SHALL be a file under `${TMPDIR:-/tmp}/rembric-file-recall/`.
-- The host runs a turn's parallel tool hooks concurrently, so writes to that record SHALL be safe under concurrent runs. A lost update SHALL cost at most a repeated request, which the server's per-memory dedupe absorbs. It SHALL never produce a corrupt record.
-- It SHALL POST through `_api.sh` with `REMBRIC_POST_MAX_TIME=0.3`.
+- The per-session record SHALL be a directory under `${TMPDIR:-/tmp}/rembric-file-recall/<session>/` holding one claim per file, each taken with an atomic `mkdir`. The host runs a turn's parallel tool hooks concurrently, so this is what keeps concurrent firings from sending a file twice, and they share no writable file that could be torn.
+- A file SHALL be claimed before its request is sent. A failed request is therefore not retried in that session, until a compaction resets the claims: a degraded server costs one budget per file, not one per tool call.
+- It SHALL POST through `_api.sh` with `REMBRIC_POST_MAX_TIME=0.3`. After the first failed request in a firing it SHALL stop, leaving that firing's remaining files unclaimed for a later firing.
 
 **Output:** on lines it SHALL print exactly one JSON object `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"<lines joined by newline>"}}`.
 - It SHALL NOT include `permissionDecision`. Staying silent on permissions is what leaves the tool to the normal permission flow.
@@ -227,12 +227,19 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - **THEN** the first firing SHALL print one `additionalContext` JSON object whose text starts with `rembric: memories about packages/db/src/migrate.ts:`
 - **AND** the second firing SHALL print nothing and SHALL issue no HTTP request
 
-#### Scenario: Parallel firings never corrupt the record
+#### Scenario: Parallel firings send each file once
 
-- **GIVEN** eight concurrent firings of `file-recall.sh claude-code` in one session, each for a different tracked file
+- **GIVEN** eight concurrent firings of `file-recall.sh claude-code` in one session for the same tracked file, and eight more each for a different tracked file
 - **WHEN** they all complete
-- **THEN** the per-session record SHALL list every path that was sent, each on its own line, with no torn line
+- **THEN** the shared file SHALL have been requested exactly once, and each of the other files exactly once
+- **AND** the per-session directory SHALL hold exactly one claim per file requested
 - **AND** each firing SHALL have exited `0`
+
+#### Scenario: Directories and globs never stand in for a file
+
+- **WHEN** the agent runs `grep -rn TODO <repo>/src/` or `ls src/*.ts`
+- **THEN** no request SHALL be issued and no file SHALL be claimed
+- **AND** the control SHALL pass in the same run: a later `cat src/a.ts` SHALL issue its request
 
 #### Scenario: The hook never blocks a tool
 
