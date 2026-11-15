@@ -106,53 +106,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./.github/actions/setup-workspace
-
-      - uses: ./.github/actions/embedding-model
-
-      - name: Build (artifact sanity)
-        run: pnpm run build
-
-      - name: Test the Pi plugin against the production build
-        working-directory: apps/web
-        run: >-
-          pnpm exec vitest run ../plugin/.pi-plugin/plugin.test.ts
-          --reporter=default --reporter=json --outputFile=test-results.json
-
-      - name: Check for rescued tests
-        working-directory: apps/web
-        run: node ../../scripts/check-rescued-tests.mjs test-results.json
-
-  test-packages:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      REMBRIC_MODEL_CACHE: ${{ github.workspace }}/.model-cache
-    steps:
-      - uses: actions/checkout@v7
-
       - id: setup
         uses: ./.github/actions/setup-workspace
 
       - uses: ./.github/actions/embedding-model
 
-      - name: Test db
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: |
-          pnpm --filter @rembric/db exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/db.json"
-          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/db.json"
+      - name: Build (artifact sanity)
+        id: build
+        run: pnpm run build
 
-      - name: Test core
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+      - name: Test the Pi plugin against the production build
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: apps/web
         run: |
-          pnpm --filter @rembric/core exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/core.json"
-          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/core.json"
-
-      - name: Test mcp
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: |
-          pnpm --filter @rembric/mcp exec vitest run --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/mcp.json"
-          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/mcp.json"
+          pnpm exec vitest run ../plugin/.pi-plugin/plugin.test.ts --reporter=default --reporter=json --outputFile=test-results.json
+          node ../../scripts/check-rescued-tests.mjs test-results.json
 
       - name: Test the Hermes plugin
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -161,6 +129,33 @@ jobs:
       - name: Installer e2e (headless)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: pnpm run e2e:installer
+
+  test-packages:
+    name: test-packages (${{ matrix.package }} ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { package: db, shard: 1/1 }
+          - { package: mcp, shard: 1/1 }
+          - { package: core, shard: 1/2 }
+          - { package: core, shard: 2/2 }
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REMBRIC_MODEL_CACHE: ${{ github.workspace }}/.model-cache
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - if: matrix.package == 'core'
+        uses: ./.github/actions/embedding-model
+
+      - name: Test ${{ matrix.package }}
+        run: |
+          pnpm --filter "@rembric/${{ matrix.package }}" exec vitest run --shard=${{ matrix.shard }} --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/results.json"
+          node scripts/check-rescued-tests.mjs "$RUNNER_TEMP/results.json"
 
   test:
     needs: [static, test-web, test-web-build, test-packages]
