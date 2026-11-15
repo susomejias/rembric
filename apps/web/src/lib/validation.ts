@@ -147,6 +147,29 @@ export function parseSessionSummary(value: unknown): ValidationOutcome<SessionSu
   };
 }
 
+export interface SessionLearningsBody {
+  report: string;
+  agentType?: string;
+}
+
+export function parseSessionLearnings(value: unknown): ValidationOutcome<SessionLearningsBody> {
+  const root = rootIssues(value);
+  if (root) return { ok: false, message: join(root) };
+  const body = asRecord(value);
+  const issues: Issue[] = [
+    ...stringIssues('report', body['report'], { min: 1 }),
+    ...optionalString('agentType', body['agentType'], { min: 1, max: 120 }),
+  ];
+  if (issues.length > 0) return { ok: false, message: join(issues) };
+  return {
+    ok: true,
+    data: {
+      report: body['report'] as string,
+      agentType: body['agentType'] as string | undefined,
+    },
+  };
+}
+
 export interface SessionEndBody {
   summary?: string;
   title?: string;

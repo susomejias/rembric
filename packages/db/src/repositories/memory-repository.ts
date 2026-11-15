@@ -163,6 +163,18 @@ export class MemoryRepository {
     return row?.createdAt ?? null;
   }
 
+  hasActiveWithContentInSession(scope: Scope, sessionId: string, content: string): boolean {
+    const row = this.db.get<{ found: number }>(sql`
+      SELECT 1 AS found FROM memory INDEXED BY memory_session_idx
+      WHERE session_id = ${sessionId}
+        AND ${scopeWhere(scope)}
+        AND status = 'active'
+        AND content = ${content}
+      LIMIT 1
+    `);
+    return row !== undefined;
+  }
+
   /** Timeline neighbors within the same session, before/after a pivot. */
   sessionNeighbors(opts: {
     projectId: string;

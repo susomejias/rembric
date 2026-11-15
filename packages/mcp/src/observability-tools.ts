@@ -1,4 +1,9 @@
-import { deriveTitle, type MemoryService, RedactionTally } from '@rembric/core';
+import {
+  captureKeyLearnings,
+  RedactionTally,
+  type CaptureKeyLearningsResult,
+  type MemoryService,
+} from '@rembric/core';
 import { getRequestContext } from '@rembric/core';
 import type { AgentSessionsService } from '@rembric/core';
 import type { DoctorReport } from '@rembric/core';
@@ -16,14 +21,7 @@ import {
   resolveSessionId,
 } from './_shared.js';
 import { errToMcp, type ErrorReportingDeps } from './errors.js';
-import {
-  candidate,
-  memorySaveSchema,
-  relatedMemory,
-  saveMemoryWithCandidates,
-  type RelatedMemoryView,
-  type SaveTimeCandidateView,
-} from './memory-tools.js';
+import { candidate, memorySaveSchema, relatedMemory } from './memory-tools.js';
 import { redactionsField, redactionsOutput } from './redactions.js';
 import { ok } from './result.js';
 
@@ -75,11 +73,12 @@ export const statsOutput = {
 
 export const capturePassiveOutput = {
   saved: z.number(),
+  skipped: z.number(),
   ids: z.array(z.string()),
   candidates: z.array(candidate).optional(),
   related: z.array(relatedMemory).optional(),
   convergeWith: z.array(z.string()).optional(),
-  /** Present (and `saved` will be 0) when no learnings section was found. */
+  /** Present when `saved` is 0: no learnings section, or every item already captured in this session. */
   reason: z.string().optional(),
   /** Summed over the saves this capture performed; 0 when it extracted nothing. */
   candidatesDetected: z.number(),
@@ -111,28 +110,6 @@ export function buildObservabilityHandlers(deps: ObservabilityToolDeps) {
   };
 }
 
-export const KEY_LEARNINGS_HEADING_HINT = '## Key Learnings' as const;
-const KEY_LEARNINGS_RE = /^(#{2,3})[ \t]*key learnings:?[ \t]*$/im;
-const NEXT_HEADING_RE = /^#{2,3}[ \t]/m;
-const LIST_ITEM_RE = /^(?:\s*(?:-|\*|\d+\.)\s+)(.+?)\s*$/gm;
-
-export function parseKeyLearnings(text: string): string[] {
-  const match = KEY_LEARNINGS_RE.exec(text);
-  if (!match || match.index === undefined) return [];
-  const after = text.slice(match.index + match[0].length);
-  // Stop at the next H2/H3 header or end of input.
-  const nextHeading = after.search(NEXT_HEADING_RE);
-  const section = nextHeading === -1 ? after : after.slice(0, nextHeading);
-  LIST_ITEM_RE.lastIndex = 0;
-  const items: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = LIST_ITEM_RE.exec(section)) !== null) {
-    const v = (m[1] ?? '').trim();
-    if (v.length > 0) items.push(v);
-  }
-  return items;
-}
-
 async function handleCapturePassive(
   deps: ObservabilityToolDeps,
   args: { text: string; tags?: string[]; sessionId?: string },
@@ -145,61 +122,36 @@ async function handleCapturePassive(
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-  const items = parseKeyLearnings(args.text);
-  if (items.length === 0) {
-    return ok({
-      saved: 0,
-      ids: [] as string[],
-      reason: `No "${KEY_LEARNINGS_HEADING_HINT}" (or "###") section found; nothing was extracted.`,
-      candidatesDetected: 0,
-    });
-  }
-  const captureProjectId = scope.projectId;
-  let explicitSession: string | null;
-  try {
-    if (args.sessionId)
-      assertExplicitSessionOwned(deps.agentSessions, args.sessionId, captureProjectId);
-    explicitSession = resolveSessionId(deps, args.sessionId, captureProjectId);
-  } catch (err) {
-    return errToMcp(err, deps.logInternalError);
-  }
-  const ids: string[] = [];
-  const candidates: SaveTimeCandidateView[] = [];
-  const related: RelatedMemoryView[] = [];
-  const convergeWith: string[] = [];
   const redactions = new RedactionTally();
-  let candidatesDetected = 0;
+  let out: CaptureKeyLearningsResult;
   try {
-    for (const content of items) {
-      const saved = await saveMemoryWithCandidates(
-        deps,
-        {
-          type: 'reference',
-          title: deriveTitle(redactions.redact(content)),
-          content,
-          tags: args.tags,
-          source: { tokenName: ctx.token.name, agent: 'passive' },
-          sessionId: explicitSession,
+    out = await captureKeyLearnings(
+      deps,
+      {
+        text: args.text,
+        tags: args.tags,
+        resolveSessionId: () => {
+          if (args.sessionId)
+            assertExplicitSessionOwned(deps.agentSessions, args.sessionId, scope.projectId);
+          return resolveSessionId(deps, args.sessionId, scope.projectId);
         },
-        scope,
-        redactions,
-      );
-      ids.push(saved.memory.id);
-      candidates.push(...saved.candidates);
-      related.push(...saved.related);
-      convergeWith.push(...saved.convergeWith);
-      candidatesDetected += saved.candidatesDetected;
-    }
+        source: { tokenName: ctx.token.name, agent: 'passive' },
+      },
+      scope,
+      redactions,
+    );
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
   return ok({
-    saved: ids.length,
-    ids,
-    ...(candidates.length > 0 ? { candidates } : {}),
-    ...(related.length > 0 ? { related } : {}),
-    ...(convergeWith.length > 0 ? { convergeWith } : {}),
-    candidatesDetected,
+    saved: out.saved,
+    skipped: out.skipped,
+    ids: out.ids,
+    ...(out.candidates.length > 0 ? { candidates: out.candidates } : {}),
+    ...(out.related.length > 0 ? { related: out.related } : {}),
+    ...(out.convergeWith.length > 0 ? { convergeWith: out.convergeWith } : {}),
+    ...(out.reason !== undefined ? { reason: out.reason } : {}),
+    candidatesDetected: out.candidatesDetected,
     ...redactionsField(redactions),
   });
 }

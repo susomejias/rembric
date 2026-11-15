@@ -37,8 +37,6 @@ function buildSurface(services: Services): McpHttpSurface {
   const diagnostics = createDiagnostics(services.db);
   const doctor = buildDoctorReport(services, diagnostics);
 
-  const getWorker = (): ReturnType<Services['embeddingWorker']> => services.embeddingWorker();
-
   return createMcpHandler(
     () =>
       createMcpServer({
@@ -47,9 +45,8 @@ function buildSurface(services: Services): McpHttpSurface {
         agentSessions: services.agentSessions,
         prompts,
         relations,
-        candidates: { perSaveMax: envInt('CANDIDATES_PER_SAVE_MAX', 5, { min: 0, max: 25 }) },
-        embedNow: (memoryId, title, content, projectId) =>
-          getWorker().then((worker) => worker.embedNow(memoryId, title, content, projectId)),
+        candidates: services.postSave.candidates,
+        embedNow: services.postSave.embedNow,
         repos: services.repos,
         doctor,
         sweep: services.sweep,
