@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 
-it('Docker and both CI boot gates accept the complete SQL inventory and reject missing or extra migrations', () => {
+it('Docker and the per-arch CI boot gate accept the complete SQL inventory and reject missing or extra migrations', () => {
   const count = readdirSync(join(root, 'packages/db/src/migrations')).filter((name) =>
     name.endsWith('.sql'),
   ).length;
@@ -17,7 +17,7 @@ it('Docker and both CI boot gates accept the complete SQL inventory and reject m
       /\[ "\$(migrations|applied)" (?:-eq|=) \d+ \]/g,
     ),
   ]);
-  expect(gates).toHaveLength(3);
+  expect(gates).toHaveLength(2);
   for (const gate of gates) {
     for (const actual of [count - 1, count, count + 1]) {
       const result = spawnSync('sh', ['-c', `${gate[1]}=${actual}; ${gate[0]}`]);

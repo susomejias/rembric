@@ -8,9 +8,12 @@ on:
 permissions:
   contents: read
 
+# Pull requests cancel superseded runs. Pushes to main never do: main's run is
+# the only one that exports the Docker cache every later build imports, and a
+# cancelled export leaves the next pull requests building cold.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Provenance only: proves a published-spec edit arrived through a change folder,
@@ -18,11 +21,11 @@ jobs:
   spec-provenance:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Its own group, never cancelled: the workflow-level `cancel-in-progress` is
-    # keyed on `github.ref`, so all pushes to main share one group and a second
-    # push cancels the first. A violating direct push would be cancelled rather
-    # than red — and five of the eight measured violations were direct pushes.
-    # Same lesson release-please already learned.
+    # Its own group, never cancelled: the workflow-level group is keyed on
+    # `github.ref`, so all pushes to main share it and a newer push replaces a
+    # pending run. A violating direct push would be cancelled rather than red —
+    # and five of the eight measured violations were direct pushes. Same lesson
+    # release-please already learned.
     concurrency:
       group: spec-provenance-${{ github.sha }}
       cancel-in-progress: false
@@ -209,15 +212,12 @@ jobs:
   docker-build-check:
     # Safety net that mirrors the release-publish path so a build break is
     # caught at PR time, not at publish. The publish builds the (distroless)
-    # runtime stage NATIVELY on two arches — so this check does too:
-    #   • amd64 (ubuntu-latest)      — builds runtime + dev, then the full
-    #                                   installer e2e (install.sh --server --up).
-    #   • arm64 (ubuntu-24.04-arm)   — builds runtime, then a boot smoke. The
-    #                                   embedder loads EAGERLY at boot, so a
-    #                                   clean boot proves the arm64 glibc native
-    #                                   modules (onnxruntime-node, better-sqlite3,
-    #                                   sqlite-vec) + baked model actually work.
-    # Both native arm runners are free for public repos. No QEMU.
+    # runtime stage NATIVELY on two arches — so this check does too, and boots
+    # it on both: a clean boot that opens /data/data.db and applies every
+    # migration proves the glibc native modules (onnxruntime-node,
+    # better-sqlite3, sqlite-vec) of that arch load. amd64 also drives the real
+    # installer bring-up (install.sh --server --up). Native arm runners are
+    # free for public repos. No QEMU.
     strategy:
       fail-fast: false
       matrix:
@@ -231,30 +231,68 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Same composite action the release publish uses (mode=load here vs
-      # mode=digest there) — one place defines how the app image is built. This
-      # call omits the action's `dockerfile`/`target` inputs, so it builds their
-      # defaults: the published web image (apps/web/Dockerfile, `runner`).
-      # Loaded as :latest so the installer e2e / boot smoke below bring it up
-      # without pulling from GHCR (REMBRIC_NO_PULL).
+      # Same composite action and cache scope as the release publish (mode=load
+      # here vs mode=digest there), so one place defines how the image is built
+      # and main's export is what the publish imports on both arches. Only a
+      # push to main exports: a pull request's cache is readable by that pull
+      # request alone, and exporting it (~400 s of a ~650 s build) only evicted
+      # main's entries from the 10 GB repository budget. Loaded as :latest so
+      # the steps below run it without pulling from GHCR (REMBRIC_NO_PULL).
       - name: Build runtime (prod) target
         uses: ./.github/actions/build-runtime-image
         with:
           image: ghcr.io/susomejias/rembric
           platform: linux/${{ matrix.arch }}
           mode: load
-          # CI-local scope, distinct from the `web-runtime-<arch>` one
-          # docker-build-check-web and the publish use: the two jobs build the
-          # same Dockerfile and stage but must not evict each other's cache.
-          cache-scope: runtime-${{ matrix.arch }}
+          cache-scope: web-runtime-${{ matrix.arch }}
+          export-cache: ${{ github.event_name == 'push' }}
           # Empty on fork PRs (no secrets) → model bake falls back to anonymous + retry.
           hf-token: ${{ secrets.HF_TOKEN }}
+
+      - name: Boot smoke — healthz, data dir, 39 migrations
+        run: |
+          set -eu
+          TOK=ci-boot-token-0123456789
+          # The image runs as uid 10001; a host dir created by a rootful
+          # docker would be root-owned and the server could not open its DB.
+          D="$(mktemp -d)"; mkdir -p "$D/data" && chmod 0777 "$D/data"
+          docker run -d --name rembric-boot-smoke \
+            -e REMBRIC_ADMIN_TOKEN="$TOK" \
+            -v "$D/data:/data" \
+            -p 127.0.0.1:8791:8787 \
+            ghcr.io/susomejias/rembric:latest
+          ok=
+          for _ in $(seq 1 60); do
+            c=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $TOK" \
+              http://127.0.0.1:8791/healthz || true)
+            [ "$c" = 200 ] && { ok=1; break; }
+            sleep 3
+          done
+          LOGS="$(docker logs rembric-boot-smoke 2>&1 || true)"
+          if [ -z "$ok" ]; then
+            echo "::error::${{ matrix.arch }} /healthz never returned 200"
+            echo "$LOGS"
+            exit 1
+          fi
+          # DS1/DS3: the boot must resolve the mounted volume, not a fresh
+          # data.db in the container's ephemeral layer.
+          echo "$LOGS" \
+            | grep -q '\[db\] data file /data/data.db (pre-existing: false)' \
+            || { echo "::error::${{ matrix.arch }} boot did not open /data/data.db"; \
+                 echo "$LOGS"; exit 1; }
+          # The migrations dir arrives through outputFileTracingIncludes, so
+          # a boot that applies fewer than 39 means that path broke silently.
+          applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
+          [ "$applied" = 39 ] \
+            || { echo "::error::expected 39 migrations, got $applied"; \
+                 echo "$LOGS"; exit 1; }
+          echo "${{ matrix.arch }} boot smoke: healthz=200, /data/data.db, 39 migrations ✓"
+          docker rm -f rembric-boot-smoke
 
       # amd64: real end-to-end of the installer's server bring-up — drive the
       # actual `install.sh --server --up` against the locally-built image
       # (REMBRIC_NO_PULL → uses the loaded :latest, no GHCR), then assert.
-      # The image is the published web one, which serves /healthz and
-      # /dashboard on the same paths the retired server image did.
       - name: Installer e2e — server --up against the built image
         if: matrix.arch == 'amd64'
         run: |
@@ -282,128 +320,3 @@ jobs:
           echo "healthz=200 dashboard=$d"
           case "$d" in 200 | 302) ;; *) echo "::error::unexpected /dashboard status $d"; exit 1 ;; esac
           docker compose down
-
-      # arm64: boot smoke — run the just-built distroless image natively and
-      # wait for /healthz. A clean boot proves the arm64 glibc native modules
-      # work (the install.sh path is exercised on amd64; here we only need to
-      # confirm the arm64 image runs and migrates).
-      - name: Boot smoke — arm64 distroless runtime
-        if: matrix.arch == 'arm64'
-        run: |
-          set -eu
-          TOK=ci-e2e-token-0123456789
-          D="$(mktemp -d)"; mkdir -p "$D/data" && chmod 0777 "$D/data"
-          docker run -d --name rembric-arm64-smoke \
-            -e REMBRIC_ADMIN_TOKEN="$TOK" \
-            -v "$D/data:/data" \
-            -p 127.0.0.1:8787:8787 \
-            ghcr.io/susomejias/rembric:latest
-          ok=
-          for _ in $(seq 1 60); do
-            c=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" http://127.0.0.1:8787/healthz || true)
-            [ "$c" = 200 ] && { ok=1; break; }
-            sleep 3
-          done
-          LOGS="$(docker logs rembric-arm64-smoke 2>&1 || true)"
-          if [ -z "$ok" ]; then
-            echo "::error::arm64 /healthz never returned 200"; echo "$LOGS"; exit 1
-          fi
-          # DS1/DS3: the boot must resolve the mounted volume, not create a
-          # fresh data.db in the container's ephemeral layer. The web image
-          # loads the embedder lazily, so this volume/migration signal — not the
-          # retired server image's eager "embedding model loaded" line — is what
-          # proves the arm64 native stack came up.
-          echo "$LOGS" \
-            | grep -q '\[db\] data file /data/data.db (pre-existing: false)' \
-            || { echo "::error::arm64 boot did not open /data/data.db"; \
-                 echo "$LOGS"; exit 1; }
-          applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
-          [ "$applied" = 39 ] \
-            || { echo "::error::expected 39 migrations, got $applied"; \
-                 echo "$LOGS"; exit 1; }
-          echo "arm64 boot smoke: healthz=200, /data/data.db, 39 migrations ✓"
-          docker rm -f rembric-arm64-smoke
-
-  docker-build-check-web:
-    # The published image is the Next.js one (apps/web/Dockerfile, `runner`):
-    # docker-publish.yml builds exactly this Dockerfile and stage through the
-    # shared composite action, and so does the matrix job above — this one keeps
-    # its own amd64 cache scope and its deeper boot assertions (data dir +
-    # migration count).
-    #
-    # amd64 only, on purpose. The build is platform-independent apart from
-    # the onnxruntime prebuilt, and the arch-specific part — the prune that
-    # drops the non-target binaries — asserts the surviving binding at
-    # build time. arm64 coverage stays on the server image so this check
-    # does not double the job's cost.
-    #
-    # The boot smoke is the real gate: the build-time checks run inside the
-    # image, while this proves the assembled tree starts, migrates and
-    # answers on the host.
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Build runtime target
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./apps/web/Dockerfile
-          target: runner
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: rembric-web:ci
-          # Separate scope from the server image's: the two builds share the
-          # pnpm/native layers but not their builder stages. docker-publish.yml
-          # uses this same scope for the web image, so the merge-to-main that
-          # precedes a release leaves the publish warm.
-          cache-from: type=gha,scope=web-runtime-amd64
-          cache-to: type=gha,mode=max,scope=web-runtime-amd64
-          # Empty on fork PRs (no secrets) -> anonymous model bake, retried.
-          secrets: |
-            hf_token=${{ secrets.HF_TOKEN }}
-
-      - name: Boot smoke — healthz, data dir, 39 migrations
-        run: |
-          set -eu
-          TOK=ci-web-token-0123456789
-          # The image runs as uid 10001; a host dir created by a rootful
-          # docker would be root-owned and the server could not open its DB.
-          D="$(mktemp -d)"; mkdir -p "$D/data" && chmod 0777 "$D/data"
-          docker run -d --name rembric-web-smoke \
-            -e REMBRIC_ADMIN_TOKEN="$TOK" \
-            -v "$D/data:/data" \
-            -p 127.0.0.1:8791:8787 \
-            rembric-web:ci
-          ok=
-          for _ in $(seq 1 60); do
-            c=$(curl -s -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer $TOK" \
-              http://127.0.0.1:8791/healthz || true)
-            [ "$c" = 200 ] && { ok=1; break; }
-            sleep 3
-          done
-          LOGS="$(docker logs rembric-web-smoke 2>&1 || true)"
-          if [ -z "$ok" ]; then
-            echo "::error::web /healthz never returned 200"
-            echo "$LOGS"
-            exit 1
-          fi
-          # DS1/DS3: the boot must resolve the mounted volume, not a fresh
-          # data.db in the container's ephemeral layer.
-          echo "$LOGS" \
-            | grep -q '\[db\] data file /data/data.db (pre-existing: false)' \
-            || { echo "::error::web boot did not open /data/data.db"; \
-                 echo "$LOGS"; exit 1; }
-          # The migrations dir arrives through outputFileTracingIncludes, so
-          # a boot that applies fewer than 39 means that path broke silently.
-          applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
-          [ "$applied" = 39 ] \
-            || { echo "::error::expected 39 migrations, got $applied"; \
-                 echo "$LOGS"; exit 1; }
-          echo "web boot smoke: healthz=200, /data/data.db, 39 migrations ✓"
-          docker rm -f rembric-web-smoke
