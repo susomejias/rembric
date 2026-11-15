@@ -1,9 +1,4 @@
-## RENAMED Requirements
-
-- FROM: `### Requirement: The plugin SHALL ship seven hook event types across ten handler entries at `apps/plugin/hooks/hooks.json``
-- TO: `### Requirement: The plugin SHALL ship eight hook event types across twelve handler entries at `apps/plugin/hooks/hooks.json``
-
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: The plugin SHALL ship eight hook event types across twelve handler entries at `apps/plugin/hooks/hooks.json`
 
@@ -221,8 +216,6 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop, SubagentStop}` carrying exactly twelve handler entries, with NO `PostToolUse` entry
 
 
-## ADDED Requirements
-
 ### Requirement: `subagent-report.sh` SHALL forward a finished subagent's report, silently and without blocking
 
 `apps/plugin/scripts/subagent-report.sh` is the one forwarder for Claude Code and Codex. It takes the agent name as its first argument (`claude-code` or `codex-cli`), exactly as `session-end.sh` and `stop-report.sh` do. There SHALL be no `subagent-report.codex.sh`.
@@ -280,3 +273,11 @@ The script SHALL discard the response. On `claude-code` it SHALL write nothing t
 - **WHEN** the script forwards a report
 - **THEN** it SHALL write exactly one diagnostic line to stderr and exit `0`
 - **AND** on `codex-cli` its stdout SHALL be exactly `{}`
+
+## REMOVED Requirements
+
+### Requirement: The plugin SHALL ship seven hook event types across ten handler entries at `apps/plugin/hooks/hooks.json`
+
+**Reason**: This change adds a `SubagentStop` entry and a second `PreToolUse` group, matched on `SubagentHandback`. The requirement's title and scenario titles carry the counts, so it cannot be corrected in place.
+
+**Migration**: Superseded by the eight-event, twelve-handler manifest requirement this change adds to the same capability. That requirement carries every subsection and scenario of the removed one, with the counts corrected.
