@@ -35,7 +35,9 @@ function main(argv) {
     console.error('usage: docker-relevant-changes.mjs --base <sha> --head <sha>');
     return 2;
   }
-  const paths = execFileSync('git', ['diff', '--name-only', `${base}...${head}`], {
+  // --no-renames: a rename lists only its destination, so a file moved out of
+  // the image would otherwise look like a docs-only change.
+  const paths = execFileSync('git', ['diff', '--name-only', '--no-renames', `${base}...${head}`], {
     encoding: 'utf8',
   })
     .split('\n')
