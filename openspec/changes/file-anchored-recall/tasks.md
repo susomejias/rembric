@@ -65,12 +65,14 @@
 
 ## 5. Hermes (PR 5)
 
-- [ ] 5.1 **Spike:** against the installed Hermes, record the result shape of `read_file`, `write_file`/`patch` and `terminal` as seen by `transform_tool_result` and `transform_terminal_output`. Decide the JSON-preserving append form. Record it as `<!-- spike result: … -->` here and as a comment in `__init__.py`.
-- [ ] 5.2 Add a Python extractor agreeing with `file-recall-fixtures.json` (a test runs every fixture); store `initialize()`'s `cwd`; add the file-recall POST with a 0.5 s budget and the per-session record.
-- [ ] 5.3 Register `transform_tool_result` (file tools) and `transform_terminal_output` (terminal) from `register(ctx)`. Return the annotated result or `None`, catching every exception.
-- [ ] 5.4 Add pytest coverage in `.hermes-plugin/tests/`: annotation, the unreachable-server control returning a byte-identical result, once per file, and the terminal path.
+- [x] 5.1 **Spike:** against the installed Hermes, record the result shape of `read_file`, `write_file`/`patch` and `terminal` as seen by `transform_tool_result` and `transform_terminal_output`. Decide the JSON-preserving append form. Record it as `<!-- spike result: … -->` here and as a comment in `__init__.py`.
+<!-- spike result (Hermes rc.3-v0.22.6): `transform_tool_result` runs for every tool, terminal included, after `transform_terminal_output`, with `tool_name`, `args`, `result` and `session_id`; the first str returned wins. `read_file`, `write_file` and `patch` take `path`; `read_file`'s result is `json.dumps` of a dict. `transform_terminal_output` gets `command` and the plain `output`, no `session_id`. Form: a JSON-object result gains key `rembric_memories` (re-dumped with `ensure_ascii=False`), anything else gets `\n\n<lines>`; `transform_tool_result` ignores `terminal` so the note is never added twice. In the source: `_append_file_recall`. -->
+- [x] 5.2 Add a Python extractor agreeing with `file-recall-fixtures.json` (a test runs every fixture); store `initialize()`'s `cwd`; add the file-recall POST with a 0.5 s budget and the per-session record.
+- [x] 5.3 Register `transform_tool_result` (file tools) and `transform_terminal_output` (terminal) from `register(ctx)`. Return the annotated result or `None`, catching every exception.
+- [x] 5.4 Add pytest coverage in `.hermes-plugin/tests/`: annotation, the unreachable-server control returning a byte-identical result, once per file, and the terminal path.
 - [ ] 5.5 Run e2e in a real Hermes session against the dev server, using the "Driving a real Hermes" rails.
-- [ ] 5.6 Docs: the Hermes README and the CHANGELOG.
+<!-- host seams verified 2026-11-15: in an isolated HERMES_HOME, Hermes's own `load_memory_provider` loaded the plugin and registered both hooks; `invoke_hook("transform_tool_result")` on `read_file` returned the JSON with `rembric_memories`, the second touch and a foreign session returned nothing, and `_apply_output_transform_hook` appended the note to `sed -n 1,3p` output, with an untracked-file control unchanged. A model-driven turn is still pending: it needs provider credentials in the isolated home. -->
+- [x] 5.6 Docs: the Hermes README and the CHANGELOG.
 
 ## 6. opencode v2 (PR 6)
 

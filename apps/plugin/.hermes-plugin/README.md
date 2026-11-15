@@ -116,6 +116,8 @@ The resume runs once per session id per process, always straight after that id's
 
 `system_prompt_block()` returns the unified Rembric nudge — the same SAVE/RECALL/SUMMARIZE text the server hands MCP clients via the `initialize.instructions` block. Hermes does not consume that MCP block and exposes no per-turn hook, so this method is its only nudging surface; the text is kept byte-identical to the server's `buildInstructions()` BASE.
 
+**Memories about the file in hand.** `register(ctx)` also registers two result transforms. When the agent's `read_file`, `write_file` or `patch` tool touches a file, or a `terminal` command names one (`cat`, `sed -n`, `grep`, `rg`, `git show`…), the provider asks `POST /api/<slug>/sessions/<id>/file-recall` for the memories linked to it and appends them to what the model sees: a `rembric_memories` field when the tool result is a JSON object, appended text otherwise. At most three memories per file, each file once per session, at most ten files per session. Only files the repository tracks are sent, as repo-relative paths resolved against the `cwd` `initialize()` received. Sub-agent tool calls are skipped, and any failure leaves the result exactly as the tool produced it.
+
 `queue_prefetch` warms a per-session recall cache, which `prefetch` returns with lifecycle hints. `sync_turn` sends the transcript summary and turn report on a context-preserving worker. These requests use the initialized profile binding. `on_memory_write` remains a no-op; agent-callable memory tools use the separate MCP bridge.
 
 ## Troubleshooting
