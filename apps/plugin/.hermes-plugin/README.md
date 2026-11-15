@@ -118,6 +118,8 @@ The resume runs once per session id per process, always straight after that id's
 
 **Memories about the file in hand.** `register(ctx)` also registers two result transforms. When the agent's `read_file`, `write_file` or `patch` tool touches a file, or a `terminal` command names one (`cat`, `sed -n`, `grep`, `rg`, `git show`…), the provider asks `POST /api/<slug>/sessions/<id>/file-recall` for the memories linked to it and appends them to what the model sees: a `rembric_memories` field when the tool result is a JSON object, appended text otherwise. At most three memories per file, each file once per session, at most ten files per session. Only files the repository tracks are sent, as repo-relative paths resolved against the `cwd` `initialize()` received. Sub-agent tool calls are skipped, and any failure leaves the result exactly as the tool produced it.
 
+**Learnings from delegated subagents.** `register(ctx)` also registers a `subagent_stop` hook, available from Hermes v2026.8.3. When a `delegate_task` child finishes, the provider sends its final summary to `POST /api/<slug>/sessions/<parent_session_id>/learnings` from a background worker. The server saves the items of the summary's `## Key Learnings` section into the session that delegated. Nothing reaches the model, and a failure is one diagnostic line.
+
 `queue_prefetch` warms a per-session recall cache, which `prefetch` returns with lifecycle hints. `sync_turn` sends the transcript summary and turn report on a context-preserving worker. These requests use the initialized profile binding. `on_memory_write` remains a no-op; agent-callable memory tools use the separate MCP bridge.
 
 ## Troubleshooting

@@ -38,6 +38,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
@@ -728,12 +729,44 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
                 if acquired:
                     self._sync_lock.release()
 
+        self._start_worker(_sync, "rembric-sync", "turn sync")
+        return None
+
+    def _start_worker(self, target: Callable[[], None], name: str, skipped: str) -> None:
         try:
             if self._spawn_context_thread is None:
                 raise RuntimeError
-            self._spawn_context_thread(_sync, name="rembric-sync", daemon=True).start()
+            self._spawn_context_thread(target, name=name, daemon=True).start()
         except Exception:
-            _stderr("[rembric] context worker unavailable; skipping turn sync")
+            _stderr(f"[rembric] context worker unavailable; skipping {skipped}")
+
+    def subagent_stop(
+        self,
+        parent_session_id: Any = None,
+        child_role: Any = None,
+        child_summary: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        del kwargs
+        if not (self._initialized and self._base and self._slug) or self._suppressed:
+            return None
+        if not isinstance(parent_session_id, str) or not parent_session_id:
+            return None
+        if not isinstance(child_summary, str):
+            return None
+        report = _redact_private(child_summary)
+        if "key learnings" not in report.lower():
+            return None
+        body: dict[str, Any] = {"report": report}
+        if isinstance(child_role, str) and child_role:
+            body["agentType"] = child_role
+        base, slug, token = self._base, self._slug, self._token
+        path = f"/sessions/{quote(parent_session_id, safe='')}/learnings"
+        self._start_worker(
+            lambda: _api_post(base, slug, path, body, token),
+            "rembric-learnings",
+            "subagent report",
+        )
         return None
 
     def _post_turn_report(
@@ -1095,10 +1128,11 @@ def _messages_used_tools(messages: Any) -> bool:
 
 
 def register(ctx: Any) -> None:
-    """Hermes plugin entry point: the memory provider, plus its two file-recall result transforms."""
+    """Hermes plugin entry point: the memory provider, its two file-recall result transforms, and the subagent report forwarder."""
     provider = RembricMemoryProvider()
     ctx.register_memory_provider(provider)
     register_hook = getattr(ctx, "register_hook", None)
     if callable(register_hook):
         register_hook("transform_tool_result", provider.transform_tool_result)
         register_hook("transform_terminal_output", provider.transform_terminal_output)
+        register_hook("subagent_stop", provider.subagent_stop)

@@ -182,7 +182,7 @@ class FileRecallTest(unittest.TestCase):
 
 
 class RegisterTest(unittest.TestCase):
-    def test_registers_the_provider_and_both_transforms(self) -> None:
+    def test_registers_the_provider_both_transforms_and_subagent_stop(self) -> None:
         mod = fresh_plugin()
         ctx = MagicMock()
         mod.register(ctx)
@@ -192,6 +192,7 @@ class RegisterTest(unittest.TestCase):
             [
                 ("transform_tool_result", provider.transform_tool_result),
                 ("transform_terminal_output", provider.transform_terminal_output),
+                ("subagent_stop", provider.subagent_stop),
             ],
         )
 
