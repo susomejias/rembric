@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 from abc import ABC, abstractmethod
@@ -111,6 +112,16 @@ _HEALTHZ_TIMEOUT_SEC = 2
 _RECALL_LIMIT = 5
 _COMPACTION_TOKEN_FLOOR = 20_000
 _NON_PRIMARY_AGENT_CONTEXTS = {"subagent", "cron", "flush"}
+# File-anchored recall: a tool waits on it, so it gets the recall-hints budget.
+_FILE_RECALL_TIMEOUT_SEC = 0.5
+_FILE_RECALL_GIT_TIMEOUT_SEC = 1.0
+_COMMAND_PATHS_MAX = 5
+_FILE_RECALL_SIBLINGS_MAX = 64
+_FILE_TOOLS = {"read_file", "write_file", "patch"}
+# The shell-path rule pinned by ../test/file-recall-fixtures.json, shared with
+# scripts/_api.sh and bin/rembric-plugin-core.mjs.
+_COMMAND_SPLIT_RE = re.compile("[ \t\n\"'`=();|&<>,:]+")
+_COMMAND_EXTENSION_RE = re.compile(r"\.[A-Za-z0-9]+$")
 _SAVE_HINT_URGENT = (
     "<memory-hint>Context is about to compact — save anything important "
     "with memory.save NOW before it is lost.</memory-hint>"
@@ -293,6 +304,73 @@ def _api_post(
     return _api_request(base, slug, path, body, token, timeout) is not None
 
 
+def _command_paths(command: str) -> list[str]:
+    paths: list[str] = []
+    for token in _COMMAND_SPLIT_RE.split(command or ""):
+        while token.startswith("./"):
+            token = token[2:]
+        if len(token) <= 1:
+            continue
+        if not token.startswith("/") and not ("/" in token and _COMMAND_EXTENSION_RE.search(token)):
+            continue
+        if token in paths:
+            continue
+        paths.append(token)
+        if len(paths) >= _COMMAND_PATHS_MAX:
+            break
+    return paths
+
+
+def _git_output(cwd: str, args: list[str], literal: bool = False) -> str | None:
+    env = dict(os.environ)
+    if literal:
+        env["GIT_LITERAL_PATHSPECS"] = "1"
+    try:
+        done = subprocess.run(
+            ["git", "-c", "core.quotePath=false", "-C", cwd, *args],
+            capture_output=True,
+            text=True,
+            timeout=_FILE_RECALL_GIT_TIMEOUT_SEC,
+            env=env,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _tracked_repo_path(cwd: str, candidate: str) -> str | None:
+    """Repo-relative path of the one regular file <candidate> names, matched literally."""
+    expanded = os.path.expanduser(candidate)
+    absolute = expanded if os.path.isabs(expanded) else os.path.join(cwd, expanded)
+    if not os.path.isfile(absolute):
+        return None
+    out = _git_output(cwd, ["ls-files", "--full-name", "--error-unmatch", "--", expanded], literal=True)
+    first = (out or "").split("\n")[0]
+    return first or None
+
+
+def _same_name_siblings(cwd: str, rel: str) -> list[str] | None:
+    name = rel.rsplit("/", 1)[-1]
+    if not name or any(c in name for c in "[]*?"):
+        return None
+    out = _git_output(cwd, ["ls-files", "--full-name", "--", f":(top)*/{name}", f":(top){name}"])
+    listed = [line for line in (out or "").split("\n") if line]
+    return listed if 0 < len(listed) <= _FILE_RECALL_SIBLINGS_MAX else None
+
+
+def _append_file_recall(result: str, lines: list[str]) -> str:
+    """Keep a JSON-object result valid JSON; anything else gets the note appended."""
+    text = "\n".join(lines)
+    try:
+        parsed = json.loads(result)
+    except Exception:  # noqa: BLE001
+        parsed = None
+    if isinstance(parsed, dict):
+        parsed["rembric_memories"] = text
+        return json.dumps(parsed, ensure_ascii=False)
+    return f"{result}\n\n{text}"
+
+
 # ---------------------------------------------------------------------------
 # Provider
 # ---------------------------------------------------------------------------
@@ -345,6 +423,11 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         # a report with no lines must never clear a pending one.
         self._pending_lines: dict[str, list[str]] = {}
         self._turn_title_sent: set[str] = set()
+        # Hermes runs one turn's tool calls in parallel, so the once-per-file
+        # check-and-claim is taken under a lock.
+        self._file_recall_lock: threading.Lock = threading.Lock()
+        self._file_recall_sent: dict[str, set[str]] = {}
+        self._file_recall_exhausted: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -756,6 +839,8 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         self._pending_lines.pop(session_id, None)
         self._turn_title_sent.discard(session_id)
         self._resumed_hint_emitted.discard(session_id)
+        self._file_recall_sent.pop(session_id, None)
+        self._file_recall_exhausted.discard(session_id)
 
     def on_session_switch(
         self,
@@ -816,6 +901,73 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         self, action: str, target: str, content: str, **kwargs: Any
     ) -> None:
         return None
+
+    def file_recall(self, candidates: list[str]) -> list[str]:
+        session_id = self._session_id
+        base, slug, token, cwd = self._base, self._slug, self._token, self._cwd
+        if not (self._initialized and base and slug and session_id and cwd) or self._suppressed:
+            return []
+        if session_id not in self._ensured_session_ids:
+            return []
+        lines: list[str] = []
+        for candidate in candidates[:_COMMAND_PATHS_MAX]:
+            if session_id in self._file_recall_exhausted:
+                break
+            rel = _tracked_repo_path(cwd, candidate)
+            if not rel:
+                continue
+            with self._file_recall_lock:
+                sent = self._file_recall_sent.setdefault(session_id, set())
+                if rel in sent:
+                    continue
+                sent.add(rel)
+            siblings = _same_name_siblings(cwd, rel)
+            body: dict[str, Any] = {"path": rel}
+            if siblings:
+                body["siblings"] = siblings
+            response = _api_request(
+                base,
+                slug,
+                f"/sessions/{session_id}/file-recall",
+                body,
+                token,
+                timeout=_FILE_RECALL_TIMEOUT_SEC,  # type: ignore[arg-type]
+            )
+            if response is None:
+                break
+            if response.get("exhausted") is True:
+                self._file_recall_exhausted.add(session_id)
+            lines.extend(line for line in response.get("lines") or [] if isinstance(line, str))
+        return lines
+
+    def transform_tool_result(
+        self, tool_name: str = "", args: Any = None, result: Any = None, **kwargs: Any
+    ) -> str | None:
+        try:
+            if tool_name not in _FILE_TOOLS or not isinstance(args, dict) or not isinstance(result, str):
+                return None
+            hook_session = kwargs.get("session_id")
+            if hook_session and hook_session != self._session_id:
+                return None
+            path = args.get("path")
+            if not isinstance(path, str) or not path:
+                return None
+            lines = self.file_recall([path])
+            return _append_file_recall(result, lines) if lines else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def transform_terminal_output(
+        self, command: str = "", output: Any = None, **kwargs: Any
+    ) -> str | None:
+        del kwargs
+        try:
+            if not isinstance(output, str):
+                return None
+            lines = self.file_recall(_command_paths(command))
+            return f"{output}\n\n" + "\n".join(lines) if lines else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def shutdown(self, **kwargs: Any) -> None:
         return None
@@ -942,5 +1094,10 @@ def _messages_used_tools(messages: Any) -> bool:
 
 
 def register(ctx: Any) -> None:
-    """Hermes plugin entry point — register the memory provider only."""
-    ctx.register_memory_provider(RembricMemoryProvider())
+    """Hermes plugin entry point: the memory provider, plus its two file-recall result transforms."""
+    provider = RembricMemoryProvider()
+    ctx.register_memory_provider(provider)
+    register_hook = getattr(ctx, "register_hook", None)
+    if callable(register_hook):
+        register_hook("transform_tool_result", provider.transform_tool_result)
+        register_hook("transform_terminal_output", provider.transform_terminal_output)
