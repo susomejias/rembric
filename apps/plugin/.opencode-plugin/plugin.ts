@@ -97,6 +97,15 @@ function nudgePart(
   };
 }
 
+const STILL_RUNNING_BLOCK = '\n\nBackground work still running:\n';
+
+function inboxSubagentReport(text: string): string {
+  const wrapper = /^<subagent\b[\s\S]*?>\n([\s\S]*)\n<\/subagent>\s*$/.exec(text);
+  const body = wrapper ? wrapper[1]! : text;
+  const running = body.lastIndexOf(STILL_RUNNING_BLOCK);
+  return running >= 0 ? body.slice(0, running) : body;
+}
+
 export const RembricPlugin: Plugin = async (ctx) => {
   const slug = readRembricSlug(ctx.directory);
   const core = createSessionProtocol({
@@ -573,6 +582,24 @@ const RembricPluginV2: V2Plugin = {
             // Compaction rewrites the transcript, so the cached block is stale.
             injected.delete(sessionID);
             await core.flushSessionSummary(sessionID);
+            continue;
+          }
+
+          if (type === 'session.inbox.enqueued') {
+            const sessionID = String(data.sessionID ?? '');
+            const item = data.item as
+              | { type?: string; payload?: { text?: unknown; metadata?: Record<string, unknown> } }
+              | undefined;
+            const metadata = item?.payload?.metadata;
+            const text = item?.payload?.text;
+            if (!sessionID || item?.type !== 'synthetic' || metadata?.source !== 'subagent')
+              continue;
+            if (typeof text !== 'string') continue;
+            void core.postSubagentReport(
+              sessionID,
+              inboxSubagentReport(text),
+              typeof metadata.agent === 'string' ? metadata.agent : undefined,
+            );
             continue;
           }
 

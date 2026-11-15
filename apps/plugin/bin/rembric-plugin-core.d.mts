@@ -67,6 +67,8 @@ export type SessionProtocol = {
     candidates: string[],
     timeoutMs?: number,
   ): Promise<string[]>;
+  /** Sends nothing unless the redacted report mentions `key learnings`; never throws. */
+  postSubagentReport(parentSessionId: string, report: string, agentType?: string): Promise<boolean>;
   /** Returns the entries the per-session cap evicted, oldest first. */
   appendUserMessage(sessionId: string, rawText: string): TranscriptEntry[];
   appendAssistantMessage(sessionId: string, rawText: string): TranscriptEntry[];
