@@ -6,9 +6,12 @@ const MCP_BRIDGE_VERSION = '0.41.0';
 // dispose-spike-result: fire-and-forget
 // ONLY `RembricPlugin` may be exported: opencode invokes every named export as a Plugin function.
 
+import { resolve } from 'node:path';
+
 import {
   createSessionProtocol,
   diag,
+  extractCommandPaths,
   POST_COMPACT_NUDGE_CORE,
 } from '../bin/rembric-plugin-core.mjs';
 import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
@@ -317,7 +320,33 @@ type V2EventEnvelope = {
   properties?: Record<string, unknown>;
 };
 
-type V2ToolExecuteBefore = { readonly sessionID?: string };
+type V2ToolExecuteBefore = {
+  readonly tool?: string;
+  readonly sessionID?: string;
+  readonly input?: unknown;
+};
+
+const V2_FILE_TOOLS = new Set(['read', 'edit', 'write']);
+
+function v2ToolCallPaths(
+  directory: string,
+  event: V2ToolExecuteBefore,
+): { cwd: string; candidates: string[] } | null {
+  const input = (event.input ?? {}) as Record<string, unknown>;
+  if (event.tool && V2_FILE_TOOLS.has(event.tool)) {
+    return typeof input.path === 'string' && input.path
+      ? { cwd: directory, candidates: [input.path] }
+      : null;
+  }
+  if (event.tool === 'shell' && typeof input.command === 'string') {
+    const cwd =
+      typeof input.workdir === 'string' && input.workdir
+        ? resolve(directory, input.workdir)
+        : directory;
+    return { cwd, candidates: extractCommandPaths(input.command) };
+  }
+  return null;
+}
 
 type V2PluginContext = {
   readonly app: { readonly version: string };
@@ -377,6 +406,7 @@ const RembricPluginV2: V2Plugin = {
     const reported = new Set<string>();
     const belongs = new Map<string, boolean>();
     const assistantText = new Map<string, Map<number, string>>();
+    const pendingFileRecall = new Map<string, Promise<string[]>[]>();
     const closed = { value: false };
 
     async function buildBlock(sessionID: string, text: string): Promise<string> {
@@ -438,6 +468,8 @@ const RembricPluginV2: V2Plugin = {
       if (closed.value) return;
       const sessionID = input.sessionID;
       if (core.isSubAgent(sessionID)) return;
+      const fileRecalls = pendingFileRecall.get(sessionID);
+      pendingFileRecall.delete(sessionID);
       if (!(await belongsHere(sessionID))) return;
 
       // A resumed session (host or plugin restart) has an empty cache; rebuild it
@@ -449,10 +481,33 @@ const RembricPluginV2: V2Plugin = {
 
       const block = injected.get(sessionID);
       if (block) input.system.push({ type: 'text', text: block });
+
+      if (fileRecalls) {
+        const lines = (await Promise.all(fileRecalls)).flat();
+        if (lines.length > 0) input.system.push({ type: 'text', text: lines.join('\n') });
+      }
     });
 
+    // The host awaits this hook and a throw rejects the tool call, so the lookup is
+    // only started here and the next context request awaits it.
     await ctx.tool.hook('execute.before', (input) => {
-      if (input.sessionID) core.markToolUsed(input.sessionID);
+      try {
+        const sessionID = input.sessionID;
+        if (!sessionID) return;
+        core.markToolUsed(sessionID);
+        if (closed.value) return;
+        const call = v2ToolCallPaths(directory, input);
+        if (!call) return;
+        const lookup = (async () =>
+          (await belongsHere(sessionID))
+            ? core.fileRecall(sessionID, call.cwd, call.candidates)
+            : [])().catch(() => []);
+        const queued = pendingFileRecall.get(sessionID) ?? [];
+        queued.push(lookup);
+        pendingFileRecall.set(sessionID, queued);
+      } catch {
+        // File recall is best-effort and must never block a tool.
+      }
     });
 
     const controller = new AbortController();
@@ -481,6 +536,7 @@ const RembricPluginV2: V2Plugin = {
             injected.delete(sessionID);
             lastPrompt.delete(sessionID);
             belongs.delete(sessionID);
+            pendingFileRecall.delete(sessionID);
             for (const entry of core.forgetSession(sessionID) ?? []) {
               if (entry?.id) assistantText.delete(entry.id);
             }
@@ -546,6 +602,7 @@ const RembricPluginV2: V2Plugin = {
       reported.clear();
       belongs.clear();
       assistantText.clear();
+      pendingFileRecall.clear();
     };
   },
 };

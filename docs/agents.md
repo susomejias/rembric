@@ -75,7 +75,7 @@ When an agent reads or edits a file, the plugin asks the server for the memories
 - **What triggers it**: the host's file tools, and any shell command that names a file (`cat`, `sed -n`, `grep`, `rg`, `git show`, `rtk read`…). Only files the repository tracks are ever sent, as repo-relative paths, so the same file matches on every machine and worktree. A command over a whole directory names no file and gets no note.
 - **How much**: each file is asked about once per session, and asked again after a compaction; at most ten files per session get a note, each note at most 1 KB.
 - **What it never does**: block or slow a tool beyond a fraction of a second — a timeout, an older server without the endpoint, or any error simply produces no note.
-- **Clients**: Claude Code and Codex CLI (`PreToolUse`), Pi (appended to the tool's result through `tool_result`), Hermes Agent (appended through the `transform_tool_result` and `transform_terminal_output` hooks).
+- **Clients**: Claude Code and Codex CLI (`PreToolUse`), Pi (appended to the tool's result through `tool_result`), Hermes Agent (appended through the `transform_tool_result` and `transform_terminal_output` hooks), opencode 2.x (a system part on the next model request; 1.x has none).
 
 ## Complete batch reads by date
 

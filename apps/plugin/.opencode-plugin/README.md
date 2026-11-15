@@ -18,6 +18,7 @@ Both are built on the same shared core and the same `.rembric` slug convention, 
 
 - **Nudges ride the system context.** 2.x has no user-message part array to append to, so recall and session-opening nudges are pushed as transient system text. They never enter the persisted turn.
 - **The injected block is cached per session.** A 2.x system part lives for one model request, so the block is re-pushed on every request, rebuilt from the server if the cache is empty, and dropped when the session is compacted.
+- **Memories about the file in hand (2.x only).** When the agent's `read`, `edit` or `write` tool touches a file, or a `shell` command names one (`cat`, `sed -n`, `grep`, `rg`, `git show`…), the plugin starts asking `POST /api/<slug>/sessions/<id>/file-recall` for the memories linked to it, without holding the tool up. The next model request of that session waits for the answer and carries it as one transient system part. At most three memories per file, each file once per session, at most ten files per session; only files the repository tracks are sent, as repo-relative paths. Sub-agent sessions are skipped, any failure adds nothing, and the 1.x plugin has no equivalent.
 
 ## Install
 

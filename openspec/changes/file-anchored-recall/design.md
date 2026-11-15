@@ -161,13 +161,13 @@ Prompt-time recall already skips sub-agent sessions. On Claude Code a sub-agent'
 
 ### D12. Per-host delivery follows each host's documented mechanism
 
-| Host        | Delivery                                                                | Reason                                                                                            |
-| ----------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Claude Code | `additionalContext`, documented as arriving "alongside the tool result" | —                                                                                                 |
-| Codex       | JSON-only `additionalContext`, never `permissionDecision`               | A 0.163 test shows an `allow` without `updatedInput` invalidates the output and drops the context |
-| Pi          | `tool_result` content append, returning `structuredContent` unchanged   | Pi's `tool_call` cannot add text and fails closed                                                 |
-| Hermes      | `transform_tool_result` / `transform_terminal_output`                   | `pre_tool_call` cannot add text and fails closed                                                  |
-| opencode v2 | `execute.before` to capture and fetch, `context` to deliver             | The v1 route (mutating `tool.execute.after`) is undocumented and excluded                         |
+| Host        | Delivery                                                                        | Reason                                                                                            |
+| ----------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Claude Code | `additionalContext`, documented as arriving "alongside the tool result"         | —                                                                                                 |
+| Codex       | JSON-only `additionalContext`, never `permissionDecision`                       | A 0.163 test shows an `allow` without `updatedInput` invalidates the output and drops the context |
+| Pi          | `tool_result` content append, returning `structuredContent` unchanged           | Pi's `tool_call` cannot add text and fails closed                                                 |
+| Hermes      | `transform_tool_result` / `transform_terminal_output`                           | `pre_tool_call` cannot add text and fails closed                                                  |
+| opencode v2 | `execute.before` to capture and start the fetch, `context` to await and deliver | The v1 route (mutating `tool.execute.after`) is undocumented and excluded                         |
 
 ### D13. Bounded, fail-open budgets
 
