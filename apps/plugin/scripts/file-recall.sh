@@ -53,10 +53,14 @@ apply_patch) PATHS="$(rembric_patch_paths "$(stdin_field .tool_input.command com
 esac
 [ -z "$PATHS" ] && exit 0
 
+# One failed request means the server is down or too slow; the rest of this firing would only
+# add its budget again, so the remaining files stay unclaimed for a later firing.
+FAILED="${DIR}/failed-$$"
 BLOCK=""
 while IFS= read -r CANDIDATE; do
   [ -z "$CANDIDATE" ] && continue
   [ -e "${DIR}/exhausted" ] && break
+  [ -e "$FAILED" ] && break
   REL="$(rembric_tracked_path "$CWD" "$CANDIDATE")"
   [ -z "$REL" ] && continue
   rembric_file_recall_claim "$DIR" "$REL" || continue
@@ -65,7 +69,7 @@ while IFS= read -r CANDIDATE; do
   [ -n "$SIBLINGS" ] && BODY="${BODY},\"siblings\":${SIBLINGS}"
   BODY="${BODY}}"
   LINES="$(REMBRIC_POST_MAX_TIME="${REMBRIC_POST_MAX_TIME:-0.3}" \
-    rembric_post_lines "/api/${SLUG}/sessions/${SESSION_ID}/file-recall" "$BODY" "${DIR}/exhausted")"
+    rembric_post_lines "/api/${SLUG}/sessions/${SESSION_ID}/file-recall" "$BODY" "${DIR}/exhausted" "$FAILED")"
   [ -z "$LINES" ] && continue
   if [ -n "$BLOCK" ]; then
     BLOCK="${BLOCK}"$'\n'"${LINES}"
@@ -74,6 +78,7 @@ while IFS= read -r CANDIDATE; do
   fi
 done <<<"$PATHS"
 
+[ -e "$FAILED" ] && { unlink "$FAILED" 2>/dev/null || true; }
 [ -z "$BLOCK" ] && exit 0
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}' \
   "$(rembric_json_escape "$BLOCK")"
