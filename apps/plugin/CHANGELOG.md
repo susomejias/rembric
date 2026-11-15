@@ -4,6 +4,23 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.42.0](https://github.com/susomejias/rembric/compare/plugin-v0.41.0...plugin-v0.42.0) (2026-11-15)
+
+
+### Features
+
+* **plugin:** append file-anchored recall to Hermes tool results ([daac3da](https://github.com/susomejias/rembric/commit/daac3dad6ae0f6765d5f898ded0dfbaabdaf158d)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+* **plugin:** deliver file-anchored recall on the opencode v2 plugin API ([a462a78](https://github.com/susomejias/rembric/commit/a462a78938c9e6a817211a110c6c0f74431b16fe)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+* **plugin:** recall memories linked to a file on Claude Code and Codex ([51318b2](https://github.com/susomejias/rembric/commit/51318b2be94b2bd84349927937a8f3aaf2826713)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+* **plugin:** recall memories linked to a file on Pi ([646d417](https://github.com/susomejias/rembric/commit/646d4173cebd0340cda18bb71dbf3a1bd441e13d)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+
+
+### Bug Fixes
+
+* **plugin:** cap Codex apply_patch recall at five distinct files ([32c0780](https://github.com/susomejias/rembric/commit/32c0780228be7e74e29c25919fdf47eef7429cc9)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+* **plugin:** keep the Hermes file-recall tests off the real repository ([fe665f3](https://github.com/susomejias/rembric/commit/fe665f39fa543d8c7672809ee72ba3f3cda52bad)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+* **plugin:** resolve shell tokens literally and stop a firing at its first failure ([d95419a](https://github.com/susomejias/rembric/commit/d95419a3459edb893774bf98e4939b1bb2e5ae0e)), closes [#489](https://github.com/susomejias/rembric/issues/489)
+
 ## [0.41.0](https://github.com/susomejias/rembric/compare/plugin-v0.40.0...plugin-v0.41.0) (2026-11-14)
 
 
