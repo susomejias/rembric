@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -39,6 +40,12 @@ class CommandPathsFixtureTest(unittest.TestCase):
 
 class FileRecallTest(unittest.TestCase):
     def setUp(self) -> None:
+        # A git hook exports GIT_DIR, which would point every git call below at the real repository.
+        env_patcher = patch.dict(os.environ)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        for key in [k for k in os.environ if k.startswith("GIT_")]:
+            del os.environ[key]
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         root = Path(self._tmp.name)
