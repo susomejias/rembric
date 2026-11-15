@@ -30,6 +30,9 @@ import { projectScope } from '@rembric/db';
 
 import rembric, { renderToolResultLines, toolCallPaths } from './index.js';
 
+// A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
 
