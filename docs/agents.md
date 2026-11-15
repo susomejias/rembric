@@ -77,6 +77,21 @@ When an agent reads or edits a file, the plugin asks the server for the memories
 - **What it never does**: block or slow a tool beyond a fraction of a second — a timeout, an older server without the endpoint, or any error simply produces no note.
 - **Clients**: Claude Code and Codex CLI (`PreToolUse`), Pi (appended to the tool's result through `tool_result`), Hermes Agent (appended through the `transform_tool_result` and `transform_terminal_output` hooks), opencode 2.x (a system part on the next model request; 1.x has none).
 
+## Learnings from subagent reports
+
+When a delegated subagent finishes, the plugin sends its final report to `POST /api/<slug>/sessions/<parent-id>/learnings`. The server saves each item of the report's `## Key Learnings` section as a memory of the session that delegated, through the same path as `memory.capture_passive`. The parent agent does not have to remember to capture anything.
+
+- **What is saved**: only the items under a `## Key Learnings` (or `### Key Learnings`) heading. A report without that section saves nothing. Each item gets the tags `subagent-learning` plus the subagent's type, and the dashboard shows it as written by `subagent`.
+- **Duplicates**: an item already saved, word for word, in the same session is skipped. A report that arrives twice, or that the parent also captures by hand, is stored once.
+- **Privacy**: `<private>` spans are removed before the report leaves your machine. Only the report text and the subagent's type are sent.
+- **What it never does**: add anything to the model's context, or delay or block the subagent. Any failure is one diagnostic line on stderr.
+- **Clients and minimum versions**:
+  - Claude Code: `SubagentStop`, plus `PreToolUse` on `SubagentHandback`, which carries the report in auto mode from 2.1.271.
+  - Codex CLI 0.133.0 or later: `SubagentStop`.
+  - opencode 2.x: the report message the subagent sends back to the parent. 1.x has none.
+  - Pi: the results of the `subagent`, `subagent_run`, `subagent_continue` and `subagent_result` tools, and the `subagent-notify` and `gentle-agents.message` completion messages.
+  - Hermes Agent v2026.8.3 or later: `subagent_stop`.
+
 ## Complete batch reads by date
 
 For “what have I worked on this week?”, retrieve the full session summaries directly:
