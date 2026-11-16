@@ -4,14 +4,27 @@ A zero-dependency MCP stdio-to-Streamable-HTTP bridge for Rembric. It is started
 with `npx -y @rembric/mcp-bridge@<exact-version>` and takes no arguments.
 
 Set `REMBRIC_SERVER_URL` (without `/mcp`) and `REMBRIC_API_TOKEN` in the
-process environment. `REMBRIC_PROJECT_SLUG` is an optional fallback. A
-`.rembric` file in the resolved project directory wins over that fallback.
-The directory is selected from `CLAUDE_PROJECT_DIR`, then `PWD`, then the
-current working directory. A valid `.rembric` slug wins over
-`REMBRIC_PROJECT_SLUG`; otherwise the bridge uses path-less `/mcp`, which
+process environment. The project directory is selected from
+`CLAUDE_PROJECT_DIR`, then `PWD`, then the current working directory. The
+project is resolved once, at startup, in this order:
+
+1. The nearest `.rembric` file containing `PROJECT_SLUG=<slug>`: the project
+   directory, then each parent up to the git checkout root. Outside a git work
+   tree only the project directory is read.
+2. `REMBRIC_PROJECT_SLUG`.
+3. Inside a git work tree only: the repository fingerprint (the first-parent
+   root commit), resolved by the server's `POST /api/repositories/resolve`.
+
+Outside a git work tree with no slug, the bridge uses path-less `/mcp`, which
 resolves to the server's default project, and writes one stderr diagnostic
-naming the fix: add a `.rembric` file containing `PROJECT_SLUG=<slug>`, or set
-`REMBRIC_PROJECT_SLUG`. A slug the server does not know is refused with
+naming the fix. Inside a git work tree every request carries
+`X-Rembric-Repo-Fingerprint` (the fingerprint, or `unavailable` for a shallow
+clone or a repository with no commit), and the bridge never falls back to the
+default project: an unbound repository connects path-less in unbound mode,
+where the server refuses every memory tool, and any other answer (an older
+server, a timeout, several bound projects) makes the bridge exit non-zero
+with one diagnostic naming the remedy. Remote URLs are sent without
+credentials. A slug the server does not know is refused with
 `project_not_found`; create the project from the dashboard.
 
 The bridge forwards MCP frames without creating a second client handshake. It
