@@ -5,7 +5,7 @@ import {
 import { runWithContext } from '@rembric/core';
 
 import { clientIdentity } from '../../../lib/client-identity';
-import { verifyMcpBearerToken } from '../../../lib/mcp-auth';
+import { readRepoFingerprintHeader, verifyMcpBearerToken } from '../../../lib/mcp-auth';
 import { getMcpSurface } from '../../../lib/mcp-server';
 import { applyMcpRateLimit } from '../../../lib/rate-limit';
 import { getServices } from '../../../lib/services';
@@ -32,11 +32,15 @@ async function handle(request: Request, context: RouteContext): Promise<Response
     );
   }
 
+  const fingerprint = readRepoFingerprintHeader(request.headers);
+  if (!fingerprint.ok) return fingerprint.response;
+
   const auth = await verifyMcpBearerToken({
     authorization: request.headers.get('authorization'),
     slug,
     identity: clientIdentity(request),
     services: getServices(),
+    repository: fingerprint.repository,
   });
   if (!auth.ok) return auth.response;
 

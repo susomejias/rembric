@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { DESCRIPTION_MAX_LENGTH } from '@rembric/mcp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { POST } from '../app/mcp/[[...path]]/route';
@@ -42,7 +43,9 @@ const TOOL_CALL_ERROR_PARAMS: Record<string, { name: string; arguments?: unknown
 interface Tool {
   name: string;
   description?: string;
+  inputSchema?: unknown;
   outputSchema?: unknown;
+  annotations?: Record<string, unknown>;
 }
 
 const CHANGED_DESCRIPTIONS: Record<string, string> = {
@@ -126,16 +129,22 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
     expect(initialized.status).toBe(202);
   }
 
-  it('returns the base tools minus project.use, changed only where the removals reach', async () => {
+  async function liveTools(): Promise<Tool[]> {
     await initialize();
     const list = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     expect(list.status).toBe(200);
     const { result } = await readJsonRpc(list);
-    const live = (result as { tools: Tool[] }).tools;
+    return (result as { tools: Tool[] }).tools;
+  }
+
+  it('returns the base tools minus project.use plus project.bind_repository, changed only where those reach', async () => {
+    const all = await liveTools();
+    const live = all.filter((t) => t.name !== 'project.bind_repository');
     const byName = new Map(live.map((t) => [t.name, t]));
 
     const base = (JSON.parse(readFileSync(BASE_TOOLS_LIST, 'utf8')) as { tools: Tool[] }).tools;
     expect(base).toHaveLength(25);
+    expect(all).toHaveLength(25);
     expect(live).toHaveLength(24);
     expect(byName.has('project.use')).toBe(false);
 
@@ -155,11 +164,16 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
         };
         const { suggestedSlugs: _dropped, ...properties } = schema.properties;
         void _dropped;
+        const liveSchema = byName.get(t.name)?.outputSchema as {
+          properties: Record<string, unknown>;
+          required: string[];
+        };
+        expect(liveSchema.required).not.toContain('repository');
         return {
           ...t,
           outputSchema: {
             ...schema,
-            properties,
+            properties: { ...properties, repository: liveSchema.properties['repository'] },
             required: schema.required.filter((r) => r !== 'suggestedSlugs'),
           },
         };
@@ -188,6 +202,27 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
       expect(description).toContain(mustContain);
       expect(description).not.toMatch(/roots|project\.use|suggestedSlugs/);
     }
+  });
+
+  it('adds project.bind_repository with a strict slug-only input and write annotations', async () => {
+    const tool = (await liveTools()).find((t) => t.name === 'project.bind_repository');
+    expect(tool).toBeDefined();
+    const description = tool?.description ?? '';
+    expect(description.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    expect(description).toContain('Admin token');
+    expect(description).toContain('no binding yet');
+    expect(tool?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: { slug: { type: 'string' } },
+      required: ['slug'],
+      additionalProperties: false,
+    });
+    expect(Object.keys((tool?.inputSchema as { properties: object }).properties)).toEqual(['slug']);
+    expect(tool?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    });
   });
 
   it.each(Object.keys(TOOL_CALL_ERROR_PARAMS))(

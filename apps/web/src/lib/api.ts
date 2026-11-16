@@ -69,6 +69,7 @@ export function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 413 |
     case 'invalid_input':
     case 'invalid_scope':
     case 'invalid_slug':
+    case 'invalid_repository_fingerprint':
       return 400;
     case 'token_invalid':
     case 'token_revoked':
@@ -90,6 +91,8 @@ export function statusForCode(code: string): 400 | 401 | 403 | 404 | 409 | 413 |
     case 'id_collision':
     case 'conflict':
     case 'session_deleted':
+    case 'repository_ambiguous':
+    case 'repository_already_bound':
       return 409;
     case 'payload_too_large':
       return 413;
@@ -136,7 +139,10 @@ export async function readJson(request: Request): Promise<JsonBody> {
 
 export type AuthOutcome = { ok: true; ctx: RequestContext } | { ok: false; response: Response };
 
-export async function authenticateRequest(request: Request, slug: string): Promise<AuthOutcome> {
+export async function authenticateRequest(
+  request: Request,
+  slug: string | undefined,
+): Promise<AuthOutcome> {
   const services = getServices();
   const identity = clientIdentity(request);
   const locked = services.authLockout.check(identity);

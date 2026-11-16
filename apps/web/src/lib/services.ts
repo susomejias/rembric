@@ -10,6 +10,7 @@ import {
   ProjectsService,
   PromptsService,
   RelationsService,
+  RepositoryBindingsService,
   TokensService,
   UsageCounters,
   embedderModelIsBaked,
@@ -39,6 +40,7 @@ export interface Services {
   memory: MemoryService;
   relations: RelationsService;
   prompts: PromptsService;
+  repositoryBindings: RepositoryBindingsService;
   postSave: Required<Omit<CaptureKeyLearningsDeps, 'memory'>>;
   usageCounters: UsageCounters;
   authLockout: AuthLockout;
@@ -73,6 +75,10 @@ function buildServices(): Services {
   const agentSessions = new AgentSessionsService(repos, db.db);
   const relations = new RelationsService(repos, db.db);
   const prompts = new PromptsService(repos, db.db);
+  const repositoryBindings = new RepositoryBindingsService(repos, db.db, {
+    pendingTtlDays: envInt('REMBRIC_REPO_PENDING_TTL_DAYS', 14, { min: 1, max: 3650 }),
+    pendingMaxPerToken: envInt('REMBRIC_REPO_PENDING_MAX_PER_TOKEN', 20, { min: 0, max: 10_000 }),
+  });
   const usageCounters = new UsageCounters();
 
   let embedderPromise: Promise<Embedder> | null = null;
@@ -146,6 +152,7 @@ function buildServices(): Services {
     memory,
     relations,
     prompts,
+    repositoryBindings,
     postSave,
     usageCounters,
     authLockout: new AuthLockout({

@@ -3,7 +3,7 @@ import type { ProjectsService, ProjectView } from '@rembric/core';
 import { DomainError } from '@rembric/core';
 import { sliceWithoutSplittingSurrogatePair } from '@rembric/core';
 import { isAuthorized, isProjectSetScope, pinnedProjectId } from '@rembric/core';
-import { getRequestContext, type RequestContext } from '@rembric/core';
+import { getRequestContext, type RequestContext, type TokenScope } from '@rembric/core';
 import { projectScope, type Memory, type Scope, type SearchScope } from '@rembric/db';
 
 export interface ScopeResolutionDeps {
@@ -35,7 +35,39 @@ function connectionScope(projects: ProjectsService): EffectiveScope {
   if (ctx.project)
     return { scope: projectScope(ctx.project.id), project: ctx.project, source: 'url-path' };
   if (ctx.requestedSlug !== null) throw unresolvableSlugError(ctx.requestedSlug, projects);
+  if (ctx.repository !== undefined) throw unboundError(ctx.scope, ctx.repository.fingerprint);
   return defaultProjectScope(projects);
+}
+
+export function isUnbound(): boolean {
+  return isUnboundContext(getRequestContext());
+}
+
+export function isUnboundContext(ctx: RequestContext | undefined): boolean {
+  return ctx !== undefined && ctx.requestedSlug === null && ctx.repository !== undefined;
+}
+
+export function unboundError(scope: TokenScope, fingerprint: string | null): DomainError {
+  return new DomainError('project_unbound', unboundMessage(scope, fingerprint));
+}
+
+export function unboundMessage(scope: TokenScope, fingerprint: string | null): string {
+  if (fingerprint === null) {
+    return (
+      'this git repository has no fingerprint (a shallow clone, no commit yet, or git unavailable), ' +
+      'so no project is selected and nothing is read or written; make a full clone or a first commit, ' +
+      'or add a .rembric file with PROJECT_SLUG=<slug> at the checkout root'
+    );
+  }
+  const remedy =
+    scope === '*'
+      ? 'bind it from the dashboard or with project.bind_repository({ slug })'
+      : 'ask an admin to bind it from the dashboard, or add a .rembric file with PROJECT_SLUG=<slug> at the checkout root';
+  return (
+    `repository ${fingerprint.slice(0, 12)} is not bound to a project, so nothing is read or written; ` +
+    `${remedy}. A binding applies from the next session. Sessions in this repository used the ` +
+    'default project before this version; binding it to the default project keeps that continuity'
+  );
 }
 
 function defaultProjectScope(projects: ProjectsService): EffectiveScope {

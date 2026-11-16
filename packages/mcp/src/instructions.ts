@@ -4,6 +4,7 @@ import { SUMMARY_MERGE_RULE, SUMMARY_SECTIONS } from '@rembric/core';
 export interface InstructionsContext {
   /** Project slug requested in the URL path; null for `/mcp` connections. */
   requestedSlug: string | null;
+  unbound?: boolean;
 }
 
 const BASE = `Rembric is this project's long-term memory: only what you write to it outlives this conversation. Run this loop yourself; host reminders may help, never wait for them.
@@ -20,8 +21,11 @@ const PATH_SCOPED_NOTE = (slug: string) => `\n\nproject '${slug}'.`;
 
 const UNSCOPED_NOTE = `\n\nProject always active: the default project; reach another at /mcp/<slug>.`;
 
+const UNBOUND_NOTE = `\n\nNo project selected: repository not bound; memory tools answer project_unbound with the fix.`;
+
 export function buildInstructions(ctx: InstructionsContext): string {
-  return ctx.requestedSlug ? BASE + PATH_SCOPED_NOTE(ctx.requestedSlug) : BASE + UNSCOPED_NOTE;
+  if (ctx.requestedSlug) return BASE + PATH_SCOPED_NOTE(ctx.requestedSlug);
+  return BASE + (ctx.unbound ? UNBOUND_NOTE : UNSCOPED_NOTE);
 }
 
 export const INSTRUCTIONS_MAX_LENGTH = 1500;

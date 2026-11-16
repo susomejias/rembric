@@ -14,6 +14,33 @@ import type { Services } from './services';
 
 const NO_EXPIRY_EPOCH_SECONDS = 4_102_444_800; // 2100-01-01T00:00:00Z
 
+const REPO_FINGERPRINT_HEADER = 'x-rembric-repo-fingerprint';
+const REPO_FINGERPRINT_VALUE = /^(?:[0-9a-f]{40}|[0-9a-f]{64}|unavailable)$/;
+
+export type RepoFingerprintHeader =
+  | { ok: true; repository: RequestContext['repository'] }
+  | { ok: false; response: Response };
+
+export function readRepoFingerprintHeader(headers: Headers): RepoFingerprintHeader {
+  const value = headers.get(REPO_FINGERPRINT_HEADER);
+  if (value === null) return { ok: true, repository: undefined };
+  if (!REPO_FINGERPRINT_VALUE.test(value)) {
+    return {
+      ok: false,
+      response: Response.json(
+        {
+          ok: false,
+          code: 'invalid_repository_fingerprint',
+          message:
+            'X-Rembric-Repo-Fingerprint must carry exactly one value: 40 or 64 lowercase hexadecimal characters, or unavailable',
+        },
+        { status: 400 },
+      ),
+    };
+  }
+  return { ok: true, repository: { fingerprint: value === 'unavailable' ? null : value } };
+}
+
 export type McpAuthOutcome =
   | { ok: true; authInfo: AuthInfo; requestContext: RequestContext }
   | { ok: false; response: Response };
@@ -23,8 +50,9 @@ export async function verifyMcpBearerToken(input: {
   slug: string | null;
   identity: string;
   services: Services;
+  repository?: RequestContext['repository'];
 }): Promise<McpAuthOutcome> {
-  const { authorization, slug, identity, services } = input;
+  const { authorization, slug, identity, services, repository } = input;
   const lockout = services.authLockout;
 
   const locked = lockout.check(identity);
@@ -75,6 +103,7 @@ export async function verifyMcpBearerToken(input: {
         memberProjectIds: resolved.memberProjectIds,
         project,
         requestedSlug: slug,
+        ...(repository === undefined ? {} : { repository }),
       };
       return {
         token,
