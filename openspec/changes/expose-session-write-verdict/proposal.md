@@ -24,7 +24,7 @@ None.
 
 ### Modified Capabilities
 
-- `mcp-api`: MODIFIED requirement "The MCP server MUST expose four session-lifecycle tools" — `sessionSummaryOutput` gains `applied: z.boolean()` and optional `discardReason`; `sessionEndOutput` gains `applied: z.boolean()`; the description requirement is updated; new scenarios cover the terminal-final-discard case and the end no-op case; the existing "last-final-wins" scenario is clarified to scope the claim to active rows.
+- `mcp-api`: MODIFIED requirement "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding" (the title `collapse-mcp-onto-stateless-sdk-v2` published for it) — `sessionSummaryOutput` gains `applied: z.boolean()` and optional `discardReason`; `sessionEndOutput` gains `applied: z.boolean()`; the description requirement is updated; new scenarios cover the terminal-final-discard case and the end no-op case; the existing "last-final-wins" scenario is clarified to scope the claim to active rows.
 
 ## Impact
 
