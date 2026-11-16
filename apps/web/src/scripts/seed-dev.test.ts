@@ -136,6 +136,47 @@ describe('runSeed', () => {
     expect(countTokenProjects()).toBe(0);
   });
 
+  it('--reset does not violate FK constraints when repository bindings and pending rows exist', () => {
+    runSeed({ handle: db.handle, reset: false, log: () => {} });
+
+    const demo = new ProjectsService(createRepositories(db.handle.db)).findBySlug('demo')!;
+    const raw = db.handle.raw;
+    const fp = 'ab'.repeat(20);
+    raw
+      .prepare(
+        'INSERT INTO project_repositories (fingerprint, project_id, remotes, created_at, created_by) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(fp, demo.id, '["github.com/acme/shop"]', 0, 'dashboard:seed-test');
+    raw
+      .prepare(
+        "INSERT INTO repository_pending (id, fingerprint, kind, project_id, remotes, first_seen_at, last_seen_at) VALUES ('p1', ?, 'suggestion', ?, '[]', 0, 0)",
+      )
+      .run(fp, demo.id);
+    raw
+      .prepare("INSERT INTO repository_pending_tokens (pending_id, token_id) VALUES ('p1', 't1')")
+      .run();
+
+    expect(() =>
+      runSeed({
+        handle: db.handle,
+        reset: true,
+        env: env({ REMBRIC_ALLOW_DESTRUCTIVE_SEED: '1' }),
+        log: () => {},
+      }),
+    ).not.toThrow();
+    for (const table of [
+      'project_repositories',
+      'repository_pending',
+      'repository_pending_tokens',
+    ]) {
+      expect(
+        (raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n,
+        table,
+      ).toBe(0);
+    }
+    expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
   it('--reset without REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 refuses and preserves data', () => {
     runSeed({ handle: db.handle, reset: false, log: () => {} });
 

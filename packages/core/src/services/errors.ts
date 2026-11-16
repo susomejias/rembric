@@ -22,7 +22,12 @@ export type DomainErrorCode =
   | 'prompt_not_found'
   | 'prompt_scope_mismatch'
   | 'prompt_already_deleted'
-  | 'prompt_not_deleted';
+  | 'prompt_not_deleted'
+  | 'project_unbound'
+  | 'repository_ambiguous'
+  | 'repository_already_bound'
+  | 'repository_fingerprint_unavailable'
+  | 'invalid_repository_fingerprint';
 
 export class DomainError extends Error {
   constructor(

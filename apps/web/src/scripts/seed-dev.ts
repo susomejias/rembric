@@ -458,6 +458,9 @@ function wipe(handle: DbHandle): void {
     handle.raw.exec('DELETE FROM dashboard_sessions');
     handle.raw.exec('DELETE FROM token_projects');
     handle.raw.exec('DELETE FROM tokens');
+    handle.raw.exec('DELETE FROM repository_pending_tokens');
+    handle.raw.exec('DELETE FROM repository_pending');
+    handle.raw.exec('DELETE FROM project_repositories');
     handle.raw.exec('DELETE FROM projects');
     handle.raw
       .prepare(

@@ -9,8 +9,11 @@ export const SOURCE_TABLES = [
   'oauth_authorization_codes',
   'oauth_clients',
   'oauth_tokens',
+  'project_repositories',
   'projects',
   'prompts',
+  'repository_pending',
+  'repository_pending_tokens',
   'sessions',
   'token_projects',
   'tokens',
@@ -100,6 +103,12 @@ const SERVER_COMPOSED: TextColumnClass = { exempt: 'composed by the server, neve
 const OPERATOR_ENTERED: TextColumnClass = { exempt: 'operator-entered name, not agent content' };
 const HASH: TextColumnClass = { exempt: 'hash or server-generated secret' };
 const OAUTH_METADATA: TextColumnClass = { exempt: 'OAuth client metadata (RFC 7591/7636)' };
+const NORMALIZED_REMOTES: TextColumnClass = {
+  exempt: 'remote URLs normalized by the server: credentials, port and query removed',
+};
+const CHECKOUT_BASENAME: TextColumnClass = {
+  exempt: 'checkout-root basename, bounded and slash-free',
+};
 
 export const TEXT_COLUMNS: Record<string, TextColumnClass> = {
   '_migrations.filename': SERVER_COMPOSED,
@@ -163,6 +172,10 @@ export const TEXT_COLUMNS: Record<string, TextColumnClass> = {
   'oauth_tokens.scope': ENUMERATION,
   'oauth_tokens.subject': IDENTIFIER,
   'oauth_tokens.project_id': IDENTIFIER,
+  'project_repositories.fingerprint': IDENTIFIER,
+  'project_repositories.project_id': IDENTIFIER,
+  'project_repositories.remotes': NORMALIZED_REMOTES,
+  'project_repositories.created_by': SERVER_COMPOSED,
   'projects.id': IDENTIFIER,
   'projects.slug': OPERATOR_ENTERED,
   'projects.display_name': OPERATOR_ENTERED,
@@ -174,6 +187,14 @@ export const TEXT_COLUMNS: Record<string, TextColumnClass> = {
   'prompts.tags': 'redacted',
   'prompts.replaces': IDENTIFIER,
   'prompts.agent': OPERATOR_ENTERED,
+  'repository_pending.id': IDENTIFIER,
+  'repository_pending.fingerprint': IDENTIFIER,
+  'repository_pending.kind': ENUMERATION,
+  'repository_pending.project_id': IDENTIFIER,
+  'repository_pending.remotes': NORMALIZED_REMOTES,
+  'repository_pending.root_name': CHECKOUT_BASENAME,
+  'repository_pending_tokens.pending_id': IDENTIFIER,
+  'repository_pending_tokens.token_id': IDENTIFIER,
   'sessions.id': IDENTIFIER,
   'sessions.token_id': IDENTIFIER,
   'sessions.project_id': IDENTIFIER,

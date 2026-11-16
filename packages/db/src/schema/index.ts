@@ -10,3 +10,4 @@ export * from './agent-sessions.js';
 export * from './prompts.js';
 export * from './memory-relations.js';
 export * from './entities.js';
+export * from './repositories.js';
