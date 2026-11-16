@@ -86,7 +86,11 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
       `The project was created, but a repository was not bound: ${failures.join('; ')}`,
     );
   }
-  redirect(`/dashboard/projects?${query.toString()}`);
+  const returnTo = readField(formData, 'returnTo');
+  const base = (REPOSITORY_PATHS as readonly string[]).includes(returnTo)
+    ? returnTo
+    : '/dashboard/projects';
+  redirect(`${base}?${query.toString()}`);
 }
 
 export async function bindRepository(_prev: BindState, formData: FormData): Promise<BindState> {

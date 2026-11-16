@@ -2,6 +2,7 @@ import type { RepositoryPending } from '@rembric/db';
 
 import type {
   BoundRepository,
+  ConnectedRepository,
   PendingRepository,
   ProjectRef,
   ProjectRepositories,
@@ -13,6 +14,7 @@ const PREFIX_LENGTH = 12;
 export interface RepositoryData {
   readonly live: PendingRepository[];
   readonly discarded: PendingRepository[];
+  readonly connected: ConnectedRepository[];
   forProject(projectId: string): ProjectRepositories;
 }
 
@@ -82,19 +84,28 @@ export function loadRepositoryData(
     return label;
   };
 
+  const toBound = (b: (typeof bindings)[number]): BoundRepository => ({
+    fingerprint: b.fingerprint,
+    fingerprintPrefix: b.fingerprint.slice(0, PREFIX_LENGTH),
+    remotes: b.remotes,
+    createdAt: b.createdAt,
+    createdBy: creatorLabel(b.createdBy),
+  });
+
+  const connected: ConnectedRepository[] = bindings
+    .map((b) => ({ ...toBound(b), project: ref(b.projectId) }))
+    .sort(
+      (a, b) =>
+        a.project.slug.localeCompare(b.project.slug) ||
+        (a.remotes[0] ?? a.fingerprint).localeCompare(b.remotes[0] ?? b.fingerprint),
+    );
+
   return {
     live,
     discarded,
+    connected,
     forProject(projectId) {
-      const bound: BoundRepository[] = bindings
-        .filter((b) => b.projectId === projectId)
-        .map((b) => ({
-          fingerprint: b.fingerprint,
-          fingerprintPrefix: b.fingerprint.slice(0, PREFIX_LENGTH),
-          remotes: b.remotes,
-          createdAt: b.createdAt,
-          createdBy: creatorLabel(b.createdBy),
-        }));
+      const bound = bindings.filter((b) => b.projectId === projectId).map(toBound);
       const naming = live.filter((row) => row.kind !== 'unbound' && row.project?.id === projectId);
       const unbound = live.filter((row) => row.kind === 'unbound');
       const conflicts = live.filter(

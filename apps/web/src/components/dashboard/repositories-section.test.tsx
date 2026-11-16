@@ -96,13 +96,15 @@ describe('the Repositories section of the project edit surface', () => {
   it('gates removal of a binding behind a warn-tone confirmation that explains what stays', () => {
     const html = render({ bound: [BOUND] });
     expect(html).toContain('data-confirm-tone="warn"');
-    expect(html).toContain('data-confirm-title="Unbind github.com/acme/shop?"');
+    expect(html).toContain('data-confirm-title="Disconnect github.com/acme/shop?"');
     expect(html).toContain('Memories and sessions already written stay in shop.');
-    expect(html).toContain('Later sessions from this repository stop resolving here.');
+    expect(html).toContain('Later sessions from this repository stop resolving here');
     const removeForm = html.split('name="csrf" value="r"')[1]!.split('</form>')[0]!;
     expect(removeForm).toContain(`name="fingerprint" value="${BOUND.fingerprint}"`);
-    expect(removeForm).toContain('>Unbind</button>');
-    expect(removeForm).toMatch(/<button[^>]*type="button"[^>]*>Unbind/);
+    expect(removeForm).toContain('>Disconnect</button>');
+    const trigger = /<button[^>]*>Disconnect/.exec(removeForm)?.[0] ?? '';
+    expect(trigger).toContain('type="button"');
+    expect(trigger).toContain('data-variant="warn"');
     expect(removeForm).not.toContain('type="submit"');
   });
 
@@ -114,7 +116,7 @@ describe('the Repositories section of the project edit surface', () => {
 
   it('falls back to the fingerprint prefix for a binding without remotes', () => {
     const html = render({ bound: [{ ...BOUND, remotes: [] }] });
-    expect(html).toContain('>no remote</span>');
+    expect(html).toContain(`>repository ${BOUND.fingerprintPrefix}</span>`);
     expect(html).toContain(`fingerprint ${BOUND.fingerprintPrefix}`);
   });
 
@@ -122,7 +124,7 @@ describe('the Repositories section of the project edit surface', () => {
     const html = render({ pending: [pending({})] });
     expect(html).toContain('name="pendingId" value="p1"');
     expect(html).toContain('name="projectId" value="shop-id"');
-    expect(html).toContain('>Bind here</button>');
+    expect(html).toContain('>Connect here</button>');
   });
 
   it('asks to move or add when the pending repository is bound elsewhere', () => {
@@ -130,8 +132,8 @@ describe('the Repositories section of the project edit surface', () => {
       pending: [pending({ kind: 'suggestion', project: SHOP, bindings: [STORE] })],
     });
     expect(html).toContain('Move from store');
-    expect(html).toContain('Add a second binding');
-    expect(html).not.toContain('>Bind here</button>');
+    expect(html).toContain('>Keep both</button>');
+    expect(html).not.toContain('>Connect here</button>');
   });
 
   it('offers accepting an unseen remote for an unknown-remote row naming this project', () => {
@@ -145,16 +147,16 @@ describe('the Repositories section of the project edit surface', () => {
         }),
       ],
     });
-    expect(html).toContain('Unseen remote github.com/other/store.');
-    expect(html).toContain('>Accept remote</button>');
+    expect(html).toContain('seen at github.com/other/store, a remote shop has never seen');
+    expect(html).toContain('>Trust remote</button>');
   });
 
   it('shows a conflict notice when a root .rembric selects another project', () => {
     const html = render({
       conflicts: [pending({ kind: 'suggestion', project: STORE, bindings: [SHOP] })],
     });
-    expect(html).toContain('conflict');
-    expect(html).toContain('selects store through its root .rembric');
+    expect(html).toContain('data-repository-conflict');
+    expect(html).toContain('asks for store through its root .rembric');
   });
 
   it('validates a pasted fingerprint against the 40- or 64-character hexadecimal format', () => {
@@ -167,10 +169,10 @@ describe('the Repositories section of the project edit surface', () => {
 
   it('offers no new binding on an archived project but keeps removal', () => {
     const html = render({ bound: [BOUND], pending: [pending({})] }, true);
-    expect(html).toContain('>Unbind</button>');
+    expect(html).toContain('>Disconnect</button>');
     expect(html).not.toContain('name="pendingId"');
     expect(html).not.toContain('pattern=');
-    expect(html).toContain('An archived project accepts no new binding.');
+    expect(html).toContain('An archived project accepts no new repository.');
   });
 });
 

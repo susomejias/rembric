@@ -1,6 +1,5 @@
 import { DomainError, SLUG_REGEX, type ProjectView } from '@rembric/core';
 import { revalidatePath } from 'next/cache';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import {
@@ -22,16 +21,16 @@ import {
 } from './repository-forms';
 
 import type { ActionState } from '@/components/dashboard/action-form';
-import { PageHelp } from '@/components/dashboard/page-help';
+import { ProjectsHeader } from '@/components/dashboard/projects-header';
 import { CreateProjectSheet } from '@/components/dashboard/projects-sheets';
 import { ProjectsTable, type ProjectRowData } from '@/components/dashboard/projects-table';
+import { ResultAlerts } from '@/components/dashboard/result-alerts';
 import { singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
-import { Flash, LABEL, Page } from '@/components/dashboard/ui';
+import { Page } from '@/components/dashboard/ui';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
-import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -179,48 +178,21 @@ export default async function ProjectsPage({
     });
 
   return (
-    <Page className="flex flex-col gap-4">
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-foreground">Projects</h1>
-            <PageHelp text="Scopes that group memory per project — agents address them by slug." />
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-3">
-          <Link
-            href="/dashboard/projects/repositories"
-            data-pending-repositories={pendingCount}
-            className={cn(
-              'inline-flex h-8 items-center gap-2 rounded-[10px] border px-3 text-xs font-medium transition-colors',
-              pendingCount > 0
-                ? 'border-warn/40 text-foreground hover:bg-warn/10'
-                : 'border-border text-muted-foreground hover:text-foreground',
-            )}
-          >
-            Pending repositories
-            <span className={cn(LABEL, 'font-semibold', pendingCount > 0 && 'text-warn')}>
-              {pendingCount}
-            </span>
-          </Link>
+    <Page className="flex flex-col gap-5">
+      <ProjectsHeader
+        active="projects"
+        projectCount={rows.length}
+        pendingCount={pendingCount}
+        actions={
           <CreateProjectSheet
             action={createProject}
             csrf={csrf.create}
             pending={repositories.live.filter((row) => row.kind === 'unbound')}
           />
-        </div>
-      </section>
+        }
+      />
 
-      {justCreated ? (
-        <Flash tone="lime" label="CREATED">
-          Created project <code className="font-mono">{justCreated}</code>.
-        </Flash>
-      ) : null}
-      {errorMessage ? (
-        <Flash tone="danger" label="ERROR">
-          {errorMessage}
-        </Flash>
-      ) : null}
+      <ResultAlerts created={justCreated} error={errorMessage} />
 
       <ProjectsTable
         rows={visibleRows}

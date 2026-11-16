@@ -1,6 +1,6 @@
 'use client';
 
-import { MoreHorizontal } from 'lucide-react';
+import { GitBranch, MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import * as React from 'react';
 
@@ -16,7 +16,7 @@ import type {
   RepositoryActions,
   RepositoryCsrf,
 } from '@/components/dashboard/repositories-section';
-import { Pill, Time } from '@/components/dashboard/ui';
+import { Time, TonePill } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,7 +30,6 @@ import { cn } from '@/lib/utils';
 
 const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
 const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
-const BULK_BUTTON = 'border-warn/40 bg-warn/10 text-warn hover:bg-warn/20 hover:text-warn';
 
 export type ProjectArchiveAction = 'archive' | 'unarchive' | 'none';
 
@@ -112,15 +111,31 @@ export function ProjectsTable({
         <div className="flex min-w-0 flex-col gap-1">
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium text-foreground">{row.label}</span>
-            {row.isDefault ? <Pill tone="dim">default</Pill> : null}
-            {row.archived ? <Pill tone="dim">archived</Pill> : null}
+            {row.isDefault ? <TonePill tone="dim">default</TonePill> : null}
+            {row.archived ? <TonePill tone="dim">archived</TonePill> : null}
           </span>
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate font-mono text-[11px] text-muted-foreground">{row.slug}</span>
-            {row.legacy ? <Pill tone="amber">legacy</Pill> : null}
+            {row.legacy ? <TonePill tone="amber">legacy</TonePill> : null}
           </span>
         </div>
       ),
+    },
+    {
+      id: 'repositories',
+      header: 'Repositories',
+      sortable: true,
+      hideBelow: 'md',
+      value: (row) => row.repositories.bound.length,
+      cell: (row) =>
+        row.repositories.bound.length === 0 ? (
+          <span className="text-xs text-muted-foreground">None</span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
+            <GitBranch aria-hidden="true" className="size-3.5 text-muted-foreground" />
+            {row.repositories.bound.length}
+          </span>
+        ),
     },
     {
       id: 'created',
@@ -196,9 +211,9 @@ export function ProjectsTable({
                         } will reject new writes while existing memories stay queryable, and their pending judgments will be closed until you unarchive them. ${skipped} ${
                           skipped === 1 ? 'project' : 'projects'
                         } will be skipped — the default project cannot be archived, and an archived one is left as it is.`}
-                        confirmLabel="ARCHIVE SELECTED"
+                        confirmLabel="Archive selected"
                       >
-                        <Button type="button" size="sm" className={BULK_BUTTON}>
+                        <Button type="button" variant="warn" size="sm">
                           Archive selected
                         </Button>
                       </ConfirmSubmit>
@@ -288,7 +303,7 @@ function ProjectRowMenu({
                     tone="warn"
                     title={`Archive project "${row.label}"?`}
                     description="New writes will be rejected; existing memories stay queryable. Its pending judgments are closed and come back when you unarchive it."
-                    confirmLabel="ARCHIVE PROJECT"
+                    confirmLabel="Archive project"
                   >
                     <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                       Archive project

@@ -379,6 +379,33 @@ describe('creating a project with repositories', () => {
     expect(target).toContain(`created=${slug}`);
     expect(repos.projects.findBySlug(slug)?.displayName).toBe('Plain');
   });
+
+  it('returns to the repositories view when asked, and ignores any other return path', async () => {
+    const row = sightUnbound(nextFingerprint(), ['github.com/acme/returning']);
+    const slug = `returning-${sequence++}`;
+    const { createProject } = await actions();
+    const back = await redirectTarget(() =>
+      createProject(
+        { error: null },
+        form('project.create', {
+          slug,
+          pendingId: [row.id],
+          returnTo: '/dashboard/projects/repositories',
+        }),
+      ),
+    );
+    expect(back).toContain(`/dashboard/projects/repositories?created=${slug}`);
+
+    const other = `elsewhere-${sequence++}`;
+    const foreign = await redirectTarget(() =>
+      createProject(
+        { error: null },
+        form('project.create', { slug: other, returnTo: 'https://evil.example/dashboard' }),
+      ),
+    );
+    expect(foreign).toContain(`/dashboard/projects?created=${other}`);
+    expect(foreign).not.toContain('evil.example');
+  });
 });
 
 describe('every repository action requires an admin session and its own CSRF token', () => {

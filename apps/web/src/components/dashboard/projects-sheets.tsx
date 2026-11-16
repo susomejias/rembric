@@ -1,5 +1,6 @@
 'use client';
 
+import { AlertTriangle, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useActionState, useEffect, useRef, useState } from 'react';
 
@@ -12,7 +13,8 @@ import {
   type RepositoryActions,
   type RepositoryCsrf,
 } from '@/components/dashboard/repositories-section';
-import { Flash, LABEL } from '@/components/dashboard/ui';
+import { LABEL } from '@/components/dashboard/ui';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,7 +61,8 @@ export function CreateProjectSheet({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button type="button" size="sm" className="rounded-[10px]">
+        <Button type="button">
+          <Plus aria-hidden="true" />
           New project
         </Button>
       </SheetTrigger>
@@ -183,7 +186,7 @@ function CreateProjectForm({
       </div>
       <CreateRepositoryFields pending={pending} />
       <SheetFooter className="mt-0 p-0">
-        <Button type="submit" size="sm" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           Create project
         </Button>
       </SheetFooter>
@@ -223,7 +226,7 @@ function RenameProjectForm({
         />
       </div>
       <SheetFooter className="mt-0 p-0">
-        <Button type="submit" size="sm" disabled={pending}>
+        <Button type="submit" disabled={pending}>
           Save
         </Button>
       </SheetFooter>
@@ -234,9 +237,10 @@ function RenameProjectForm({
 function SheetError({ error }: { error: string | null }) {
   if (error === null) return null;
   return (
-    <Flash tone="danger" label="ERROR">
-      {error}
-    </Flash>
+    <Alert variant="destructive">
+      <AlertTriangle aria-hidden="true" />
+      <AlertDescription>{error}</AlertDescription>
+    </Alert>
   );
 }
 

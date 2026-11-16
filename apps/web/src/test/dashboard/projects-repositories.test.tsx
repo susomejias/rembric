@@ -17,6 +17,7 @@ let t: TestDb;
 let repos: Repositories;
 let bindings: RepositoryBindingsService;
 let shop: Project;
+let sandbox: Project;
 let writer: RepositoryActor;
 
 const F = 'a'.repeat(40);
@@ -30,7 +31,7 @@ beforeEach(async () => {
   repos = createRepositories(t.handle.db);
   const projects = new ProjectsService(repos, undefined, t.handle.db);
   shop = projects.create({ slug: 'shop' });
-  projects.create({ slug: 'sandbox' });
+  sandbox = projects.create({ slug: 'sandbox' });
   bindings = new RepositoryBindingsService(repos, t.handle.db);
   const tokens = new TokensService(repos, t.handle.db);
   const created = tokens.createForSlugs(
@@ -106,7 +107,7 @@ describe('the projects list counts pending repositories', () => {
   });
 });
 
-describe('the pending view', () => {
+describe('the repositories view', () => {
   it('lists each kind with its remotes, fingerprint prefix, tokens and times', async () => {
     bindings.bind({ fingerprint: H, projectId: shop.id, createdBy: 'dashboard:seed' });
     repos.repositoryBindings.updateRemotes(H, shop.id, ['github.com/acme/tools']);
@@ -123,31 +124,36 @@ describe('the pending view', () => {
     bindings.resolve(writer, { fingerprint: H, remotes: ['github.com/other/store'] });
 
     const html = await renderPending();
+    expect(html).toContain('3 repositories need a project');
 
     const unbound = card(html, 'unbound');
-    expect(unbound).toContain('</span>unbound</span>');
+    expect(unbound).toContain('</span>new</span>');
     expect(unbound).toContain('github.com/acme/web');
     expect(unbound).not.toContain('secret');
     expect(unbound).toContain(`fingerprint ${F.slice(0, 12)}`);
-    expect(unbound).toContain('Sighted by laptop');
+    expect(unbound).toContain('seen by laptop');
     expect((unbound.match(/data-rembric-ts/g) ?? []).length).toBe(2);
+    expect(unbound).toContain('New: no project yet, so its memory is saved in default.');
     expect(unbound).toContain('Choose a project…');
 
     const suggestion = card(html, 'suggestion');
-    expect(suggestion).toContain('</span>suggestion</span>');
+    expect(suggestion).toContain('</span>suggested</span>');
     expect(suggestion).toContain('>store</span>');
     expect(suggestion).toContain(`fingerprint ${G.slice(0, 12)}`);
-    expect(suggestion).toContain('A root .rembric selects sandbox.');
-    expect(suggestion).toContain('Bind to sandbox');
+    expect(suggestion).toContain('Its .rembric file asks for sandbox.');
+    expect(suggestion).toContain(`name="projectId" value="${sandbox.id}"`);
+    expect(suggestion).toContain('Connect</button>');
 
     const unknown = card(html, 'unknown_remote');
-    expect(unknown).toContain('</span>unknown remote</span>');
-    expect(unknown).toContain('Bound to shop, which has never seen github.com/other/store.');
-    expect(unknown).toContain('Accept remote into shop');
-    expect(unknown).toContain('Another project…');
+    expect(unknown).toContain('</span>new remote</span>');
+    expect(unknown).toContain(
+      'Same repository as one connected to shop, but seen at github.com/other/store',
+    );
+    expect(unknown).toContain('Connecting trusts github.com/other/store as a remote of shop.');
+    expect(unknown).not.toContain('name="projectId"');
 
     for (const kind of ['unbound', 'suggestion', 'unknown_remote']) {
-      expect(card(html, kind)).toContain('>Discard</button>');
+      expect(card(html, kind)).toContain('>Ignore</button>');
     }
   });
 
@@ -162,24 +168,45 @@ describe('the pending view', () => {
     const conflict = card(await renderPending(), 'suggestion');
 
     expect(conflict).toContain('</span>conflict</span>');
-    expect(conflict).toContain('Bound to shop; a root .rembric selects sandbox.');
+    expect(conflict).toContain('Connected to shop, but its .rembric file asks for sandbox.');
     expect(hasSubmit(conflict, 'moveFrom', shop.id)).toBe(true);
     expect(conflict).toContain('Move from shop');
     expect(hasSubmit(conflict, 'choice', 'add')).toBe(true);
     expect(conflict).toContain('ambiguity');
-    expect(conflict).not.toContain('Bind to sandbox');
+    expect(conflict).toContain('>Keep shop</button>');
+    expect(conflict).not.toContain('>Ignore</button>');
   });
 
-  it('keeps discarded rows out of the pending view and offers restore in the discarded view', async () => {
-    seedThreeLiveOneDiscarded();
-    const pending = await renderPending();
-    expect(pending).not.toContain('github.com/acme/old');
-    expect(pending).not.toContain('>Restore</button>');
+  it('lists every connected repository with its project and a change control', async () => {
+    bindings.bind({ fingerprint: F, projectId: shop.id, createdBy: 'dashboard:seed' });
+    repos.repositoryBindings.updateRemotes(F, shop.id, ['github.com/acme/shop']);
+    bindings.bind({ fingerprint: G, projectId: sandbox.id, createdBy: 'dashboard:seed' });
 
-    const discarded = await renderPending('discarded');
-    expect(discarded).toContain('github.com/acme/old');
-    expect(discarded).toContain('>Restore</button>');
-    expect(discarded).not.toContain('>Discard</button>');
-    expect(discarded).toContain('discarded <time');
+    const html = await renderPending();
+
+    expect(html).toContain('Every repository has a project');
+    const connected = html.split('aria-label="Connected repositories"')[1]!.split('</ul>')[0]!;
+    expect(connected).toContain('github.com/acme/shop');
+    expect(connected).toContain('</span>shop</span>');
+    expect(connected).toContain(`repository ${G.slice(0, 12)}`);
+    expect(connected).toContain('</span>sandbox</span>');
+    expect((connected.match(/>Change<\/button>/g) ?? []).length).toBe(2);
+  });
+
+  it('keeps ignored rows out of the main view and offers restore in the ignored view', async () => {
+    seedThreeLiveOneDiscarded();
+    const main = await renderPending();
+    expect(main).not.toContain('github.com/acme/old');
+    expect(main).not.toContain('Restore</button>');
+    expect(main).toContain('href="/dashboard/projects/repositories?view=ignored"');
+    expect(main).toContain('Show 1 ignored repository');
+
+    for (const view of ['ignored', 'discarded']) {
+      const ignored = await renderPending(view);
+      expect(ignored).toContain('github.com/acme/old');
+      expect(ignored).toContain('Restore</button>');
+      expect(ignored).not.toContain('>Ignore</button>');
+      expect(ignored).toContain('ignored <time');
+    }
   });
 });
