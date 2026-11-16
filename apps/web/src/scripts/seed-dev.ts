@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
+
 import { AgentSessionsService } from '@rembric/core';
 import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
+import { RepositoryBindingsService, type RepositoryActor } from '@rembric/core';
 import { TokensService } from '@rembric/core';
 import { createDb, createRepositories, memory, projectScope, type DbHandle } from '@rembric/db';
 import { eq } from 'drizzle-orm';
@@ -395,11 +398,13 @@ export function runSeed(deps: SeedDeps): SeedResult {
       .run();
   });
 
+  const repositoryCounts = seedRepositories(deps.handle, projectsSvc, tokensSvc, adminTokenId);
+
   const result: SeedResult = {
     skipped: false,
     counts: {
       projects: projectsSvc.list().length,
-      tokens: 3,
+      tokens: 3 + repositoryCounts.tokens,
       memories: memoryCount,
       endedSessions: endedSessions.length,
       activeSessions: 2,
@@ -418,6 +423,9 @@ export function runSeed(deps: SeedDeps): SeedResult {
   log(`  ended sessions:    ${result.counts!.endedSessions}`);
   log(`  active sessions:   ${result.counts!.activeSessions}`);
   log(`  pending judgments: ${result.counts!.pendingJudgments}`);
+  log(
+    `  repositories:      ${repositoryCounts.connected} connected, ${repositoryCounts.waiting} waiting, ${repositoryCounts.ignored} ignored`,
+  );
   log('');
   if (useEnvAdmin) {
     log('[seed-dev] admin token: matches your REMBRIC_ADMIN_TOKEN in .env');
@@ -439,6 +447,209 @@ export function runSeed(deps: SeedDeps): SeedResult {
   log('');
 
   return result;
+}
+
+interface RepositorySeedCounts {
+  tokens: number;
+  connected: number;
+  waiting: number;
+  ignored: number;
+}
+
+function seedRepositories(
+  handle: DbHandle,
+  projectsSvc: ProjectsService,
+  tokensSvc: TokensService,
+  adminTokenId: string,
+): RepositorySeedCounts {
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+  let clock = Date.now();
+  const at = (agoMs: number) => {
+    clock = Date.now() - agoMs;
+  };
+  const repos = createRepositories(handle.db);
+  const bindings = new RepositoryBindingsService(repos, handle.db, { now: () => new Date(clock) });
+  const fingerprint = (name: string) =>
+    createHash('sha1').update(`seed-repo:${name}`).digest('hex');
+  const project = (slug: string) => {
+    const found = projectsSvc.findBySlug(slug);
+    if (!found) throw new Error(`[seed-dev] missing project ${slug}`);
+    return found;
+  };
+  const agent = (name: string, slugs: readonly [string, ...string[]]): RepositoryActor => {
+    const created = tokensSvc.createForSlugs({ name, slugs, access: 'write' }, projectsSvc);
+    return {
+      tokenId: created.token.id,
+      scope: 'projects',
+      memberProjectIds: repos.tokens.listProjectIds(created.token.id),
+    };
+  };
+
+  const laptop = agent('laptop-claude', [
+    'api-gateway',
+    'mobile-app',
+    'infra',
+    'billing',
+    'auth-service',
+    'design-system',
+    'marketing-site',
+    'demo',
+  ]);
+  const ci = agent('ci-codex', ['api-gateway', 'infra', 'billing', 'data-pipeline']);
+
+  let connected = 0;
+  const connect = (
+    name: string,
+    slug: string,
+    remotes: string[],
+    by: RepositoryActor,
+    agoMs: number,
+    viaDashboard: boolean,
+    rootName: string | null = null,
+  ) => {
+    connected += 1;
+    at(agoMs);
+    const fp = fingerprint(name);
+    bindings.resolve(by, { fingerprint: fp, remotes, rootName });
+    const row = repos.pendingRepositories.findByIdentity(fp, 'unbound', null);
+    bindings.bindWithChoice({
+      projectId: project(slug).id,
+      createdBy: viaDashboard ? `dashboard:${adminTokenId}` : `token:${by.tokenId}`,
+      ...(row ? { pendingId: row.id } : { fingerprint: fp }),
+    });
+  };
+
+  connect(
+    'api-gateway',
+    'api-gateway',
+    ['https://github.com/acme/api-gateway.git', 'git@git.acme.dev:platform/api-gateway.git'],
+    laptop,
+    26 * DAY,
+    true,
+  );
+  connect('ios-app', 'mobile-app', ['git@github.com:acme/ios-app.git'], laptop, 21 * DAY, true);
+  connect(
+    'android-app',
+    'mobile-app',
+    ['https://github.com/acme/android-app'],
+    laptop,
+    21 * DAY,
+    false,
+  );
+  connect(
+    'terraform-live',
+    'infra',
+    ['https://github.com/acme/terraform-live.git'],
+    ci,
+    18 * DAY,
+    false,
+  );
+  connect(
+    'k8s-manifests',
+    'infra',
+    ['https://github.com/acme/k8s-manifests.git'],
+    ci,
+    12 * DAY,
+    true,
+  );
+  connect(
+    'billing-api',
+    'billing',
+    ['git@github.com:acme/billing-api.git'],
+    laptop,
+    30 * DAY,
+    true,
+  );
+  connect(
+    'design-tokens',
+    'design-system',
+    ['https://github.com/acme/design-tokens'],
+    laptop,
+    9 * DAY,
+    true,
+  );
+  connect(
+    'website',
+    'marketing-site',
+    ['https://github.com/acme/website.git'],
+    laptop,
+    6 * DAY,
+    false,
+  );
+  connect(
+    'auth-sdk',
+    'api-gateway',
+    ['https://github.com/acme/auth-sdk.git'],
+    laptop,
+    15 * DAY,
+    true,
+  );
+  connect(
+    'etl-jobs',
+    'data-pipeline',
+    ['https://github.com/acme/etl-jobs.git'],
+    ci,
+    20 * DAY,
+    true,
+  );
+  connect('scratch', 'demo', [], laptop, 2 * DAY, false, 'scratch');
+
+  const sight = (
+    by: RepositoryActor,
+    name: string,
+    remotes: string[],
+    agoMs: number,
+    explicit?: string,
+  ) => {
+    at(agoMs);
+    bindings.resolve(by, {
+      fingerprint: fingerprint(name),
+      remotes,
+      ...(explicit ? { explicit: { slug: explicit, source: 'rembric-root' as const } } : {}),
+    });
+  };
+
+  sight(laptop, 'checkout-service', ['https://github.com/acme/checkout-service.git'], 3 * DAY);
+  sight(ci, 'checkout-service', ['https://github.com/acme/checkout-service.git'], 2 * HOUR);
+  sight(ci, 'notifications-worker', ['git@github.com:acme/notifications-worker.git'], 9 * HOUR);
+  sight(
+    laptop,
+    'storefront-next',
+    ['https://github.com/acme/storefront-next.git'],
+    25 * 60_000,
+    'marketing-site',
+  );
+  sight(laptop, 'auth-sdk', ['https://github.com/acme/auth-sdk.git'], 70 * 60_000, 'auth-service');
+  sight(laptop, 'billing-api', ['https://gitlab.com/contractor/billing-api.git'], 2 * DAY);
+  sight(laptop, 'billing-api', ['https://gitlab.com/contractor/billing-api.git'], 5 * HOUR);
+  sight(laptop, 'etl-jobs', ['https://github.com/acme/etl-jobs.git'], 4 * HOUR);
+
+  sight(laptop, 'dotfiles', ['https://github.com/susomejias/dotfiles.git'], 9 * DAY);
+  sight(ci, 'hackathon-2025', ['https://github.com/acme/hackathon-2025.git'], 13 * DAY);
+  at(6 * DAY);
+  for (const name of ['dotfiles', 'hackathon-2025']) {
+    const row = repos.pendingRepositories.findByIdentity(fingerprint(name), 'unbound', null);
+    if (row) bindings.discard(row.id);
+  }
+
+  at(0);
+  const pending = [
+    'checkout-service',
+    'notifications-worker',
+    'storefront-next',
+    'auth-sdk',
+    'billing-api',
+    'etl-jobs',
+    'dotfiles',
+    'hackathon-2025',
+  ].flatMap((name) => repos.pendingRepositories.listForFingerprint(fingerprint(name)));
+  return {
+    tokens: 2,
+    connected: connected,
+    waiting: pending.filter((row) => row.discardedAt === null).length,
+    ignored: pending.filter((row) => row.discardedAt !== null).length,
+  };
 }
 
 function wipe(handle: DbHandle): void {

@@ -33,7 +33,7 @@ describe('runSeed', () => {
     expect(result.skipped).toBe(false);
     expect(result.counts).toEqual({
       projects: 20,
-      tokens: 3,
+      tokens: 5,
       memories: 35,
       endedSessions: 3,
       activeSessions: 2,
@@ -73,7 +73,7 @@ describe('runSeed', () => {
     expect(result.skipped).toBe(false);
     expect(result.refused).toBeUndefined();
     expect(result.counts!.projects).toBe(20);
-    expect(result.counts!.tokens).toBe(3);
+    expect(result.counts!.tokens).toBe(5);
     expect(result.counts!.memories).toBe(35);
     expect(result.counts!.pendingJudgments).toBe(1);
   });
@@ -117,13 +117,14 @@ describe('runSeed', () => {
     const projects = new ProjectsService(repos);
     const demo = projects.findBySlug('demo');
     expect(demo).toBeDefined();
+    const seeded = countTokenProjects();
     const extra = projects.create({ slug: 'seed-reset-extra' });
     new TokensService(repos, db.handle.db).create({
       name: 'seed-reset-set-token',
       projects: [demo!, extra],
       access: 'write',
     });
-    expect(countTokenProjects(), 'nothing to regress against').toBe(2);
+    expect(countTokenProjects(), 'nothing to regress against').toBe(seeded + 2);
 
     expect(() =>
       runSeed({
@@ -133,7 +134,7 @@ describe('runSeed', () => {
         log: () => {},
       }),
     ).not.toThrow();
-    expect(countTokenProjects()).toBe(0);
+    expect(countTokenProjects()).toBe(seeded);
   });
 
   it('--reset does not violate FK constraints when repository bindings and pending rows exist', () => {
@@ -164,17 +165,41 @@ describe('runSeed', () => {
         log: () => {},
       }),
     ).not.toThrow();
-    for (const table of [
-      'project_repositories',
-      'repository_pending',
-      'repository_pending_tokens',
-    ]) {
-      expect(
-        (raw.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n,
-        table,
-      ).toBe(0);
-    }
+    const count = (sql: string, ...args: string[]) =>
+      (raw.prepare(sql).get(...args) as { n: number }).n;
+    expect(count('SELECT count(*) AS n FROM project_repositories WHERE fingerprint = ?', fp)).toBe(
+      0,
+    );
+    expect(count("SELECT count(*) AS n FROM repository_pending WHERE id = 'p1'")).toBe(0);
+    expect(
+      count("SELECT count(*) AS n FROM repository_pending_tokens WHERE pending_id = 'p1'"),
+    ).toBe(0);
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('seeds connected, waiting and ignored repositories covering every pending kind', () => {
+    runSeed({ handle: db.handle, reset: false, log: () => {} });
+    const raw = db.handle.raw;
+    const kinds = raw
+      .prepare(
+        'SELECT kind, count(*) AS n FROM repository_pending WHERE discarded_at IS NULL GROUP BY kind',
+      )
+      .all() as { kind: string; n: number }[];
+    expect(Object.fromEntries(kinds.map((k) => [k.kind, k.n]))).toEqual({
+      unbound: 3,
+      suggestion: 2,
+      unknown_remote: 1,
+    });
+    expect(
+      (
+        raw
+          .prepare('SELECT count(*) AS n FROM repository_pending WHERE discarded_at IS NOT NULL')
+          .get() as { n: number }
+      ).n,
+    ).toBe(2);
+    expect(
+      (raw.prepare('SELECT count(*) AS n FROM project_repositories').get() as { n: number }).n,
+    ).toBe(11);
   });
 
   it('--reset without REMBRIC_ALLOW_DESTRUCTIVE_SEED=1 refuses and preserves data', () => {
