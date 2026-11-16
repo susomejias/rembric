@@ -91,8 +91,12 @@ describe('shared component radii', () => {
   it.each([
     ['dialog-footer', DialogFooter({})],
     ['alert-dialog-footer', AlertDialogFooter({})],
-  ])('matches the bottom corners of %s to its modal', (slot, node) => {
-    expect(slotClass(node, String(slot))?.split(' ')).toContain('rounded-b-[16px]');
+  ])('gives %s no surface of its own, so its corners cannot mismatch the modal', (slot, node) => {
+    const classes = slotClass(node, String(slot))?.split(' ');
+    expect(classes).toBeDefined();
+    expect(
+      classes?.filter((value) => value.startsWith('bg-') || value.startsWith('rounded-')),
+    ).toEqual([]);
   });
 
   it.each([

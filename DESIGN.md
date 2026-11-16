@@ -409,14 +409,17 @@ Every clickable control that looks like a button is the shadcn `Button`
 
 | Size                                    | Height | Use it for                                    |
 | --------------------------------------- | ------ | --------------------------------------------- |
-| `xs`                                    | 28 px  | Dense table cells                             |
+| `xs`                                    | 24 px  | Dense table cells                             |
 | `sm`                                    | 32 px  | Row actions, bulk bar, menus                  |
 | `default`                               | 36 px  | Page header actions, forms, dialog footers    |
 | `lg`                                    | 40 px  | Hero calls to action (Play your recap), login |
 | `icon`, `icon-xs`, `icon-sm`, `icon-lg` | square | Icon-only buttons; always with `aria-label`   |
 
-Spacing is shadcn's standard (new-york): `default` is `h-9 px-4 gap-2`, and
-`px-3` when it carries an icon; `sm` is `h-8 px-3`; `lg` is `h-10 px-6`. Inputs
+The primitives in `apps/web/src/components/ui/` follow the official shadcn
+`new-york` style (`components.json`), changed locally only in radius and colour
+(the radii above; the token palette; tinted `destructive` and `warn`). So
+`default` is `h-9 px-4 gap-2`, and `px-3` when it carries an icon; `xs` is
+`h-6 px-2`; `sm` is `h-8 px-3`; `lg` is `h-10 px-6`. Inputs
 and select triggers share the 36 px height (`sm` select: 32 px) so a field and
 its button line up. Select and menu items are `py-1.5 pl-2` inside a `p-1`
 viewport; a select list is capped at 18 rem and scrolls.
@@ -433,7 +436,7 @@ Rules:
   button-looking label inside a larger link card (the Wrapped entry) is a
   `<span className={buttonVariants({ size: 'lg' })}>`: a link never nests
   another interactive element.
-- **Icons** are lucide-react, sized by the button (`size-4`, `size-3.5` at `sm`),
+- **Icons** are lucide-react, sized by the button (`size-4`, `size-3` at `xs`),
   placed before the label; a trailing `ArrowUpRight` marks a call to action
   that leaves the page. Never a text glyph such as `↗` or `→`.
 - **Labels** are sentence case: "Archive selected", not "ARCHIVE SELECTED".
