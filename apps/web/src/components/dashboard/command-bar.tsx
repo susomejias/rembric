@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -60,26 +61,26 @@ function NavMoreMenu({
           <MoreHorizontal aria-hidden="true" className="size-5" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="border-border bg-popover">
-        <DropdownMenuLabel className="font-mono text-[10px] tracking-[.14em] text-muted-foreground">
-          v{version}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator className="bg-border" />
-        {entries.map((entry) => {
-          const Icon = entry.icon;
-          return (
-            <DropdownMenuItem
-              key={entry.key}
-              asChild
-              className={cn('gap-2', entry.key === activeKey && 'text-primary')}
-            >
-              <Link href={entry.href} prefetch={false}>
-                <Icon aria-hidden="true" className="size-4" />
-                {entry.label}
-              </Link>
-            </DropdownMenuItem>
-          );
-        })}
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuLabel className="font-mono">v{version}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          {entries.map((entry) => {
+            const Icon = entry.icon;
+            return (
+              <DropdownMenuItem
+                key={entry.key}
+                asChild
+                className={cn(entry.key === activeKey && 'text-primary')}
+              >
+                <Link href={entry.href} prefetch={false}>
+                  <Icon aria-hidden="true" />
+                  {entry.label}
+                </Link>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -140,7 +141,7 @@ function UpdaterChip({
       title={label}
       aria-label={label}
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium tabular-nums transition-colors',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] tabular-nums transition-colors',
         available
           ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
           : 'border-border text-muted-foreground hover:text-foreground',
