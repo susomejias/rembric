@@ -8,6 +8,7 @@ import type { MemoryService } from '@rembric/core';
 import type { ProjectsService } from '@rembric/core';
 import type { PromptsService } from '@rembric/core';
 import type { RelationsService } from '@rembric/core';
+import type { RepositoryBindingsService } from '@rembric/core';
 import type { CandidateOptions } from '@rembric/core';
 import type { UsageCounters } from '@rembric/core';
 import { SUMMARY_MAX_CHARS, type AgentSessionsService } from '@rembric/core';
@@ -48,6 +49,8 @@ import {
 } from './observability-tools.js';
 import {
   buildProjectHandlers,
+  projectBindRepositoryOutput,
+  projectBindRepositorySchema,
   projectCurrentOutput,
   projectCurrentSchema,
   projectListOutput,
@@ -96,6 +99,7 @@ export interface CreateMcpServerOptions {
   agentSessions: AgentSessionsService;
   prompts: PromptsService;
   relations: RelationsService;
+  repositoryBindings: RepositoryBindingsService;
   candidates: CandidateOptions;
   /** Inline save-time embedding (see MemoryToolDeps.embedNow). */
   embedNow?: (
@@ -112,6 +116,8 @@ export interface CreateMcpServerOptions {
   orphanAfterMs?: number;
   /** URL path slug for this connection, used to scope `instructions`. */
   requestedSlug?: string | null;
+  /** Path-less request carrying the repository fingerprint header. */
+  unbound?: boolean;
   usageCounters?: UsageCounters;
   name?: string;
   version?: string;
@@ -173,7 +179,10 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       version,
     },
     {
-      instructions: buildInstructions({ requestedSlug: opts.requestedSlug ?? null }),
+      instructions: buildInstructions({
+        requestedSlug: opts.requestedSlug ?? null,
+        unbound: opts.unbound ?? false,
+      }),
     },
   );
   const aboutHandler = createAboutHandler(version);
@@ -476,6 +485,7 @@ Does NOT end the session — use memory.session_end for that.`,
     repos: opts.repos,
     projects: opts.projects,
     agentSessions: opts.agentSessions,
+    repositoryBindings: opts.repositoryBindings,
     logInternalError: opts.logInternalError,
   });
   registerTool(
@@ -498,6 +508,17 @@ Does NOT end the session — use memory.session_end for that.`,
       annotations: READ_ANNOTATIONS('Current project'),
     },
     projectHandlers.current,
+  );
+  registerTool(
+    'project.bind_repository',
+    {
+      description:
+        "Admin token (scope *) only. Bind the git repository this client runs in to an existing project, given its `slug`. The repository is identified by the fingerprint header the client computes from the working tree, never by an argument. Binds only a repository that has no binding yet; moving or removing a binding is done from the dashboard. The binding applies from the next session: this connection's project does not change.",
+      inputSchema: projectBindRepositorySchema,
+      outputSchema: projectBindRepositoryOutput,
+      annotations: WRITE_ANNOTATIONS('Bind repository'),
+    },
+    projectHandlers.bindRepository,
   );
 
   // ── Relations tools (judgment graph) ──────────────────────────────

@@ -12,7 +12,12 @@ import {
   vectorIndexResetWarning,
 } from '@rembric/core';
 import { createDiagnostics } from '@rembric/db';
-import { createMcpServer, parseRunSummary, type DoctorReport } from '@rembric/mcp';
+import {
+  createMcpServer,
+  isUnboundContext,
+  parseRunSummary,
+  type DoctorReport,
+} from '@rembric/mcp';
 
 import { maxRequestBodyBytes } from './api';
 import { getServices, type Services } from './services';
@@ -45,6 +50,7 @@ function buildSurface(services: Services): McpHttpSurface {
         agentSessions: services.agentSessions,
         prompts,
         relations,
+        repositoryBindings: services.repositoryBindings,
         candidates: services.postSave.candidates,
         embedNow: services.postSave.embedNow,
         repos: services.repos,
@@ -56,6 +62,7 @@ function buildSurface(services: Services): McpHttpSurface {
           max: 30 * 86_400_000,
         }),
         requestedSlug: tryGetRequestContext()?.requestedSlug ?? null,
+        unbound: isUnboundContext(tryGetRequestContext()),
         version: REMBRIC_VERSION,
         logInternalError,
       }),

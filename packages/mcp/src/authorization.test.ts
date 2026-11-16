@@ -2,6 +2,7 @@ import { AgentSessionsService } from '@rembric/core';
 import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
+import { RepositoryBindingsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
 import { pinnedProjectId, TokensService, type TokenScope } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
@@ -123,6 +124,7 @@ beforeEach(() => {
 
   const sharedDeps = {
     repos,
+    repositoryBindings: new RepositoryBindingsService(repos, db.handle.db),
     agentSessions,
     memory,
     projects,

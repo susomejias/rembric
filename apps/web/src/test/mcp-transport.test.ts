@@ -1044,10 +1044,11 @@ describe('MCP protocol conformance', () => {
         'memory.stats',
         'project.list',
         'project.current',
+        'project.bind_repository',
       ]),
     );
     expect(names).not.toContain('project.use');
-    expect(names).toHaveLength(24);
+    expect(names).toHaveLength(25);
     await client.close();
   });
 
@@ -2167,6 +2168,7 @@ describe('MCP protocol conformance', () => {
       'memory.session_resume',
       'memory.judge_batch',
       'memory.compare',
+      'project.bind_repository',
     ]);
 
     const client = await connect();

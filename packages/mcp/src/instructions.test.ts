@@ -46,6 +46,30 @@ describe('MCP initialize instructions', () => {
     expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
   });
 
+  it('tells an unbound connection that no project is selected, within budget, with the same loop', () => {
+    const text = buildInstructions({ requestedSlug: null, unbound: true });
+    expect(text.length).toBeLessThanOrEqual(INSTRUCTIONS_MAX_LENGTH);
+    expect(text.startsWith(buildInstructions({ requestedSlug: 'demo' }).split('\n\n')[0]!)).toBe(
+      true,
+    );
+    expect(text).toContain('No project selected');
+    expect(text).toContain('project_unbound');
+    expect(text).not.toContain('default project');
+    expect(text).not.toContain('project.bind_repository');
+    for (const banned of ['global', 'include_global', 'user-wide', 'project.use', 'roots']) {
+      expect(text).not.toContain(banned);
+    }
+  });
+
+  it('control: unbound never overrides a path-scoped connection', () => {
+    expect(buildInstructions({ requestedSlug: 'demo', unbound: true })).toBe(
+      buildInstructions({ requestedSlug: 'demo' }),
+    );
+    expect(buildInstructions({ requestedSlug: null, unbound: false })).toBe(
+      buildInstructions({ requestedSlug: null }),
+    );
+  });
+
   it('keeps the self-imposed cap below the 2048-character Claude Code truncation ceiling', () => {
     expect(INSTRUCTIONS_MAX_LENGTH).toBeLessThan(2048);
   });

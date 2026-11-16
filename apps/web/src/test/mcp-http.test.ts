@@ -102,7 +102,8 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     });
   }
 
-  const ctx = { params: Promise.resolve({}) };
+  type RouteContext = { params: Promise<{ path?: string[] }> };
+  const ctx: RouteContext = { params: Promise.resolve({}) };
 
   const initializeBody = {
     jsonrpc: '2.0',
@@ -924,6 +925,549 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     expect(invalid.status).toBe(302);
     expect(validNonAdmin.headers.get('location')).toBe(invalid.headers.get('location'));
     expect(await validNonAdmin.text()).toBe(await invalid.text());
+  });
+
+  describe('repository fingerprint header and unbound mode', () => {
+    const FP = 'c3'.repeat(20);
+    const FP_SHA256 = 'd4'.repeat(32);
+    const HEADER = 'x-rembric-repo-fingerprint';
+    const pathless = { params: Promise.resolve({}) };
+    const at = (slug: string) => ({ params: Promise.resolve({ path: [slug] }) });
+
+    let shop: { id: string; slug: string };
+    let sandbox: { id: string; slug: string };
+    let secret: { id: string; slug: string };
+    let archived: { id: string; slug: string };
+    let bothWriter: string;
+    let shopWriter: string;
+    let defaultId: string;
+
+    beforeAll(() => {
+      shop = services.projects.create({ slug: 'fp-shop' });
+      sandbox = services.projects.create({ slug: 'fp-sandbox' });
+      secret = services.projects.create({ slug: 'fp-secret' });
+      archived = services.projects.create({ slug: 'fp-archived' });
+      services.projects.archive(archived.id);
+      defaultId = services.projects.getDefault().id;
+      bothWriter = services.tokens.create({
+        name: 'fp-both-writer',
+        projects: [
+          services.projects.getById(shop.id)!,
+          services.projects.getById(sandbox.id)!,
+          services.projects.getById(defaultId)!,
+        ],
+        access: 'write',
+      }).plaintext;
+      shopWriter = services.tokens.create({
+        name: 'fp-shop-writer',
+        project: services.projects.getById(shop.id)!,
+        access: 'write',
+      }).plaintext;
+    });
+
+    interface ToolResult {
+      status: number;
+      isError: boolean;
+      body: Record<string, unknown>;
+      error?: { code: number; message: string };
+    }
+
+    async function callTool(
+      name: string,
+      args: Record<string, unknown>,
+      opts: { token?: string; headers?: Record<string, string>; ctx?: RouteContext } = {},
+    ): Promise<ToolResult> {
+      const res = await POST(
+        mcpRequestForToken(
+          opts.token ?? adminToken,
+          { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } },
+          opts.headers ?? {},
+        ),
+        opts.ctx ?? pathless,
+      );
+      const text = await res.text();
+      if (res.status !== 200) {
+        return {
+          status: res.status,
+          isError: true,
+          body: JSON.parse(text) as Record<string, unknown>,
+        };
+      }
+      const payload = text.startsWith('{')
+        ? text
+        : (text
+            .split('\n')
+            .find((line) => line.startsWith('data: '))
+            ?.slice('data: '.length) ?? '');
+      const parsed = JSON.parse(payload) as {
+        result?: { isError?: boolean; content: { text: string }[] };
+        error?: { code: number; message: string };
+      };
+      if (parsed.error) return { status: 200, isError: true, body: {}, error: parsed.error };
+      return {
+        status: 200,
+        isError: parsed.result?.isError === true,
+        body: parseToolText(parsed.result?.content[0]?.text ?? '{}'),
+      };
+    }
+
+    function parseToolText(text: string): Record<string, unknown> {
+      try {
+        return JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        return { text };
+      }
+    }
+
+    function rowCounts(): { memory: number; sessions: number } {
+      const count = (table: string) =>
+        (services.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+      return { memory: count('memory'), sessions: count('sessions') };
+    }
+
+    function bindings(fingerprint: string): string[] {
+      return services.repos.repositoryBindings
+        .unsafeListAllForFingerprint(fingerprint)
+        .map((b) => b.slug);
+    }
+
+    const SAVE = { type: 'project', title: 'fp save', content: 'fp save body', tags: ['fp-test'] };
+    const UNBOUND_CALLS: [string, Record<string, unknown>][] = [
+      ['memory.save', SAVE],
+      ['memory.search', { query: 'fp' }],
+      ['memory.context', {}],
+      ['memory.session_start', { agent: 'fp-test' }],
+    ];
+
+    describe('header validation', () => {
+      const malformed = [
+        'ABC,def',
+        'A'.repeat(40),
+        'a'.repeat(39),
+        'a'.repeat(41),
+        `${FP}, ${FP}`,
+        'Unavailable',
+        `x${FP}`,
+        '',
+      ];
+
+      it.each(malformed)('refuses %j with 400 before any tool runs', async (value) => {
+        const before = rowCounts();
+        const r = await callTool('memory.save', SAVE, {
+          headers: { [HEADER]: value },
+          ctx: at(shop.slug),
+        });
+        expect(r.status).toBe(400);
+        expect(r.body).toMatchObject({ ok: false, code: 'invalid_repository_fingerprint' });
+        expect(rowCounts()).toEqual(before);
+      });
+
+      it('refuses two header instances', async () => {
+        const headers = new Headers({
+          authorization: `Bearer ${adminToken}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        });
+        headers.append(HEADER, FP);
+        headers.append(HEADER, FP);
+        const res = await POST(
+          new Request(`${ORIGIN}/mcp`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+          }),
+          pathless,
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it.each([FP, FP_SHA256, 'unavailable'])(
+        'control: %s is accepted and a path-scoped save lands in the URL project',
+        async (value) => {
+          const r = await callTool('memory.save', SAVE, {
+            headers: { [HEADER]: value },
+            ctx: at(shop.slug),
+          });
+          expect(r.isError).toBe(false);
+          const row = services.db.raw
+            .prepare('SELECT project_id FROM memory WHERE id = ?')
+            .get(r.body['id']) as { project_id: string };
+          expect(row.project_id).toBe(shop.id);
+        },
+      );
+    });
+
+    describe('an unbound request', () => {
+      it.each(UNBOUND_CALLS)(
+        'refuses %s with project_unbound and writes nothing',
+        async (name, args) => {
+          const before = rowCounts();
+          const r = await callTool(name, args, { headers: { [HEADER]: FP } });
+          expect(r.isError).toBe(true);
+          expect(r.body['code']).toBe('project_unbound');
+          expect(rowCounts()).toEqual(before);
+        },
+      );
+
+      it.each(UNBOUND_CALLS)(
+        'control: %s without the header serves the default project',
+        async (name, args) => {
+          const r = await callTool(name, args);
+          expect(r.isError).toBe(false);
+        },
+      );
+
+      it('control: a path-less save without the header lands in the default project', async () => {
+        const r = await callTool('memory.save', SAVE);
+        const row = services.db.raw
+          .prepare('SELECT project_id FROM memory WHERE id = ?')
+          .get(r.body['id']) as { project_id: string };
+        expect(row.project_id).toBe(defaultId);
+      });
+
+      async function initializeInstructions(headers: Record<string, string>): Promise<string> {
+        const res = await POST(
+          mcpRequestForToken(
+            adminToken,
+            {
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'initialize',
+              params: {
+                protocolVersion: '2025-06-18',
+                capabilities: {},
+                clientInfo: { name: 'instructions-probe', version: '0' },
+              },
+            },
+            headers,
+          ),
+          pathless,
+        );
+        expect(res.status).toBe(200);
+        const text = await res.text();
+        const payload = text.startsWith('{')
+          ? text
+          : (text
+              .split('\n')
+              .find((line) => line.startsWith('data: '))
+              ?.slice('data: '.length) ?? '');
+        return (JSON.parse(payload) as { result: { instructions: string } }).result.instructions;
+      }
+
+      it('initialize instructions say no project is selected instead of naming the default project', async () => {
+        const unbound = await initializeInstructions({ [HEADER]: FP });
+        expect(unbound).toContain('No project selected');
+        expect(unbound).toContain('project_unbound');
+        expect(unbound).not.toContain('default project');
+        expect(unbound).toContain('memory.session_summary');
+      });
+
+      it('control: path-less initialize instructions without the header name the default project', async () => {
+        const plain = await initializeInstructions({});
+        expect(plain).toContain('Project always active: the default project');
+        expect(plain).not.toContain('No project selected');
+      });
+
+      it('still answers project.list and project.current, reporting source unbound', async () => {
+        const list = await callTool('project.list', {}, { headers: { [HEADER]: FP } });
+        expect(list.isError).toBe(false);
+        const current = await callTool('project.current', {}, { headers: { [HEADER]: FP } });
+        expect(current.isError).toBe(false);
+        expect(current.body).toEqual({
+          slug: null,
+          projectId: null,
+          source: 'unbound',
+          repository: { fingerprint: FP, boundSlugs: [], conflict: false },
+        });
+      });
+
+      it('is unbound even when the fingerprint is bound: the header never selects a project', async () => {
+        const fp = 'e5'.repeat(20);
+        services.repositoryBindings.bind({
+          fingerprint: fp,
+          projectId: shop.id,
+          createdBy: 'test',
+        });
+        const r = await callTool('memory.search', { query: 'fp' }, { headers: { [HEADER]: fp } });
+        expect(r.body['code']).toBe('project_unbound');
+      });
+
+      it('treats unavailable as unbound and names its causes and remedies', async () => {
+        const r = await callTool('memory.save', SAVE, { headers: { [HEADER]: 'unavailable' } });
+        expect(r.body['code']).toBe('project_unbound');
+        expect(String(r.body['message'])).toMatch(/shallow clone/);
+        expect(String(r.body['message'])).toContain('.rembric');
+        expect(String(r.body['message'])).not.toContain('project.bind_repository');
+        const current = await callTool(
+          'project.current',
+          {},
+          {
+            headers: { [HEADER]: 'unavailable' },
+          },
+        );
+        expect(current.body['repository']).toEqual({
+          fingerprint: null,
+          boundSlugs: [],
+          conflict: false,
+        });
+      });
+
+      it('names only remedies the token can perform', async () => {
+        const admin = await callTool('memory.save', SAVE, { headers: { [HEADER]: FP } });
+        expect(String(admin.body['message'])).toContain('project.bind_repository');
+        expect(String(admin.body['message'])).toContain('dashboard');
+        expect(String(admin.body['message'])).toContain(FP.slice(0, 12));
+        const writer = await callTool('memory.save', SAVE, {
+          token: bothWriter,
+          headers: { [HEADER]: FP },
+        });
+        expect(writer.body['code']).toBe('project_unbound');
+        expect(String(writer.body['message'])).not.toContain('project.bind_repository');
+        expect(String(writer.body['message'])).toContain('dashboard');
+        expect(String(writer.body['message'])).toContain('.rembric');
+      });
+    });
+
+    describe('path-scoped requests are unchanged by the header', () => {
+      it('an unknown slug is still project_not_found, not unbound', async () => {
+        const r = await callTool(
+          'memory.search',
+          { query: 'fp' },
+          {
+            headers: { [HEADER]: FP },
+            ctx: at('fp-no-such-project'),
+          },
+        );
+        expect(r.body['code']).toBe('project_not_found');
+        const control = await callTool(
+          'memory.search',
+          { query: 'fp' },
+          {
+            ctx: at('fp-no-such-project'),
+          },
+        );
+        expect(control.body['code']).toBe('project_not_found');
+      });
+
+      it('project.current reports an explicit selection that overrides a binding', async () => {
+        const fp = 'f6'.repeat(20);
+        services.repositoryBindings.bind({
+          fingerprint: fp,
+          projectId: shop.id,
+          createdBy: 'test',
+        });
+        const r = await callTool(
+          'project.current',
+          {},
+          {
+            token: bothWriter,
+            headers: { [HEADER]: fp },
+            ctx: at(sandbox.slug),
+          },
+        );
+        expect(r.body).toEqual({
+          slug: sandbox.slug,
+          projectId: sandbox.id,
+          source: 'url-path',
+          repository: { fingerprint: fp, boundSlugs: [shop.slug], conflict: true },
+        });
+        const agreeing = await callTool(
+          'project.current',
+          {},
+          {
+            token: bothWriter,
+            headers: { [HEADER]: fp },
+            ctx: at(shop.slug),
+          },
+        );
+        expect(agreeing.body['repository']).toEqual({
+          fingerprint: fp,
+          boundSlugs: [shop.slug],
+          conflict: false,
+        });
+        const save = await callTool('memory.save', SAVE, {
+          token: bothWriter,
+          headers: { [HEADER]: fp },
+          ctx: at(sandbox.slug),
+        });
+        const row = services.db.raw
+          .prepare('SELECT project_id FROM memory WHERE id = ?')
+          .get(save.body['id']) as { project_id: string };
+        expect(row.project_id).toBe(sandbox.id);
+      });
+
+      it('project.current does not reveal a binding the token cannot read', async () => {
+        const fp = '07'.repeat(20);
+        services.repositoryBindings.bind({
+          fingerprint: fp,
+          projectId: secret.id,
+          createdBy: 'test',
+        });
+        const r = await callTool(
+          'project.current',
+          {},
+          {
+            token: shopWriter,
+            headers: { [HEADER]: fp },
+            ctx: at(shop.slug),
+          },
+        );
+        expect(r.body['repository']).toEqual({ fingerprint: fp, boundSlugs: [], conflict: false });
+        const admin = await callTool(
+          'project.current',
+          {},
+          {
+            headers: { [HEADER]: fp },
+            ctx: at(shop.slug),
+          },
+        );
+        expect(admin.body['repository']).toEqual({
+          fingerprint: fp,
+          boundSlugs: [secret.slug],
+          conflict: true,
+        });
+      });
+
+      it('project.current carries no repository field without the header', async () => {
+        const r = await callTool('project.current', {}, { ctx: at(shop.slug) });
+        expect(r.body).toEqual({ slug: shop.slug, projectId: shop.id, source: 'url-path' });
+        const pathlessCurrent = await callTool('project.current', {});
+        expect(pathlessCurrent.body).toMatchObject({ projectId: defaultId, source: 'default' });
+        expect(pathlessCurrent.body).not.toHaveProperty('repository');
+      });
+    });
+
+    describe('project.bind_repository', () => {
+      it('an admin binds an unbound repository from an unbound session', async () => {
+        const fp = '18'.repeat(20);
+        const resolved = services.repositoryBindings.resolve(
+          { tokenId: 'fp-t', scope: 'projects', memberProjectIds: [shop.id] },
+          { fingerprint: fp, remotes: ['github.com/acme/fp-shop'] },
+        );
+        expect(resolved).toEqual({ outcome: 'unbound', reason: 'not_bound' });
+        const r = await callTool(
+          'project.bind_repository',
+          { slug: shop.slug },
+          {
+            headers: { [HEADER]: fp },
+          },
+        );
+        expect(r.isError).toBe(false);
+        expect(r.body).toMatchObject({ slug: shop.slug, fingerprint: fp });
+        expect(String(r.body['message'])).toContain('next session');
+        expect(bindings(fp)).toEqual([shop.slug]);
+        expect(
+          services.repos.pendingRepositories.findByIdentity(fp, 'unbound', null),
+        ).toBeUndefined();
+        expect(
+          services.repos.repositoryBindings.unsafeListAllForFingerprint(fp)[0]?.remotes,
+        ).toEqual(['github.com/acme/fp-shop']);
+        const after = await callTool('memory.save', SAVE, { headers: { [HEADER]: fp } });
+        expect(after.body['code']).toBe('project_unbound');
+        expect(
+          services.repositoryBindings.resolve(
+            { tokenId: 'fp-t', scope: 'projects', memberProjectIds: [shop.id] },
+            { fingerprint: fp, remotes: [] },
+          ),
+        ).toEqual({ outcome: 'bound', slug: shop.slug });
+      });
+
+      it('a non-admin token cannot bind, even with every other condition met', async () => {
+        const fp = '29'.repeat(20);
+        const r = await callTool(
+          'project.bind_repository',
+          { slug: shop.slug },
+          {
+            token: shopWriter,
+            headers: { [HEADER]: fp },
+            ctx: at(shop.slug),
+          },
+        );
+        expect(r.body['code']).toBe('admin_token_required');
+        expect(bindings(fp)).toEqual([]);
+        const noHeader = await callTool(
+          'project.bind_repository',
+          { slug: 'fp-nope' },
+          {
+            token: shopWriter,
+          },
+        );
+        expect(noHeader.body['code']).toBe('admin_token_required');
+      });
+
+      it('refuses without a fingerprint before looking at the project', async () => {
+        const missing = await callTool('project.bind_repository', { slug: 'fp-nope' });
+        expect(missing.body['code']).toBe('repository_fingerprint_unavailable');
+        const unavailable = await callTool(
+          'project.bind_repository',
+          { slug: shop.slug },
+          {
+            headers: { [HEADER]: 'unavailable' },
+          },
+        );
+        expect(unavailable.body['code']).toBe('repository_fingerprint_unavailable');
+      });
+
+      it('refuses an unknown or archived project before the binding check', async () => {
+        const fp = '3a'.repeat(20);
+        services.repositoryBindings.bind({
+          fingerprint: fp,
+          projectId: shop.id,
+          createdBy: 'test',
+        });
+        const unknown = await callTool(
+          'project.bind_repository',
+          { slug: 'fp-nope' },
+          {
+            headers: { [HEADER]: fp },
+          },
+        );
+        expect(unknown.body['code']).toBe('project_not_found');
+        const gone = await callTool(
+          'project.bind_repository',
+          { slug: archived.slug },
+          {
+            headers: { [HEADER]: fp },
+          },
+        );
+        expect(gone.body['code']).toBe('project_archived');
+      });
+
+      it('a bound repository is not moved by the tool', async () => {
+        const fp = '4b'.repeat(20);
+        services.repositoryBindings.bind({
+          fingerprint: fp,
+          projectId: shop.id,
+          createdBy: 'test',
+        });
+        const r = await callTool(
+          'project.bind_repository',
+          { slug: sandbox.slug },
+          {
+            headers: { [HEADER]: fp },
+          },
+        );
+        expect(r.body['code']).toBe('repository_already_bound');
+        expect(String(r.body['message'])).toContain(shop.slug);
+        expect(String(r.body['message'])).toContain('dashboard');
+        expect(bindings(fp)).toEqual([shop.slug]);
+      });
+
+      it('the fingerprint cannot come from the model', async () => {
+        const fp = '5c'.repeat(20);
+        const r = await callTool(
+          'project.bind_repository',
+          { slug: shop.slug, fingerprint: fp },
+          {
+            headers: { [HEADER]: FP_SHA256 },
+          },
+        );
+        expect(r.isError).toBe(true);
+        expect(JSON.stringify(r)).toMatch(/fingerprint/);
+        expect(bindings(fp)).toEqual([]);
+        expect(bindings(FP_SHA256)).toEqual([]);
+      });
+    });
   });
 });
 

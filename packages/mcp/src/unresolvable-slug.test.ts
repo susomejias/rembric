@@ -4,6 +4,7 @@ import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { PromptsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
+import { RepositoryBindingsService } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import {
   createRepositories,
@@ -227,6 +228,7 @@ describe('the refusal does not brick the connection', () => {
       repos,
       projects,
       agentSessions,
+      repositoryBindings: new RepositoryBindingsService(repos, db.handle.db),
     });
     const current = await runWithContext(ctxFor(), () => Promise.resolve(projectTools.current({})));
     expect(decode(current).isError).toBe(false);
@@ -259,6 +261,7 @@ describe('the refusal does not brick the connection', () => {
       repos,
       projects,
       agentSessions,
+      repositoryBindings: new RepositoryBindingsService(repos, db.handle.db),
     });
     const pinnedToOther = mintTestToken(db.handle, {
       project: realProject,
@@ -456,7 +459,18 @@ const EXEMPT: Record<string, Record<string, unknown>> = {
   'memory.about': {},
   'project.list': {},
   'project.current': {},
+  'project.bind_repository': { slug: 'rembric' },
 };
+
+const FINGERPRINT = 'ab'.repeat(20);
+
+function exemptCtx(name: string, overrides: Partial<RequestContext> = {}): RequestContext {
+  return ctxFor(
+    name === 'project.bind_repository'
+      ? { repository: { fingerprint: FINGERPRINT }, ...overrides }
+      : overrides,
+  );
+}
 
 describe('every registered scope-sensitive tool refuses an unresolvable slug', () => {
   let client: Client;
@@ -468,6 +482,7 @@ describe('every registered scope-sensitive tool refuses an unresolvable slug', (
       agentSessions,
       prompts,
       relations,
+      repositoryBindings: new RepositoryBindingsService(repos, db.handle.db),
       candidates: { perSaveMax: 5 },
       repos,
       doctor: () => DOCTOR,
@@ -502,10 +517,49 @@ describe('every registered scope-sensitive tool refuses an unresolvable slug', (
   });
 
   it.each(Object.keys(EXEMPT))('%s stays reachable', async (name) => {
-    const result = await runWithContext(ctxFor(), () =>
+    const result = await runWithContext(exemptCtx(name), () =>
       client.callTool({ name, arguments: EXEMPT[name] ?? {} }),
     );
     expect(decode(result).isError).toBe(false);
+  });
+
+  describe('on an unbound request', () => {
+    const unbound = (name = ''): RequestContext =>
+      exemptCtx(name, { requestedSlug: null, repository: { fingerprint: FINGERPRINT } });
+
+    it.each(Object.keys(MINIMAL_ARGS))('%s is refused with project_unbound', async (name) => {
+      const args = { ...MINIMAL_ARGS[name] };
+      if ('id' in args) args.id = defaultMemoryId;
+      if ('memoryId' in args) args.memoryId = defaultMemoryId;
+      const before = countRows();
+      const result = await runWithContext(unbound(), () =>
+        client.callTool({ name, arguments: args }),
+      );
+      const { isError, body } = decode(result);
+      expect(isError).toBe(true);
+      expect(body.code).toBe('project_unbound');
+      expect(countRows()).toEqual(before);
+    });
+
+    it.each(Object.keys(MINIMAL_ARGS))(
+      'control: %s without the header is not refused as unbound',
+      async (name) => {
+        const args = { ...MINIMAL_ARGS[name] };
+        if ('id' in args) args.id = defaultMemoryId;
+        if ('memoryId' in args) args.memoryId = defaultMemoryId;
+        const result = await runWithContext(ctxFor({ requestedSlug: null }), () =>
+          client.callTool({ name, arguments: args }),
+        );
+        expect(decode(result).body.code).not.toBe('project_unbound');
+      },
+    );
+
+    it.each(Object.keys(EXEMPT))('%s stays reachable', async (name) => {
+      const result = await runWithContext(unbound(name), () =>
+        client.callTool({ name, arguments: EXEMPT[name] ?? {} }),
+      );
+      expect(decode(result).isError).toBe(false);
+    });
   });
 
   it.each(['projects', ADMIN] as const)(
