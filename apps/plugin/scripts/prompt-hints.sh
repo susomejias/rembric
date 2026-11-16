@@ -17,7 +17,7 @@ fi
 
 PROMPT="$(rembric_prompt_from_stdin_json "$INPUT")"
 SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
-SLUG="$(rembric_read_project_slug)"
+SLUG="$(rembric_session_project "$SESSION_ID" "$(rembric_cwd_from_stdin_json "$INPUT")")"
 
 if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
   exit 0

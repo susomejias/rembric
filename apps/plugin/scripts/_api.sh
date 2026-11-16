@@ -3,7 +3,13 @@
 #
 # Sourced by every hook script. Exposes:
 #   - rembric_parse_dotenv <path>     → echoes "KEY=VALUE\n..." pairs
-#   - rembric_read_project_slug <cwd> → echoes the slug from <cwd>/.rembric or empty
+#   - rembric_read_project_slug <dir> → echoes the slug of the nearest .rembric at or
+#                                       above <dir>, up to the checkout root inside git
+#   - rembric_session_project <id> <cwd> → echoes the session's slug, resolved once
+#                                       per session (.rembric, REMBRIC_PROJECT_SLUG,
+#                                       then the repository fingerprint) and cached
+#   - rembric_session_project_notice <id> → the session-start text for an unbound,
+#                                       ambiguous, unresolvable or conflicting outcome
 #   - rembric_post <path> <body>      → POSTs $body (JSON) to ${REMBRIC_SERVER_URL}${path}
 #                                       with Authorization: Bearer ${REMBRIC_API_TOKEN}.
 #                                       Budget defaults to 3s; REMBRIC_POST_MAX_TIME
@@ -73,22 +79,392 @@ rembric_parse_dotenv() {
   done <"$file"
 }
 
-rembric_read_project_slug() {
-  local cwd="${1:-${PWD}}"
-  local file="${cwd}/.rembric"
-  [ ! -f "$file" ] && return 0
-  local pairs slug
-  pairs="$(rembric_parse_dotenv "$file")"
-  slug="$(printf '%s\n' "$pairs" | sed -n 's/^PROJECT_SLUG=//p' | head -n1)"
-  # Mirror the bridge's slug regex: lowercase letters/digits/hyphens, 1–64 chars,
-  # cannot begin or end with a hyphen.
-  case "$slug" in
-  '') return 0 ;;
-  *[!a-z0-9-]*) return 0 ;;
-  -* | *-) return 0 ;;
+# Mirrors the bridge's SLUG_RE: lowercase letters/digits/hyphens, 1–64 chars,
+# no leading or trailing hyphen.
+rembric_valid_slug() {
+  case "${1:-}" in
+  '' | *[!a-z0-9-]* | -* | *-) return 1 ;;
   esac
-  [ "${#slug}" -gt 64 ] && return 0
-  printf '%s' "$slug"
+  [ "${#1}" -le 64 ]
+}
+
+_rembric_slug_in() {
+  local file="${1:-}/.rembric" slug
+  [ -f "$file" ] || return 0
+  slug="$(rembric_parse_dotenv "$file" | sed -n 's/^PROJECT_SLUG=//p' | head -n1)"
+  if rembric_valid_slug "$slug"; then printf '%s' "$slug"; fi
+  return 0
+}
+
+# The hook's cwd decides the repository, never an inherited GIT_DIR.
+rembric_git() {
+  (
+    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
+    git "$@"
+  ) 2>/dev/null
+}
+
+# Echoes "<toplevel>\n<is-shallow>" inside a git work tree, nothing outside one.
+# Without git, a .git entry in an ancestor marks a repository it cannot read.
+_rembric_git_info() {
+  local out="" d
+  if ! command -v git >/dev/null 2>&1; then
+    d="$(cd "${1:-.}" 2>/dev/null && pwd -P)" || return 0
+    while [ -n "$d" ]; do
+      if [ -e "$d/.git" ]; then
+        printf '%s\nunavailable' "$d"
+        return 0
+      fi
+      d="${d%/*}"
+    done
+    if [ -e /.git ]; then printf '/\nunavailable'; fi
+    return 0
+  fi
+  out="$(rembric_git -C "${1:-.}" rev-parse --is-inside-work-tree --show-toplevel --is-shallow-repository)" || true
+  case "$out" in
+  true$'\n'/*) printf '%s' "${out#true$'\n'}" ;;
+  esac
+  return 0
+}
+
+# Echoes "<slug> <source>" for the nearest .rembric: <dir> up to <top> inside
+# git (rembric-root | rembric-nested), only <dir> itself outside git (rembric).
+_rembric_nearest_rembric() {
+  local dir="${1:-}" top="${2:-}" d slug
+  if [ -z "$top" ]; then
+    slug="$(_rembric_slug_in "$dir")"
+    if [ -n "$slug" ]; then printf '%s rembric' "$slug"; fi
+    return 0
+  fi
+  d="$(cd "$dir" 2>/dev/null && pwd -P)" || return 0
+  while :; do
+    if [ -f "$d/.rembric" ]; then
+      slug="$(_rembric_slug_in "$d")"
+      if [ -z "$slug" ]; then return 0; fi
+      if [ "$d" = "$top" ]; then printf '%s rembric-root' "$slug"; else printf '%s rembric-nested' "$slug"; fi
+      return 0
+    fi
+    if [ "$d" = "$top" ]; then return 0; fi
+    d="${d%/*}"
+    if [ -z "$d" ]; then return 0; fi
+  done
+}
+
+_rembric_explicit_selection() {
+  local found
+  found="$(_rembric_nearest_rembric "${1:-}" "${2:-}")"
+  if [ -n "$found" ]; then
+    printf '%s' "$found"
+  elif rembric_valid_slug "${REMBRIC_PROJECT_SLUG:-}"; then
+    printf '%s env' "$REMBRIC_PROJECT_SLUG"
+  fi
+  return 0
+}
+
+rembric_read_project_slug() {
+  local dir="${1:-${PWD}}" info found
+  info="$(_rembric_git_info "$dir")"
+  found="$(_rembric_nearest_rembric "$dir" "${info%%$'\n'*}")"
+  printf '%s' "${found%% *}"
+}
+
+# Echoes "fp <hex>" or "nofp <shallow|no_commit|git_unavailable>". The shallow check comes
+# first: a shallow clone's first-parent root is its boundary commit.
+_rembric_fingerprint() {
+  local dir="${1:-}" shallow="${2:-}" fp=""
+  if [ "$shallow" = true ]; then
+    printf 'nofp shallow'
+    return 0
+  fi
+  if [ "$shallow" != false ]; then
+    printf 'nofp git_unavailable'
+    return 0
+  fi
+  fp="$(rembric_git -C "$dir" rev-list --first-parent --max-parents=0 HEAD)" || fp=""
+  fp="${fp%%$'\n'*}"
+  case "$fp" in
+  '' | *[!0-9a-f]*) ;;
+  *)
+    if [ "${#fp}" -eq 40 ] || [ "${#fp}" -eq 64 ]; then
+      printf 'fp %s' "$fp"
+      return 0
+    fi
+    ;;
+  esac
+  if rembric_git -C "$dir" rev-parse -q --verify HEAD >/dev/null; then
+    printf 'nofp git_unavailable'
+  else
+    printf 'nofp no_commit'
+  fi
+  return 0
+}
+
+# Lowercase; scheme, user information, port, query and trailing .git or
+# slashes removed; scp-like host:path becomes host/path. User information
+# ends at the LAST `@`, so an unencoded `/` or `@` in a password never leaks.
+rembric_normalize_remote() {
+  local url host rest scheme=""
+  url="$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')"
+  case "$url" in
+  file://*) return 0 ;;
+  *://*)
+    scheme=1
+    url="${url#*://}"
+    ;;
+  esac
+  url="${url##*@}"
+  url="${url%%\?*}"
+  url="${url%%#*}"
+  if [ -n "$scheme" ]; then
+    host="${url%%/*}"
+    rest="${url#"$host"}"
+    host="${host%%:*}"
+  else
+    host="${url%%:*}"
+    case "$host" in
+    "$url" | */* | ?) return 0 ;;
+    esac
+    rest="/${url#*:}"
+  fi
+  url="${host}${rest}"
+  case "$url" in
+  /* | *\\*) return 0 ;;
+  esac
+  while :; do
+    case "$url" in
+    *//*) url="${url//\/\//\/}" ;;
+    */) url="${url%/}" ;;
+    *.git) url="${url%.git}" ;;
+    *) break ;;
+    esac
+  done
+  printf '%s' "$url"
+}
+
+# The resolve request accepts at most 8 remotes of at most 512 characters.
+_rembric_remotes_json() {
+  local line url norm out="" seen=$'\n' count=0
+  while IFS= read -r line; do
+    case "$line" in
+    *' (fetch)') ;;
+    *) continue ;;
+    esac
+    url="${line#*$'\t'}"
+    norm="$(rembric_normalize_remote "${url% (fetch)}")"
+    if [ -z "$norm" ] || [ "${#norm}" -gt 512 ]; then continue; fi
+    case "$seen" in
+    *$'\n'"$norm"$'\n'*) continue ;;
+    esac
+    seen="${seen}${norm}"$'\n'
+    out="${out:+${out},}\"$(rembric_json_escape "$norm")\""
+    count=$((count + 1))
+    if [ "$count" -ge 8 ]; then break; fi
+  done <<EOF
+$(rembric_git -C "${1:-}" remote -v || true)
+EOF
+  printf '%s' "$out"
+}
+
+_rembric_json_string() {
+  printf '%s' "${1:-}" | sed -n "s/.*\"${2:-}\":\"\([^\"]*\)\".*/\1/p" | head -n1
+}
+
+_rembric_json_slugs() {
+  local slug out=""
+  while IFS= read -r slug; do
+    if rembric_valid_slug "$slug"; then out="${out:+${out},}${slug}"; fi
+  done <<EOF
+$(printf '%s' "${1:-}" | sed -n "s/.*\"${2:-}\":\[\([^]]*\)\].*/\1/p" | head -n1 | tr -d '"' | tr ',' '\n')
+EOF
+  printf '%s' "$out"
+}
+
+# Echoes one resolution as key=value lines; `outcome` is one of
+# slug | unbound | ambiguous | nofp | error | none.
+_rembric_resolve_outcome() {
+  local cwd="${1:-}" info top="" shallow="" found slug="" source="" fpinfo fp
+  info="$(_rembric_git_info "$cwd")"
+  if [ -n "$info" ]; then
+    top="${info%%$'\n'*}"
+    shallow="${info#*$'\n'}"
+  fi
+  found="$(_rembric_explicit_selection "$cwd" "$top")"
+  if [ -n "$found" ]; then
+    slug="${found%% *}"
+    source="${found#* }"
+  fi
+  if [ -z "$top" ]; then
+    if [ -n "$slug" ]; then printf 'outcome=slug\nslug=%s\nsource=%s' "$slug" "$source"; else printf 'outcome=none'; fi
+    return 0
+  fi
+  fpinfo="$(_rembric_fingerprint "$cwd" "$shallow")"
+  case "$fpinfo" in
+  'nofp '*)
+    if [ -n "$slug" ]; then printf 'outcome=slug\nslug=%s\nsource=%s' "$slug" "$source"; else printf 'outcome=nofp\ncause=%s' "${fpinfo#nofp }"; fi
+    return 0
+    ;;
+  esac
+  fp="${fpinfo#fp }"
+
+  local root body rc=0 response="" status="" compact="" outcome="" value=""
+  body="{\"fingerprint\":\"${fp}\",\"remotes\":[$(_rembric_remotes_json "$top")]"
+  root="${top##*/}"
+  case "$root" in
+  '' | *\\*) ;;
+  *) if [ "${#root}" -le 255 ]; then body="${body},\"rootName\":\"$(rembric_json_escape "$root")\""; fi ;;
+  esac
+  if [ -n "$slug" ]; then body="${body},\"explicit\":{\"slug\":\"${slug}\",\"source\":\"${source}\"}"; fi
+  response="$(curl -s -X POST \
+    -H "Authorization: Bearer ${REMBRIC_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --max-time "${REMBRIC_POST_MAX_TIME:-3}" \
+    -d "${body}}" \
+    -w '\n%{http_code}' \
+    "${REMBRIC_SERVER_URL%/}/api/repositories/resolve")" || rc=$?
+  status="${response##*$'\n'}"
+  compact="$(printf '%s' "${response%$'\n'*}" | tr -d ' \t\r\n')"
+  if [ "$rc" -eq 0 ] && [ "$status" = 200 ]; then
+    case "$compact" in
+    *'"ok":true'*) outcome="$(_rembric_json_string "$compact" outcome)" ;;
+    esac
+  fi
+  if [ -n "$slug" ]; then
+    printf 'outcome=slug\nslug=%s\nsource=%s\nfingerprint=%s' "$slug" "$source" "$fp"
+    if [ "$outcome" = explicit ]; then printf '\nslugs=%s' "$(_rembric_json_slugs "$compact" boundSlugs)"; fi
+    return 0
+  fi
+  case "$outcome" in
+  bound)
+    value="$(_rembric_json_string "$compact" slug)"
+    if rembric_valid_slug "$value"; then
+      printf 'outcome=slug\nslug=%s\nsource=binding\nfingerprint=%s' "$value" "$fp"
+      return 0
+    fi
+    ;;
+  unbound)
+    value="$(_rembric_json_string "$compact" reason)"
+    case "$value" in
+    *[!a-z_]*) value="" ;;
+    esac
+    printf 'outcome=unbound\nreason=%s\nfingerprint=%s' "$value" "$fp"
+    return 0
+    ;;
+  esac
+  if [ "$status" = 409 ]; then
+    case "$compact" in
+    *'"code":"repository_ambiguous"'*)
+      printf 'outcome=ambiguous\nslugs=%s\nfingerprint=%s' "$(_rembric_json_slugs "$compact" slugs)" "$fp"
+      return 0
+      ;;
+    esac
+  fi
+  local cause="unrecognized response"
+  if [ "$rc" -eq 28 ]; then
+    cause="timed out"
+  elif [ "$rc" -ne 0 ]; then
+    cause="unreachable, curl rc=${rc}"
+  elif [ "$status" != 200 ]; then
+    cause="HTTP ${status}"
+  fi
+  printf '[rembric] POST /api/repositories/resolve failed (%s): this session saves nothing. Update the Rembric server, or add a .rembric file with PROJECT_SLUG=<slug>.\n' "$cause" >&2
+  printf 'outcome=error\ncause=%s\nfingerprint=%s' "$cause" "$fp"
+}
+
+_rembric_project_cache_file() {
+  local dir="${TMPDIR:-/tmp}/rembric-project" safe
+  safe="$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9_.-' '_')"
+  case "$safe" in
+  '' | . | ..) return 0 ;;
+  esac
+  mkdir -m 700 "$dir" 2>/dev/null || true
+  if [ -d "$dir" ] && [ -O "$dir" ]; then printf '%s/%s' "$dir" "$safe"; fi
+  return 0
+}
+
+_rembric_record_field() {
+  printf '%s\n' "${1:-}" | sed -n "s/^${2:-}=//p" | head -n1
+}
+
+# Echoes the session's slug, or nothing when the session has no project. The
+# first resolution of a session is cached and every later hook reuses it.
+rembric_session_project() {
+  local session_id="${1:-}" cwd="${2:-}" file record="" tmp found slug
+  [ -z "$session_id" ] && return 0
+  [ -z "$cwd" ] && cwd="$PWD"
+  if [ -z "${REMBRIC_SERVER_URL:-}" ] || [ -z "${REMBRIC_API_TOKEN:-}" ]; then
+    found="$(_rembric_explicit_selection "$cwd" "$(_rembric_git_info "$cwd" | head -n1)")"
+    printf '%s' "${found%% *}"
+    return 0
+  fi
+  file="$(_rembric_project_cache_file "$session_id")"
+  if [ -n "$file" ] && [ -f "$file" ] && [ -O "$file" ]; then
+    record="$(cat "$file" 2>/dev/null)" || record=""
+  else
+    record="$(_rembric_resolve_outcome "$cwd")"
+    if [ -n "$file" ]; then
+      tmp="$(mktemp "${file}.XXXXXX" 2>/dev/null)" || tmp=""
+      if [ -n "$tmp" ]; then
+        printf '%s\n' "$record" >"$tmp"
+        ln "$tmp" "$file" 2>/dev/null || true
+        rm -f "$tmp"
+        record="$(cat "$file" 2>/dev/null)" || record=""
+      fi
+    fi
+  fi
+  slug="$(_rembric_record_field "$record" slug)"
+  if rembric_valid_slug "$slug"; then printf '%s' "$slug"; fi
+  return 0
+}
+
+# Echoes the session-start text for a cached outcome that saves nothing, or
+# for an explicit selection that conflicts with a binding.
+rembric_session_project_notice() {
+  local file record outcome fp slugs
+  file="$(_rembric_project_cache_file "${1:-}")"
+  if [ -z "$file" ] || [ ! -f "$file" ] || [ ! -O "$file" ]; then return 0; fi
+  record="$(cat "$file" 2>/dev/null)" || return 0
+  outcome="$(_rembric_record_field "$record" outcome)"
+  fp="$(_rembric_record_field "$record" fingerprint)"
+  fp="${fp:0:12}"
+  slugs="$(_rembric_record_field "$record" slugs)"
+  slugs="${slugs//,/, }"
+  local history="Sessions in this repository used the default project before this version; binding it to the default project keeps that continuity."
+  local remedy="To bind it, ask an admin to bind this repository from the Rembric dashboard, or add a .rembric file with PROJECT_SLUG=<slug>. The binding applies from the next session."
+  case "$outcome" in
+  slug)
+    [ -n "$slugs" ] || return 0
+    local source
+    case "$(_rembric_record_field "$record" source)" in
+    rembric-root) source="the .rembric file at the checkout root" ;;
+    rembric-nested) source="a .rembric file below the checkout root" ;;
+    *) source="REMBRIC_PROJECT_SLUG" ;;
+    esac
+    printf 'rembric: This session uses project %s, selected by %s, but this repository is bound to %s. The binding is unchanged; remove the selection to use the bound project from the next session.\n' \
+      "$(_rembric_record_field "$record" slug)" "$source" "$slugs"
+    ;;
+  unbound)
+    if [ "$(_rembric_record_field "$record" reason)" = unknown_remote ]; then
+      printf 'rembric: This repository is not bound to a Rembric project (fingerprint %s): its history matches a bound repository, but none of its remotes is known to that binding, so nothing from this session is saved. %s %s\n' "$fp" "$history" "$remedy"
+    else
+      printf 'rembric: This repository is not bound to a Rembric project (fingerprint %s), so nothing from this session is saved. %s %s\n' "$fp" "$history" "$remedy"
+    fi
+    ;;
+  ambiguous)
+    printf 'rembric: This repository (fingerprint %s) is bound to several Rembric projects (%s), so nothing from this session is saved. Add a .rembric file with PROJECT_SLUG=<slug> or set REMBRIC_PROJECT_SLUG to choose one; it applies from the next session.\n' "$fp" "$slugs"
+    ;;
+  nofp)
+    case "$(_rembric_record_field "$record" cause)" in
+    shallow) printf 'rembric: This git repository is a shallow clone, so Rembric cannot identify its project and nothing from this session is saved. Fetch its full history (git fetch --unshallow) or add a .rembric file with PROJECT_SLUG=<slug>; either applies from the next session.\n' ;;
+    no_commit) printf 'rembric: This git repository has no commit yet, so Rembric cannot identify its project and nothing from this session is saved. Make a first commit or add a .rembric file with PROJECT_SLUG=<slug>; either applies from the next session.\n' ;;
+    *) printf 'rembric: git could not read this repository, so Rembric cannot identify its project and nothing from this session is saved. Add a .rembric file with PROJECT_SLUG=<slug>; it applies from the next session.\n' ;;
+    esac
+    ;;
+  error)
+    printf "rembric: Rembric could not resolve this repository's project (%s), so nothing from this session is saved. Update the Rembric server, or add a .rembric file with PROJECT_SLUG=<slug>.\n" \
+      "$(_rembric_record_field "$record" cause)"
+    ;;
+  esac
+  return 0
 }
 
 rembric_post() {
@@ -594,16 +970,16 @@ rembric_subagent_report() {
   if [ "$event" = SubagentStop ] && [ "$agent" = claude-code ] && [ -z "$agent_type" ]; then
     return 0
   fi
-  session_id="$(rembric_session_id_from_stdin_json "$input")"
-  cwd="$(rembric_cwd_from_stdin_json "$input")"
-  [ -z "$cwd" ] && cwd="$PWD"
-  slug="$(rembric_read_project_slug "$cwd")"
-  { [ -z "$session_id" ] || [ -z "$slug" ]; } && return 0
   report="$(rembric_redact_private "$report")"
   case "$report" in
   *[Kk][Ee][Yy]" "[Ll][Ee][Aa][Rr][Nn][Ii][Nn][Gg][Ss]*) ;;
   *) return 0 ;;
   esac
+  session_id="$(rembric_session_id_from_stdin_json "$input")"
+  cwd="$(rembric_cwd_from_stdin_json "$input")"
+  [ -z "$cwd" ] && cwd="$PWD"
+  slug="$(rembric_session_project "$session_id" "$cwd")"
+  { [ -z "$session_id" ] || [ -z "$slug" ]; } && return 0
   body="{\"report\":\"$(rembric_json_escape "$report")\""
   [ -n "$agent_type" ] && body="${body},\"agentType\":\"$(rembric_json_escape "$agent_type")\""
   local REMBRIC_POST_MAX_TIME="${REMBRIC_POST_MAX_TIME:-2}"

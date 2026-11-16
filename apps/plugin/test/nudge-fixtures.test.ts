@@ -257,10 +257,15 @@ describe('the shared JS/TS core: nudgesForTurn order and no-cadence contract', (
 });
 
 describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
+  function isolatedEnv(cwd: string): NodeJS.ProcessEnv {
+    return { ...process.env, TMPDIR: cwd, REMBRIC_SERVER_URL: '', REMBRIC_API_TOKEN: '' };
+  }
+
   function runPostCompact(cwd: string): string {
     return execFileSync('bash', [postCompactSh], {
       input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
       encoding: 'utf8',
+      env: isolatedEnv(cwd),
     }).trimEnd();
   }
 
@@ -279,10 +284,12 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
       const claudeOut = execFileSync('bash', [postCompactSh, 'claude-code'], {
         input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
         encoding: 'utf8',
+        env: isolatedEnv(cwd),
       }).trimEnd();
       const codexOut = execFileSync('bash', [postCompactSh, 'codex-cli'], {
         input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
         encoding: 'utf8',
+        env: isolatedEnv(cwd),
       }).trimEnd();
       expect(claudeOut).toBe(codexOut);
     } finally {

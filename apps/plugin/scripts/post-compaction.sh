@@ -29,7 +29,7 @@ CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 # transcript-derived: it must pass through the same redaction choke point.
 COMPACTION_SUMMARY="$(rembric_redact_private "$(rembric_compaction_summary_from_stdin_json "$INPUT")")"
 [ -z "$CWD" ] && CWD="$PWD"
-SLUG="$(rembric_read_project_slug "$CWD")"
+SLUG="$(rembric_session_project "$SESSION_ID" "$CWD")"
 
 if [ -z "$SESSION_ID" ] || [ -z "$SLUG" ]; then
   exit 0

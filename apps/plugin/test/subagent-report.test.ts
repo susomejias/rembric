@@ -306,7 +306,12 @@ describe('rembric_subagent_report fails closed without the redactor', () => {
     ].join('\n');
     return new Promise((resolve) => {
       const child = spawn('bash', ['-c', script, 'bash', handback(REPORT)], {
-        env: { ...process.env, REMBRIC_SERVER_URL: serverUrl, REMBRIC_API_TOKEN: 'test-token' },
+        env: {
+          ...process.env,
+          TMPDIR: scratch,
+          REMBRIC_SERVER_URL: serverUrl,
+          REMBRIC_API_TOKEN: 'test-token',
+        },
         stdio: 'ignore',
       });
       child.on('close', resolve);

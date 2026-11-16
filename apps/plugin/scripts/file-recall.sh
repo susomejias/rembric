@@ -40,7 +40,7 @@ CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 if [ -z "$SESSION_ID" ] || [ -z "$CWD" ]; then
   exit 0
 fi
-SLUG="$(rembric_read_project_slug "$CWD")"
+SLUG="$(rembric_session_project "$SESSION_ID" "$CWD")"
 [ -z "$SLUG" ] && exit 0
 DIR="$(rembric_file_recall_dir "$SESSION_ID")"
 

@@ -8,14 +8,16 @@
 #     hooks.codex.json → "codex-cli"
 #
 # 1. Reads `session_id` and `cwd` from hook stdin JSON.
-# 2. Resolves the Rembric project from `${cwd}/.rembric` (PROJECT_SLUG).
+# 2. Resolves the session's project once (rembric_session_project): the nearest
+#    `.rembric`, then REMBRIC_PROJECT_SLUG, then the repository fingerprint.
 # 3. POSTs `/api/<slug>/sessions {id, cwd, agent}` to create or upsert the row.
 # 4. POSTs `/api/<slug>/sessions/<id>/resume`, which returns an ended or
 #    abandoned row to `active` and is a no-op on one that is already active.
-# 5. Emits a nudge so the agent reloads memory.context if relevant.
+# 5. Emits a nudge so the agent reloads memory.context if relevant, or the
+#    notice for an unbound, ambiguous, unresolvable or conflicting repository.
 #
 # Failure modes (missing slug, server unreachable, malformed input) all
-# fall through to a silent skip + nudge — the host session continues.
+# fall through to a skip — the host session continues.
 set -u
 trap 'exit 0' ERR
 
@@ -33,7 +35,7 @@ SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"
 
-SLUG="$(rembric_read_project_slug "$CWD")"
+SLUG="$(rembric_session_project "$SESSION_ID" "$CWD")"
 
 if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   ID_ESC="$(rembric_json_escape "$SESSION_ID")"
@@ -52,5 +54,11 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/resume" '{}'
 fi
 
-echo 'rembric: If this is a continuation of recent work, call memory.context before responding.'
+NOTICE="$(rembric_session_project_notice "$SESSION_ID")"
+if [ -n "$NOTICE" ]; then
+  printf '%s\n' "$NOTICE"
+fi
+if [ -n "$SLUG" ] || [ -z "$NOTICE" ]; then
+  echo 'rembric: If this is a continuation of recent work, call memory.context before responding.'
+fi
 exit 0
