@@ -1,10 +1,5 @@
-import { parseDotenv, SLUG_RE } from './rembric-dotenv.mjs';
-import {
-  buildEndpoint,
-  projectDirectorySource,
-  resolveProjectDirectory,
-  resolveSlug,
-} from './slug.mjs';
+import { buildEndpoint, FINGERPRINT_HEADER, resolveProject } from './rembric-project.mjs';
+import { projectDirectorySource, resolveProjectDirectory } from './slug.mjs';
 
 const MIN_SERVER_VERSION = '0.24.0';
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
@@ -76,17 +71,31 @@ export async function runBridge({
   }
 
   const projectDir = resolveProjectDirectory(env);
-  const slugResult = resolveSlug(projectDir, env, parseDotenv, SLUG_RE);
-  if (slugResult.issue) {
+  const project = await resolveProject({
+    startDir: projectDir,
+    env,
+    serverUrl: baseUrl,
+    apiToken: token,
+    fetchImpl,
+  });
+  const issuePrefix = project.issue ? `${project.issue}; ` : '';
+  if (project.mode === 'refused') {
+    stderr.write(`[rembric-bridge] ${issuePrefix}${project.message}\n`);
+    return 1;
+  }
+  if (project.mode === 'unbound') {
+    stderr.write(`[rembric-bridge] ${issuePrefix}${project.message}\n`);
+  } else if (project.issue) {
     stderr.write(
-      slugResult.slug
-        ? `[rembric-bridge] ${slugResult.issue}; using slug ${slugResult.slug}.\n`
-        : `[rembric-bridge] ${slugResult.issue}; add a .rembric file containing PROJECT_SLUG=<slug> ` +
+      project.slug
+        ? `[rembric-bridge] ${project.issue}; using slug ${project.slug}.\n`
+        : `[rembric-bridge] ${project.issue}; add a .rembric file containing PROJECT_SLUG=<slug> ` +
             `to ${projectDir} or set REMBRIC_PROJECT_SLUG. Using path-less /mcp, which resolves to ` +
             `the server's default project.\n`,
     );
   }
-  const endpoint = buildEndpoint(baseUrl, slugResult.slug);
+  if (project.conflict) stderr.write(`[rembric-bridge] ${project.message}\n`);
+  const endpoint = buildEndpoint(baseUrl, project.mode === 'project' ? project.slug : null);
   stderr.write(
     `[rembric-bridge] projectDir=${projectDir} (from ${projectDirectorySource(env)}) url=${endpoint}\n`,
   );
@@ -124,6 +133,7 @@ export async function runBridge({
       'MCP-Protocol-Version': negotiatedProtocolVersion,
     };
     if (sessionId && !isInitialize) headers['mcp-session-id'] = sessionId;
+    if (project.header) headers[FINGERPRINT_HEADER] = project.header;
     return headers;
   }
 

@@ -126,7 +126,7 @@ function truncate(text, max) {
   return text.length > max ? text.slice(0, max) + '...' : text;
 }
 
-export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd }) {
+export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd, projectIssue }) {
   if (!agent) {
     throw new Error('rembric-plugin-core: createSessionProtocol requires an `agent`');
   }
@@ -136,7 +136,7 @@ export function createSessionProtocol({ agent, serverUrl, apiToken, slug, cwd })
       ? 'REMBRIC_SERVER_URL or REMBRIC_API_TOKEN missing'
       : slug
         ? null
-        : `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`;
+        : (projectIssue ?? `no PROJECT_SLUG in ${cwd ?? '.'}/.rembric`);
   const disabled = disabledReason !== null;
   if (disabledReason) {
     diag(`${disabledReason}; plugin disabled`);

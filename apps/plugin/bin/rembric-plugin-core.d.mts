@@ -29,6 +29,7 @@ export type SessionProtocolOptions = {
   apiToken: string | undefined;
   slug: string | null;
   cwd?: string;
+  projectIssue?: string | null;
 };
 
 export type SessionProtocol = {

@@ -1,27 +1,39 @@
 import { once } from 'node:events';
 import { mkdtemp, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
-import {
-  buildEndpoint,
-  projectDirectorySource,
-  resolveProjectDirectory,
-  resolveSlug,
-} from './slug.mjs';
+import { buildEndpoint, resolveSlug } from './rembric-project.mjs';
+import { projectDirectorySource, resolveProjectDirectory } from './slug.mjs';
+
+// A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
 
 const bridge = fileURLToPath(new URL('./cli.mjs', import.meta.url));
 const children: ChildProcessWithoutNullStreams[] = [];
 
+// The test runner's PWD is this repository; a bridge started there would resolve its .rembric.
+const neutralDir = realpathSync(mkdtempSync(join(tmpdir(), 'mcp-bridge-neutral-')));
+afterAll(() => rmSync(neutralDir, { recursive: true, force: true }));
+
 async function startBridge(env: Record<string, string | undefined>) {
   const child = spawn(process.execPath, [bridge], {
-    env: { ...process.env, ...env },
+    cwd: neutralDir,
+    env: { ...process.env, PWD: neutralDir, ...env },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   children.push(child);
@@ -71,7 +83,8 @@ async function startBridge(env: Record<string, string | undefined>) {
 
 async function runBridgeProcess(env: Record<string, string | undefined>) {
   const child = spawn(process.execPath, [bridge], {
-    env: { ...process.env, ...env },
+    cwd: neutralDir,
+    env: { ...process.env, PWD: neutralDir, ...env },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let stderr = '';
@@ -107,7 +120,7 @@ describe('slug resolution', () => {
 
     expect(resolveProjectDirectory(env, '/wrong')).toBe(directory);
     expect(projectDirectorySource(env)).toBe('PWD');
-    expect(resolveSlug(directory, env)).toEqual({ slug: 'from-file', issue: null });
+    expect(resolveSlug(directory, env)).toMatchObject({ slug: 'from-file', issue: null });
     expect(buildEndpoint('https://example.test///', 'from-file')).toBe(
       'https://example.test/mcp/from-file',
     );
@@ -119,7 +132,7 @@ describe('slug resolution', () => {
     expect(resolveSlug(directory, { REMBRIC_PROJECT_SLUG: 'fallback' }).slug).toBe('fallback');
 
     const empty = await mkdtemp(join(tmpdir(), 'mcp-bridge-'));
-    expect(resolveSlug(empty, { REMBRIC_PROJECT_SLUG: 'not_valid' })).toEqual({
+    expect(resolveSlug(empty, { REMBRIC_PROJECT_SLUG: 'not_valid' })).toMatchObject({
       slug: null,
       issue: 'not_valid in REMBRIC_PROJECT_SLUG is invalid',
     });
@@ -162,8 +175,12 @@ describe('slug resolution', () => {
   it('reports a missing slug and uses the path-less endpoint', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mcp-bridge-'));
     const paths: string[] = [];
+    const fingerprintHeaders: unknown[] = [];
     const server = createServer(async (request, response) => {
       paths.push(request.url ?? '');
+      if (request.url === '/mcp') {
+        fingerprintHeaders.push(request.headers['x-rembric-repo-fingerprint']);
+      }
       if (request.url === '/healthz') {
         response.end(JSON.stringify({ version: '0.28.2' }));
         return;
@@ -184,6 +201,8 @@ describe('slug resolution', () => {
     await client.nextLine();
 
     expect(paths).toContain('/mcp');
+    expect(paths).not.toContain('/api/repositories/resolve');
+    expect(fingerprintHeaders).toEqual([undefined]);
     const fallback = client.stderr
       .split('\n')
       .filter((line) => line.includes(`No .rembric in ${directory}`));
@@ -859,5 +878,183 @@ describe('stdio to HTTP transport', () => {
     client.send({ jsonrpc: '2.0', method: 'notifications/cancelled' });
     const [code] = (await once(client.child, 'exit')) as [number | null, string | null];
     expect(code).not.toBe(0);
+  });
+});
+
+describe('project resolution inside a git work tree', () => {
+  const GIT_ENV = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Fixture Author',
+    GIT_AUTHOR_EMAIL: 'author@example.test',
+    GIT_COMMITTER_NAME: 'Fixture Committer',
+    GIT_COMMITTER_EMAIL: 'committer@example.test',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+  };
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'mcp-bridge-git-')));
+  let counter = 0;
+
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+  function git(cwd: string, ...args: string[]): string {
+    return execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim();
+  }
+
+  function repository(remote?: string) {
+    counter += 1;
+    const repo = join(scratch, `repo-${counter}`);
+    mkdirSync(repo, { recursive: true });
+    git(repo, 'init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'a.txt'), 'a\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'root');
+    if (remote) git(repo, 'remote', 'add', 'origin', remote);
+    return { repo, root: git(repo, 'rev-parse', 'HEAD') };
+  }
+
+  type Seen = { path: string; fingerprint: string | undefined; raw: string };
+
+  async function stub(reply: { status: number; body: unknown } | 'hang') {
+    const seen: Seen[] = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const raw = Buffer.concat(chunks).toString();
+      seen.push({
+        path: request.url ?? '',
+        fingerprint: request.headers['x-rembric-repo-fingerprint'] as string | undefined,
+        raw: `${JSON.stringify(request.headers)}${raw}`,
+      });
+      if (request.url === '/healthz') {
+        response.end(JSON.stringify({ version: '0.31.0' }));
+        return;
+      }
+      if (request.url === '/api/repositories/resolve') {
+        if (reply === 'hang') return;
+        response.statusCode = reply.status;
+        response.setHeader('content-type', 'application/json');
+        response.end(typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body));
+        return;
+      }
+      const message = JSON.parse(raw) as { id?: number };
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+    });
+    const base = await listen(server);
+    return { base, seen, server };
+  }
+
+  const mcpOf = (seen: Seen[]) =>
+    seen.filter((s) => s.path === '/mcp' || s.path.startsWith('/mcp/'));
+
+  async function connected(base: string, projectDir: string, extra: Record<string, string> = {}) {
+    const client = await startBridge({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+      CLAUDE_PROJECT_DIR: projectDir,
+      REMBRIC_PROJECT_SLUG: undefined,
+      ...extra,
+    });
+    client.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    await client.nextLine();
+    client.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    await client.nextLine();
+    return client;
+  }
+
+  it('a bound fingerprint path-scopes the URL and every forwarded request carries the header', async () => {
+    const { repo, root } = repository();
+    const { base, seen, server } = await stub({
+      status: 200,
+      body: { ok: true, outcome: 'bound', slug: 'shop' },
+    });
+    const client = await connected(base, repo);
+
+    const mcp = mcpOf(seen);
+    expect(mcp).toHaveLength(2);
+    expect(mcp.every((s) => s.path === '/mcp/shop' && s.fingerprint === root)).toBe(true);
+    expect(client.stderr).toContain(`url=${base}/mcp/shop`);
+    client.child.stdin.end();
+    server.close();
+  });
+
+  it('an unbound fingerprint connects path-less with the header and says the repository is unbound', async () => {
+    const { repo, root } = repository();
+    const { base, seen, server } = await stub({
+      status: 200,
+      body: { ok: true, outcome: 'unbound', reason: 'not_bound' },
+    });
+    const client = await connected(base, repo);
+
+    const mcp = mcpOf(seen);
+    expect(mcp).toHaveLength(2);
+    expect(mcp.every((s) => s.path === '/mcp' && s.fingerprint === root)).toBe(true);
+    expect(client.stderr).toContain('not bound to a project');
+    expect(client.stderr).not.toContain("server's default project");
+    client.child.stdin.end();
+    server.close();
+  });
+
+  it.each([
+    ['a server without the resolve endpoint', { status: 404, body: 'Not Found' }],
+    [
+      'an ambiguous repository',
+      { status: 409, body: { ok: false, code: 'repository_ambiguous', slugs: ['a', 'b'] } },
+    ],
+    ['a resolve endpoint that never answers', 'hang' as const],
+  ])('%s gets no connection and one diagnostic', async (_label, reply) => {
+    const { repo } = repository();
+    const { base, seen, server } = await stub(reply);
+    const result = await runBridgeProcess({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+      CLAUDE_PROJECT_DIR: repo,
+      REMBRIC_PROJECT_SLUG: undefined,
+      REMBRIC_RESOLVE_TIMEOUT_MS: '200',
+    });
+
+    expect(result.code).not.toBe(0);
+    expect(mcpOf(seen)).toEqual([]);
+    const lines = result.stderr.split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('.rembric');
+    if (reply !== 'hang' && reply.status === 404)
+      expect(lines[0]).toContain('update the Rembric server');
+    server.closeAllConnections();
+    server.close();
+  });
+
+  it('the nearest .rembric up to the checkout root path-scopes a subdirectory, header included', async () => {
+    const { repo, root } = repository();
+    writeFileSync(join(repo, '.rembric'), 'PROJECT_SLUG=shop\n');
+    mkdirSync(join(repo, 'packages', 'api'), { recursive: true });
+    const { base, seen, server } = await stub({
+      status: 200,
+      body: { ok: true, outcome: 'explicit', slug: 'shop', conflict: null },
+    });
+    const client = await connected(base, join(repo, 'packages', 'api'));
+
+    const mcp = mcpOf(seen);
+    expect(mcp.every((s) => s.path === '/mcp/shop' && s.fingerprint === root)).toBe(true);
+    client.child.stdin.end();
+    server.close();
+  });
+
+  it('a credential in a remote reaches neither the server nor stderr', async () => {
+    const { repo } = repository('https://user:secret@git.example.com/acme/shop.git');
+    const { base, seen, server } = await stub({
+      status: 200,
+      body: { ok: true, outcome: 'unbound', reason: 'not_bound' },
+    });
+    const client = await connected(base, repo);
+
+    expect(seen.find((s) => s.path === '/api/repositories/resolve')?.raw).toContain(
+      'git.example.com/acme/shop',
+    );
+    expect(seen.map((s) => s.raw).join('\n')).not.toContain('secret@');
+    expect(seen.map((s) => s.raw).join('\n')).not.toContain(':secret');
+    expect(client.stderr).not.toContain('secret');
+    client.child.stdin.end();
+    server.close();
   });
 });

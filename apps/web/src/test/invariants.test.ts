@@ -834,6 +834,7 @@ describe('opencode plugin dispose-spike result is recorded', () => {
 const OPENCODE_PLUGIN_TS = 'apps/plugin/.opencode-plugin/plugin.ts';
 const REMBRIC_DOTENV_MJS = 'apps/plugin/mcp-bridge/rembric-dotenv.mjs';
 const MCP_BRIDGE_MJS = 'apps/plugin/mcp-bridge/bridge.mjs';
+const REMBRIC_PROJECT_MJS = 'apps/plugin/mcp-bridge/rembric-project.mjs';
 const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
 const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: string }> = [
@@ -966,13 +967,31 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     ).toEqual([]);
   });
 
-  it('plugin.ts and the published bridge import the slug helpers instead of redefining them', () => {
-    for (const rel of [OPENCODE_PLUGIN_TS, MCP_BRIDGE_MJS]) {
-      expect(
-        /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(readFileSync(join(repoRoot, rel), 'utf8')),
-        `${rel} must import slug helpers from rembric-dotenv.mjs`,
-      ).toBe(true);
-    }
+  it('plugin.ts imports the slug helpers instead of redefining them', () => {
+    expect(
+      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(
+        readFileSync(join(repoRoot, OPENCODE_PLUGIN_TS), 'utf8'),
+      ),
+      `${OPENCODE_PLUGIN_TS} must import slug helpers from rembric-dotenv.mjs`,
+    ).toBe(true);
+  });
+
+  it('the project resolver reads .rembric through the shared dotenv module', () => {
+    expect(
+      /from\s+['"]\.\/rembric-dotenv\.mjs['"]/.test(
+        readFileSync(join(repoRoot, REMBRIC_PROJECT_MJS), 'utf8'),
+      ),
+      `${REMBRIC_PROJECT_MJS} must import the slug helpers from rembric-dotenv.mjs`,
+    ).toBe(true);
+  });
+
+  it('the published bridge imports the project resolver', () => {
+    expect(
+      /from\s+['"][^'"]*rembric-project\.mjs['"]/.test(
+        readFileSync(join(repoRoot, MCP_BRIDGE_MJS), 'utf8'),
+      ),
+      `${MCP_BRIDGE_MJS} must import its project resolution from rembric-project.mjs`,
+    ).toBe(true);
   });
 
   it('every JS/TS client imports the protocol core instead of reimplementing it', () => {
