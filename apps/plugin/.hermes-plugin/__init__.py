@@ -19,8 +19,11 @@ during initialization and retains that binding on the instance. Missing scoped
 APIs require updating Hermes; there is no process-environment fallback. The bridge
 receives its values through its explicit ``mcp_servers.rembric.env`` mapping.
 
-Project slug cascade (first valid match wins): ``<cwd>/.rembric``
-``PROJECT_SLUG`` → scoped ``REMBRIC_PROJECT_SLUG`` → diagnostic and skip.
+Project slug cascade (first valid match wins), resolved once per session:
+the nearest ``.rembric`` ``PROJECT_SLUG`` (up to the checkout root inside
+git, only ``<cwd>`` outside) → scoped ``REMBRIC_PROJECT_SLUG`` → inside git,
+the repository fingerprint via ``POST /api/repositories/resolve`` →
+diagnostic and skip. Inside git there is no default-project fallback.
 Failures degrade silently (single-line stderr diagnostic) and never abort
 the host session.
 """
@@ -37,7 +40,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -119,6 +122,13 @@ _FILE_RECALL_GIT_TIMEOUT_SEC = 1.0
 _COMMAND_PATHS_MAX = 5
 _FILE_RECALL_SIBLINGS_MAX = 64
 _FILE_TOOLS = {"read_file", "write_file", "patch"}
+_RESOLVE_TIMEOUT_SEC: float = 3
+_FINGERPRINT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_REMOTES_MAX = 8
+_REMOTE_MAX_CHARS = 512
+_ROOT_NAME_MAX_CHARS = 255
+_REMOTE_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+_REMOTE_SCP_RE = re.compile(r"^(?:[^@/]+@)?([^/:]{2,}):(?!//)(.*)$")
 # The shell-path rule pinned by ../test/file-recall-fixtures.json, shared with
 # scripts/_api.sh and bin/rembric-plugin-core.mjs.
 _COMMAND_SPLIT_RE = re.compile("[ \t\n\"'`=();|&<>,:]+")
@@ -213,9 +223,38 @@ def _slug_from_dotrembric(cwd: str) -> str | None:
     return _valid_slug(pairs.get("PROJECT_SLUG"))
 
 
+def _dotrembric_dirs(cwd: str, inside_git: bool, root: str | None) -> list[Path]:
+    """Directories to search for `.rembric`, nearest first; never above the checkout root."""
+    if not inside_git or root is None:
+        return [Path(cwd)]
+    start, top = Path(os.path.realpath(cwd)), Path(root)
+    if start != top and top not in start.parents:
+        return [Path(cwd)]
+    dirs = [start]
+    while dirs[-1] != top:
+        dirs.append(dirs[-1].parent)
+    return dirs
+
+
+def _explicit_selection(
+    cwd: str, profile_slug: str | None, inside_git: bool, root: str | None
+) -> tuple[str | None, str | None]:
+    """(slug, source) from the nearest `.rembric` or the scoped default."""
+    for directory in _dotrembric_dirs(cwd, inside_git, root):
+        slug = _slug_from_dotrembric(str(directory))
+        if slug:
+            nested = inside_git and root is not None and str(directory) != root
+            return slug, "rembric-nested" if nested else "rembric-root"
+        if (directory / ".rembric").is_file():
+            break
+    slug = _valid_slug(profile_slug)
+    return (slug, "env") if slug else (None, None)
+
+
 def _resolve_slug(cwd: str, profile_slug: str | None = None) -> str | None:
-    """Return the first valid slug from the local marker or scoped default."""
-    return _slug_from_dotrembric(cwd) or _valid_slug(profile_slug)
+    """Return the explicitly selected slug: nearest `.rembric`, then the scoped default."""
+    inside_git, root = _git_work_tree(cwd)
+    return _explicit_selection(cwd, profile_slug, inside_git, root)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -322,8 +361,20 @@ def _command_paths(command: str) -> list[str]:
     return paths
 
 
+_GIT_LOCATION_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+)
+
+
 def _git_output(cwd: str, args: list[str], literal: bool = False) -> str | None:
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_ENV}
     if literal:
         env["GIT_LITERAL_PATHSPECS"] = "1"
     try:
@@ -370,6 +421,196 @@ def _append_file_recall(result: str, lines: list[str]) -> str:
         parsed["rembric_memories"] = text
         return json.dumps(parsed, ensure_ascii=False)
     return f"{result}\n\n{text}"
+
+
+# ---------------------------------------------------------------------------
+# Repository fingerprint resolution
+# ---------------------------------------------------------------------------
+
+
+def _git_line(cwd: str, args: list[str]) -> str | None:
+    out = _git_output(cwd, args)
+    return out.strip() if out is not None else None
+
+
+def _git_work_tree(cwd: str) -> tuple[bool, str | None]:
+    """(inside a work tree, real path of its checkout root)."""
+    if _git_line(cwd, ["rev-parse", "--is-inside-work-tree"]) != "true":
+        return False, None
+    root = _git_line(cwd, ["rev-parse", "--show-toplevel"])
+    return True, os.path.realpath(root) if root else None
+
+
+def _repository_fingerprint(cwd: str) -> tuple[str | None, str | None]:
+    """(first-parent root commit, cause when there is none)."""
+    shallow = _git_line(cwd, ["rev-parse", "--is-shallow-repository"])
+    if shallow != "false":
+        return None, "shallow" if shallow == "true" else "git_unavailable"
+    roots = (_git_output(cwd, ["rev-list", "--first-parent", "--max-parents=0", "HEAD"]) or "").split()
+    if len(roots) == 1 and _FINGERPRINT_RE.match(roots[0]):
+        return roots[0], None
+    return None, "no_commit"
+
+
+def _normalize_remote(url: str) -> str | None:
+    """`host/path`, lowercase, without scheme, credentials, port, query or `.git`; None for a local path."""
+    text = url.strip()
+    scheme = _REMOTE_SCHEME_RE.match(text)
+    if scheme:
+        if text[: scheme.end()].lower() == "file://":
+            return None
+        rest = text[scheme.end():]
+        rest = rest[rest.rfind("@") + 1:]
+        authority, _, path = rest.partition("/")
+        host = re.sub(r":\d*$", "", authority)
+    else:
+        scp = _REMOTE_SCP_RE.match(text)
+        if not scp:
+            return None
+        host, path = scp.group(1), scp.group(2)
+    path = re.split(r"[?#]", path, maxsplit=1)[0].strip("/")
+    if path.lower().endswith(".git"):
+        path = path[:-4].rstrip("/")
+    if not host:
+        return None
+    return (f"{host}/{path}" if path else host).lower()
+
+
+def _repository_remotes(cwd: str) -> list[str]:
+    remotes: list[str] = []
+    for name in (_git_output(cwd, ["remote"]) or "").split():
+        normalized = _normalize_remote(_git_line(cwd, ["remote", "get-url", name]) or "")
+        if normalized and len(normalized) <= _REMOTE_MAX_CHARS and normalized not in remotes:
+            remotes.append(normalized)
+        if len(remotes) >= _REMOTES_MAX:
+            break
+    return remotes
+
+
+def _post_resolve(base: str, token: str, body: dict) -> dict:
+    """The endpoint's answer as `{"outcome": ...}`; anything unproven is `unavailable` with a cause."""
+    url = _http_url(base, "/api/repositories/resolve")
+    if url is None:
+        return {"outcome": "unavailable", "cause": "server URL must use HTTP(S)"}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        req = Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+        with urlopen(req, timeout=_RESOLVE_TIMEOUT_SEC) as resp:
+            parsed = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as err:
+        if err.code == 409:
+            try:
+                refused = json.loads(err.read().decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                refused = None
+            if isinstance(refused, dict) and refused.get("code") == "repository_ambiguous":
+                slugs = [s for s in refused.get("slugs") or [] if _valid_slug(s)]
+                return {"outcome": "ambiguous", "slugs": slugs}
+        return {"outcome": "unavailable", "cause": f"HTTP {err.code}"}
+    except TimeoutError:
+        return {"outcome": "unavailable", "cause": "timeout"}
+    except URLError as err:
+        timed_out = isinstance(err.reason, TimeoutError)
+        return {"outcome": "unavailable", "cause": "timeout" if timed_out else "network error"}
+    except Exception:  # noqa: BLE001
+        return {"outcome": "unavailable", "cause": "unreadable response"}
+    outcome = parsed.get("outcome") if isinstance(parsed, dict) and parsed.get("ok") is True else None
+    if outcome == "bound" and _valid_slug(parsed.get("slug")):
+        return {"outcome": "bound", "slug": parsed["slug"]}
+    if outcome == "unbound" and parsed.get("reason") in ("not_bound", "unknown_remote", "no_fingerprint"):
+        return {"outcome": "unbound", "reason": parsed["reason"]}
+    if outcome == "explicit":
+        conflict = parsed.get("conflict")
+        bound = conflict.get("boundSlugs") if isinstance(conflict, dict) else None
+        return {"outcome": "explicit", "bound": [s for s in bound or [] if _valid_slug(s)]}
+    return {"outcome": "unavailable", "cause": "unreadable response"}
+
+
+_NO_FINGERPRINT_TEXT = {
+    "shallow": ("this repository is a shallow clone, so it has no fingerprint",
+                "make a full clone (git fetch --unshallow)"),
+    "no_commit": ("this repository has no commit yet, so it has no fingerprint",
+                  "make a first commit"),
+    "git_unavailable": ("git could not read this repository's history, so it has no fingerprint",
+                        "make git available"),
+}
+_DOTREMBRIC_REMEDY = "add a .rembric file with PROJECT_SLUG=<slug> at the repository root"
+
+
+def _no_project_label(fingerprint: str | None, cause: str | None, answer: dict) -> str:
+    outcome = answer.get("outcome")
+    if outcome == "unbound":
+        if fingerprint:
+            return f"repository unbound ({fingerprint[:12]})"
+        return f"repository without fingerprint ({cause})"
+    if outcome == "ambiguous":
+        return "repository ambiguous"
+    return f"repository resolve unavailable ({answer.get('cause')})"
+
+
+def _no_project_notice(fingerprint: str | None, cause: str | None, answer: dict) -> str:
+    """Session-start text for a git work tree whose session resolved no project."""
+    outcome = answer.get("outcome")
+    if outcome == "unbound" and fingerprint:
+        return (
+            f"Rembric: this repository (fingerprint {fingerprint[:12]}) is not bound to a "
+            "project, so this session stores no memory. Sessions in such a repository used "
+            "the default project before this version; binding it to the default project keeps "
+            "that continuity. Ask a Rembric admin to bind it from the dashboard, or "
+            f"{_DOTREMBRIC_REMEDY}. A binding applies from the next session."
+        )
+    if outcome == "unbound":
+        reason, remedy = _NO_FINGERPRINT_TEXT.get(cause or "", _NO_FINGERPRINT_TEXT["git_unavailable"])
+        return (
+            f"Rembric: {reason}, so this session stores no memory. To fix it, {remedy}, "
+            f"or {_DOTREMBRIC_REMEDY}."
+        )
+    if outcome == "ambiguous":
+        slugs = ", ".join(answer.get("slugs") or [])
+        return (
+            f"Rembric: this repository is bound to several projects ({slugs}), so the project "
+            "is ambiguous and this session stores no memory. Select one with a .rembric file "
+            "containing PROJECT_SLUG=<slug> or with REMBRIC_PROJECT_SLUG."
+        )
+    return (
+        f"Rembric: could not resolve this repository's project ({answer.get('cause')}), so this "
+        f"session stores no memory: update the Rembric server, or {_DOTREMBRIC_REMEDY}."
+    )
+
+
+def _resolve_project(
+    cwd: str, profile_slug: str | None, base: str, token: str
+) -> tuple[str | None, str | None, str | None]:
+    """(slug, session-start notice, diagnostic label) for this session, resolved once."""
+    inside_git, root = _git_work_tree(cwd)
+    slug, source = _explicit_selection(cwd, profile_slug, inside_git, root)
+    if not inside_git:
+        return slug, None, None
+    fingerprint, cause = _repository_fingerprint(cwd)
+    if slug and not fingerprint:
+        return slug, None, None
+    remotes = _repository_remotes(cwd)
+    body: dict[str, Any] = {"fingerprint": fingerprint, "remotes": remotes}
+    root_name = os.path.basename(root) if root else ""
+    if fingerprint and not remotes and root_name and len(root_name) <= _ROOT_NAME_MAX_CHARS and "\\" not in root_name:
+        body["rootName"] = root_name
+    if slug:
+        body["explicit"] = {"slug": slug, "source": source}
+    answer = _post_resolve(base, token, body)
+    if slug:
+        bound = answer.get("bound") if answer.get("outcome") == "explicit" else None
+        if not bound:
+            return slug, None, None
+        selector = "REMBRIC_PROJECT_SLUG" if source == "env" else ".rembric"
+        return slug, (
+            f"Rembric: this session uses project '{slug}', selected by {selector}, but this "
+            f"repository is bound to {', '.join(repr(b) for b in bound)}. The selection wins for "
+            "this session and the binding is unchanged."
+        ), None
+    if answer.get("outcome") == "bound":
+        return answer["slug"], None, None
+    notice = _no_project_notice(fingerprint, cause, answer)
+    return None, notice, _no_project_label(fingerprint, cause, answer)
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +670,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         self._file_recall_lock: threading.Lock = threading.Lock()
         self._file_recall_sent: dict[str, set[str]] = {}
         self._file_recall_exhausted: set[str] = set()
+        self._project_notice: str | None = None
 
     @property
     def name(self) -> str:
@@ -457,6 +699,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
 
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         self._base = self._token = self._slug = None
+        self._project_notice = None
         self._initialized = False
         settings = _scoped_settings()
         if settings is None:
@@ -473,7 +716,11 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         self._base, self._token, profile_slug = settings
         cwd = kwargs.get("cwd") or os.getcwd()
         self._cwd = cwd
-        self._slug = _resolve_slug(cwd, profile_slug)
+        self._slug, self._project_notice, no_project = _resolve_project(
+            cwd, profile_slug, self._base, self._token
+        )
+        if self._project_notice:
+            _stderr(f"[rembric] {self._project_notice}")
         self._session_id = session_id
         self._initialized = True
         # Only a primary context creates a session row, so subagent/cron runs
@@ -482,8 +729,9 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         agent_context = kwargs.get("agent_context", "primary")
         self._suppressed = agent_context in _NON_PRIMARY_AGENT_CONTEXTS
         if not self._slug:
+            reason = f" ({no_project})" if no_project else ""
             _stderr(
-                f"[rembric] no project slug for session {session_id}; "
+                f"[rembric] no project slug for session {session_id}{reason}; "
                 "skipping session POST"
             )
         elif not self._base:
@@ -621,6 +869,10 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             and bool(self._session_created.get(session_id))
             and session_id not in self._session_opening_emitted
         )
+        if self._project_notice:
+            hints.append(f"<memory-hint>{self._project_notice}</memory-hint>")
+            hint_tags.append("project")
+            self._project_notice = None
         pending_lines = self._pending_lines.pop(session_id, []) if session_id else []
         write_directing = opening_due or bool(pending_lines)
 
