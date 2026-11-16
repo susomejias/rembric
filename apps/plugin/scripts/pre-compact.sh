@@ -38,7 +38,7 @@ SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 TRANSCRIPT_PATH="$(rembric_transcript_path_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"
-SLUG="$(rembric_read_project_slug "$CWD")"
+SLUG="$(rembric_session_project "$SESSION_ID" "$CWD")"
 
 if [ -z "$SESSION_ID" ] || [ -z "$SLUG" ]; then
   exit 0

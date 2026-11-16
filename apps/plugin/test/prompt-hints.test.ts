@@ -21,8 +21,10 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
   let heldResponses = new Set<ServerResponse>();
   let baseUrl = '';
   let projectDir = '';
+  let scratch = '';
 
   beforeEach(async () => {
+    scratch = mkdtempSync(join(tmpdir(), 'rembric-hintssh-tmp-'));
     capturedBody = '';
     capturedPath = '';
     leaveUnanswered = false;
@@ -60,6 +62,7 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
     for (const response of heldResponses) response.destroy();
     hintServer.close();
     rmSync(projectDir, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
   });
 
   function run(
@@ -69,7 +72,7 @@ describe('prompt-hints.sh (dedicated entity-recall transport)', () => {
     return new Promise((resolve, reject) => {
       const child = spawn('bash', [promptHintsSh], {
         cwd: projectDir,
-        env: { ...process.env, ...overrides },
+        env: { ...process.env, TMPDIR: scratch, ...overrides },
       });
       let stdout = '';
       let stderr = '';

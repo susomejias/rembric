@@ -17,7 +17,7 @@ fi
 SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
 CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"
-SLUG="$(rembric_read_project_slug "$CWD")"
+SLUG="$(rembric_session_project "$SESSION_ID" "$CWD")"
 
 # Idempotent ensure, then resume. The ensure alone returns a terminal row
 # untouched, so the resume is what recovers a row the stale sweep abandoned
