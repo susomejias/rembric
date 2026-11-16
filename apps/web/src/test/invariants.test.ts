@@ -835,6 +835,7 @@ const OPENCODE_PLUGIN_TS = 'apps/plugin/.opencode-plugin/plugin.ts';
 const REMBRIC_DOTENV_MJS = 'apps/plugin/mcp-bridge/rembric-dotenv.mjs';
 const MCP_BRIDGE_MJS = 'apps/plugin/mcp-bridge/bridge.mjs';
 const REMBRIC_PROJECT_MJS = 'apps/plugin/mcp-bridge/rembric-project.mjs';
+const PI_INDEX_TS = 'apps/plugin/.pi-plugin/index.ts';
 const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
 const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: string }> = [
@@ -967,15 +968,6 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     ).toEqual([]);
   });
 
-  it('plugin.ts imports the slug helpers instead of redefining them', () => {
-    expect(
-      /from\s+['"][^'"]*rembric-dotenv\.mjs['"]/.test(
-        readFileSync(join(repoRoot, OPENCODE_PLUGIN_TS), 'utf8'),
-      ),
-      `${OPENCODE_PLUGIN_TS} must import slug helpers from rembric-dotenv.mjs`,
-    ).toBe(true);
-  });
-
   it('the project resolver reads .rembric through the shared dotenv module', () => {
     expect(
       /from\s+['"]\.\/rembric-dotenv\.mjs['"]/.test(
@@ -985,13 +977,55 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     ).toBe(true);
   });
 
-  it('the published bridge imports the project resolver', () => {
-    expect(
-      /from\s+['"][^'"]*rembric-project\.mjs['"]/.test(
-        readFileSync(join(repoRoot, MCP_BRIDGE_MJS), 'utf8'),
-      ),
-      `${MCP_BRIDGE_MJS} must import its project resolution from rembric-project.mjs`,
-    ).toBe(true);
+  it('the bridge, the opencode plugin and the Pi extension import the project resolver', () => {
+    for (const rel of [MCP_BRIDGE_MJS, OPENCODE_PLUGIN_TS, PI_INDEX_TS]) {
+      expect(
+        /from\s+['"][^'"]*rembric-project\.mjs['"]/.test(readFileSync(join(repoRoot, rel), 'utf8')),
+        `${rel} must import its project resolution from rembric-project.mjs`,
+      ).toBe(true);
+    }
+  });
+
+  it('the project resolver exists once and no other JS/TS file resolves a fingerprint or walks .rembric', () => {
+    const files = execSync(
+      `git -C ${repoRoot} ls-files --cached --others --exclude-standard -- ${PLUGIN_JS_PATHSPECS.filter(
+        (p) => !p.startsWith(':!'),
+      )
+        .map((p) => `'${p}'`)
+        .join(' ')}`,
+      { encoding: 'utf8' },
+    )
+      .split('\n')
+      .filter((f) => f && !/\.test\.m?[jt]s$|\.d\.mts$/.test(f))
+      .filter((f) => existsSync(join(repoRoot, f)));
+    expect(files, 'fewer files than the shared modules and two clients').toEqual(
+      expect.arrayContaining([MCP_BRIDGE_MJS, OPENCODE_PLUGIN_TS, PI_INDEX_TS]),
+    );
+    expect(files, 'the resolver is no longer listed').toContain(REMBRIC_PROJECT_MJS);
+    expect(files.filter((f) => f.endsWith('/rembric-project.mjs'))).toEqual([REMBRIC_PROJECT_MJS]);
+
+    const resolverOwned = [
+      { what: 'a first-parent root lookup', pattern: /--max-parents=0/ },
+      { what: 'a shallow-repository check', pattern: /--is-shallow-repository/ },
+      { what: 'the resolve endpoint', pattern: /\/api\/repositories\/resolve/ },
+      { what: 'a remote normalizer', pattern: /\bfunction\s+normalizeRemote\b/ },
+    ];
+    const offenders: string[] = [];
+    for (const rel of files.filter((f) => f !== REMBRIC_PROJECT_MJS)) {
+      const source = readFileSync(join(repoRoot, rel), 'utf8');
+      for (const { what, pattern } of resolverOwned) {
+        if (pattern.test(source)) offenders.push(`${rel} contains ${what}`);
+      }
+    }
+    const resolver = readFileSync(join(repoRoot, REMBRIC_PROJECT_MJS), 'utf8');
+    for (const { what, pattern } of resolverOwned) {
+      expect(pattern.test(resolver), `${REMBRIC_PROJECT_MJS} no longer contains ${what}`).toBe(
+        true,
+      );
+    }
+    expect(offenders, `move these into ${REMBRIC_PROJECT_MJS}: ${offenders.join(', ')}`).toEqual(
+      [],
+    );
   });
 
   it('every JS/TS client imports the protocol core instead of reimplementing it', () => {

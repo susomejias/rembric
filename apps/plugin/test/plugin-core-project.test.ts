@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import rembric from '../.pi-plugin/index.js';
 import {
   FINGERPRINT_HEADER,
   inspectRepository,
@@ -634,5 +635,188 @@ describe('resolution against the resolve endpoint', () => {
     expect(outcome).toMatchObject({ mode: 'unbound', header: 'unavailable' });
     expect(outcome.message).toContain('shallow');
     expect(stub.resolveBodies()).toEqual([{ fingerprint: null, remotes: [] }]);
+  });
+});
+
+describe('the Pi extension resolves through the shared resolver', () => {
+  type Handler = (event: unknown, ctx: unknown) => unknown;
+  const CHILD_MARKERS = [
+    'REMBRIC_SUBAGENT',
+    'GENTLE_PI_AGENTS_CHILD',
+    'PI_SUBAGENT_CHILD',
+    'REMBRIC_TRACK_SESSION',
+    'REMBRIC_PROJECT_SLUG',
+  ];
+
+  beforeEach(() => {
+    for (const key of CHILD_MARKERS) vi.stubEnv(key, '');
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function harness(cwd: string, sessionId = 'pi-session') {
+    const handlers = new Map<string, Handler>();
+    const tools: Array<{ name: string; label: string }> = [];
+    const notifications: Array<{ message: string; type?: string }> = [];
+    const ctx = {
+      cwd,
+      mode: 'tui',
+      sessionManager: { getSessionId: () => sessionId, getSessionFile: () => undefined },
+      ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
+    };
+    rembric({
+      registerTool: (tool: { name: string; label: string }) => tools.push(tool),
+      on: (event: string, handler: Handler) => handlers.set(event, handler),
+    } as unknown as Parameters<typeof rembric>[0]);
+    const fire = async (event: string, payload: unknown = {}) => {
+      const handler = handlers.get(event);
+      if (!handler) throw new Error(`no handler registered for ${event}`);
+      return await handler(payload, ctx);
+    };
+    return { fire, tools, notifications };
+  }
+
+  function useServer(url: string) {
+    vi.stubEnv('REMBRIC_SERVER_URL', url);
+    vi.stubEnv('REMBRIC_API_TOKEN', 'pi-token');
+  }
+
+  async function fullSession(h: ReturnType<typeof harness>) {
+    await h.fire('session_start');
+    await h.fire('before_agent_start', { prompt: 'hello', systemPrompt: 'Base.' });
+    await h.fire('agent_settled');
+    await h.fire('session_shutdown', { reason: 'quit' });
+  }
+
+  async function repoWithCommit(name: string) {
+    const repo = newRepo(fresh(name));
+    return { repo, root: commit(repo, 'a.txt') };
+  }
+
+  it('an unbound checkout connects path-less with the header, registers no session and says so at warning', async () => {
+    const { repo, root } = await repoWithCommit('pi-unbound');
+    const stub = await startStub(() => unbound());
+    useServer(stub.url);
+    const h = harness(repo);
+    await fullSession(h);
+
+    const mcp = stub.requests.filter((r) => r.path.startsWith('/mcp'));
+    expect(mcp.length).toBeGreaterThan(0);
+    for (const request of mcp) {
+      expect(request.path).toBe('/mcp');
+      expect(request.headers[FINGERPRINT_HEADER.toLowerCase()]).toBe(root);
+    }
+    expect(h.tools.map((t) => t.label)).toEqual(['project.current']);
+    expect(
+      stub.requests.filter(
+        (r) => r.path.startsWith('/api/') && r.path !== '/api/repositories/resolve',
+      ),
+    ).toEqual([]);
+    expect(h.notifications).toHaveLength(1);
+    expect(h.notifications[0]!.type).toBe('warning');
+    expect(h.notifications[0]!.message).toContain('not bound to a project');
+  });
+
+  it('a bound checkout connects to its project with the header on every MCP request and registers the session', async () => {
+    const { repo, root } = await repoWithCommit('pi-bound');
+    const stub = await startStub(() => bound('shop'));
+    useServer(stub.url);
+    const h = harness(repo);
+    await fullSession(h);
+
+    const mcp = stub.requests.filter((r) => r.path.startsWith('/mcp'));
+    expect(mcp.length).toBeGreaterThan(0);
+    for (const request of mcp) {
+      expect(request.path).toBe('/mcp/shop');
+      expect(request.headers[FINGERPRINT_HEADER.toLowerCase()]).toBe(root);
+    }
+    expect(stub.requests.some((r) => r.path === '/api/shop/sessions')).toBe(true);
+  });
+
+  it('a server without the resolve endpoint gets no connection, no tools and one notification', async () => {
+    const { repo } = await repoWithCommit('pi-old-server');
+    const stub = await startStub(() => ({ status: 404, body: 'Not Found' }));
+    useServer(stub.url);
+    const h = harness(repo);
+    await fullSession(h);
+
+    expect(stub.requests.map((r) => r.path)).toEqual(['/api/repositories/resolve']);
+    expect(h.tools).toEqual([]);
+    expect(h.notifications).toHaveLength(1);
+    expect(h.notifications[0]!.message).toContain('update the Rembric server');
+  });
+
+  it('resolves once per session even when the host fires session_start again', async () => {
+    const { repo } = await repoWithCommit('pi-once');
+    const stub = await startStub(() => unbound());
+    useServer(stub.url);
+    const h = harness(repo);
+    await h.fire('session_start');
+    await h.fire('session_start');
+    expect(stub.resolveCalls()).toHaveLength(1);
+  });
+
+  it('a .rembric inside a fingerprinted repository still scopes the connection, header included', async () => {
+    const { repo, root } = await repoWithCommit('pi-explicit');
+    writeFileSync(join(repo, '.rembric'), 'PROJECT_SLUG=sandbox\n');
+    const stub = await startStub(() => ({
+      status: 200,
+      body: { ok: true, outcome: 'explicit', slug: 'sandbox', conflict: null },
+    }));
+    useServer(stub.url);
+    const h = harness(repo);
+    await fullSession(h);
+
+    const mcp = stub.requests.filter((r) => r.path.startsWith('/mcp'));
+    expect(mcp.every((r) => r.path === '/mcp/sandbox')).toBe(true);
+    expect(mcp.every((r) => r.headers[FINGERPRINT_HEADER.toLowerCase()] === root)).toBe(true);
+    expect(stub.requests.some((r) => r.path === '/api/sandbox/sessions')).toBe(true);
+    expect(stub.resolveBodies()[0]).toMatchObject({
+      explicit: { slug: 'sandbox', source: 'rembric-root' },
+    });
+  });
+
+  it('outside git with a .rembric nothing changes: no resolve call and no header', async () => {
+    const dir = fresh('pi-outside');
+    mkdirSync(dir);
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
+    const stub = await startStub(() => bound('shop'));
+    useServer(stub.url);
+    const h = harness(dir);
+    await fullSession(h);
+
+    expect(stub.resolveCalls()).toEqual([]);
+    const mcp = stub.requests.filter((r) => r.path.startsWith('/mcp'));
+    expect(mcp.length).toBeGreaterThan(0);
+    expect(mcp.every((r) => r.path === '/mcp/demo')).toBe(true);
+    expect(mcp.every((r) => r.headers[FINGERPRINT_HEADER.toLowerCase()] === undefined)).toBe(true);
+    expect(stub.requests.some((r) => r.path === '/api/demo/sessions')).toBe(true);
+  });
+
+  it('outside git without a .rembric the extension stays off and requests nothing, as before', async () => {
+    const dir = fresh('pi-outside-empty');
+    mkdirSync(dir);
+    const stub = await startStub(() => bound('shop'));
+    useServer(stub.url);
+    const h = harness(dir);
+    await fullSession(h);
+
+    expect(stub.requests).toEqual([]);
+    expect(h.tools).toEqual([]);
+    expect(h.notifications).toHaveLength(1);
+    expect(h.notifications[0]).toMatchObject({ type: 'warning' });
+    expect(h.notifications[0]!.message).toContain(`no PROJECT_SLUG in ${dir}/.rembric`);
+  });
+
+  it('index.ts takes its project resolution from the shared module and computes no fingerprint itself', () => {
+    const source = readFileSync(new URL('../.pi-plugin/index.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/from\s+'\.\.\/mcp-bridge\/rembric-project\.mjs'/);
+    expect(source).not.toMatch(/function\s+parseDotenv\b/);
+    expect(source).not.toMatch(/\bSLUG_RE\s*=/);
+    expect(source).not.toContain('rev-list');
   });
 });

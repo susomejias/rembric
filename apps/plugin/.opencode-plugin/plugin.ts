@@ -14,7 +14,7 @@ import {
   extractCommandPaths,
   POST_COMPACT_NUDGE_CORE,
 } from '../bin/rembric-plugin-core.mjs';
-import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
+import { resolveProject } from '../mcp-bridge/rembric-project.mjs';
 
 type EventInput = {
   event: {
@@ -99,6 +99,28 @@ function nudgePart(
 
 const STILL_RUNNING_BLOCK = '\n\nBackground work still running:\n';
 
+async function sessionProtocol(directory: string) {
+  const serverUrl = process.env.REMBRIC_SERVER_URL;
+  const apiToken = process.env.REMBRIC_API_TOKEN;
+  const project = await resolveProject({
+    startDir: directory,
+    env: process.env,
+    serverUrl,
+    apiToken,
+  });
+  const slug = project.mode === 'project' ? project.slug : null;
+  const core = createSessionProtocol({
+    agent: 'opencode',
+    serverUrl,
+    apiToken,
+    slug,
+    cwd: directory,
+    projectIssue: project.repository && !slug ? project.message : null,
+  });
+  if (!core.disabled && project.conflict && project.message) diag(project.message);
+  return { core, slug };
+}
+
 function inboxSubagentReport(text: string): string {
   const wrapper = /^<subagent\b[\s\S]*?>\n([\s\S]*)\n<\/subagent>\s*$/.exec(text);
   const body = wrapper ? wrapper[1]! : text;
@@ -107,14 +129,7 @@ function inboxSubagentReport(text: string): string {
 }
 
 export const RembricPlugin: Plugin = async (ctx) => {
-  const slug = readRembricSlug(ctx.directory);
-  const core = createSessionProtocol({
-    agent: 'opencode',
-    serverUrl: process.env.REMBRIC_SERVER_URL,
-    apiToken: process.env.REMBRIC_API_TOKEN,
-    slug,
-    cwd: ctx.directory,
-  });
+  const { core, slug } = await sessionProtocol(ctx.directory);
 
   const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
@@ -396,14 +411,7 @@ const RembricPluginV2: V2Plugin = {
   id: 'rembric.lifecycle',
   async setup(ctx) {
     const directory = ctx.location.directory;
-    const slug = readRembricSlug(directory);
-    const core = createSessionProtocol({
-      agent: 'opencode',
-      serverUrl: process.env.REMBRIC_SERVER_URL,
-      apiToken: process.env.REMBRIC_API_TOKEN,
-      slug,
-      cwd: directory,
-    });
+    const { core, slug } = await sessionProtocol(directory);
 
     if (core.disabled) {
       diag(`rembric: ${core.disabledReason ?? 'disabled'}`);

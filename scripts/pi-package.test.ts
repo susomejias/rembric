@@ -94,6 +94,42 @@ describe('materialize', () => {
     expect(runPiPackage('assert-pack').code).toBe(0);
   });
 
+  it('packs a module a shared module imports, though index.ts never names it', () => {
+    writeFileSync(
+      join(root, 'apps', 'plugin', 'mcp-bridge', 'probe.mjs'),
+      "import { deep } from './probe-dep.mjs';\nexport const probe = deep;\n",
+    );
+    writeFileSync(
+      join(root, 'apps', 'plugin', 'mcp-bridge', 'probe-dep.mjs'),
+      'export const deep = true;\n',
+    );
+    writeFileSync(
+      pkg('index.ts'),
+      `import { probe } from '../mcp-bridge/probe.mjs';\n${indexText()}`,
+    );
+    const { code } = runPiPackage('materialize');
+    expect(code).toBe(0);
+    expect(readFileSync(pkg('bin', 'probe-dep.mjs'), 'utf8')).toBe('export const deep = true;\n');
+    expect(indexText()).not.toContain('probe-dep.mjs');
+    expect(runPiPackage('assert-pack').code).toBe(0);
+  });
+
+  it('refuses a shared module whose own import climbs out of its directory', () => {
+    writeFileSync(
+      join(root, 'apps', 'plugin', 'mcp-bridge', 'probe.mjs'),
+      "import { x } from '../bin/rembric-plugin-core.mjs';\nexport const probe = x;\n",
+    );
+    writeFileSync(
+      pkg('index.ts'),
+      `import { probe } from '../mcp-bridge/probe.mjs';\n${indexText()}`,
+    );
+    const before = indexText();
+    const { code, out } = runPiPackage('materialize');
+    expect(code).toBe(1);
+    expect(out).toContain('probe.mjs imports ../bin/rembric-plugin-core.mjs');
+    expect(indexText()).toBe(before);
+  });
+
   it('refuses an index.ts with no shared import at all rather than expect nothing', () => {
     writeFileSync(pkg('index.ts'), 'export const RembricExtension = () => ({});\n');
     const { code, out } = runPiPackage('materialize');

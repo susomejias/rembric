@@ -71,12 +71,42 @@ function sharedModules() {
   return modules;
 }
 
+const SIBLING_IMPORT = /^\.\/([\w.-]+\.mjs)$/;
+
+// A shared module's own imports keep working unrewritten because every packed
+// module lands flat in ./bin/; only same-directory siblings can survive that.
+function siblingModules(direct) {
+  const packed = new Map(direct.map((mod) => [mod.name, mod]));
+  const siblings = [];
+  const queue = [...direct];
+  while (queue.length > 0) {
+    const mod = queue.shift();
+    const source = readFileSync(join(pluginRoot, mod.sourceDir, mod.name), 'utf8');
+    for (const [, specifier] of source.matchAll(RELATIVE_IMPORT)) {
+      const match = SIBLING_IMPORT.exec(specifier);
+      if (match === null) {
+        fail(
+          `${mod.name} imports ${specifier} — only ./ siblings of a shared module can be packed`,
+        );
+      }
+      const name = match[1];
+      if (packed.has(name)) continue;
+      const sibling = { sourceDir: mod.sourceDir, name };
+      packed.set(name, sibling);
+      siblings.push(sibling);
+      queue.push(sibling);
+    }
+  }
+  return siblings;
+}
+
 function materialize() {
   const shared = sharedModules();
+  const siblings = siblingModules(shared);
   mkdirSync(join(pkgDir, 'bin'), { recursive: true });
   mkdirSync(join(pkgDir, 'commands'), { recursive: true });
 
-  for (const mod of shared) {
+  for (const mod of [...shared, ...siblings]) {
     copyFileSync(join(pluginRoot, mod.sourceDir, mod.name), join(pkgDir, 'bin', mod.name));
   }
 
@@ -119,7 +149,7 @@ function materialize() {
   writeFileSync(indexPath, after);
 
   process.stdout.write(
-    `[pi-package] materialised ${shared.length} shared modules and ${COMMANDS.length} commands; ` +
+    `[pi-package] materialised ${shared.length} shared modules (+${siblings.length} they import) and ${COMMANDS.length} commands; ` +
       `renamed tools in ${renamed} of ${COMMANDS.length} commands; ` +
       `rewrote ${rewrote} import specifiers (${alreadyPacked} already materialised)\n`,
   );
@@ -131,7 +161,10 @@ function expectedFiles() {
     'package.json',
     'README.md',
     'index.ts',
-    ...sharedModules().map((module) => `bin/${module.name}`),
+    ...(() => {
+      const shared = sharedModules();
+      return [...shared, ...siblingModules(shared)].map((module) => `bin/${module.name}`);
+    })(),
     ...COMMANDS.map((c) => `commands/${c}`),
   ].sort();
 }
