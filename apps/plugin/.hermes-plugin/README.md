@@ -25,7 +25,7 @@ Native installation prompts for missing values declared in `plugin.yaml::require
 
 - **`REMBRIC_SERVER_URL`** — base URL of your deployment, **without** the `/mcp` suffix. The bridge appends `/mcp/<slug>` itself when you wire it.
 - **`REMBRIC_API_TOKEN`** — Bearer token minted from the Rembric dashboard at `/dashboard/tokens` (plaintext shown exactly once). Marked `secret: true` in the manifest so the prompt hides the input.
-- **`REMBRIC_PROJECT_SLUG`** — default project slug for the provider and bridge.
+- **`REMBRIC_PROJECT_SLUG`** — default project slug for the provider and bridge. Optional: while it is set it wins over every repository binding (see [Project slug resolution](#project-slug-resolution)).
 
 The TUI prints native commands without executing them when Hermes is unavailable or a headless run lacks `--yes`. `--yes` authorizes invocation, not bypassing Hermes's dependency/security/capability consent.
 
@@ -67,7 +67,7 @@ memory:
   provider: rembric
 ```
 
-Configure these settings for each active Hermes profile. The provider resolves them through Hermes' `agent.secret_scope.get_secret` API; the explicit `env` map configures the separate MCP bridge. Both prefer a valid per-directory `.rembric` slug. Without a valid slug, the provider skips requests with a diagnostic; the bridge uses path-less `/mcp`.
+Configure these settings for each active Hermes profile. The provider resolves them through Hermes' `agent.secret_scope.get_secret` API; the explicit `env` map configures the separate MCP bridge. Both select the project with the same cascade, described under [Project slug resolution](#project-slug-resolution).
 
 ## Environment variables
 
@@ -75,7 +75,7 @@ Configure these settings for each active Hermes profile. The provider resolves t
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `REMBRIC_SERVER_URL`   | ✓        | Base URL of your Rembric deployment, **without** the `/mcp` suffix. Example: `https://memory.example.com`. No trailing slash. |
 | `REMBRIC_API_TOKEN`    | ✓        | Bearer token minted from the Rembric dashboard at `/dashboard/tokens`.                                                        |
-| `REMBRIC_PROJECT_SLUG` | —        | Optional default project slug. Overridden by a valid per-directory `.rembric` file.                                           |
+| `REMBRIC_PROJECT_SLUG` | —        | Optional default project slug. Overridden by a valid `.rembric` file; overrides the repository binding when set.              |
 | `HERMES_HOME`          | —        | Override Hermes's home dir (default `~/.hermes`). Honoured by the installer.                                                  |
 
 ### Where credentials live
@@ -95,11 +95,14 @@ The plugin **does not** read any plugin-private dotenv file (`~/.rembric/.env`, 
 
 ## Project slug resolution
 
-Rembric scopes everything to a project slug. The provider and bridge use the same cascade — the **first valid match** wins:
+Rembric scopes everything to a project slug. The provider and bridge use the same cascade, once per session — the **first valid match** wins:
 
-1. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>`.
+1. The nearest `.rembric` → `PROJECT_SLUG=<slug>`: `<cwd>`, then each parent up to the git checkout root (outside git, only `<cwd>`).
 2. `REMBRIC_PROJECT_SLUG` from the active profile's `get_secret` result (the separate bridge reads its explicitly mapped environment).
-3. No valid slug → the provider skips lifecycle POSTs with one diagnostic, while the bridge uses path-less `/mcp`.
+3. Inside a git repository: the project an admin bound the repository to, resolved by its root commit through `POST /api/repositories/resolve`.
+4. No project → the provider skips lifecycle POSTs with one diagnostic. Outside git the bridge uses path-less `/mcp` (the server's default project). Inside git there is no default-project fallback: an unbound repository runs in unbound mode, where every memory tool answers `project_unbound` and the first memory hint explains how to bind it.
+
+Because the install prompt stores `REMBRIC_PROJECT_SLUG` as a profile default, a set value pre-empts the binding in every repository. Leave it empty if you want bound repositories to pick their own project. The full rules, including how an admin binds a repository, are in [How a client selects its project](../../../docs/agents.md#how-a-client-selects-its-project).
 
 Every candidate is validated against the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Non-matching values are discarded and the cascade continues. The server URL remains the bare deployment URL; a `/mcp/<slug>` suffix is not a fallback.
 
@@ -126,15 +129,15 @@ The resume runs once per session id per process, always straight after that id's
 
 `[rembric] scoped secrets API unavailable; update Hermes` or `context thread API unavailable; update Hermes` means the host is unsupported: update Hermes and restart the gateway. `profile secrets unavailable` means the active profile could not be resolved; fix the gateway/profile scope rather than exporting default-profile credentials. Missing profile URL/token diagnostics require configuring that profile. Error messages deliberately omit exception text and response bodies to avoid credential leaks.
 
-| Symptom                                                                              | Likely cause                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hermes memory status` shows `rembric: Missing` after install                        | Verify the native install succeeded and `memory.provider: rembric` is selected; use `hermes memory setup rembric` if necessary, then restart Hermes.                                                                                                  |
-| Native install didn't prompt for settings                                            | Hermes already has the required settings. Check the active profile without printing credentials; edit its settings and restart Hermes when necessary.                                                                                                 |
-| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`. Edit the file and restart Hermes.                                                                                         |
-| stderr shows `[rembric] POST failed: HTTP 403`                                       | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                    |
-| stderr shows `[rembric] POST failed: HTTP 404`                                       | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                |
-| MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded, scoped APIs are unavailable, or the active profile lacks credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then verify the three settings in the active profile without printing credentials. |
-| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                 |
+| Symptom                                                                              | Likely cause                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hermes memory status` shows `rembric: Missing` after install                        | Verify the native install succeeded and `memory.provider: rembric` is selected; use `hermes memory setup rembric` if necessary, then restart Hermes.                                                                                                                                                      |
+| Native install didn't prompt for settings                                            | Hermes already has the required settings. Check the active profile without printing credentials; edit its settings and restart Hermes when necessary.                                                                                                                                                     |
+| stderr shows `[rembric] no project slug for session ...; skipping session POST`      | No step of the cascade produced a project. Inside a git repository the reason in parentheses says why (for example `repository unbound`): ask an admin to bind the repository, or add a `.rembric`. Outside git, confirm `REMBRIC_PROJECT_SLUG` is in `~/.hermes/.env`, edit the file and restart Hermes. |
+| stderr shows `[rembric] POST failed: HTTP 403`                                       | Token doesn't have `write` permission for the project. Inspect at `/dashboard/tokens` on the server; revoke and reissue scoped to the project with the default `write` permission.                                                                                                                        |
+| stderr shows `[rembric] POST failed: HTTP 404`                                       | `REMBRIC_SERVER_URL` is path-scoped (ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, NOT the URL. Edit `~/.hermes/.env` and remove the `/mcp/<slug>` suffix.                                                                                    |
+| MCP works (memory.save/search round-trip) but `/dashboard/sessions` never gets a row | The provider isn't loaded, scoped APIs are unavailable, or the active profile lacks credentials. Confirm `memory.provider: rembric` is in `~/.hermes/config.yaml`, then verify the three settings in the active profile without printing credentials.                                                     |
+| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                  | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                                     |
 
 For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Hermes's docs at <https://hermes-agent.nousresearch.com/docs>.
 

@@ -2,7 +2,7 @@
 
 Persistent memory for [Pi](https://pi.dev), backed by a self-hosted [Rembric](https://github.com/susomejias/rembric) server: memory tools your agent can call, four slash commands, per-turn nudges, `<private>` redaction and automatic session capture.
 
-The same server and the same `.rembric` project convention as Rembric's Claude Code, Codex CLI, Hermes Agent and opencode clients — one memory store, whichever agent you are in.
+The same server and the same project selection as Rembric's Claude Code, Codex CLI, Hermes Agent and opencode clients — one memory store, whichever agent you are in.
 
 Pi ships no MCP client of its own, so this extension holds one: it connects to `${REMBRIC_SERVER_URL}/mcp/<slug>`, asks the server which tools exist, and registers every one of them with Pi. Nothing about the tool surface is written down here, so a server that gains a tool gains it in Pi with no update. The server's usage instructions — the crib-sheet the other four clients receive through their host — are forwarded into the system prompt for each turn. The extension declares **no runtime dependencies**.
 
@@ -32,20 +32,20 @@ export REMBRIC_SERVER_URL=http://127.0.0.1:8787   # your server, no trailing /mc
 export REMBRIC_API_TOKEN=<token from /dashboard/tokens>
 ```
 
-Then drop a `.rembric` file at each repo root:
+The project is selected once, at session start: the nearest `.rembric` up to the git checkout root, then `REMBRIC_PROJECT_SLUG`, then, inside a git repository, the project an admin bound the repository to. A bound repository needs no file. To select a project explicitly, drop a `.rembric` file at the repo root:
 
 ```
 PROJECT_SLUG=my-app
 ```
 
-The extension reads `PROJECT_SLUG` and connects to `/mcp/my-app`, so the server pins that project for the whole session and no tool argument can reach another one. Add `.rembric` to your global gitignore if you prefer not to commit it.
+The extension connects to `/mcp/my-app`, so the server pins that project for the whole session and no tool argument can reach another one. Add `.rembric` to your global gitignore if you prefer not to commit it. The full rules are in [How a client selects its project](../../../docs/agents.md#how-a-client-selects-its-project).
 
-Without credentials, or without a `.rembric`, the extension disables itself and Pi runs normally. It says which of the two is missing in a Pi notification, and on stderr.
+Without credentials, the extension disables itself and Pi runs normally. Outside a git repository, without a `.rembric` or `REMBRIC_PROJECT_SLUG`, it does the same. Inside a git repository it never falls back to the default project: an unbound repository gets a warning notification and tools that answer `project_unbound`, and a repository it cannot resolve turns the extension off. Each case is named in a Pi notification, and on stderr.
 
 ## Verify
 
 ```bash
-cd /path/to/a/repo/with/.rembric
+cd /path/to/a/bound/repo   # or one with a .rembric
 pi -p "call memory_stats and show the result"
 ```
 
@@ -97,7 +97,9 @@ The toggle is Pi's own and it is **global**: one press expands every tool row in
 | Symptom                                                | Cause                                                                                                          | Fix                                                                                                                               |
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | No `memory_*` tools in the session                     | `REMBRIC_SERVER_URL` / `REMBRIC_API_TOKEN` not exported in this shell                                          | A startup notification names the one that is missing; export both and restart Pi                                                  |
-| `[rembric] no PROJECT_SLUG in …`                       | No `.rembric` at the directory Pi was started in                                                               | Create it with `PROJECT_SLUG=<slug>`; the slug must name a project that exists on the server                                      |
+| `[rembric] no PROJECT_SLUG in …`                       | Outside a git repository, no `.rembric` in the directory Pi was started in and no `REMBRIC_PROJECT_SLUG`       | Create it with `PROJECT_SLUG=<slug>`; the slug must name a project that exists on the server                                      |
+| `Rembric: This repository (…) has no Rembric project`  | The git repository is not bound to a project; every memory tool answers `project_unbound`                      | Ask an admin to bind it from the dashboard, or add a `.rembric`; either applies from the next session                             |
+| `Rembric is off — …` inside a git repository           | The server did not answer `POST /api/repositories/resolve`, or the repository is bound to several projects     | Follow the remedy the notification names: update the server, or add a `.rembric`                                                  |
 | `[rembric] tool discovery failed: … project_not_found` | The slug names no project on the server — deliberately refused rather than widened                             | Create the project at `…/dashboard/projects`, or fix the slug                                                                     |
 | `[rembric] tool discovery failed: … HTTP 401`          | Token is wrong, revoked, or not authorised for that project                                                    | Issue a new one at `…/dashboard/tokens`                                                                                           |
 | Tools present but every call fails                     | Server reachable at discovery, not at call time (container restarted, tunnel dropped)                          | `curl -H "Authorization: Bearer $REMBRIC_API_TOKEN" $REMBRIC_SERVER_URL/healthz`                                                  |

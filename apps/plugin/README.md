@@ -12,13 +12,13 @@ less rembric-install.sh && sh rembric-install.sh
 
 It is an orchestrator — opencode uses its scripts, Claude/Codex their marketplace CLIs, Pi its registry CLI, and Hermes its native Git-subdirectory plugin manager. Hermes mutations reject explicit refs and local-source overrides; explicit TUI update offers recognized legacy copies a separately confirmed stopped-host migration with verified backup and native reinstall, never forced replacement. Hermes owns provider/plugin selection and grants, and removal deletes its entire managed directory while preserving unrelated settings, MCP pins and external credentials. [Hermes transition and update-check limitations](./.hermes-plugin/README.md#transition-from-a-copied-installation).
 
-| Client           | Manifest dir        | Docs                                                                       |
-| ---------------- | ------------------- | -------------------------------------------------------------------------- |
-| **Claude Code**  | `.claude-plugin/`   | this file                                                                  |
-| **Codex CLI**    | `.codex-plugin/`    | [`docs/agents.md`](../docs/agents.md#codex-cli-recommended-bundled-plugin) |
-| **Hermes Agent** | `.hermes-plugin/`   | [`apps/plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)       |
-| **opencode**     | `.opencode-plugin/` | [`apps/plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)   |
-| **Pi**           | `.pi-plugin/`       | [`apps/plugin/.pi-plugin/README.md`](./.pi-plugin/README.md)               |
+| Client           | Manifest dir        | Docs                                                                          |
+| ---------------- | ------------------- | ----------------------------------------------------------------------------- |
+| **Claude Code**  | `.claude-plugin/`   | this file                                                                     |
+| **Codex CLI**    | `.codex-plugin/`    | [`docs/agents.md`](../../docs/agents.md#codex-cli-recommended-bundled-plugin) |
+| **Hermes Agent** | `.hermes-plugin/`   | [`apps/plugin/.hermes-plugin/README.md`](./.hermes-plugin/README.md)          |
+| **opencode**     | `.opencode-plugin/` | [`apps/plugin/.opencode-plugin/README.md`](./.opencode-plugin/README.md)      |
+| **Pi**           | `.pi-plugin/`       | [`apps/plugin/.pi-plugin/README.md`](./.pi-plugin/README.md)                  |
 
 <details>
 <summary><strong>Manual install</strong> (per-client, fallback — what the TUI runs under the hood)</summary>
@@ -46,10 +46,10 @@ Before rewriting a resumed summary, call `memory.session_get_batch({ ids: [sessi
 ## What you get
 
 - **One MCP server** declared automatically — no hand-editing `.mcp.json`, no plaintext tokens in your settings file. The API token lives in your system keychain.
-- **A zero-dependency stdio bridge** (`mcp-bridge/`) that reads `PROJECT_SLUG` from `.rembric`, path-scopes the MCP URL, and recovers a terminated session without replaying earlier tool calls.
+- **A zero-dependency stdio bridge** (`mcp-bridge/`) that selects the project (a `.rembric`, `REMBRIC_PROJECT_SLUG`, or the repository's binding), path-scopes the MCP URL, and recovers a terminated session without replaying earlier tool calls.
 - **Four slash commands** under `/rembric:*` — `remember`, `recall`, `context`, `summary`.
 - **Twelve hooks** — all `command`-type, all calling Rembric's HTTP API directly so sessions are tracked and memory reaches the agent regardless of whether the agent remembers to call a tool:
-  - `SessionStart` (matcher `startup|resume|clear|fork`) reads the host session id from stdin and POSTs `/api/<slug>/sessions` to register the session (idempotent), then `/api/<slug>/sessions/<id>/resume`, which returns a row a previous run ended (or the sweep abandoned) to `active` so a reopened conversation keeps its memories. Also nudges the agent to load recent context.
+  - `SessionStart` (matcher `startup|resume|clear|fork`) reads the host session id from stdin, resolves the session's project once (every later hook reuses that result), and POSTs `/api/<slug>/sessions` to register the session (idempotent), then `/api/<slug>/sessions/<id>/resume`, which returns a row a previous run ended (or the sweep abandoned) to `active` so a reopened conversation keeps its memories. Also nudges the agent to load recent context. When no project is selected inside a git repository, it registers nothing and prints the unbound notice instead, and every other hook skips its POSTs.
   - `SessionStart` (matcher `compact`) injects a multi-line nudge to read `memory.session_get_batch({ ids: [sessionId] })` / `sessions[0]` in full before rewriting via `memory.session_summary`; use `memory.context` only for missing detail.
   - `UserPromptSubmit` (matcher on recall keywords) nudges the agent to search before responding.
   - `UserPromptSubmit` (matcher-less, every prompt) prints, on plain stdout, whatever the previous turn's report cached: the reminder the SERVER composed from the session's own state — a `memory.save` clause when tool work followed the session's last saved memory, and a session-summary refresh when the summary is stale — plus the session-opening line on a newly created session. It counts nothing — the firing decision belongs to the server.
@@ -141,21 +141,28 @@ Reload after edits with `/reload-plugins`. For deep changes (e.g. editing the br
 
 ## Picking the project per repo
 
-Drop a `.rembric` file in each project's root with `PROJECT_SLUG=<slug>`:
+The bridge and the hooks select the project once per session, first match wins:
+
+1. The nearest `.rembric` file with `PROJECT_SLUG=<slug>`: the start directory, then each parent up to the git checkout root (outside git, only the start directory).
+2. `REMBRIC_PROJECT_SLUG`.
+3. Inside a git repository: the project an admin bound the repository to, identified by its root commit, so every clone and worktree resolves to it with no file at all.
+
+Inside a git repository there is no default-project fallback: an unbound repository runs in unbound mode, where the session saves nothing, every memory tool answers `project_unbound`, and the session-start notice says how to bind it. Outside git, with no slug, the bridge uses path-less `/mcp` (the server's default project) and writes one stderr diagnostic (visible in `claude --debug`) naming the fix. The full rules, including how an admin binds a repository, shallow clones and the pending list, are in [How a client selects its project](../../docs/agents.md#how-a-client-selects-its-project).
+
+To select a project explicitly, drop a `.rembric` file at the checkout root, or in a subdirectory for a monorepo subproject:
 
 ```bash
 echo "PROJECT_SLUG=my-app-slug" > .rembric
 ```
 
-Format is dotenv-style (`KEY=VALUE`, `#` for comments). Reserved for future fields (e.g. `DEFAULT_SCOPE=`, `AUTO_SAVE=`) — today only `PROJECT_SLUG` is read. The bridge parses it on every MCP session start and builds the URL `${server_url}/mcp/my-app-slug`. The Rembric server pins the project from the URL path automatically.
-
-If `.rembric` is missing, unparseable, or `PROJECT_SLUG` is invalid, the bridge falls back to `REMBRIC_PROJECT_SLUG` when it is set, and otherwise to path-less `/mcp`. Either way it writes one diagnostic to stderr (visible in `claude --debug`) naming the fix: add a `.rembric` file containing `PROJECT_SLUG=<slug>`, or set `REMBRIC_PROJECT_SLUG`. The session still works — a path-less connection resolves to the server's default project for its whole life, and no tool switches it. To work in another project, change `.rembric` and start a new session.
+Format is dotenv-style (`KEY=VALUE`, `#` for comments). Reserved for future fields (e.g. `DEFAULT_SCOPE=`, `AUTO_SAVE=`) — today only `PROJECT_SLUG` is read. The bridge builds the URL `${server_url}/mcp/my-app-slug`, and the Rembric server pins the project from the URL path. A `.rembric` wins over the repository's binding; when they differ, the session-start notice reports the conflict and the binding stays unchanged. To work in another project, change `.rembric` and start a new session.
 
 A slug the server does not know is refused with `project_not_found`. Create the project from the dashboard (`/dashboard/projects`); agents cannot create one, and the same URL works as soon as it exists.
 
 ### Whether to commit `.rembric`
 
-- **Commit it** when the whole team should share the same Rembric project for this repo.
+- **Usually you need neither**: once an admin binds the repository, every clone resolves to its project. A committed root `.rembric` naming a project the repository is not bound to shows up in the dashboard as a suggestion for an admin to accept.
+- **Commit it** when the whole team should share the same Rembric project for this repo and nobody has bound it, or to pin monorepo subprojects.
 - **Gitignore it** if each teammate uses their own memory scope.
 
 ### Choosing a slug
