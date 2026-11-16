@@ -341,20 +341,37 @@ const TONE_PILL: Record<Tone, { border: string; bg: string; text: string; dot: s
   },
 };
 
-export function StatusPill({ status }: { status: string }) {
-  const tone = TONE_PILL[STATUS_TONE[status] ?? 'dim'];
+export function TonePill({
+  tone = 'dim',
+  children,
+  className,
+}: {
+  tone?: Tone;
+  children: ReactNode;
+  className?: string;
+}) {
+  const style = TONE_PILL[tone];
   return (
     <span
       className={cn(
-        'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
-        tone.border,
-        tone.bg,
-        tone.text,
+        'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium',
+        style.border,
+        style.bg,
+        style.text,
+        className,
       )}
     >
-      <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', tone.dot)} />
-      {status}
+      <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', style.dot)} />
+      {children}
     </span>
+  );
+}
+
+export function StatusPill({ status }: { status: string }) {
+  return (
+    <TonePill tone={STATUS_TONE[status] ?? 'dim'} className="capitalize">
+      {status}
+    </TonePill>
   );
 }
 
