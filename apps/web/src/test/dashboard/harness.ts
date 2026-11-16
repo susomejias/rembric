@@ -4,6 +4,8 @@ import {
   ProjectsService,
   PromptsService,
   RelationsService,
+  RepositoryBindingsService,
+  TokensService,
 } from '@rembric/core';
 import { createRepositories, type DbHandle } from '@rembric/db';
 import { createElement } from 'react';
@@ -25,6 +27,8 @@ export function buildDashboardServices(handle: DbHandle): Record<string, unknown
     agentSessions: new AgentSessionsService(repos, handle.db),
     relations: new RelationsService(repos, handle.db),
     prompts: new PromptsService(repos, handle.db),
+    tokens: new TokensService(repos, handle.db),
+    repositoryBindings: new RepositoryBindingsService(repos, handle.db),
   };
 }
 

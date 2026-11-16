@@ -290,6 +290,52 @@ export class RepositoryBindingsService {
     });
   }
 
+  pendingCutoff(): Date {
+    return new Date(this.now().getTime() - this.ttlMs);
+  }
+
+  bindWithChoice(input: {
+    projectId: string;
+    createdBy: string;
+    fingerprint?: string;
+    pendingId?: string;
+    choice?: 'add' | { moveFrom: string };
+  }): ProjectRepository {
+    return this.tx.transaction(() => {
+      let fingerprint = input.fingerprint ?? '';
+      if (input.pendingId !== undefined) {
+        const row = this.repos.pendingRepositories.findById(input.pendingId);
+        if (!row) throw new DomainError('conflict', 'this pending repository no longer exists');
+        fingerprint = row.fingerprint;
+      }
+      const { choice, projectId, createdBy } = input;
+      let bound: ProjectRepository;
+      if (typeof choice === 'object') {
+        bound = this.move({
+          fingerprint,
+          fromProjectId: choice.moveFrom,
+          toProjectId: projectId,
+          createdBy,
+        });
+      } else {
+        const others = this.repos.repositoryBindings
+          .unsafeListAllForFingerprint(fingerprint)
+          .filter((b) => b.projectId !== projectId);
+        if (others.length > 0 && choice !== 'add') {
+          throw new DomainError(
+            'repository_already_bound',
+            `this repository is already bound to ${others.map((b) => `'${b.slug}'`).join(', ')}; ` +
+              'choose whether to move that binding or add a second one',
+            { boundProjects: others.map((b) => ({ id: b.projectId, slug: b.slug })) },
+          );
+        }
+        bound = this.bind({ fingerprint, projectId, createdBy });
+      }
+      if (input.pendingId !== undefined) this.repos.pendingRepositories.delete(input.pendingId);
+      return bound;
+    });
+  }
+
   remove(input: { fingerprint: string; projectId: string }): boolean {
     return this.repos.repositoryBindings.delete(input.fingerprint, input.projectId);
   }
