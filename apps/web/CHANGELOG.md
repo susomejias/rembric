@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.31.3](https://github.com/susomejias/rembric/compare/server-v0.31.2...server-v0.31.3) (2026-11-16)
+
+
+### Features
+
+* **dashboard:** manage repository bindings and pending repositories ([4e1ae27](https://github.com/susomejias/rembric/commit/4e1ae27a2d366db5236da15317b6eca10fd4cefd))
+* **db:** store repository bindings and pending repositories ([6b68bae](https://github.com/susomejias/rembric/commit/6b68bae42fa8e92e80079fbfe901c8ad5ae642b3))
+* **mcp:** resolve repository fingerprints and refuse unbound connections ([5e764dc](https://github.com/susomejias/rembric/commit/5e764dc0b26a3156fc0242a78d675a626b38bb4a))
+* **plugin:** resolve the project from the repository fingerprint in the bridge ([1888145](https://github.com/susomejias/rembric/commit/1888145ff440e9daa1932a7faff77791d3c6926f))
+* **plugin:** resolve the project once per session in opencode and Pi ([5f8e25a](https://github.com/susomejias/rembric/commit/5f8e25a6c92d8550dbad72c05fc81ba1f5f52ef9))
+
 ## [0.31.2](https://github.com/susomejias/rembric/compare/server-v0.31.1...server-v0.31.2) (2026-11-15)
 
 
