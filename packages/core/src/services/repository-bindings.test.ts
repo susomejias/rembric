@@ -539,3 +539,116 @@ describe('binding', () => {
     expect(repos.pendingRepositories.findById(row.id)).toBeUndefined();
   });
 });
+
+describe('dashboard binding with an explicit conflict choice', () => {
+  const BY = 'dashboard:t-admin';
+
+  it('reports the live-pending cutoff the configured expiry implies', () => {
+    expect(build({ pendingTtlDays: 3 }).pendingCutoff()).toEqual(new Date(97 * DAY));
+  });
+
+  it('binds a pending unbound row with its remotes and clears the row', () => {
+    service.resolve(writer(shop), { fingerprint: F, remotes: ['https://github.com/acme/shop'] });
+    const row = repos.pendingRepositories.findByIdentity(F, 'unbound', null)!;
+    const bound = service.bindWithChoice({ pendingId: row.id, projectId: shop.id, createdBy: BY });
+    expect(bound).toMatchObject({ fingerprint: F, projectId: shop.id, createdBy: BY });
+    expect(repos.repositoryBindings.unsafeListAllForFingerprint(F)).toEqual([
+      expect.objectContaining({ slug: 'shop', remotes: ['github.com/acme/shop'] }),
+    ]);
+    expect(repos.pendingRepositories.findById(row.id)).toBeUndefined();
+  });
+
+  it('refuses to bind a fingerprint bound elsewhere until a choice is made, changing nothing', () => {
+    service.bind({ fingerprint: F, projectId: shop.id, createdBy: BY });
+    service.resolve(writer(sandbox), {
+      fingerprint: F,
+      remotes: [],
+      explicit: { slug: 'sandbox', source: 'rembric-root' },
+    });
+    const row = repos.pendingRepositories.findByIdentity(F, 'suggestion', sandbox.id)!;
+    const before = dump();
+    let caught: unknown;
+    try {
+      service.bindWithChoice({ pendingId: row.id, projectId: sandbox.id, createdBy: BY });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({
+      code: 'repository_already_bound',
+      details: { boundProjects: [{ id: shop.id, slug: 'shop' }] },
+    });
+    expect((caught as Error).message).toContain("'shop'");
+    expect(dump()).toBe(before);
+  });
+
+  it('moving leaves the fingerprint bound to the chosen project only', () => {
+    service.bind({ fingerprint: F, projectId: shop.id, createdBy: BY });
+    service.resolve(writer(sandbox), {
+      fingerprint: F,
+      remotes: [],
+      explicit: { slug: 'sandbox', source: 'rembric-root' },
+    });
+    const row = repos.pendingRepositories.findByIdentity(F, 'suggestion', sandbox.id)!;
+    service.bindWithChoice({
+      pendingId: row.id,
+      projectId: sandbox.id,
+      createdBy: BY,
+      choice: { moveFrom: shop.id },
+    });
+    expect(repos.repositoryBindings.unsafeListAllForFingerprint(F).map((b) => b.slug)).toEqual([
+      'sandbox',
+    ]);
+    expect(repos.pendingRepositories.findById(row.id)).toBeUndefined();
+  });
+
+  it('adding keeps both bindings', () => {
+    service.bind({ fingerprint: F, projectId: shop.id, createdBy: BY });
+    service.bindWithChoice({ fingerprint: F, projectId: sandbox.id, createdBy: BY, choice: 'add' });
+    expect(repos.repositoryBindings.unsafeListAllForFingerprint(F).map((b) => b.slug)).toEqual([
+      'sandbox',
+      'shop',
+    ]);
+  });
+
+  it('binding an unknown-remote row to another project clears that row', () => {
+    service.bind({ fingerprint: F, projectId: shop.id, createdBy: BY });
+    repos.repositoryBindings.updateRemotes(F, shop.id, ['github.com/acme/shop']);
+    service.resolve(writer(shop), { fingerprint: F, remotes: ['github.com/other/store'] });
+    const row = repos.pendingRepositories.findByIdentity(F, 'unknown_remote', shop.id)!;
+    service.bindWithChoice({
+      pendingId: row.id,
+      projectId: sandbox.id,
+      createdBy: BY,
+      choice: { moveFrom: shop.id },
+    });
+    expect(repos.repositoryBindings.unsafeListAllForFingerprint(F)).toEqual([
+      expect.objectContaining({ slug: 'sandbox' }),
+    ]);
+    expect(repos.pendingRepositories.findById(row.id)).toBeUndefined();
+  });
+
+  it('refuses a vanished pending row and a move from a project that holds no binding', () => {
+    expect(() =>
+      service.bindWithChoice({ pendingId: 'missing', projectId: shop.id, createdBy: BY }),
+    ).toThrow(expect.objectContaining({ code: 'conflict' }) as Error);
+    service.bind({ fingerprint: F, projectId: shop.id, createdBy: BY });
+    const before = dump();
+    expect(() =>
+      service.bindWithChoice({
+        fingerprint: F,
+        projectId: sandbox.id,
+        createdBy: BY,
+        choice: { moveFrom: secret.id },
+      }),
+    ).toThrow(expect.objectContaining({ code: 'conflict' }) as Error);
+    expect(dump()).toBe(before);
+  });
+
+  it('validates a typed fingerprint before touching anything', () => {
+    const before = dump();
+    expect(() =>
+      service.bindWithChoice({ fingerprint: 'abc123', projectId: shop.id, createdBy: BY }),
+    ).toThrow(expect.objectContaining({ code: 'invalid_repository_fingerprint' }) as Error);
+    expect(dump()).toBe(before);
+  });
+});

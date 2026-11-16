@@ -11,6 +11,11 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import type {
+  ProjectRepositories,
+  RepositoryActions,
+  RepositoryCsrf,
+} from '@/components/dashboard/repositories-section';
 import { Pill, Time } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
@@ -38,6 +43,7 @@ export interface ProjectRowData {
   readonly archived: boolean;
   readonly legacy: boolean;
   readonly createdAt: Date;
+  readonly repositories: ProjectRepositories;
 }
 
 export interface ProjectServerActions {
@@ -69,6 +75,8 @@ export function ProjectsTable({
   rows,
   actions,
   csrf,
+  repositoryActions,
+  repositoryCsrf,
   bulkArchiveAction,
   selectable = false,
   toolbar,
@@ -78,6 +86,8 @@ export function ProjectsTable({
   rows: readonly ProjectRowData[];
   actions: ProjectServerActions;
   csrf: ProjectCsrfTokens;
+  repositoryActions: RepositoryActions;
+  repositoryCsrf: RepositoryCsrf;
   bulkArchiveAction: FormAction;
   selectable?: boolean;
   toolbar?: React.ReactNode;
@@ -89,6 +99,8 @@ export function ProjectsTable({
   // out; `renameOpen` alone decides whether the sheet is on screen.
   const [renameTarget, setRenameTarget] = React.useState<ProjectRowData | null>(null);
   const [renameOpen, setRenameOpen] = React.useState(false);
+  const currentTarget =
+    renameTarget === null ? null : (rows.find((row) => row.id === renameTarget.id) ?? renameTarget);
 
   const columns: DataTableColumn<ProjectRowData>[] = [
     {
@@ -211,11 +223,13 @@ export function ProjectsTable({
       />
 
       <RenameProjectSheet
-        target={renameTarget}
+        target={currentTarget}
         open={renameOpen}
         onOpenChange={setRenameOpen}
         action={actions.rename}
         csrf={csrf.rename}
+        repositoryActions={repositoryActions}
+        repositoryCsrf={repositoryCsrf}
       />
     </>
   );
@@ -256,7 +270,7 @@ function ProjectRowMenu({
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onRename} className={MENU_ITEM_ROOT}>
-          Rename project
+          Edit project
         </DropdownMenuItem>
         {archiveAction === 'none' ? null : (
           <>

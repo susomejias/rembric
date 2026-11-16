@@ -4,6 +4,14 @@ import { useRouter } from 'next/navigation';
 import { useActionState, useEffect, useRef, useState } from 'react';
 
 import type { ActionState, FormAction } from '@/components/dashboard/action-form';
+import {
+  CreateRepositoryFields,
+  RepositoriesSection,
+  type PendingRepository,
+  type ProjectRepositories,
+  type RepositoryActions,
+  type RepositoryCsrf,
+} from '@/components/dashboard/repositories-section';
 import { Flash, LABEL } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +29,7 @@ import { cn } from '@/lib/utils';
 
 const INITIAL_STATE: ActionState = { error: null };
 
-const SHEET_CONTENT = 'w-full gap-0 border-border bg-card sm:max-w-md';
+const SHEET_CONTENT = 'w-full gap-0 overflow-y-auto border-border bg-card sm:max-w-md';
 const SHEET_HEAD = 'border-b border-border px-4 py-4';
 const SHEET_BODY = 'flex flex-col gap-4 px-4 py-5';
 
@@ -33,9 +41,19 @@ export interface RenameTarget {
   readonly label: string;
   readonly slug: string;
   readonly displayName: string | null;
+  readonly archived?: boolean;
+  readonly repositories?: ProjectRepositories;
 }
 
-export function CreateProjectSheet({ action, csrf }: { action: FormAction; csrf: string | null }) {
+export function CreateProjectSheet({
+  action,
+  csrf,
+  pending = [],
+}: {
+  action: FormAction;
+  csrf: string | null;
+  pending?: readonly PendingRepository[];
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -53,7 +71,12 @@ export function CreateProjectSheet({ action, csrf }: { action: FormAction; csrf:
             can change.
           </SheetDescription>
         </SheetHeader>
-        <CreateProjectForm action={action} csrf={csrf} onDone={() => setOpen(false)} />
+        <CreateProjectForm
+          action={action}
+          csrf={csrf}
+          pending={pending}
+          onDone={() => setOpen(false)}
+        />
       </SheetContent>
     </Sheet>
   );
@@ -65,18 +88,22 @@ export function RenameProjectSheet({
   onOpenChange,
   action,
   csrf,
+  repositoryActions,
+  repositoryCsrf,
 }: {
   target: RenameTarget | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   action: FormAction;
   csrf: string | null;
+  repositoryActions?: RepositoryActions;
+  repositoryCsrf?: RepositoryCsrf;
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className={SHEET_CONTENT}>
         <SheetHeader className={SHEET_HEAD}>
-          <SheetTitle>Rename project</SheetTitle>
+          <SheetTitle>Edit project</SheetTitle>
           <SheetDescription>
             {target === null
               ? 'Update the display name this project shows across the dashboard.'
@@ -92,6 +119,17 @@ export function RenameProjectSheet({
             onDone={() => onOpenChange(false)}
           />
         )}
+        {target?.repositories === undefined ||
+        repositoryActions === undefined ||
+        repositoryCsrf === undefined ? null : (
+          <RepositoriesSection
+            key={`repositories-${target.id}`}
+            project={{ id: target.id, slug: target.slug, archived: target.archived ?? false }}
+            data={target.repositories}
+            actions={repositoryActions}
+            csrf={repositoryCsrf}
+          />
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -100,13 +138,15 @@ export function RenameProjectSheet({
 function CreateProjectForm({
   action,
   csrf,
+  pending,
   onDone,
 }: {
   action: FormAction;
   csrf: string | null;
+  pending: readonly PendingRepository[];
   onDone: () => void;
 }) {
-  const { state, formAction, pending } = useSheetForm(action, onDone);
+  const { state, formAction, pending: submitting } = useSheetForm(action, onDone);
 
   return (
     <form action={formAction} className={SHEET_BODY}>
@@ -141,8 +181,9 @@ function CreateProjectForm({
           autoComplete="off"
         />
       </div>
+      <CreateRepositoryFields pending={pending} />
       <SheetFooter className="mt-0 p-0">
-        <Button type="submit" size="sm" disabled={pending}>
+        <Button type="submit" size="sm" disabled={submitting}>
           Create project
         </Button>
       </SheetFooter>
