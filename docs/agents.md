@@ -15,7 +15,7 @@ URL:    http(s)://your-host:8787/mcp[/<project-slug>]
 Header: Authorization: Bearer <agent-token>
 ```
 
-- `/mcp` → the default project. A project is always active; to work in another one, connect at `/mcp/<slug>` (for the bridge clients, a `.rembric` file or `REMBRIC_PROJECT_SLUG`). No tool switches or creates a project; projects are created from the dashboard.
+- `/mcp` → the default project, except for a bundled-plugin session inside a git repository nobody has bound, which runs in [unbound mode](#inside-a-git-repository-no-default-project) instead. To work in another project, connect at `/mcp/<slug>`; the bundled plugins pick the slug for you, as described in [How a client selects its project](#how-a-client-selects-its-project). No tool switches or creates a project; projects are created from the dashboard.
 - `/mcp/<slug>` → path-scoped. The agent's home project is fixed to that slug and cannot be switched for the life of the connection; every write lands there and no argument names another destination. Reads are the same as anywhere else — the opt-in `across_projects` search below works here too, because the path fixes which project is home, not which projects the token may read. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.list`/`project.current`/`memory.about` stay available, and the refusal points at the dashboard, where the project is created.
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
@@ -36,6 +36,106 @@ Recommended: the shipped client plugins default to `*` or a matching `project:<i
 **OAuth 2.1 — no static token.** OAuth-capable clients (Claude Code as a remote MCP server, ChatGPT custom connectors) can connect without minting a token: set `REMBRIC_PUBLIC_URL` (the https issuer; `http://localhost` allowed for local testing) and the server runs the authorization-code + PKCE flow itself. The client points at the same `…/mcp[/<slug>]` URL with **no `Authorization` header**; the first connect opens a consent screen where you sign in with the admin token and approve, after which the client manages the token (refresh included). It is off unless `REMBRIC_PUBLIC_URL` is set, and the static-token path above is unchanged — both kinds of token authenticate `/mcp` identically.
 
 The MCP server emits a short `instructions` block at handshake teaching the whole memory loop — recall before work, `memory.save` each fix, decision or discovery as soon as it is settled, `memory.judge_batch` for conflicts, `memory.session_summary` before ending a working turn, and `memory.session_start` when no host registered a session. It is written to stand on its own: an MCP client without a Rembric plugin receives no per-turn reminders. Clients that support `initialize.instructions` — Claude Code, Codex CLI and Pi among them — inject it into the system prompt. Other clients still get the same protocol via each tool's description.
+
+## How a client selects its project
+
+Every bundled plugin picks its project the same way: the MCP bridge (used by Claude Code, Codex CLI, Hermes Agent and opencode), the Pi extension, the Claude Code and Codex hooks, and the opencode, Pi and Hermes lifecycle code. It happens once, when the session starts, and the first step that yields a valid slug wins:
+
+1. **The nearest `.rembric` file** containing `PROJECT_SLUG=<slug>`. Inside a git repository the client reads the start directory, then each parent up to the checkout root, never above it. Outside git, only the start directory is read.
+2. **`REMBRIC_PROJECT_SLUG`**, the client's default slug.
+3. **Inside a git repository only: the repository fingerprint.** The client asks the server (`POST /api/repositories/resolve`) which project the repository is bound to.
+
+The fingerprint is the root commit of the checked-out history, followed through first parents. You can print it yourself:
+
+```bash
+git rev-list --first-parent --max-parents=0 HEAD
+```
+
+It is the same in every full clone and every worktree of a repository, on every machine, and it survives renames and remote changes. A session inside a git submodule uses the submodule's own fingerprint. The client sends the repository's remote URLs along with it, with credentials removed.
+
+The result holds for the whole session. A new `.rembric`, a new binding or a removed binding takes effect from the next session. A selected slug connects at `/mcp/<slug>`; a slug that names no project is refused with `project_not_found` (create the project from the dashboard).
+
+The start directory is the host's project directory. For the bridge, that is `CLAUDE_PROJECT_DIR`, then `PWD`, then the current directory. The hooks use the `cwd` the host passes them, and opencode, Pi and Hermes use the session's directory.
+
+### Outside a git repository
+
+Nothing changes here. With no `.rembric` and no `REMBRIC_PROJECT_SLUG`, the bridge connects path-less to `/mcp`, which resolves to the server's default project, and writes one stderr line naming the fix. The hooks and the in-process lifecycle code register no session, and Pi turns itself off with a notification.
+
+### Inside a git repository: no default project
+
+Inside a git repository a client **never** falls back to the default project. When neither `.rembric` nor `REMBRIC_PROJECT_SLUG` selects a project, the server's answer decides:
+
+| Answer from the server                                                                                                                 | What happens                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bound to one project the token can read                                                                                                | The session uses that project.                                                                                                                                                                                  |
+| Not bound, or its remotes are [unknown to its binding](#binding-a-repository)                                                          | **Unbound mode**, below.                                                                                                                                                                                        |
+| Bound to several projects the token can read (`repository_ambiguous`)                                                                  | No connection. Pick one with a `.rembric` or `REMBRIC_PROJECT_SLUG`.                                                                                                                                            |
+| No answer: an older server without the endpoint, any other HTTP error, a timeout, an unreachable server, or missing server credentials | No connection, so nothing lands in the default project. The bridge exits non-zero with one stderr line naming the remedy: update the Rembric server, or add a `.rembric` file containing `PROJECT_SLUG=<slug>`. |
+
+An explicit selection (`.rembric` or `REMBRIC_PROJECT_SLUG`) works against any server version. The bridge, opencode and Pi wait 2000 ms for the answer (`REMBRIC_RESOLVE_TIMEOUT_MS` overrides it); the hooks use `REMBRIC_POST_MAX_TIME`, 3 seconds by default.
+
+**Unbound mode** keeps the session out of every project:
+
+- The bridge and Pi still connect, path-less, with an `X-Rembric-Repo-Fingerprint` header. Every tool that reads or writes a project's memory is refused with `code: project_unbound`. `project.list`, `project.current` and `project.bind_repository` keep working, and `project.current` answers `source: 'unbound'` with a `repository` field carrying the fingerprint.
+- No session is registered and nothing is posted: no turn reports, summaries, recall hints, file notes or end events.
+- The session starts with a notice that names the first 12 characters of the fingerprint and how to get out of unbound mode. In Claude Code and Codex the hook prints it to the agent:
+
+  ```text
+  rembric: This repository is not bound to a Rembric project (fingerprint 1a2b3c4d5e6f), so nothing from this session is saved. Sessions in this repository used the default project before this version; binding it to the default project keeps that continuity. To bind it, ask an admin to bind this repository from the Rembric dashboard, or add a .rembric file with PROJECT_SLUG=<slug>. The binding applies from the next session.
+  ```
+
+  Hermes adds the notice to its first memory hint and to stderr; Pi raises it as a warning notification; opencode and the bridge write it to stderr.
+
+To leave unbound mode, do one of these and start a new session:
+
+- Ask an admin to [bind the repository](#binding-a-repository).
+- Add a `.rembric` file containing `PROJECT_SLUG=<slug>` anywhere between the start directory and the checkout root, or set `REMBRIC_PROJECT_SLUG`.
+
+**Upgrading.** A checkout that used to land in the default project without a `.rembric` becomes unbound after the upgrade and shows up in the [pending list](#pending-repositories). Binding it to the default project keeps its history continuous. Nothing already written moves.
+
+### Repositories without a fingerprint
+
+A shallow clone, a repository with no commit yet, or a host where git cannot read the history has no fingerprint: a shallow clone's oldest commit is not the real root, so the client does not use it. The session runs in unbound mode, no binding can match it, and it is never added to the pending list. To fix it, run `git fetch --unshallow`, make a first commit, or add a `.rembric` file.
+
+### Binding a repository
+
+Only an admin binds a repository, either from the dashboard or with the admin token (`*`):
+
+- **Dashboard.** A project's create and edit sheets carry a **Repositories** section. It lists the repositories bound to the project, the pending repositories relevant to it (each with a bind action), and a field that binds a fingerprint you paste: 40 or 64 lowercase hexadecimal characters, the output of the `git rev-list` command above. Removing a binding asks for confirmation; memories and sessions already written stay in the project, and later sessions from that repository stop resolving there. The projects list shows how many repositories are pending, and the pending view lists them all. Moving a binding to another project is done there too.
+- **`project.bind_repository({ slug })`**, from an agent session running inside the repository with the admin token. It reads the fingerprint from the session, binds only a repository that has no binding yet, and takes effect from the next session; the current session's project does not change. It refuses with `admin_token_required` for any other token, `repository_fingerprint_unavailable` when the session has no fingerprint, and `repository_already_bound` when the repository is already bound. Moving or removing a binding is dashboard-only.
+
+A repository can be bound to several projects. A token only sees the bindings to projects it can read; a binding it cannot read behaves exactly as if it did not exist. A token that can read more than one binding gets `repository_ambiguous` and needs an explicit selection.
+
+**Unknown remotes.** Once a binding knows a repository's remotes, a checkout whose remotes are all unknown to it is not resolved. It runs in unbound mode, and the notice says its remotes do not match. The checkout appears in the pending list as an unknown remote, where an admin can accept the remote into the binding, bind the repository to another project, or discard it. This keeps a second project started from the same boilerplate history out of the first one's memory. A fork that keeps the original repository as a remote resolves, and its new remote is learned. A checkout with no remote resolves without this check.
+
+### Pending repositories
+
+The pending list tells an admin which repositories need a decision. A token that may write records a row when:
+
+- **unbound**: it resolved a repository with no binding it can read;
+- **suggestion**: its checkout has a `.rembric` at the checkout root naming a project the token may write, and the repository is not bound to that project;
+- **unknown remote**: see [Binding a repository](#binding-a-repository).
+
+There is one row per repository, kind and project, however many teammates run into it, and the row lists the tokens that did. A row stores the normalized remotes without credentials, or only the checkout folder's name when the repository has no remote, never a local path. Read-only tokens and repositories without a fingerprint record nothing. A discarded row stays hidden, even when sighted again, until an admin restores it.
+
+Two server environment variables bound the list:
+
+| Variable                             | Default | Effect                                                                                                                                                 |
+| ------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REMBRIC_REPO_PENDING_TTL_DAYS`      | `14`    | A row nobody has sighted for this many days leaves the list and stops counting toward the per-token limit. Discarded rows do not expire. Range 1–3650. |
+| `REMBRIC_REPO_PENDING_MAX_PER_TOKEN` | `20`    | A token that already appears in this many live rows creates no new row; a sighting that refreshes an existing row still counts. Range 0–10000.         |
+
+A value that is not an integer falls back to the default, and one outside the range is clamped to it.
+
+### An explicit selection wins over a binding
+
+A `.rembric` or `REMBRIC_PROJECT_SLUG` always beats a binding. That is how a monorepo picks a subproject (a nested `.rembric`) and how a session settles an ambiguity. When the selection differs from the project the repository is bound to, the session uses the selection, the binding stays as it is, and the conflict is reported:
+
+- in the session-start notice, for example `rembric: This session uses project sandbox, selected by the .rembric file at the checkout root, but this repository is bound to shop. The binding is unchanged; remove the selection to use the bound project from the next session.`;
+- in `project.current`, as `repository.conflict: true`;
+- for a `.rembric` at the checkout root only, as a suggestion in the dashboard's pending list.
+
+`REMBRIC_PROJECT_SLUG` is a per-client default, not a statement about one repository: while it is set (for example as a Hermes profile default), it wins over the binding in every repository.
 
 ## Searching across projects
 
@@ -190,13 +290,13 @@ What the plugin registers for Codex:
 - A five-hook subset (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `PostCompact`, `Stop`) sharing scripts with the Claude Code plugin via `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`. All hooks are `command`-type and POST to Rembric's `/api/<slug>/sessions(*)` HTTP API for session lifecycle — the agent never needs to call `memory.session_start`/`memory.session_summary`/`memory.session_end` manually; the hooks handle creation, summary-on-compact (pre + post), and end-on-stop.
 - **No slash commands.** `/rembric:remember`, `/rembric:recall`, `/rembric:context` and `/rembric:summary` are Claude-Code-only: Claude Code auto-discovers them from `apps/plugin/commands/*.md`, and `.codex-plugin/plugin.json` declares only `mcpServers` and `hooks`. Under Codex, ask the agent in plain language instead ("remember that…", "what did we do last time") — it has the same MCP tools, and the protocol guidance arrives server-side via the `initialize.instructions` handshake.
 
-After install, drop a `.rembric` file at the root of each project to path-scope the slug automatically:
+After install, the plugin picks each session's project as described in [How a client selects its project](#how-a-client-selects-its-project). Inside a git repository, an admin binds the repository once and every clone and worktree of it resolves to that project. To select a project explicitly instead, drop a `.rembric` file at the checkout root (or in a subdirectory, for a monorepo subproject):
 
 ```bash
 echo "PROJECT_SLUG=my-app" > .rembric
 ```
 
-Without that file the bridge connects path-less (`/mcp`) and operates in the default project.
+With neither a binding nor a `.rembric`, a session inside a git repository runs in [unbound mode](#inside-a-git-repository-no-default-project) and saves nothing; outside git the bridge connects path-less (`/mcp`) and operates in the default project.
 
 #### Credentials — REQUIRED: shell env vars
 
@@ -230,12 +330,14 @@ After trusting the hooks, the `/plugins` panel for `rembric` shows the hook coun
 
 ##### Symptom → cause table
 
-| Symptom in Codex                                                                                                                | Cause                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/dashboard/sessions` stays empty after Codex sessions                                                                          | Hooks have not been approved via `/hooks` yet. MCP can still work while hooks silently no-op.                                                                                                                                                                                            |
-| `/plugins` panel shows `Hooks: No plugin hooks`                                                                                 | You're on a `codex-cli` release old enough to still gate hooks behind a feature flag — run `codex features list` to check, and upgrade Codex if so.                                                                                                                                      |
-| Startup banner _"N hooks need review"_ keeps appearing across launches                                                          | Not all hooks approved yet. Open `/hooks` and approve any handler whose status is `Untrusted` or `Modified`.                                                                                                                                                                             |
-| Hook fires but Codex reports `error: hook returned invalid session start JSON output` (or `... user prompt submit JSON output`) | Codex applies a `looks_like_json` heuristic to hook stdout and rejects anything it reads as malformed JSON. The scripts emit plain text prefixed `rembric:` precisely so the heuristic does not fire, so this points at a nudge whose prefix was dropped, not at a missing JSON wrapper. |
+| Symptom in Codex                                                                                                                           | Cause                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/dashboard/sessions` stays empty after Codex sessions                                                                                     | Hooks have not been approved via `/hooks` yet. MCP can still work while hooks silently no-op.                                                                                                                                                                                            |
+| `/plugins` panel shows `Hooks: No plugin hooks`                                                                                            | You're on a `codex-cli` release old enough to still gate hooks behind a feature flag — run `codex features list` to check, and upgrade Codex if so.                                                                                                                                      |
+| Startup banner _"N hooks need review"_ keeps appearing across launches                                                                     | Not all hooks approved yet. Open `/hooks` and approve any handler whose status is `Untrusted` or `Modified`.                                                                                                                                                                             |
+| Hook fires but Codex reports `error: hook returned invalid session start JSON output` (or `... user prompt submit JSON output`)            | Codex applies a `looks_like_json` heuristic to hook stdout and rejects anything it reads as malformed JSON. The scripts emit plain text prefixed `rembric:` precisely so the heuristic does not fire, so this points at a nudge whose prefix was dropped, not at a missing JSON wrapper. |
+| Every memory tool fails with `project_unbound`, and the session starts with `rembric: This repository is not bound to a Rembric project …` | The git repository is not bound to a project ([unbound mode](#inside-a-git-repository-no-default-project)). Ask an admin to bind it, or add a `.rembric`; either applies from the next session.                                                                                          |
+| The `rembric` MCP server fails to start inside a git repository                                                                            | The bridge could not resolve the repository (older server, timeout, or a repository bound to several projects) and refused to fall back to the default project. `codex --debug` shows the `[rembric-bridge]` line naming the cause and the remedy.                                       |
 
 #### Using both Claude Code and Codex on the same machine
 
@@ -311,38 +413,36 @@ To change credentials later, edit the active profile's settings and restart Herm
 
 #### Project slug resolution
 
-The provider needs a project slug for every session-lifecycle POST. Cascade, first valid match wins:
+The provider and the bridge select the project with the shared cascade in [How a client selects its project](#how-a-client-selects-its-project): the nearest `.rembric`, then `REMBRIC_PROJECT_SLUG` (the provider reads the active profile's value, the bridge its explicit `env` map), then, inside a git repository, the repository binding. With no project, the provider skips session POSTs with one `[rembric] no project slug …` diagnostic; outside git the bridge uses path-less `/mcp`, and inside git the session runs in [unbound mode](#inside-a-git-repository-no-default-project).
 
-1. `<cwd>/.rembric` → `PROJECT_SLUG=<slug>`.
-2. `REMBRIC_PROJECT_SLUG` from the environment.
-3. No valid slug → the provider skips session POSTs with one `[rembric] no project slug …` diagnostic; the bridge uses path-less `/mcp`.
+The install prompt stores `REMBRIC_PROJECT_SLUG` as a profile default. While it is set it wins over every repository binding, so leave it empty if you want bound repositories to pick their own project.
 
 Every candidate is validated against `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`; invalid values fall through. Keep `REMBRIC_SERVER_URL` bare — a `/mcp/<slug>` URL suffix is not a fallback.
 
 #### Symptom → cause table
 
-| Symptom in Hermes                                                                         | Cause                                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native install skipped the credential prompts                                             | Hermes already has those settings; edit the active profile's settings and restart when necessary.                                                                                                                                                                                     |
-| MCP tools work but `/dashboard/sessions` never gets a row with `agent=hermes`             | Either the provider isn't loaded or `~/.hermes/.env` wasn't populated. Verify `memory.provider: rembric` in `~/.hermes/config.yaml` and confirm all required profile settings are present without printing credentials.                                                               |
-| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty | Token doesn't have `write` permission for the project (visit `/dashboard/tokens` to inspect — `read` alone returns 403 on session POST, which the provider logs to stderr only). Revoke + reissue from `/dashboard/tokens` scoped to the project with the default `write` permission. |
-| stderr shows `[rembric] no project slug for session …; skipping session POST`             | Neither `.rembric` nor `REMBRIC_PROJECT_SLUG` produced a valid slug. Set `REMBRIC_PROJECT_SLUG` in the active profile and restart Hermes.                                                                                                                                             |
-| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                             | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                                      |
-| MCP tools fail and `hermes memory status` reports `rembric: Missing`                      | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, use `hermes memory setup rembric` if necessary. Restart Hermes.                                                                                                                      |
-| Provider tracks slug `A`, MCP bridge tracks slug `B`                                      | Both resolve `.rembric` first, then `REMBRIC_PROJECT_SLUG`. Check that the working directory and the environment are the same for both processes; a per-directory `.rembric` overrides the default.                                                                                   |
-| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                       | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                 |
-| Native checker reports provenance drift                                                   | The measured native subdirectory checker cannot classify its source record without `.git`; TUI status is unknown. Explicit native update works for matching source-tracked installs; copied installs require the backup/reinstall transition.                                         |
-| TUI Hermes update reports an MCP migration fallback                                       | The documented legacy block migrates automatically with a `.rembric-mcp-remote.bak` backup. For a custom block, replace it with the exact entry printed by the TUI, then restart the gateway.                                                                                         |
+| Symptom in Hermes                                                                         | Cause                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native install skipped the credential prompts                                             | Hermes already has those settings; edit the active profile's settings and restart when necessary.                                                                                                                                                                                                                                              |
+| MCP tools work but `/dashboard/sessions` never gets a row with `agent=hermes`             | Either the provider isn't loaded or `~/.hermes/.env` wasn't populated. Verify `memory.provider: rembric` in `~/.hermes/config.yaml` and confirm all required profile settings are present without printing credentials.                                                                                                                        |
+| `hermes memory status` lists `rembric` as available but `/dashboard/sessions` stays empty | Token doesn't have `write` permission for the project (visit `/dashboard/tokens` to inspect — `read` alone returns 403 on session POST, which the provider logs to stderr only). Revoke + reissue from `/dashboard/tokens` scoped to the project with the default `write` permission.                                                          |
+| stderr shows `[rembric] no project slug for session …; skipping session POST`             | No step of the [cascade](#how-a-client-selects-its-project) produced a project. Inside a git repository the reason in parentheses says why (for example `repository unbound`): ask an admin to bind the repository, or add a `.rembric`. Outside git, add a `.rembric` or set `REMBRIC_PROJECT_SLUG` in the active profile and restart Hermes. |
+| stderr shows `[rembric] POST /sessions failed: HTTPError 404`                             | `REMBRIC_SERVER_URL` is path-scoped (e.g. ends in `/mcp/<slug>`). The provider needs the bare server URL — use `REMBRIC_PROJECT_SLUG` for the slug, not the URL.                                                                                                                                                                               |
+| MCP tools fail and `hermes memory status` reports `rembric: Missing`                      | The Python provider isn't loaded. Confirm `memory.provider: rembric` in `~/.hermes/config.yaml`, use `hermes memory setup rembric` if necessary. Restart Hermes.                                                                                                                                                                               |
+| Provider tracks slug `A`, MCP bridge tracks slug `B`                                      | Both run the same [cascade](#how-a-client-selects-its-project), each once per session. Check that the working directory and `REMBRIC_PROJECT_SLUG` are the same for both processes (the profile value for the provider, the `env` map for the bridge); a `.rembric` overrides the default.                                                     |
+| You edited `~/.hermes/.env` and Hermes didn't pick up the new value                       | Hermes reads `.env` at startup, not on every session. Restart Hermes.                                                                                                                                                                                                                                                                          |
+| Native checker reports provenance drift                                                   | The measured native subdirectory checker cannot classify its source record without `.git`; TUI status is unknown. Explicit native update works for matching source-tracked installs; copied installs require the backup/reinstall transition.                                                                                                  |
+| TUI Hermes update reports an MCP migration fallback                                       | The documented legacy block migrates automatically with a `.rembric-mcp-remote.bak` backup. For a custom block, replace it with the exact entry printed by the TUI, then restart the gateway.                                                                                                                                                  |
 
 #### Using Hermes alongside Claude Code or Codex on the same machine
 
 Credentials, slug source, and update flow are independent per client. The Rembric server side is identical — same token, same `/api/<slug>/sessions(*)` endpoints. The clients just configure their adapters differently:
 
-| Client           | Credentials from                                          | Slug from                                     | Update                                                                                   |
-| ---------------- | --------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Claude Code**  | Wizard → keychain (`${user_config.*}`)                    | `.rembric` file via the bridge                | `/plugin update rembric@rembric`                                                         |
-| **Codex CLI**    | Shell env (`export REMBRIC_*`)                            | `.rembric` file via the bridge                | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
-| **Hermes Agent** | `${HERMES_HOME:-~/.hermes}/.env` + explicit MCP `env` map | `.rembric` first, then `REMBRIC_PROJECT_SLUG` | TUI update repairs recognized bridge blocks; custom blocks get an exact fallback         |
+| Client           | Credentials from                                          | Slug from                                                                                                                 | Update                                                                                   |
+| ---------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Claude Code**  | Wizard → keychain (`${user_config.*}`)                    | [Shared cascade](#how-a-client-selects-its-project): `.rembric`, then `REMBRIC_PROJECT_SLUG`, then the repository binding | `/plugin update rembric@rembric`                                                         |
+| **Codex CLI**    | Shell env (`export REMBRIC_*`)                            | Same cascade                                                                                                              | `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` + restart |
+| **Hermes Agent** | `${HERMES_HOME:-~/.hermes}/.env` + explicit MCP `env` map | Same cascade; the profile's `REMBRIC_PROJECT_SLUG` pre-empts the binding                                                  | TUI update repairs recognized bridge blocks; custom blocks get an exact fallback         |
 
 Hermes has no keychain equivalent; `${HERMES_HOME:-~/.hermes}/.env` is its canonical persisted env. The provider reads it directly, while the MCP bridge needs the explicit `mcp_servers.rembric.env` map.
 
@@ -366,24 +466,25 @@ The script fetches `plugin.ts` and the shared modules, then prints an MCP block 
 
 The plugin adds its MCP entry in memory and leaves `opencode.json` untouched. Export `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell that starts opencode.
 
-Per-project path-scoping uses `.rembric` in each repo (the same convention as every other client):
+The project is selected like every other client's, see [How a client selects its project](#how-a-client-selects-its-project): a bound git repository needs nothing, and a `.rembric` selects a project explicitly:
 
 ```
 PROJECT_SLUG=my-app
 ```
 
-The bridge subprocess reads `.rembric` at spawn time from its project directory and builds `/mcp/<slug>`. Existing configs that still name the old launcher are upgraded in memory by the plugin hook; `opencode.json` remains untouched.
+The plugin and the bridge subprocess each resolve the project once, at session start and at spawn time, and the bridge builds `/mcp/<slug>`. Existing configs that still name the old launcher are upgraded in memory by the plugin hook; `opencode.json` remains untouched.
 
 #### Verify
 
-1. Open opencode in a repo with a valid `.rembric`.
+1. Open opencode in a bound repository, or one with a valid `.rembric`.
 2. Trigger any MCP tool (e.g. ask the agent to call `memory.search`).
 3. `/dashboard/sessions` shows a new row with `agent='opencode'`.
 4. opencode's debug log contains one `[rembric] session.created id=...` line.
 
 #### Troubleshooting
 
-- **No session row appears.** Missing/invalid `.rembric`. Check stderr in opencode's debug log for `[rembric] no project slug` lines.
+- **No session row appears.** No project was selected. Check stderr in opencode's debug log: inside a git repository, a line ending in `plugin disabled` names the cause (an unbound repository, an ambiguous one, or a failed resolve) and the remedy; outside git, add a valid `.rembric`.
+- **Every memory tool fails with `project_unbound`.** The repository is not bound to a project ([unbound mode](#inside-a-git-repository-no-default-project)). Ask an admin to bind it, or add a `.rembric`; either applies from the next session.
 - **MCP connection error in opencode.** Confirm `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` are available in the shell that starts opencode. Legacy launcher entries are upgraded by the plugin config hook.
 - **Sub-agent inflation (too many session rows per conversation).** The plugin filters sub-agents via `parentID` or title ending in `subagent)`. If you see inflation, attach the `[rembric] session.created ...` log lines so the heuristic can be tightened.
 - **Session never transitions to `'ended'`.** opencode has no `SessionEnd` event; closure relies on the agent calling `memory.session_summary` voluntarily, or the server's `abandonStale` flipping inactive rows. opencode is now the only client in this state — Codex CLI does have `SessionEnd` and reaches `ended` on a normal close.
@@ -415,19 +516,19 @@ export REMBRIC_SERVER_URL=https://memory.example.com
 export REMBRIC_API_TOKEN=pi-token-XXXXXXXX
 ```
 
-Per-project path-scoping uses `.rembric` in each repo, the same convention as every other client:
+The project is selected like every other client's, see [How a client selects its project](#how-a-client-selects-its-project): a bound git repository needs nothing, and a `.rembric` selects a project explicitly:
 
 ```
 PROJECT_SLUG=my-app
 ```
 
-The extension reads it with the shared parser at startup and builds `/mcp/<slug>`, so the server pins the project on connect. A slug naming no project is refused with `project_not_found` rather than falling back to the default project.
+The extension resolves the project once at session start with the shared resolver and connects to `/mcp/<slug>`, so the server pins the project on connect. A slug naming no project is refused with `project_not_found` rather than falling back to the default project. In an unbound repository it connects path-less with the repository fingerprint, registers the tools, and raises a warning notification; every memory tool then answers `project_unbound`. Outside git with no slug, the extension turns itself off.
 
 The four shared command files (`apps/plugin/commands/{context,recall,remember,summary}.md`) are exposed as Pi prompt templates verbatim — same frontmatter, same `$ARGUMENTS`, no per-client copies.
 
 #### Verify
 
-1. Start Pi in a repo with a valid `.rembric`.
+1. Start Pi in a bound repository, or one with a valid `.rembric`.
 2. Ask the agent to list its tools. The Rembric ones appear with underscores (`memory_save`, not `memory.save`); the proxied call still reaches the server under its canonical dotted name.
 3. Save a test memory, then check `/dashboard/memories` for the row.
 4. `/dashboard/sessions` shows a new row with `agent='pi'`.
@@ -456,7 +557,9 @@ Ending on replacement is what keeps attribution working. Session resolution is s
 
 - **No Rembric tools registered, one stderr line naming missing configuration.** `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` is unset in the shell that launched Pi. Pi will not read them from its settings file.
 - **`project_not_found` on connect.** `.rembric` names a `PROJECT_SLUG` with no matching project. Create it at `/dashboard/projects` or fix the slug — the server refuses rather than widening the scope.
-- **No session row appears.** Missing or invalid `.rembric`; check stderr for the `[rembric] no project slug` line.
+- **No session row appears.** No project was selected. Outside git, add a valid `.rembric` (stderr shows the `[rembric] no PROJECT_SLUG in …` line). Inside a git repository, the startup notification names the cause and the remedy.
+- **`Rembric: This repository (…) has no Rembric project` notification, and every memory tool fails with `project_unbound`.** The repository is not bound ([unbound mode](#inside-a-git-repository-no-default-project)). Ask an admin to bind it, or add a `.rembric`; either applies from the next session.
+- **`Rembric is off — …` notification inside a git repository.** The repository could not be resolved: the server did not answer `POST /api/repositories/resolve` (an older server, a timeout, or an unreachable server), or the repository is bound to several projects. The extension does not fall back to the default project; the notification names the remedy (update the server, or add a `.rembric`).
 - **The session row stays `active` and its summary is one turn stale.** The process exited without reaching the shutdown handler: a `SIGKILL`, an OS-level crash, or an interrupted print-mode run. Nothing closes the row from the client side — `abandonStale` retires it as `abandoned` later — and the per-turn flush bounds the summary loss to the final turn.
 - **`pi update --all` reports nothing to update.** The extension was installed with a version suffix and is therefore pinned. Re-run `pi install npm:@rembric/pi` with no version.
 
@@ -540,11 +643,11 @@ headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
 
 Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Streamable HTTP with the same URL + Bearer shape. Locate their MCP config file in the client's docs and drop in the same block, adjusting field names (`type`, `transport`, `httpUrl`, plain `url`) to match.
 
-If your client is stdio-only, use `npx -y @rembric/mcp-bridge@<exact-version>` as a stdio↔HTTP shim, with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the environment. The package accepts no URL, header, or token arguments.
+If your client is stdio-only, use `npx -y @rembric/mcp-bridge@<exact-version>` as a stdio↔HTTP shim, with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the environment. The package accepts no URL, header, or token arguments, and selects the project as described in [How a client selects its project](#how-a-client-selects-its-project).
 
 ## Path-less connections
 
-A connection to `/mcp` (path-less) always resolves to the default project. The working directory never chooses the project: add a `.rembric` file (or set `REMBRIC_PROJECT_SLUG`) to reach `/mcp/<slug>`. Projects are created from the dashboard; no tool creates one.
+A connection to `/mcp` (path-less) resolves to the default project, unless it carries the `X-Rembric-Repo-Fingerprint` header that the bundled plugins send from inside a git repository: such a connection is [unbound](#inside-a-git-repository-no-default-project) and every memory tool is refused with `project_unbound`. A plugin uses `/mcp/<slug>` whenever [its cascade](#how-a-client-selects-its-project) selects a project. Projects are created from the dashboard; no tool creates one.
 
 Earlier releases refused some path-less writes with `project_suggestion_pending`, on the stated reasoning that write tools would otherwise "fall through to global" silently. `memory.save` never did — its `scope` argument defaulted to `project` and a path-less save was refused loudly. The gate was load-bearing for `memory.session_start`, `memory.save_prompt` and `memory.capture_passive`, which without it wrote user-wide rows silently. That scope no longer exists, so neither does the gate.
 
