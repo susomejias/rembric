@@ -428,7 +428,7 @@ rembric_session_project_notice() {
   fp="${fp:0:12}"
   slugs="$(_rembric_record_field "$record" slugs)"
   slugs="${slugs//,/, }"
-  local history="Sessions in this repository used the default project before this version; binding it to the default project keeps that continuity."
+  local history="Before this version, a repository without a .rembric file used the default project; bind it to the project its earlier sessions used to keep that continuity."
   local remedy="To bind it, ask an admin to bind this repository from the Rembric dashboard, or add a .rembric file with PROJECT_SLUG=<slug>. The binding applies from the next session."
   case "$outcome" in
   slug)

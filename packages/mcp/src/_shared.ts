@@ -65,8 +65,9 @@ export function unboundMessage(scope: TokenScope, fingerprint: string | null): s
       : 'ask an admin to bind it from the dashboard, or add a .rembric file with PROJECT_SLUG=<slug> at the checkout root';
   return (
     `repository ${fingerprint.slice(0, 12)} is not bound to a project, so nothing is read or written; ` +
-    `${remedy}. A binding applies from the next session. Sessions in this repository used the ` +
-    'default project before this version; binding it to the default project keeps that continuity'
+    `${remedy}. A binding applies from the next session. Before this version, a repository without ` +
+    'a .rembric file used the default project; bind it to the project its earlier sessions used to ' +
+    'keep that continuity'
   );
 }
 

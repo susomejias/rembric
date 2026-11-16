@@ -554,9 +554,9 @@ def _no_project_notice(fingerprint: str | None, cause: str | None, answer: dict)
     if outcome == "unbound" and fingerprint:
         return (
             f"Rembric: this repository (fingerprint {fingerprint[:12]}) is not bound to a "
-            "project, so this session stores no memory. Sessions in such a repository used "
-            "the default project before this version; binding it to the default project keeps "
-            "that continuity. Ask a Rembric admin to bind it from the dashboard, or "
+            "project, so this session stores no memory. Before this version, a repository "
+            "without a .rembric file used the default project; bind it to the project its earlier "
+            "sessions used to keep that continuity. Ask a Rembric admin to bind it from the dashboard, or "
             f"{_DOTREMBRIC_REMEDY}. A binding applies from the next session."
         )
     if outcome == "unbound":

@@ -397,6 +397,11 @@ describe('resolution against the resolve endpoint', () => {
     expect(outcome.message).toContain('dashboard');
     expect(outcome.message).toContain('.rembric');
     expect(outcome.message).toContain('default project');
+    expect(outcome.message).toContain(
+      'a repository without a .rembric file used the default project',
+    );
+    expect(outcome.message).toContain('the project its earlier sessions used');
+    expect(outcome.message).not.toContain('Sessions here used the default project');
     expect(outcome.message).not.toContain('project.bind_repository');
   });
 

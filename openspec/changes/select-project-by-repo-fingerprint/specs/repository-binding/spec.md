@@ -195,7 +195,7 @@ A session SHALL be in **unbound mode** when it runs inside a git work tree, no s
 
 - The bridge and the Pi extension SHALL connect path-less with the `X-Rembric-Repo-Fingerprint` header, and the server SHALL refuse every tool that resolves an effective scope with structured code `project_unbound` (see the `mcp-api` capability). `project.list`, `project.current` and `project.bind_repository` remain callable.
 - Hook scripts and in-process lifecycle handlers SHALL register no session and SHALL POST no turn report, summary, recall, file-recall or end event.
-- The session-start text delivered to the model SHALL say that the repository is not bound, SHALL identify it by the first 12 characters of its fingerprint, SHALL say that sessions in such a repository used the default project before this version and that binding it to the default project keeps that continuity, and SHALL say that the binding applies from the next session.
+- The session-start text delivered to the model SHALL say that the repository is not bound, SHALL identify it by the first 12 characters of its fingerprint, SHALL say that before this version a repository without a `.rembric` file used the default project and that binding it to the project its earlier sessions used keeps that continuity, and SHALL say that the binding applies from the next session.
 
 The `project_unbound` message and the session-start text SHALL name only remedies the token can perform: for an admin token, the dashboard and `project.bind_repository`; for any other token, asking an admin to bind the repository from the dashboard, or adding a `.rembric` file with `PROJECT_SLUG=<slug>`.
 

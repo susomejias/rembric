@@ -247,8 +247,9 @@ function unboundMessage(repository, reason) {
       : 'it is not bound to a project';
   return (
     `This repository (${fingerprintLabel(repository)}) has no Rembric project: ${why}. ` +
-    'Memory is off for this session. Sessions here used the default project before this version; ' +
-    'binding the repository to the default project keeps that continuity. Ask an admin to bind it ' +
+    'Memory is off for this session. Before this version, a repository without a .rembric file used ' +
+    'the default project; bind the repository to the project its earlier sessions used to keep that ' +
+    'continuity. Ask an admin to bind it ' +
     'from the dashboard, or add a .rembric file containing PROJECT_SLUG=<slug>. A binding applies ' +
     'from the next session.'
   );

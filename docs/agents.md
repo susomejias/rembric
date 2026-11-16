@@ -81,7 +81,7 @@ An explicit selection (`.rembric` or `REMBRIC_PROJECT_SLUG`) works against any s
 - The session starts with a notice that names the first 12 characters of the fingerprint and how to get out of unbound mode. In Claude Code and Codex the hook prints it to the agent:
 
   ```text
-  rembric: This repository is not bound to a Rembric project (fingerprint 1a2b3c4d5e6f), so nothing from this session is saved. Sessions in this repository used the default project before this version; binding it to the default project keeps that continuity. To bind it, ask an admin to bind this repository from the Rembric dashboard, or add a .rembric file with PROJECT_SLUG=<slug>. The binding applies from the next session.
+  rembric: This repository is not bound to a Rembric project (fingerprint 1a2b3c4d5e6f), so nothing from this session is saved. Before this version, a repository without a .rembric file used the default project; bind it to the project its earlier sessions used to keep that continuity. To bind it, ask an admin to bind this repository from the Rembric dashboard, or add a .rembric file with PROJECT_SLUG=<slug>. The binding applies from the next session.
   ```
 
   Hermes adds the notice to its first memory hint and to stderr; Pi raises it as a warning notification; opencode and the bridge write it to stderr.

@@ -456,6 +456,9 @@ describe('outcomes of POST /api/repositories/resolve', () => {
     expect(out.stdout).toContain(twoRoot.root.slice(0, 12));
     expect(out.stdout).not.toContain(twoRoot.root.slice(0, 13));
     expect(out.stdout).toContain('default project');
+    expect(out.stdout).toContain('a repository without a .rembric file used the default project');
+    expect(out.stdout).toContain('the project its earlier sessions used');
+    expect(out.stdout).not.toContain('Sessions in this repository used the default project');
     expect(out.stdout).toContain('next session');
     expect(out.stdout).toContain('dashboard');
     expect(out.stdout).toContain('.rembric');
