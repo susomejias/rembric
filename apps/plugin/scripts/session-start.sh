@@ -54,11 +54,16 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/resume" '{}'
 fi
 
+NUDGE='rembric: If this is a continuation of recent work, call memory.context before responding.'
 NOTICE="$(rembric_session_project_notice "$SESSION_ID")"
-if [ -n "$NOTICE" ]; then
-  printf '%s\n' "$NOTICE"
+NOTICE="${NOTICE%$'\n'}"
+if [ -z "$NOTICE" ]; then
+  printf '%s\n' "$NUDGE"
+  exit 0
 fi
-if [ -n "$SLUG" ] || [ -z "$NOTICE" ]; then
-  echo 'rembric: If this is a continuation of recent work, call memory.context before responding.'
-fi
+# Plain stdout reaches only the model; systemMessage is what both hosts show the user.
+CONTEXT="${NOTICE}"$'\n''Tell the user about this in your first reply.'
+[ -n "$SLUG" ] && CONTEXT="${CONTEXT}"$'\n'"${NUDGE}"
+printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' \
+  "$(rembric_json_escape "$NOTICE")" "$(rembric_json_escape "$CONTEXT")"
 exit 0

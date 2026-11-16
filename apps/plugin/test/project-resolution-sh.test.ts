@@ -423,6 +423,31 @@ describe('outcomes of POST /api/repositories/resolve', () => {
     expect(out.stdout).not.toContain('not bound');
   });
 
+  it('control: a session with a project keeps printing the plain-text nudge, not JSON', async () => {
+    resolveReply = bound('shop');
+    const out = await start(twoRoot.dir);
+    expect(out.stdout).toBe(
+      'rembric: If this is a continuation of recent work, call memory.context before responding.\n',
+    );
+  });
+
+  it('shows the unbound notice to the user and asks the model to relay it in its first reply', async () => {
+    const out = await start(twoRoot.dir);
+    const json = JSON.parse(out.stdout) as {
+      systemMessage: string;
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    expect(json.systemMessage).toContain('not bound');
+    expect(json.systemMessage).toContain(twoRoot.root.slice(0, 12));
+    expect(json.hookSpecificOutput.hookEventName).toBe('SessionStart');
+    expect(json.hookSpecificOutput.additionalContext).toContain(json.systemMessage);
+    expect(json.hookSpecificOutput.additionalContext).toContain(
+      'Tell the user about this in your first reply',
+    );
+    expect(Object.keys(json).sort()).toEqual(['hookSpecificOutput', 'systemMessage']);
+    expect(out.code).toBe(0);
+  });
+
   it('an unbound repository registers nothing and says how to bind it, without the admin-only tool', async () => {
     const out = await start(twoRoot.dir);
     expect(resolveRequests()).toHaveLength(1);
@@ -470,6 +495,14 @@ describe('outcomes of POST /api/repositories/resolve', () => {
       expect(out.stdout).toContain('sandbox');
       expect(out.stdout).toContain('shop');
       expect(out.stdout).toContain('.rembric');
+      const json = JSON.parse(out.stdout) as {
+        systemMessage: string;
+        hookSpecificOutput: { additionalContext: string };
+      };
+      expect(json.systemMessage).toContain('bound to shop');
+      expect(json.hookSpecificOutput.additionalContext).toContain(
+        'rembric: If this is a continuation of recent work',
+      );
     } finally {
       rmSync(join(twoRoot.dir, '.rembric'));
     }
