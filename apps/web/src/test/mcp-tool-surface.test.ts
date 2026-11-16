@@ -26,7 +26,7 @@ function resetAppGlobals(): void {
 const ORIGIN = 'http://127.0.0.1:8787';
 const MEASUREMENTS = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../../openspec/changes/collapse-mcp-onto-stateless-sdk-v2/measurements',
+  '../../../../openspec/changes/archive/2026-11-16-collapse-mcp-onto-stateless-sdk-v2/measurements',
 );
 const BASE_TOOLS_LIST = join(MEASUREMENTS, 'tools-list-base.json');
 const BASE_TOOL_CALL_ERRORS = join(MEASUREMENTS, 'tool-call-errors-base.json');
