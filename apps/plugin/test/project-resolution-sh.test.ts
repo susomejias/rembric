@@ -752,6 +752,91 @@ describe('parity with the shared JavaScript resolver (rembric-project.mjs)', () 
     };
   }
 
+  const hermesTests = join(apiSh, '..', '..', '.hermes-plugin', 'tests');
+
+  function pythonView(dir: string, env: NodeJS.ProcessEnv = {}) {
+    const program = [
+      'import json, sys',
+      'sys.path.insert(0, sys.argv[1])',
+      'from _loader import fresh_plugin',
+      'p = fresh_plugin()',
+      'cwd, profile = sys.argv[2], (sys.argv[3] or None)',
+      'inside, root = p._git_work_tree(cwd)',
+      'fp, cause = p._repository_fingerprint(cwd) if inside else (None, None)',
+      'slug, source = p._explicit_selection(cwd, profile, inside, root)',
+      'remotes = p._repository_remotes(cwd) if inside and fp else []',
+      'print(json.dumps({"insideGit": inside, "fingerprint": fp, "cause": cause, "remotes": remotes, "slug": slug, "source": source}))',
+    ].join('\n');
+    const out = execFileSync(
+      'python3',
+      ['-B', '-c', program, hermesTests, dir, env['REMBRIC_PROJECT_SLUG'] ?? ''],
+      { encoding: 'utf8', env: cleanEnv() },
+    );
+    return JSON.parse(out.trim().split('\n').at(-1)!) as {
+      insideGit: boolean;
+      fingerprint: string | null;
+      cause: string | null;
+      remotes: string[];
+      slug: string | null;
+      source: string | null;
+    };
+  }
+
+  it('every fixture repository gives the same outcome from the Hermes plugin as from rembric-project.mjs', async () => {
+    writeFileSync(join(twoRoot.dir, 'packages', 'api', '.rembric'), 'PROJECT_SLUG=api\n');
+    try {
+      const dirs = [
+        twoRoot.dir,
+        featureWorktree,
+        worktree,
+        join(twoRoot.dir, 'packages', 'api', 'src'),
+        orphan.dir,
+        shallow,
+        empty,
+        notGit,
+        join(above.repo, 'src'),
+        creds,
+      ];
+      for (const dir of dirs) {
+        const js = await jsView(dir);
+        const py = pythonView(dir);
+        expect({ dir, ...py, remotes: [...py.remotes].sort() }).toEqual({
+          dir,
+          ...js,
+          remotes: [...js.remotes].sort(),
+        });
+      }
+      const envSel = { REMBRIC_PROJECT_SLUG: 'from-env' };
+      expect(pythonView(twoRoot.dir, envSel)).toEqual(await jsView(twoRoot.dir, envSel));
+    } finally {
+      rmSync(join(twoRoot.dir, 'packages', 'api', '.rembric'));
+    }
+  });
+
+  it.each([
+    'git@github.com:Acme/Shop.git',
+    'https://user:secret@git.example.com/acme/shop.git',
+    'https://user:se/cr@et@host/x',
+    'https://user:p?ss@host/acme/shop',
+    'https://user:pa#ss@host/x',
+    'https://gitlab.com/group/sub/repo.git?ref=x',
+    'file:///srv/repo.git',
+    '/srv/repo.git',
+  ])('the Hermes plugin normalizes %s the same way', (input) => {
+    const out = execFileSync(
+      'python3',
+      [
+        '-B',
+        '-c',
+        'import sys; sys.path.insert(0, sys.argv[1]); from _loader import fresh_plugin; r = fresh_plugin()._normalize_remote(sys.argv[2]); print(r if r is not None else "")',
+        hermesTests,
+        input,
+      ],
+      { encoding: 'utf8', env: cleanEnv() },
+    );
+    expect(out.trim().split('\n').at(-1) || null).toBe(normalizeRemote(input));
+  });
+
   it('every fixture repository gives the same outcome from _api.sh as from rembric-project.mjs', async () => {
     writeFileSync(join(twoRoot.dir, 'packages', 'api', '.rembric'), 'PROJECT_SLUG=api\n');
     try {
