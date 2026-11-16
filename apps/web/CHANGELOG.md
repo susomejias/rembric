@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.31.4](https://github.com/susomejias/rembric/compare/server-v0.31.3...server-v0.31.4) (2026-11-16)
+
+
+### Features
+
+* **dashboard:** repositories tab that connects repos to projects in one step ([d34a92c](https://github.com/susomejias/rembric/commit/d34a92c7e76f2766bb97e961623e75ee270b2728))
+* **web:** standard shadcn spacing, warn variant, Alert and TonePill ([278e76c](https://github.com/susomejias/rembric/commit/278e76c10b94d10d5b48b65cdc9c02852ba18b9d))
+
+
+### Bug Fixes
+
+* **dashboard:** size the More menu and restore the version chip ([0615d39](https://github.com/susomejias/rembric/commit/0615d394b4925e7b71a07ffdb4a7ff33db6e3d8a))
+
+
+### Refactor
+
+* **dashboard:** render every control through the shadcn primitives ([5328c2d](https://github.com/susomejias/rembric/commit/5328c2d616a5e4b055627c5feb8c04e0ad1c55b9))
+* **web:** adopt the shadcn new-york style for the ui primitives ([c3fbcbb](https://github.com/susomejias/rembric/commit/c3fbcbb1fc227869022f8b78381e622d07cf50ca))
+
 ## [0.31.3](https://github.com/susomejias/rembric/compare/server-v0.31.2...server-v0.31.3) (2026-11-16)
 
 
