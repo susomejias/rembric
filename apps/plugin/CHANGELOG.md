@@ -4,6 +4,21 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.44.0](https://github.com/susomejias/rembric/compare/plugin-v0.43.0...plugin-v0.44.0) (2026-11-16)
+
+
+### Features
+
+* **plugin:** resolve the Hermes project from the repository fingerprint ([9e1909e](https://github.com/susomejias/rembric/commit/9e1909e51cf0244f1eda74b02e161d2ef194bc5c))
+* **plugin:** resolve the project from the repository fingerprint in the bridge ([1888145](https://github.com/susomejias/rembric/commit/1888145ff440e9daa1932a7faff77791d3c6926f))
+* **plugin:** resolve the project once per session in opencode and Pi ([5f8e25a](https://github.com/susomejias/rembric/commit/5f8e25a6c92d8550dbad72c05fc81ba1f5f52ef9))
+* **plugin:** resolve the project once per session in the Claude Code and Codex hooks ([40ddc55](https://github.com/susomejias/rembric/commit/40ddc557464ba9a8e4c517d2339b5b6120ee3098))
+
+
+### Documentation
+
+* explain how a client selects its project ([d4cfd90](https://github.com/susomejias/rembric/commit/d4cfd90d2506a79ccf599d29b1914b1e2a673a00))
+
 ## [0.43.0](https://github.com/susomejias/rembric/compare/plugin-v0.42.0...plugin-v0.43.0) (2026-11-15)
 
 

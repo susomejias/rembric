@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@rembric/mcp-bridge@0.43.0"
+        "@rembric/mcp-bridge@0.44.0"
       ],
       "cwd": ".",
       "env_vars": [
