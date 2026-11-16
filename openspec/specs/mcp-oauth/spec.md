@@ -180,7 +180,7 @@ An OAuth grant SHALL be bound to the project it was consented for, and that bind
 - **GIVEN** an access token consented for project `a` (connector `/mcp/a`)
 - **WHEN** the same token is presented to `/mcp/b`, or to a path-less `/mcp` whose connection resolves to the default project, and used to read or write
 - **THEN** the request SHALL be rejected with a `403`-class authorization failure, because the token's scope is bound to project `a` and does not authorize project `b` or the default project
-- **AND** the refusal SHALL name `project.use` and the slug `a`, so the operator's own project is reachable in one call
+- **AND** the refusal SHALL name the slug `a` and the `/mcp/a` URL, and SHALL NOT name `project.use`, so the operator learns the one connection URL that reaches the token's own project
 
 #### Scenario: Path-less OAuth grant is global
 

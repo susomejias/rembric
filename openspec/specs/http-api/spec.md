@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines Rembric's non-MCP HTTP session-lifecycle API at `/api`. The API is mounted in the Hono app sibling to `/mcp`, `/dashboard`, `/admin`, and `/healthz`, and is path-scoped on project slug so cross-scope leakage is impossible by construction. It exists so external surfaces (Claude Code hooks, Codex hooks, future integrations) can register, summarize, and close `agent_sessions` rows without speaking the MCP wire protocol. Sessions registered via this API are integrated with the MCP `SessionRouter` fallback so subsequent `memory.save` calls attach `session_id` automatically.
+Defines Rembric's non-MCP HTTP session-lifecycle API at `/api`. The API is mounted in the Hono app sibling to `/mcp`, `/dashboard`, `/admin`, and `/healthz`, and is path-scoped on project slug so cross-scope leakage is impossible by construction. It exists so external surfaces (Claude Code hooks, Codex hooks, future integrations) can register, summarize, and close `agent_sessions` rows without speaking the MCP wire protocol. Sessions registered via this API reach MCP tools through an explicit, ownership-checked `sessionId` or, when none is passed, the sole active session for the token and project (`findActiveForTransport`), so subsequent `memory.save` calls attach `session_id` without any per-connection binding.
 
 ## Requirements
 
@@ -313,26 +313,6 @@ Soft-deleted rows SHALL be rejected with `session_deleted`, and that rejection S
 - **WHEN** a token whose scope does not cover project `P` POSTs to `/api/<P-slug>/sessions/<any-id>/end`
 - **THEN** the server SHALL respond `403` with `{ ok: false, code: 'forbidden' }` before resolving the session
 
-### Requirement: Sessions registered via HTTP MUST integrate with the SessionRouter so subsequent MCP tools attach memories to them
-
-When a session row is created via `POST /api/<slug>/sessions`, the server SHALL NOT eagerly populate the `SessionRouter` (the router is keyed by `(tokenId, mcpSessionId)` and the HTTP call has no `mcp-session-id`). Instead, the server SHALL ensure that MCP tool handlers — when resolving the active Rembric session for a request — fall back to the most-recently-active row in `agent_sessions` matching `(token_id, project_id)` whose `status = 'active'` when no `SessionRouter` entry exists.
-
-This is the bridge that makes `memory.save` calls (issued by the agent over MCP) attach `session_id` to the row that the hook created via HTTP.
-
-#### Scenario: Hook creates session over HTTP, agent saves memory over MCP
-
-- **GIVEN** a client POSTs `{ id: 'sess-abc12345' }` to `/api/foo/sessions` (HTTP) and the session row is created
-- **AND** the same agent then opens an MCP connection on `/mcp/foo` and calls `memory.save({ type: 'project', content: '...' })`
-- **WHEN** the server resolves the active session for that save call
-- **THEN** the resolution SHALL find `sess-abc12345` (most-recently-active for `(token_id, foo.id)`) and the saved memory's `session_id` SHALL equal `'sess-abc12345'`
-
-#### Scenario: Multiple active sessions for the same (token, project)
-
-- **GIVEN** two `status='active'` rows exist for `(token_id, foo.id)` (e.g. user has two Claude Code windows open)
-- **WHEN** a memory save attaches via fallback resolution
-- **THEN** the save SHALL attach to the row with the most recent `started_at`
-- **AND** the older row's eventual `ended_at` / `summary` is unaffected
-
 ### Requirement: The server MUST expose a bearer-gated health endpoint at `/healthz`
 
 The Rembric server SHALL expose `GET /healthz` as a bearer-gated availability probe, sibling to `/mcp`, `/api`, `/dashboard`, and `/admin`. The endpoint SHALL require `Authorization: Bearer <token>` using the same token-extraction and validation path as `/api`. Any token whose `scope` is recognised by `authenticate()` SHALL be accepted (including project-scoped tokens — availability is not a project-scoped concern). The endpoint SHALL NOT exempt itself from the rate limiter if the rate limiter is enabled.
@@ -376,7 +356,7 @@ The endpoint SHALL respond synchronously — there SHALL NOT be a caching layer 
 
 ### Requirement: The authenticated HTTP surface MUST bound request body size
 
-Endpoints that read a request body — `/mcp` (POST/DELETE) and `/api/<slug>/sessions*` — SHALL enforce a maximum raw body size and reject an over-large body with `413` (payload too large) instead of buffering it unboundedly in memory. The bound SHALL apply even to authenticated callers, so a valid token cannot exhaust process memory with a single large POST. The limit SHALL be generous enough for legitimate MCP payloads and MAY be configurable.
+Endpoints that read a request body — `/mcp` (POST) and `/api/<slug>/sessions*` — SHALL enforce a maximum raw body size and reject an over-large body with `413` (payload too large) instead of buffering it unboundedly in memory. The bound SHALL apply even to authenticated callers, so a valid token cannot exhaust process memory with a single large POST. The limit SHALL be generous enough for legitimate MCP payloads and MAY be configurable.
 
 #### Scenario: Oversized MCP body is rejected
 
@@ -392,7 +372,7 @@ Endpoints that read a request body — `/mcp` (POST/DELETE) and `/api/<slug>/ses
 
 ### Requirement: The MCP transport MUST support configurable Host/Origin allow-lists
 
-The Streamable HTTP transport SHALL accept operator-configured `Host` and `Origin` allow-lists (`REMBRIC_MCP_ALLOWED_HOSTS`, `REMBRIC_MCP_ALLOWED_ORIGINS`, comma-separated). When EITHER list is configured, DNS-rebinding protection SHALL be enabled and the transport SHALL reject a request whose `Host` is not on the host allow-list, or whose `Origin` is present and not on the origin allow-list. When NEITHER is configured, protection SHALL be off (the current default): this is defense-in-depth layered on the mandatory bearer token — which already rejects any request without valid credentials — and the strict `Host` check would otherwise risk rejecting legitimate reverse-proxy setups. Protection is opt-in rather than always-on because the underlying SDK options are deprecated and the primary control is the bearer requirement.
+The Streamable HTTP transport SHALL accept operator-configured `Host` and `Origin` allow-lists (`REMBRIC_MCP_ALLOWED_HOSTS`, `REMBRIC_MCP_ALLOWED_ORIGINS`, comma-separated). Entries SHALL be matched by hostname: a port in a `Host` entry and a scheme or port in an `Origin` entry are accepted and ignored, so `rembric.example.com:443` and `https://rembric.example.com` both admit the hostname `rembric.example.com` on any port. When EITHER list is configured, DNS-rebinding protection SHALL be enabled and the transport SHALL reject a request whose `Host` hostname is not on the host allow-list, or whose `Origin` is present and its hostname not on the origin allow-list. The check SHALL run before authentication, the failed-attempt lockout and rate limiting, so a rebinding request is refused without its credentials being evaluated. When NEITHER is configured, protection SHALL be off (the current default): this is defense-in-depth layered on the mandatory bearer token — which already rejects any request without valid credentials — and the strict `Host` check would otherwise risk rejecting legitimate reverse-proxy setups. Protection is opt-in rather than always-on because the primary control is the bearer requirement.
 
 #### Scenario: Unconfigured transport does not reject on Host/Origin
 
@@ -411,6 +391,18 @@ The Streamable HTTP transport SHALL accept operator-configured `Host` and `Origi
 - **GIVEN** `REMBRIC_MCP_ALLOWED_HOSTS` includes the deployment host
 - **WHEN** a request arrives at `/mcp` with an allowed `Host` and a valid bearer token
 - **THEN** the request SHALL be handled normally
+
+#### Scenario: A configured host:port entry admits its hostname on any port
+
+- **GIVEN** `REMBRIC_MCP_ALLOWED_HOSTS` is `rembric.example.com:443`
+- **WHEN** a request with a valid bearer arrives at `/mcp` with `Host: rembric.example.com` or `Host: rembric.example.com:443`
+- **THEN** the request SHALL be handled normally
+
+#### Scenario: A rebinding request is refused before its credentials are evaluated
+
+- **GIVEN** `REMBRIC_MCP_ALLOWED_HOSTS` is configured with the deployment host
+- **WHEN** a request with no bearer arrives at `/mcp` with a `Host` header not on the allow-list
+- **THEN** the transport SHALL answer `403` rather than the `401` bearer challenge
 
 ### Requirement: `POST /api/<slug>/memory/recall` MUST return ranked memory context for per-turn prefetch
 
@@ -468,7 +460,7 @@ The request body SHALL be an object carrying no properties, and its schema SHALL
 
 On success the server SHALL respond `200` with `{ ok: true, sessionId, status: 'active', startedAt, resumedAt, previousStatus, previousEndedAt, title }`, where `previousStatus` is the row's `status` immediately before the call and `previousEndedAt` is the ISO `ended_at` the call discarded, or `null` when the row was already `active`. Those two fields SHALL be present on every success response: they are the only report of a value the server does not retain (`sessions` capability). A row that is already `active` SHALL be a success no-op — `200`, `previousStatus: 'active'`, `previousEndedAt: null`, no `UPDATE` — so a client that resumes unconditionally after every ensure never sees an error for doing so.
 
-This route SHALL NOT write the `SessionRouter` binding. The binding is keyed on `(tokenId, mcpSessionId)` and an HTTP request carries no `mcpSessionId`, so there is nothing to pin; pinning remains exclusive to `memory.session_resume` (`mcp-api` capability). The consequence SHALL be stated rather than hidden: a session resumed over HTTP is reachable by auto-attach through the sole-active-session lookup only, which declines to resolve when a second session is concurrently live for the same `(token, project)`. An agent that needs the unambiguous binding calls the MCP tool.
+This route SHALL NOT bind the resumed session to any MCP connection, and neither does `memory.session_resume` (`mcp-api` capability): the server keeps no per-connection session state. The consequence SHALL be stated rather than hidden: a resumed session is reachable by auto-attach through the sole-active-session lookup only, which declines to resolve when a second session is concurrently live for the same `(token, project)`. A client that needs an unambiguous attachment passes the session's id as `sessionId` on each write.
 
 The route SHALL NOT be reachable at `/api/sessions/:id/resume` (no slug segment), consistent with every other route in this capability.
 
@@ -529,10 +521,10 @@ The route SHALL NOT be reachable at `/api/sessions/:id/resume` (no slug segment)
 
 #### Scenario: The route does not pin the SessionRouter
 
-- **GIVEN** an MCP transport with no session binding, and a session `<S>` resumed over HTTP
-- **WHEN** the `SessionRouter` entry for that transport is read
-- **THEN** it SHALL still carry no session binding
-- **AND** the control SHALL pass in the same run: `memory.session_resume` on the same row over the MCP transport DOES set it
+- **GIVEN** a session `<S>` resumed over HTTP and a second `active` session `<T>` for the same `(token, project)`
+- **WHEN** the agent calls `memory.save` over MCP on `/mcp/foo` without `sessionId`, and then again with `sessionId: <S>`
+- **THEN** the first saved row SHALL carry `session_id = NULL`, because the resume bound `<S>` to no connection and the `SessionRouter` it once declined to pin is removed
+- **AND** the second saved row SHALL carry `session_id = <S>`, which is the control that the resumed session is reachable by its explicit id
 
 ### Requirement: `POST /api/<slug>/sessions/:id/turn` MUST accept a per-turn report and return the notice lines, if any
 
@@ -648,3 +640,24 @@ The route SHALL do no work beyond one service call and the usage counter. It SHA
 
 - **WHEN** a client sends `GET /api/foo/sessions/S/file-recall`
 - **THEN** the response SHALL be the `404 not_found` answer every POST-only session route gives through `methodFallback`
+
+### Requirement: Sessions registered via HTTP MUST be reachable by MCP tools through an explicit `sessionId` or the sole-active-session lookup
+
+When a session row is created via `POST /api/<slug>/sessions`, MCP tool handlers SHALL reach it — when resolving the Rembric session for a request — through exactly two mechanisms, in this order: (1) an explicit `sessionId` argument naming the row, validated for ownership as the `mcp-api` capability specifies; (2) otherwise `findActiveForTransport(token_id, project_id)`, which returns the row only when it is the unambiguous `active` session for the caller's `(token_id, project_id)` (see the `sessions` capability, "`findActiveForTransport` MUST NOT guess under concurrent ambiguity"). The server SHALL NOT bind an HTTP-registered session to an MCP connection, and SHALL keep no per-connection session state for either mechanism to consult.
+
+This is the bridge that makes `memory.save` calls (issued by the agent over MCP) attach `session_id` to the row that the hook created via HTTP.
+
+#### Scenario: Hook creates session over HTTP, agent saves memory over MCP
+
+- **GIVEN** a client POSTs `{ id: 'sess-abc12345' }` to `/api/foo/sessions` (HTTP) and the session row is created, and it is the only `active` row for `(token_id, foo.id)`
+- **AND** the same agent then opens an MCP connection on `/mcp/foo` and calls `memory.save({ type: 'project', content: '...' })` without `sessionId`
+- **WHEN** the server resolves the active session for that save call
+- **THEN** the resolution SHALL find `sess-abc12345` and the saved memory's `session_id` SHALL equal `'sess-abc12345'`
+
+#### Scenario: Multiple active sessions for the same (token, project)
+
+- **GIVEN** two `status='active'` rows exist for `(token_id, foo.id)` (e.g. user has two Claude Code windows open), both inside the staleness window
+- **WHEN** a memory save without `sessionId` attaches via fallback resolution
+- **THEN** the save SHALL persist `session_id = NULL` rather than choosing either row by recency
+- **AND** the same save carrying `sessionId` of either row SHALL attach to that row, which is how a client with concurrent sessions names its own
+- **AND** neither row's eventual `ended_at` / `summary` is affected

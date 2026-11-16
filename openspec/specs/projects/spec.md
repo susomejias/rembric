@@ -10,7 +10,7 @@ Defines project identity and scope resolution for Rembric, including path-based 
 
 The `projects` table SHALL store the canonical identifier of each project in a column named `slug` (renamed from `path` in this change). `slug` SHALL be `TEXT NOT NULL UNIQUE`. A migration SHALL rename the column atomically; no value normalization SHALL occur during the rename — legacy values continue to function for read and write.
 
-For _new_ slugs created after this change (via `project.use({slug, autocreate: true})` or via the dashboard), the value SHALL match the strict regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Paths SHALL NOT be persisted in the projects table and SHALL NOT be accepted by any tool argument.
+Projects SHALL be created from the dashboard only; no MCP tool SHALL create a project. For _new_ slugs created after this change, the value SHALL match the strict regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Paths SHALL NOT be persisted in the projects table and SHALL NOT be accepted by any tool argument.
 
 #### Scenario: Renaming the column at migration time
 
@@ -20,8 +20,13 @@ For _new_ slugs created after this change (via `project.use({slug, autocreate: t
 
 #### Scenario: Creating a new project with a valid slug
 
-- **WHEN** `project.use({slug: 'rembric-api', autocreate: true})` is called and the slug does not exist
-- **THEN** a new row SHALL be inserted with that slug and the call SHALL return `{ slug, projectId, created: true, switched: false }`
+- **WHEN** the operator creates a project with slug `rembric-api` from the dashboard and the slug does not exist
+- **THEN** a new row SHALL be inserted with that slug
+
+#### Scenario: No MCP tool creates a project
+
+- **WHEN** an MCP client calls any registered tool on a connection whose slug names no project, with any arguments
+- **THEN** no `projects` row SHALL be inserted
 
 #### Scenario: Creating a new project with an invalid slug
 
@@ -33,35 +38,6 @@ For _new_ slugs created after this change (via `project.use({slug, autocreate: t
 - **GIVEN** a pre-existing row with `slug = 'My.Project'` (created under v0.1's looser rules)
 - **WHEN** any tool resolves project scope to that slug
 - **THEN** the row SHALL be returned and the request SHALL proceed normally
-
-### Requirement: Project scope MUST be resolvable only from URL path or explicit tool call
-
-The server SHALL accept two ways to set the active project for an MCP session: (a) the URL path `/mcp/<slug>` and (b) the `project.use({slug})` tool call. The `X-Rembric-Project` header SHALL no longer be consulted; servers SHALL ignore it and SHALL NOT use its value in scope resolution.
-
-When neither mechanism has fired, the connection SHALL resolve to the **default project** (see "Exactly one project MUST be marked as the system default"). There SHALL be no scopeless state: a connection is either bound to the project its URL slug named, bound to a project a tool call activated, or resolved to the default project. Auto-detection via MCP `roots` MAY replace the default with a project on `/mcp` connections, but only by activating an _existing_ slug (see the next requirement).
-
-A path slug that names no project is NOT resolved to the default project. An operator who typed a slug asked to be confined to it, and answering a typo with a different project would write into the wrong place silently; such a connection is refused instead.
-
-#### Scenario: URL path sets the scope at connection time
-
-- **WHEN** an MCP call arrives at `/mcp/rembric` and the slug exists
-- **THEN** the request SHALL be scoped to project `rembric` for the lifetime of the MCP transport session
-
-#### Scenario: URL path slug does not exist
-
-- **WHEN** an MCP call arrives at `/mcp/does-not-exist` and no project has that slug
-- **THEN** the `initialize` SHALL succeed (path-scoping does not enforce existence pre-tools), BUT any tool call that resolves the scope into a `project_id` SHALL respond with `project_not_found`, SHALL NOT auto-create, and SHALL NOT fall back to the default project
-
-#### Scenario: `X-Rembric-Project` header is sent
-
-- **WHEN** an MCP call arrives with `X-Rembric-Project: rembric` and no path slug
-- **THEN** the server SHALL ignore the header and SHALL resolve the request to the default project
-
-#### Scenario: Neither path nor tool call has set scope
-
-- **WHEN** the agent calls `memory.save` on a `/mcp` connection without having called `project.use` and without `roots`-based discovery resolving to a project
-- **THEN** the call SHALL succeed against the default project
-- **AND** it SHALL NOT be rejected with `project_required`, which is retired from the MCP surface entirely: no emitting site remains, because the two paths that leave a connection unusable emit their own codes — `project_not_found` for an unresolvable slug and `project_archived` for an archived project
 
 ### Requirement: Projects MUST support archive and rename
 
@@ -80,76 +56,6 @@ The dashboard and CLI SHALL allow operators to rename a project (changing its di
 - **WHEN** the operator attempts to archive the project holding `is_default = 1`
 - **THEN** the attempt SHALL be refused and the row SHALL remain unarchived
 
-### Requirement: Project auto-detection via MCP `roots` MUST be read-only
-
-When a client advertises `capabilities.roots` at `initialize` and the URL path is `/mcp` (no slug), the server SHALL call `roots/list`, derive a candidate slug from the basename of the first root (lowercase ASCII, non-`[a-z0-9-]` characters replaced with `-`, trimmed of leading/trailing `-`), and activate an _existing_ project with that slug. Auto-detection SHALL NOT create new projects.
-
-**Delivery obligation.** The `roots/list` request SHALL be issued on a server→client stream that is registered at the moment of the send, so its delivery does not depend on request timing and does not depend on the client having opened the optional standalone server→client stream. Concretely, discovery is triggered from a tool call and the request SHALL be correlated with that in-flight tool call, whose response stream the transport registers before any handler runs. A request the transport cannot route SHALL NOT be treated as a request that was sent: the requirement is on delivery, not on the attempt.
-
-This is stated as a property of the send rather than of any SDK symbol so the mechanism stays free, but the property is what must hold. The standalone stream is optional by the MCP client's own contract; a server that depends on it has a correctness bug that presents as a timeout, and a request routed only to an unregistered stream is discarded by the transport with no error, no `onerror` callback and no log at any layer, which is why this obligation must be specified rather than left to the implementation.
-
-**The once-only guarantee attaches to an answered call, not to an attempt.** The server SHALL issue at most one `roots/list` **for discovery purposes** per transport that produced a definitive outcome, where a definitive outcome is any of: the client returned a root list (empty or not), the client returned a JSON-RPC error, or the client advertised no `roots` capability. An attempt that produced no answer — a timeout, an undelivered request, or a transport failure — SHALL NOT consume that slot, and the next scope-resolving tool call on the same transport SHALL retry discovery. The `roots/list` a `notifications/roots/list_changed` refresh issues is not discovery — it can only write suggestions — and is governed by its own requirement below; it SHALL neither consume nor release this slot.
-
-The unconditional variant is what makes a single lost message permanent: the sentinel is per `(tokenId, mcpSessionId)` and the resolver short-circuits on it, so a connection whose one attempt was discarded resolves to the default project for the remainder of its life, with `project.current` reporting an empty `suggestedSlugs` so the agent cannot self-diagnose. Because `memory` rows are append-only with no reassignment verb and `agent_sessions.project_id` is immutable, every row that connection writes is misfiled permanently. `notifications/roots/list_changed` is not a recovery path: it updates suggestions only and never activates a project.
-
-**The discovery slot is per-transport state, and SHALL be owned by the connection rather than by the process.** No transport's discovery state SHALL be readable, writable or clearable from another transport, and the number of `roots/list` requests a client receives SHALL NOT depend on how many other connections the process is serving. Ownership SHALL be structural rather than by convention: the state SHALL live with the per-connection server instance so it is released when that instance is, and SHALL NOT live in a module-level registry that outlives every transport it describes.
-
-The `roots/list` budget SHALL be a bounded timeout, and the specified behaviour on expiry is unchanged (silent fall-through). The shipped budget is 2500 ms. This requirement SHALL NOT be read as endorsing any particular value: once the delivery obligation above holds, a compliant client answers far inside any reasonable bound and the budget binds only a client that advertises `roots` and declines to answer.
-
-#### Scenario: Roots resolves to an existing slug
-
-- **GIVEN** the client returns `[{uri: 'file:///home/me/rembric'}]` from `roots/list`
-- **AND** a project with `slug = 'rembric'` exists
-- **WHEN** the auto-detection step runs
-- **THEN** the session SHALL be scoped to that project with `source = 'roots'`
-
-#### Scenario: Roots resolves to a slug that does not exist
-
-- **GIVEN** the client returns `[{uri: 'file:///tmp/quick-test'}]` from `roots/list`
-- **AND** no project with `slug = 'quick-test'` exists
-- **WHEN** the auto-detection step runs
-- **THEN** the session SHALL remain in the default project and the derived `'quick-test'` SHALL appear in `project.current.suggestedSlugs`
-
-#### Scenario: Client does not support roots
-
-- **WHEN** the `initialize` request advertises no `roots` capability
-- **THEN** the server SHALL NOT issue `roots/list` and the session SHALL remain in the default project until an explicit `project.use` call
-
-#### Scenario: `roots/list` times out or errors
-
-- **WHEN** the server's `roots/list` request does not return within the discovery budget (2500 ms as shipped), or returns a JSON-RPC error
-- **THEN** the auto-detection SHALL silently fall through to the default project; the connection SHALL NOT be failed
-
-#### Scenario: Discovery succeeds while the client's standalone server→client stream is absent
-
-- **GIVEN** an unscoped `/mcp` connection whose client advertises `capabilities.roots`
-- **AND** the client's standalone GET server→client stream is **not** registered on the transport at the moment discovery runs
-- **WHEN** a scope-resolving tool call triggers `roots/list`
-- **THEN** the request SHALL still be delivered to the client and the discovered project SHALL be activated
-- **AND** the outcome SHALL NOT depend on whether that standalone stream is ever opened
-
-#### Scenario: A discovery attempt that produced no answer is retried on the next tool call
-
-- **GIVEN** an unscoped `/mcp` connection on which a `roots/list` request was issued and no answer of any kind arrived
-- **WHEN** a second scope-resolving tool call arrives on the same transport
-- **THEN** discovery SHALL run again rather than short-circuiting on the earlier attempt
-- **AND** if that second attempt answers with a root naming an existing project, the connection SHALL resolve to that project from then on
-
-#### Scenario: An answered discovery is not re-issued
-
-- **GIVEN** an unscoped `/mcp` connection whose `roots/list` returned a root list, an empty root list, or a JSON-RPC error
-- **WHEN** further scope-resolving tool calls arrive on the same transport, and no `notifications/roots/list_changed` has been received on it
-- **THEN** the server SHALL NOT issue another `roots/list` for that transport
-- **AND** a client advertising no `roots` capability SHALL likewise be asked at most once
-- **AND** a `notifications/roots/list_changed` received on a DIFFERENT transport SHALL NOT cause another `roots/list` on this one
-
-#### Scenario: Roots changes mid-session via `notifications/roots/list_changed`
-
-- **GIVEN** a session has been auto-scoped to project `'rembric'` via the initial `roots/list`
-- **WHEN** the client emits `notifications/roots/list_changed` with new roots resolving to slug `'api'`
-- **THEN** the server SHALL update `project.current.suggestedSlugs` to `['api']` but SHALL NOT switch the active project; the agent must explicitly call `project.use({slug: 'api', confirmSwitch: true})` to switch (which itself requires the active session to be ended first per the sessions capability)
-- **AND** the update SHALL be observable on the first scope-resolving tool call that follows the notification, including the `project.current` call that reads it, because the refreshing `roots/list` must be correlated with an in-flight tool call to be deliverable; the notification alone SHALL NOT be required to have produced it
-
 ### Requirement: The `projects` service MUST expose `findBySlug` and explicit `create`
 
 The application-layer service that today provides `findOrCreate(path)` SHALL be replaced by two distinct methods: `findBySlug(slug)` (returns the row or `null`, never inserts) and `create({slug, displayName?})` (inserts after validating the strict slug regex, throws on conflict).
@@ -166,12 +72,17 @@ The application-layer service that today provides `findOrCreate(path)` SHALL be 
 
 ### Requirement: Project resolution MUST surface deterministic suggestions on miss
 
-When a `project.use({slug})` or any other resolution path returns `project_not_found`, the response SHALL include `suggestedSlugs: string[]` containing up to 3 existing slugs ranked by Levenshtein distance ≤ 3 from the input slug. The algorithm SHALL be deterministic (same input + database state → same suggestion list) and SHALL execute fully in-process without any LLM call.
+When a resolution path returns `project_not_found`, the response SHALL include `suggestedSlugs: string[]` containing up to 3 existing slugs ranked by Levenshtein distance ≤ 3 from the input slug. The algorithm SHALL be deterministic (same input + database state → same suggestion list) and SHALL execute fully in-process without any LLM call.
 
 #### Scenario: A near-miss produces a suggestion
 
-- **WHEN** `project.use({slug: 'rembic'})` is called and projects `'rembric'` and `'rembric-api'` exist
+- **WHEN** a scope-resolving tool is called on a connection at `/mcp/rembic` and projects `'rembric'` and `'rembric-api'` exist
 - **THEN** the response SHALL be an error `project_not_found` with payload `{ suggestedSlugs: ['rembric', 'rembric-api'] }`
+
+#### Scenario: Suggestions are never derived from the client's roots
+
+- **WHEN** an MCP client advertising the `roots` capability connects and calls `project.current` or any scope-resolving tool
+- **THEN** no response SHALL carry a slug derived from the client's roots, and the server SHALL NOT send `roots/list`
 
 #### Scenario: No near-misses found
 
@@ -220,7 +131,7 @@ The GET handler SHALL read `?created` and `?error` query parameters and render t
 
 The `projects` table SHALL carry a boolean `is_default` column, and exactly one row SHALL hold `is_default = 1` at all times. That row is the **default project**: the scope a path-less `/mcp` connection resolves to when nothing else named a project.
 
-Beyond that single resolution rule the default project SHALL be an **ordinary project** in every respect. It SHALL be returned by `project.list` on the same authorization terms as any other project, activatable by `project.use`, swept by consolidation, filterable on the dashboard, and authorized against by the same `isAuthorized` check. No read SHALL treat it as a wildcard, no read SHALL merge it with another project's rows, and no token SHALL gain reach through it.
+Beyond that single resolution rule the default project SHALL be an **ordinary project** in every respect. It SHALL be returned by `project.list` on the same authorization terms as any other project, reachable at `/mcp/<its slug>`, swept by consolidation, filterable on the dashboard, and authorized against by the same `isAuthorized` check. No read SHALL treat it as a wildcard, no read SHALL merge it with another project's rows, and no token SHALL gain reach through it.
 
 **The default project SHALL ALWAYS be created as a NEW `projects` row by schema migration. The migration SHALL NEVER adopt, reuse or re-designate an existing project — not even a project whose slug is already `default`.** Two reasons, in order of severity:
 
@@ -314,59 +225,31 @@ Renaming the default project SHALL remain permitted. Rename changes only the dis
 - **WHEN** an operator renames the default project
 - **THEN** the display name SHALL change, the slug SHALL be unchanged, `is_default` SHALL remain `1`, and a path-less connection SHALL continue to resolve to it
 
-### Requirement: The `roots/list_changed` refresh MUST be per-transport, advisory, and delivered under a tool call
+### Requirement: Project scope MUST be resolvable only from URL path or the default project
 
-On `notifications/roots/list_changed`, the server SHALL re-derive the candidate slug for **only the transport that emitted the notification** and SHALL record it as a suggestion. The refresh SHALL NOT activate, switch or clear a project, and SHALL NOT alter any other transport's state in any way.
+The server SHALL resolve an MCP request's project from exactly two sources: (a) the URL path `/mcp/<slug>`, and (b) on a path-less `/mcp` request, the default project. No tool call SHALL set, switch or pin a project, MCP `roots` SHALL NOT be consulted, and no per-connection state SHALL carry a project between requests. The `X-Rembric-Project` header SHALL no longer be consulted; servers SHALL ignore it and SHALL NOT use its value in scope resolution.
 
-The refreshing `roots/list` SHALL be issued under an in-flight tool call, on the same terms as discovery's delivery obligation above. A notification handler has no in-flight tool call to correlate with, so the refresh SHALL be performed by the first scope-resolving tool call that follows the notification rather than by the handler itself; the handler SHALL only record that a refresh is due.
+When the URL path carries no slug, the request SHALL resolve to the **default project** (see "Exactly one project MUST be marked as the system default"). There SHALL be no scopeless state: a request is either bound to the project its URL slug named or resolved to the default project.
 
-**One notification earns at most one attempt.** The refresh obligation SHALL be discharged by the attempt, not by an answer: a refreshing `roots/list` that times out, errors or is never answered SHALL NOT be retried, and SHALL leave nothing pending. This is deliberately the inverse of the discovery slot's rule, and the difference is justified by the difference in consequence — a lost discovery misscopes every append-only row the connection writes, whereas a lost refresh leaves one stale advisory slug that activates nothing. Retrying it would make every subsequent tool call on a silent client pay the full `roots/list` budget for the life of the connection.
+A path slug that names no project is NOT resolved to the default project. An operator who typed a slug asked to be confined to it, and answering a typo with a different project would write into the wrong place silently; such a connection is refused instead.
 
-Where the transport has no answered discovery yet when the notification arrives, ordinary discovery SHALL run instead of a refresh — the `roots/list` it is about to issue already reflects the new roots — and the pending refresh SHALL be discharged by it.
+#### Scenario: URL path sets the scope at connection time
 
-#### Scenario: A `list_changed` on one transport does not re-ask another
+- **WHEN** an MCP call arrives at `/mcp/rembric` and the slug exists
+- **THEN** the request SHALL be scoped to project `rembric`, and so SHALL every later request at the same URL
 
-- **GIVEN** two live `/mcp` transports A and B, each with an answered `roots/list` and each scoped to its own project
-- **WHEN** A emits `notifications/roots/list_changed` and B then makes a scope-resolving tool call
-- **THEN** B's client SHALL receive no further `roots/list` request
-- **AND** B's resolved project, its `project.current.source`, and its `project.current.suggestedSlugs` SHALL all be unchanged
+#### Scenario: URL path slug does not exist
 
-#### Scenario: A refresh neither spends nor discards the answered discovery slot
+- **WHEN** an MCP call arrives at `/mcp/does-not-exist` and no project has that slug
+- **THEN** the `initialize` SHALL succeed (path-scoping does not enforce existence pre-tools), BUT any tool call that resolves the scope into a `project_id` SHALL respond with `project_not_found`, SHALL NOT auto-create, and SHALL NOT fall back to the default project
 
-- **GIVEN** a transport whose `roots/list` was answered and whose client then stops answering
-- **WHEN** the client emits `notifications/roots/list_changed` and then makes several scope-resolving tool calls
-- **THEN** at most one further `roots/list` SHALL be issued on that transport in total
-- **AND** no tool call after the first SHALL wait on the `roots/list` budget
-- **AND** the connection SHALL keep the project its answered discovery activated
+#### Scenario: `X-Rembric-Project` header is sent
 
-#### Scenario: A refresh updates suggestions and never activates
+- **WHEN** an MCP call arrives with `X-Rembric-Project: rembric` and no path slug
+- **THEN** the server SHALL ignore the header and SHALL resolve the request to the default project
 
-- **GIVEN** a transport with no active project whose roots now resolve to the slug of an existing project
-- **WHEN** `notifications/roots/list_changed` is followed by a scope-resolving tool call
-- **THEN** the derived slug SHALL appear in `project.current.suggestedSlugs`
-- **AND** the resolved project SHALL still be the default one, with `source` reporting the default fallback rather than `'roots'`
+#### Scenario: Neither path nor tool call has set scope
 
-#### Scenario: A refresh whose roots are empty or underivable clears the suggestion list
-
-- **GIVEN** a transport carrying a non-empty `project.current.suggestedSlugs` from an earlier derivation
-- **WHEN** `notifications/roots/list_changed` is followed by a scope-resolving tool call, and the client answers `roots/list` with an empty list or with a URI from which no valid slug can be derived
-- **THEN** `project.current.suggestedSlugs` SHALL become empty rather than retaining the stale slug
-
-#### Scenario: A `list_changed` arriving before any answered discovery runs ordinary discovery
-
-- **GIVEN** an unscoped transport whose discovery slot is unconsumed because its first `roots/list` produced no answer
-- **WHEN** `notifications/roots/list_changed` arrives and a scope-resolving tool call follows
-- **THEN** ordinary discovery SHALL run, and SHALL be permitted to activate the discovered project
-- **AND** exactly one `roots/list` SHALL be issued for that tool call, not one for discovery and another for the refresh
-
-#### Scenario: The refreshing `roots/list` is delivered while the standalone stream is absent
-
-- **GIVEN** a transport whose client never opens the standalone GET server→client stream
-- **WHEN** `notifications/roots/list_changed` is followed by a scope-resolving tool call
-- **THEN** the refreshing `roots/list` SHALL reach the client and the refreshed suggestion SHALL be observable on that same tool call's `project.current`
-
-#### Scenario: Per-transport discovery state is not a process-global registry
-
-- **WHEN** the test suite inspects the roots-discovery module
-- **THEN** it SHALL find no module-level mutable registry of per-transport state
-- **AND** no exported helper whose purpose is to clear such a registry for all transports at once
+- **WHEN** the agent calls `memory.save` on a `/mcp` connection, where no tool call can set a project, whether or not its client advertises the `roots` capability
+- **THEN** the call SHALL succeed against the default project
+- **AND** it SHALL NOT be rejected with `project_required`, which is retired from the MCP surface entirely: no emitting site remains, because the two paths that leave a connection unusable emit their own codes — `project_not_found` for an unresolvable slug and `project_archived` for an archived project

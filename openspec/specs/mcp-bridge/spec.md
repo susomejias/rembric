@@ -8,7 +8,7 @@ Defines the published zero-dependency client-side Rembric MCP bridge, including 
 
 ### Requirement: The bridge is the single client-side piece, published as a package inside the plugin component
 
-The repository SHALL own the whole client side of the MCP connection in one published package, `@rembric/mcp-bridge`, with its source at `apps/plugin/mcp-bridge/`. The package SHALL be responsible for project-directory resolution, `.rembric` slug resolution, URL building, the startup stderr diagnostic, the advisory server-version warning, bearer injection, the stdio↔Streamable-HTTP MCP transport, and session-terminated recovery.
+The repository SHALL own the whole client side of the MCP connection in one published package, `@rembric/mcp-bridge`, with its source at `apps/plugin/mcp-bridge/`. The package SHALL be responsible for project-directory resolution, `.rembric` slug resolution, URL building, the startup stderr diagnostic, the advisory server-version warning, bearer injection, and the stdio↔Streamable-HTTP MCP transport. It SHALL NOT implement protocol-session recovery or relay server-initiated requests: the server mints no `Mcp-Session-Id` and initiates no request.
 
 There SHALL NOT be a second component that resolves the URL and then hands off to this one. The two-piece shape it replaces existed because the transport engine was third-party and could not be told to read a `.rembric` file; with the engine owned, a wrapper whose only job is to compute an argument for it has no independent reason to exist, and it carried real cost — process spawning, a stdio relay, spawn-error handling, exit-code forwarding, terminating-signal re-raising, and one extra process per session.
 
@@ -16,7 +16,7 @@ The directory SHALL sit inside `apps/plugin/` because release-please attributes 
 
 The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which `apps/web/src/test/invariants.test.ts` derives "is this a JS/TS session client", every member of which must import `apps/plugin/bin/rembric-plugin-core.mjs`. The bridge is a transport and SHALL NOT import the session-protocol core.
 
-`apps/plugin/mcp-bridge` SHALL be declared in `pnpm-workspace.yaml::packages`, unlike `.pi-plugin/`. Both declare no runtime dependencies, so the reason is not lockfile resolution: this package carries the whole client side for every shell client, and its session-recovery and relay logic SHALL be covered by executable tests, which requires it to be a workspace member the test runner reaches.
+`apps/plugin/mcp-bridge` SHALL be declared in `pnpm-workspace.yaml::packages`, unlike `.pi-plugin/`. Both declare no runtime dependencies, so the reason is not lockfile resolution: this package carries the whole client side for every shell client, and its slug-resolution and transport logic SHALL be covered by executable tests, which requires it to be a workspace member the test runner reaches.
 
 #### Scenario: The package directory is inside the plugin component and is a workspace member
 
@@ -94,7 +94,7 @@ The bridge SHALL look for `${projectDir}/.rembric`. If present, it SHALL parse i
 
 The slug cascade SHALL be, in order: the validated `PROJECT_SLUG` from `.rembric`; then a validated `REMBRIC_PROJECT_SLUG` environment variable; then no slug. A candidate that fails validation SHALL be discarded and the cascade SHALL continue rather than aborting. The bridge SHALL NOT walk parent directories looking for `.rembric` — only the resolved project directory is checked. This precedence is the one `hermes-agent-plugin` already defines for its provider, adopted here rather than reinvented, so that a user who sets a default slug once and then works across repositories each carrying its own `.rembric` gets correct per-repository scoping from both surfaces.
 
-With a resolved slug the endpoint SHALL be `${REMBRIC_SERVER_URL}/mcp/<slug>` (path-scoped); with none it SHALL be `${REMBRIC_SERVER_URL}/mcp` (path-less). Trailing slashes on the base URL SHALL be stripped. A missing, unparseable or invalid slug SHALL NOT abort the session: the bridge writes one stderr diagnostic and continues path-less, where the connection resolves to the server's default project or to whatever the agent later pins.
+With a resolved slug the endpoint SHALL be `${REMBRIC_SERVER_URL}/mcp/<slug>` (path-scoped); with none it SHALL be `${REMBRIC_SERVER_URL}/mcp` (path-less). Trailing slashes on the base URL SHALL be stripped. A missing, unparseable or invalid slug SHALL NOT abort the session: the bridge writes one stderr diagnostic and continues path-less, where the connection resolves to the server's default project and stays there: no tool can switch it, and the server does not derive a project from the host's roots. That diagnostic SHALL name the fix — add a `.rembric` file containing `PROJECT_SLUG=<slug>` to the resolved project directory, or set `REMBRIC_PROJECT_SLUG` — and SHALL state that the connection uses the default project.
 
 The bridge SHALL write one diagnostic line to stderr at startup of the form `[rembric-bridge] projectDir=<dir> (from <source>) url=<url>`, where `<source>` is exactly one of `CLAUDE_PROJECT_DIR`, `PWD`, or `process.cwd()` — naming which step of the chain produced the resolved directory. This is what makes `claude --debug` and Codex log inspection able to explain a wrong project.
 
@@ -147,15 +147,15 @@ The bridge SHALL be the **only** JS/TS implementation of this parsing: it import
 
 - **GIVEN** no `.rembric` and no `REMBRIC_PROJECT_SLUG`
 - **WHEN** the bridge starts
-- **THEN** it SHALL emit one stderr diagnostic
+- **THEN** it SHALL emit one stderr diagnostic that names `.rembric` with `PROJECT_SLUG` and `REMBRIC_PROJECT_SLUG` as the fix and states that the default project is in use
 - **AND** the endpoint SHALL be `${REMBRIC_SERVER_URL}/mcp`
-- **AND** the session SHALL proceed
+- **AND** the session SHALL proceed, and its tool calls SHALL resolve to the server's default project
 
 ### Requirement: The bridge forwards the host's `initialize` verbatim and never substitutes its own identity
 
 The bridge SHALL pass the host's MCP frames through unchanged, including the `initialize` request and its `clientInfo`. The `clientInfo.name` and `clientInfo.version` the server observes SHALL be exactly the values the host sent, with no prefix, suffix, replacement, or annotation.
 
-This is a requirement on the architecture, not only on the output: an implementation that instantiates an SDK `Client` against the remote endpoint performs its own `initialize` and declares its own identity, which is how the delegate being replaced produced `"<host> (via mcp-remote <version>)"` — measured 2026-08-15, with a version string that did not even match the running package. The bridge SHALL therefore be a message pipe, holding only the state its session recovery needs (the current `mcp-session-id` and the most recent `initialize` frame).
+This is a requirement on the architecture, not only on the output: an implementation that instantiates an SDK `Client` against the remote endpoint performs its own `initialize` and declares its own identity, which is how the delegate being replaced produced `"<host> (via mcp-remote <version>)"` — measured 2026-08-15, with a version string that did not even match the running package. The bridge SHALL therefore be a message pipe. It SHALL NOT retain the host's `initialize` frame for replay, because no recovery path exists to replay it.
 
 The bridge SHALL NOT modify tool names, tool arguments, tool results, or any other frame content.
 
@@ -171,73 +171,6 @@ The bridge SHALL NOT modify tool names, tool arguments, tool results, or any oth
 - **WHEN** a `tools/call` frame passes through the bridge in either direction
 - **THEN** the tool name, the arguments object and the result SHALL be byte-identical to what the sender emitted
 
-### Requirement: A terminated session is recovered exactly once, on HTTP 404 only
-
-When the endpoint answers an HTTP `404` to a request that carried an `mcp-session-id`, the bridge SHALL discard that session id, send a fresh `InitializeRequest` followed by `notifications/initialized`, and retry the original request exactly once. This implements the MCP specification's mandate (2025-06-18, Session Management): a client receiving `404` for a request carrying `Mcp-Session-Id` MUST start a new session with a new `InitializeRequest`.
-
-The recovery is bounded on every axis:
-
-- **Status.** `404` alone. `401`, `403`, `429` and every `5xx` SHALL propagate to the host unchanged, with no re-initialization and no retry.
-- **Count.** Exactly one re-initialization and one retry per failing request. A failure of the retried request SHALL propagate. The bridge SHALL NOT loop.
-- **Payload.** Only the handshake is replayed. Prior tool calls SHALL NOT be re-sent.
-- **Applicability.** A request carrying no `mcp-session-id` — notably `initialize` itself — is not a recovery case, so a `404` to it SHALL propagate unchanged and cannot recurse.
-
-Retrying a request that mutates state is safe against a Rembric server specifically, because that server's refusal is emitted at the transport boundary before any tool handler is constructed or run (`apps/server/src/server/http.ts`), so the refused call cannot have been partially applied. This property is stated as the reason rather than assumed, so that it is re-checked rather than generalised if the server's refusal ever moves.
-
-#### Scenario: A tool call after a server restart succeeds transparently
-
-- **GIVEN** an established session and a server that has restarted, so it no longer holds the session id
-- **WHEN** the host issues a `tools/call` and the endpoint answers `404` with JSON-RPC error `-32001`
-- **THEN** the bridge SHALL send a new `InitializeRequest`, then `notifications/initialized`, then re-send the original `tools/call` once
-- **AND** the host SHALL receive the successful result, having observed no error
-
-#### Scenario: A 401 is not a recovery case
-
-- **GIVEN** an established session
-- **WHEN** a request carrying the session id is answered `401`
-- **THEN** the bridge SHALL NOT send an `InitializeRequest` and SHALL NOT retry
-- **AND** the error SHALL propagate to the host unchanged
-
-#### Scenario: A second failure propagates instead of looping
-
-- **GIVEN** a request answered `404`, followed by a re-initialization, followed by a retry that is also answered `404`
-- **WHEN** the second failure is observed
-- **THEN** the bridge SHALL propagate the error to the host
-- **AND** it SHALL issue no third attempt and no second `InitializeRequest`
-
-#### Scenario: A 404 to `initialize` does not recurse
-
-- **GIVEN** a request with no `mcp-session-id` header
-- **WHEN** the endpoint answers `404`
-- **THEN** the error SHALL propagate unchanged
-- **AND** the bridge SHALL NOT attempt a re-initialization
-
-#### Scenario: Prior calls are not replayed
-
-- **WHEN** recovery completes for one failing request
-- **THEN** the frames the bridge has sent since discarding the session id SHALL be exactly: the `InitializeRequest`, `notifications/initialized`, and the one retried request
-
-### Requirement: Recovery restores the transport session, not server-side session state
-
-A re-initialized connection is a new server-side session. The bridge SHALL NOT attempt to restore state the previous session held.
-
-For a path-scoped endpoint (`/mcp/<slug>`) the project scope is re-derived from the unchanged URL, so recovery is scope-preserving. For a path-less endpoint (`/mcp`) the new session re-resolves through the server's ordinary discovery path; a project the agent had pinned during the session with `project.use` SHALL NOT be restored, and the connection resolves as any fresh path-less connection would.
-
-This gap is specified rather than closed because closing it would require replaying prior tool calls, which the recovery requirement forbids.
-
-#### Scenario: A path-scoped connection keeps its project across recovery
-
-- **GIVEN** a resolved slug `demo`, so the endpoint is `<base>/mcp/demo`
-- **WHEN** recovery re-initializes against the same URL
-- **THEN** the new session SHALL be scoped to the `demo` project
-
-#### Scenario: A `project.use` pin is not carried across recovery
-
-- **GIVEN** a path-less `/mcp` connection on which the agent has pinned a project with `project.use`
-- **WHEN** recovery re-initializes
-- **THEN** the pin SHALL NOT be re-applied
-- **AND** the new session SHALL resolve exactly as a fresh path-less connection does
-
 ### Requirement: The server-version check is advisory, lives here, and exists exactly once
 
 Before connecting, the bridge SHALL perform one `GET ${REMBRIC_SERVER_URL}/healthz` request (reusing the bearer it holds for the MCP connection) with a short timeout (2 seconds). On success it SHALL compare the response's `version` field against a `MIN_SERVER_VERSION` constant bumped alongside the plugin's own version. When the server's version is older (semver comparison), the bridge SHALL print exactly one stderr line naming both versions and pointing at the dashboard self-update flow / `docs/updates.md`, then connect unchanged.
@@ -246,7 +179,7 @@ The check SHALL be advisory only and SHALL NOT block or delay the connection: it
 
 There SHALL be exactly one implementation of this check across the plugin tree. No client, and not the deprecated on-disk launcher, SHALL issue a second `/healthz` request — a duplicate would be both a second implementation of one concern and a second HTTP request on every session start.
 
-The bridge SHALL impose **no hard version floor**: it SHALL NOT refuse to run, and SHALL NOT alter its behaviour, on the basis of the server's version. Against a server that answers a status other than `404` for an unknown `mcp-session-id`, the recovery path simply does not fire and behaviour is exactly what it is without this package — never worse. What makes this safe is that the bridge is transport-only: MCP negotiates at runtime — tools discovered through `tools/list`, protocol version agreed in `initialize` — so a bridge that inspects no payload cannot go stale against a server.
+The bridge SHALL impose **no hard version floor**: it SHALL NOT refuse to run, and SHALL NOT alter its behaviour, on the basis of the server's version. What makes this safe is that the bridge is transport-only: MCP negotiates at runtime — tools discovered through `tools/list`, protocol version agreed in `initialize` — so a bridge that inspects no payload cannot go stale against a server.
 
 #### Scenario: An outdated server produces one advisory line and connects
 
@@ -270,9 +203,9 @@ The bridge SHALL impose **no hard version floor**: it SHALL NOT refuse to run, a
 
 #### Scenario: An older server degrades to today's behaviour, not worse
 
-- **GIVEN** a server that answers `400` (not `404`) for a request naming an unknown `mcp-session-id`
-- **WHEN** the host issues such a request through the bridge
-- **THEN** the error SHALL propagate unchanged
+- **GIVEN** a server whose version is older than `MIN_SERVER_VERSION` and that answers a request with an HTTP error status
+- **WHEN** the host issues that request through the bridge
+- **THEN** the error SHALL propagate to the host unchanged
 - **AND** the bridge SHALL NOT re-initialize, retry, or refuse to run against that server
 
 #### Scenario: Exactly one `/healthz` request per session start
@@ -289,7 +222,7 @@ The alternative — one exact-pinned dependency on the SDK's client transports �
 
 Zero dependencies also discharges the message-pipe requirement above by construction rather than by discipline: with no SDK `Client` there is no second handshake that could substitute the bridge's identity for the host's.
 
-This is not a novel burden for this repository. `apps/plugin/.pi-plugin/index.ts` already ships a Streamable HTTP MCP client with `dependencies: {}`, including SSE frame parsing, and the prototype recorded in `measurements/prototype-zerodep.mjs` demonstrated the one mechanism that had no precedent there — see the roots requirement below.
+This is not a novel burden for this repository. `apps/plugin/.pi-plugin/index.ts` already ships a Streamable HTTP MCP client with `dependencies: {}`, including SSE frame parsing, and the prototype recorded in `measurements/prototype-zerodep.mjs` demonstrated the one mechanism that had no precedent there: relaying a server-initiated request to the host. That relay has since been removed, because the server no longer initiates any request.
 
 #### Scenario: The manifest declares no runtime dependencies
 
@@ -302,19 +235,6 @@ This is not a novel burden for this repository. `apps/plugin/.pi-plugin/index.ts
 - **WHEN** `@rembric/mcp-bridge` is installed into an empty directory with lifecycle scripts disabled
 - **THEN** the resulting tree SHALL contain exactly one package
 - **AND** its measured size SHALL be recorded against the 80 packages / 7.0 MB the replaced delegate installs
-
-### Requirement: The bridge relays a server-initiated request to the host and returns its answer
-
-A request the server initiates on a response stream — `roots/list` is the one Rembric sends — SHALL be forwarded to the host unchanged, and the host's response SHALL be posted back to the MCP endpoint. The bridge SHALL NOT answer such a request itself, and SHALL NOT drop it: answering it would make the bridge, rather than the host, the authority on the client's roots, and dropping it strands the server's project resolution until its timeout.
-
-This is stated as a requirement because it is the one mechanism the zero-dependency decision could not inherit from an existing implementation: `.pi-plugin/index.ts` sends `capabilities: {}` and therefore never receives one. It was measured before the design was settled — a real `claude` CLI against a real server on a path-less `/mcp`, through `measurements/prototype-zerodep.mjs`, produced `server-initiated request on stream: roots/list id=0 -> host` followed by `host response id=0 -> server` (`measurements/gate-arm3-roots-relay.log`).
-
-#### Scenario: A server-initiated roots/list reaches the host and its answer reaches the server
-
-- **WHEN** the server initiates a `roots/list` request on the response stream of an in-flight tool call
-- **THEN** the bridge SHALL write that request to the host unchanged
-- **AND** SHALL post the host's response to the MCP endpoint
-- **AND** SHALL NOT synthesise a response of its own
 
 ### Requirement: Every spawn site MUST pin an exact bridge version
 
@@ -364,6 +284,12 @@ These are recorded as requirements rather than as omissions because the package 
 ### Requirement: Bridge compatibility documentation distinguishes support from host verification
 
 The documentation SHALL describe the bridge as a standard stdio MCP transport replacement for hosts that previously used `mcp-remote`. Its compatibility table SHALL retain recorded host-level evidence where it exists and label unmeasured hosts as supported but not host-verified; it SHALL not present an unmeasured host as a recorded run.
+
+#### Scenario: An unmeasured host is labelled supported but not host-verified
+
+- **WHEN** the bridge's compatibility table is read
+- **THEN** every host with no recorded host-level run SHALL be labelled supported but not host-verified
+- **AND** no such host SHALL be presented as a recorded run, and every host with a recorded run SHALL keep its evidence
 
 ### Requirement: The compatibility matrix names how each client was verified, or states it was not
 

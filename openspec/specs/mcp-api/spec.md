@@ -8,12 +8,28 @@ Defines the Model Context Protocol surface exposed by Rembric over Streamable HT
 
 ### Requirement: The MCP endpoint MUST use Streamable HTTP transport
 
-The server SHALL expose the Model Context Protocol over the Streamable HTTP transport at `/mcp`, using `@modelcontextprotocol/sdk`. The legacy SSE transport SHALL NOT be exposed.
+The server SHALL expose the Model Context Protocol over the Streamable HTTP transport at `/mcp` and `/mcp/<slug>` through one `createMcpHandler` from `@modelcontextprotocol/server`, in its default stateless posture. That single handler SHALL serve both the 2025 protocol family and the `2026-07-28` revision from the same tool-server factory: each request SHALL be answered by a server built for that request, and no per-connection state SHALL be kept between requests. A `2026-07-28` request SHALL be served, not refused with `-32022`. `@modelcontextprotocol/sdk` SHALL NOT serve any MCP request. The legacy SSE transport SHALL NOT be exposed.
+
+The server SHALL NOT mint an `Mcp-Session-Id` header, and SHALL NOT require one on any request. `GET` and `DELETE` on the MCP endpoint SHALL be answered with HTTP `405`: there is no standalone server→client stream to open and no protocol session to tear down.
 
 #### Scenario: Client initiates a session
 
-- **WHEN** an MCP client opens a session against `/mcp` using the Streamable HTTP transport
+- **WHEN** an MCP client sends `initialize` with a 2025 `protocolVersion` to `/mcp` using the Streamable HTTP transport
 - **THEN** the server SHALL respond with a valid initialize result advertising the registered tools
+- **AND** the response SHALL NOT carry an `Mcp-Session-Id` header
+- **AND** a subsequent `tools/call` from the same client, sent without an `Mcp-Session-Id` header, SHALL be served
+
+#### Scenario: A 2026-07-28 client discovers the server
+
+- **WHEN** an MCP client sends `server/discover` with protocol version `2026-07-28` to `/mcp`
+- **THEN** the server SHALL answer with a successful JSON-RPC result, not an HTTP 500 and not a `-32022` error
+- **AND** a `tools/list` sent by that client SHALL list the same tools a 2025 client receives
+
+#### Scenario: GET and DELETE are not served
+
+- **WHEN** an authenticated client sends `GET` or `DELETE` to `/mcp` or `/mcp/<slug>`
+- **THEN** the server SHALL answer with HTTP `405`
+- **AND** no event stream SHALL be opened and no server state SHALL be created or removed
 
 ### Requirement: Path-scoped connections MUST enforce strict project isolation
 
@@ -23,7 +39,7 @@ When the MCP connection is path-scoped (`/mcp/<slug>`) the server SHALL enforce 
 - `memory.search` SHALL return only memories whose `project_id` equals the bound project, **unless the caller explicitly passes the cross-project argument specified in "`memory.search` MUST accept an opt-in cross-project read and report which projects it read", in which case it SHALL return only memories from projects the token is authorized to read.** No other argument SHALL widen the result set past the bound project, and `include_global` remains absent from the tool's input schema. **Widening is a property of the caller's request and the token's reach, not of the connection: a path-scoped connection may widen exactly as a path-less one may, because the path fixes which project is the caller's home, not which projects the token may read.**
 - `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes. **Neither accepts a widening argument**, so this clause is unchanged by the cross-project search.
 
-Because there is exactly one kind of scope, the isolation this requirement describes is no longer a property of path-scoped connections specifically — it holds on every connection. What remains specific to a path-scoped connection is that its home project is fixed by the URL and cannot be changed by `project.use` for the life of the connection.
+Because there is exactly one kind of scope, the isolation this requirement describes is no longer a property of path-scoped connections specifically — it holds on every connection. What remains specific to a path-scoped connection is that its home project is fixed by the URL. No tool can change a connection's home project, on a path-scoped connection or a path-less one.
 
 A path slug that does not resolve to an existing project SHALL NOT establish any scope. Such a connection has no bound project, so the clauses above have nothing to bind to; instead **every** tool that resolves scope SHALL be refused with structured code `project_not_found`, reads and writes alike, and SHALL NOT fall back to any other project — in particular not to the default project, whose role is to serve path-LESS connections, and **in particular not by widening**: with no resolved home project there is nothing to widen from, and the cross-project argument SHALL NOT make such a connection usable. An operator who typed a slug asked to be confined to it, and answering a typo with someone else's project is worse than refusing.
 
@@ -98,10 +114,10 @@ The title predates this change: there are no global memories left to leak, and t
 
 #### Scenario: the connection is not bricked by the refusal
 
-- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to create a project
-- **WHEN** the client calls `project.current`, `project.list`, `memory.about`, or `project.use({slug: 'no-such-project', autocreate: true})`
+- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
+- **WHEN** the client calls `project.current`, `project.list` or `memory.about`
 - **THEN** each call SHALL succeed
-- **AND** after the `project.use` call, subsequent scope-resolving tools SHALL operate in that project's scope rather than being refused
+- **AND** the `project_not_found` refusal that every scope-resolving tool returns on that connection SHALL name the dashboard as the place to create the project, and SHALL NOT name a tool call as a way to create or activate it
 
 ### Requirement: The MCP endpoint MUST support path-based project scoping
 
@@ -329,7 +345,7 @@ Every MCP tool that returns a memory SHALL include that memory's `title` field i
 
 ### Requirement: The MCP server MUST expose a `memory.archive` tool
 
-The server SHALL register an MCP tool `memory.archive` that retires a single memory by flipping its `status` from `active` to `archived`. The tool SHALL accept `{ id: string }` (validated by zod; non-empty) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope exactly like the other single-memory tools (`memory.get`/`memory.confirm`, via `resolveEffectiveScope`) and delegate to `MemoryService.archive(id, scope)`, so archiving is confined to the connection's one effective scope: a `/mcp/<slug>` connection archives in that project's scope; a `/mcp` connection archives in the project the router pinned (via `project.use`), or in the default project when nothing else resolved.
+The server SHALL register an MCP tool `memory.archive` that retires a single memory by flipping its `status` from `active` to `archived`. The tool SHALL accept `{ id: string }` (validated by zod; non-empty) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope exactly like the other single-memory tools (`memory.get`/`memory.confirm`, via `resolveEffectiveScope`) and delegate to `MemoryService.archive(id, scope)`, so archiving is confined to the connection's one effective scope: a `/mcp/<slug>` connection archives in that project's scope; a `/mcp` connection archives in the default project.
 
 A cross-scope or unknown `id` SHALL return the same `not_found`-class error as `memory.get`/`memory.confirm` — there is no cross-scope or cross-project archive path. Archiving a non-`active` memory SHALL return a `conflict`-class error. The tool SHALL NOT delete rows, drop vectors, or expose any purge capability; physical deletion remains operator/admin-only.
 
@@ -670,7 +686,7 @@ When `focus` is absent, the server SHALL derive a seed from signals it already h
 
 ### Requirement: `memory.timeline` session neighbors MUST be filtered by the connection's effective scope
 
-`memory.timeline`'s session-neighbor query (used when the target memory has a non-null `session_id`) SHALL filter neighbors by the connection's effective `project_id` in addition to `session_id`, so a neighbor lying outside the effective scope is never returned. Filtering by `session_id` alone is insufficient because a single session can hold memories in more than one project (a path-less connection can call `project.use` mid-session and save into a second project) and because `session_id` carries no foreign key — so without a scope predicate `memory.timeline` could return another project's memory `content`, violating the cross-scope-read invariant that a target memory's own scope gate is meant to uphold. The time-window fallback neighbor query already applies this filter; the session-neighbor query SHALL match it.
+`memory.timeline`'s session-neighbor query (used when the target memory has a non-null `session_id`) SHALL filter neighbors by the connection's effective `project_id` in addition to `session_id`, so a neighbor lying outside the effective scope is never returned. Filtering by `session_id` alone is insufficient because a single session can hold memories in more than one project (rows written before project switching was removed, when a path-less connection could switch project mid-session and save into a second project) and because `session_id` carries no foreign key — so without a scope predicate `memory.timeline` could return another project's memory `content`, violating the cross-scope-read invariant that a target memory's own scope gate is meant to uphold. The time-window fallback neighbor query already applies this filter; the session-neighbor query SHALL match it.
 
 #### Scenario: A same-session memory in another scope is not returned
 
@@ -792,115 +808,11 @@ This requirement constrains description prose only. It SHALL NOT be read as re-s
 - **THEN** `memory.doctor`'s `review.pendingJudgments` SHALL still report 1 while `memory.stats`' `pendingJudgmentsTotal` SHALL report 0
 - **AND** the `memory.doctor` description SHALL contain a cause that accounts for that difference, since the population cannot: both calls resolved to the same project
 
-### Requirement: The MCP server MUST expose three project-management tools under the `project.*` namespace
-
-The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.use`, `project.list`, and `project.current` with the following contracts. Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
-
-`project.list`'s per-project count SHALL be named `activeMemoryCount` and SHALL count only memories whose `status` is `active`, in that project's scope. The name carries the filter because the count's previous name, `memoryCount`, stated neither dimension and was measured disagreeing with the corpus the same connection could read: after `memory.archive` on a project's only memory, `project.list` reported `1` while `memory.search` in that same scope returned `0`. The name is additionally reused elsewhere in the server for a different aggregate (memories saved in one session), so a bare `memoryCount` on this payload is ambiguous in two ways at once. Renaming rather than silently re-filtering is required: a changed value under an unchanged key gives a consumer no signal to re-read the contract.
-
-`activeMemoryCount` SHALL be computed by a repository read that takes the scope as a required parameter (see the `data-access` requirement "`project.list`'s per-project memory count MUST be a scoped repository read"). The scope SHALL be derived from the project row being reported, and the token-authorization filter over project rows SHALL be applied BEFORE any count is taken, so the handler can only count a scope the token was already authorized to read. This ordering is the entire basis on which a handler may name its own scope, and it SHALL NOT be relaxed into a post-filter.
-
-`project.list` SHALL NOT resolve an effective scope from the request context in order to produce the count, and SHALL continue to succeed on a connection whose URL slug resolves to no project (see "the connection is not bricked by the refusal").
-
-`project.list` SHALL NOT report a second, unfiltered per-project total. The per-status breakdown scoped to the request context is `memory.stats`' `memoriesByStatus`, and a second total on this payload would answer the same question on a path that deliberately does not resolve the caller's scope.
-
-`project.list`'s registered top-level description SHALL state that the count is of active memories. This SHALL be in the description string returned by `tools/list`, not only in a schema `describe()`, which some clients do not surface to the model.
-
-#### Scenario: `project.use` activates an existing slug
-
-- **WHEN** an MCP client calls `project.use({slug: 'rembric'})` and no project is currently active for the session
-- **AND** a project row exists with `slug = 'rembric'`
-- **THEN** the server SHALL activate that project for the session and SHALL return `{ slug: 'rembric', projectId, created: false, switched: false, source: 'tool-explicit' }`
-
-#### Scenario: `project.use` with the same slug as currently active is idempotent
-
-- **WHEN** `project.use({slug})` is called where `slug` matches the project already active for the session
-- **THEN** the server SHALL return `{ slug, projectId, created: false, switched: false }` and SHALL NOT mutate any state
-
-#### Scenario: `project.use` against a different active project requires `confirmSwitch`
-
-- **WHEN** `project.use({slug: 'api'})` is called where the session is already active in project `'rembric'` and `confirmSwitch` is omitted or `false`
-- **THEN** the call SHALL be rejected with code `project_switch_requires_confirm` and a payload `{ currentSlug: 'rembric', targetSlug: 'api' }`
-
-#### Scenario: `project.use` against a different active project with active session
-
-- **WHEN** `project.use({slug: 'api', confirmSwitch: true})` is called where the session is active in project `'rembric'` AND a Rembric session is currently `status = 'active'` for this MCP transport session
-- **THEN** the call SHALL be rejected with code `session_active_must_end` and a payload `{ activeSessionId }`, instructing the agent to call `memory.session_summary` (or `memory.session_end`) first
-
-#### Scenario: `project.use` against an unknown slug without `autocreate`
-
-- **WHEN** `project.use({slug: 'does-not-exist'})` is called and no project with that slug exists
-- **THEN** the call SHALL be rejected with code `project_not_found` and a payload `{ suggestedSlugs: string[] }` of up to 3 deterministic Levenshtein-≤3 suggestions
-
-#### Scenario: `project.use` with `autocreate` creates a valid slug
-
-- **WHEN** `project.use({slug: 'new-thing', autocreate: true})` is called where no project has that slug and no other project is active for the session
-- **AND** the slug matches the strict regex
-- **THEN** the server SHALL insert a new `projects` row and activate it, returning `{ slug, projectId, created: true, switched: false }`
-
-#### Scenario: `project.use` with `autocreate` and an invalid slug
-
-- **WHEN** `project.use({slug: 'Bad_Slug', autocreate: true})` is called
-- **THEN** the call SHALL be rejected with code `invalid_slug` and SHALL NOT insert a row
-
-#### Scenario: `project.list` returns available slugs
-
-- **WHEN** an MCP client calls `project.list({includeArchived?: false})`
-- **THEN** the server SHALL return `{ projects: Array<{ slug, displayName, archived, activeMemoryCount }> }` ordered by slug ascending, filtering archived rows by default
-- **AND** the payload SHALL NOT contain a `memoryCount` key on any project entry
-
-#### Scenario: `activeMemoryCount` drops when a memory is archived
-
-- **GIVEN** projects `p` and `q`, where `p` holds exactly one memory with `status = 'active'` and `q` holds two
-- **WHEN** an MCP client calls `project.list`, then calls `memory.archive` on `p`'s only memory, then calls `project.list` again
-- **THEN** the first response SHALL report `activeMemoryCount` of 1 for `p`
-- **AND** the second response SHALL report `activeMemoryCount` of 0 for `p`
-- **AND** `q`'s `activeMemoryCount` SHALL be 2 in both responses
-
-#### Scenario: `activeMemoryCount` agrees with what the same connection can retrieve
-
-- **GIVEN** a project holding one `active` memory and one `archived` memory
-- **WHEN** an MCP client on a connection resolving to that project calls `project.list` and `memory.stats`
-- **THEN** `activeMemoryCount` for that project SHALL equal `memory.stats`' `memoriesByStatus.active` for the same scope
-- **AND** `activeMemoryCount` SHALL be strictly less than the project's total row count, so the filter is observable rather than vacuous
-
-#### Scenario: `activeMemoryCount` excludes memories outside the reported project
-
-- **GIVEN** projects `p` and `q` each holding `active` memories, plus at least one `active` memory in the default project
-- **WHEN** a token authorized for both projects calls `project.list`
-- **THEN** each entry's `activeMemoryCount` SHALL count only that entry's own project scope
-- **AND** no entry's `activeMemoryCount` SHALL include any other project's memories
-
-#### Scenario: A project-scoped token sees only its own project and its own count
-
-- **GIVEN** projects `p` and `q` both holding `active` memories, and a token with scope `project:<p.id>`
-- **WHEN** the token calls `project.list`
-- **THEN** the response SHALL contain `p` only, with `p`'s own `activeMemoryCount`
-- **AND** no count for `q` SHALL be computed or returned
-
-#### Scenario: `project.list` still succeeds on a connection whose slug resolves to no project
-
-- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
-- **WHEN** the client calls `project.list`
-- **THEN** the call SHALL succeed and SHALL report `activeMemoryCount` for every project the token may read
-- **AND** the call SHALL NOT be rejected with `project_not_found`
-
-#### Scenario: `project.list`'s description states that the count is of active memories
-
-- **WHEN** an MCP client retrieves the tool description for `project.list` via `tools/list`
-- **THEN** the description SHALL convey that the per-project count covers active memories
-- **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling")
-
-#### Scenario: `project.current` reports resolution provenance
-
-- **WHEN** an MCP client calls `project.current`
-- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'roots' | 'tool-explicit' | 'default' | 'none', suggestedSlugs: string[] }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'` — and `suggestedSlugs` is populated by the most recent `roots/list` derivation that did NOT auto-activate (existing-but-already-active, or non-existing)
-
 ### Requirement: The MCP `initialize` response MUST ship a protocol-teaching `instructions` block
 
 When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 1000 characters or fewer in both variants. This cap is a self-imposed token budget rather than the binding limit: the MCP specification defines `InitializeResult.instructions` as an optional free-form string with no maximum length or truncation rule, but at least one consuming client DOES impose a ceiling — Claude Code truncates `instructions` at 2048 characters with the same `LB` constant it applies to tool descriptions, appending `… [truncated]`. The 1000-character cap is therefore chosen for token cost, at less than half the known client ceiling, and it binds first. Any future change RAISING this cap SHALL keep it below the verified client ceiling (see "Tool descriptions MUST stay below the client truncation ceiling").
 
-Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect when nothing else resolved, and name `project.use` as the way to switch.
+Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect, and name a `/mcp/<slug>` URL as the way to reach another project. Neither variant SHALL name `project.use` or roots-based auto-detection, because neither exists.
 
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
@@ -935,7 +847,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: An MCP client connects on `/mcp` without a project
 
 - **WHEN** the `initialize` handshake completes against `/mcp`
-- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect, roots-based auto-detection where the client supports it, and `project.use` as the way to switch. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `packages/mcp/src/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect and a `/mcp/<slug>` URL as the way to reach another project. It SHALL NOT name `project.use` or roots-based auto-detection. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `packages/mcp/src/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
 
 #### Scenario: Instructions length is checked at build time
 
@@ -972,17 +884,24 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 ### Requirement: Tools that attach a write to a session MUST accept an explicit `sessionId` override, reinforced in their descriptions
 
-`memory.save`, `memory.session_summary`, `memory.session_end`, `memory.save_prompt`, and `memory.capture_passive` SHALL accept an optional `sessionId: string` argument. When provided, it SHALL take precedence over the transport's own session resolution (the `SessionRouter` entry, then the ambiguous-active-session fallback) — mirroring the explicit-first precedence `memory.session_summary`/`memory.session_end` already apply via `resolveSessionId`. Each tool's description SHALL mention `sessionId` explicitly (not only via the input schema's per-argument `describe()`, since some MCP clients do not surface per-property schema descriptions to the model) with guidance to pass it only if genuinely known and never invent one.
+`memory.save`, `memory.session_summary`, `memory.session_end`, `memory.save_prompt`, and `memory.capture_passive` SHALL accept an optional `sessionId: string` argument. When provided, it SHALL take precedence over the server's own session resolution — mirroring the explicit-first precedence `memory.session_summary`/`memory.session_end` already apply via `resolveSessionId`. The resolution order SHALL be exactly two steps: (1) the explicit, ownership-checked `sessionId`; (2) otherwise `findActiveForTransport(tokenId, projectId)`, which returns a session only when the choice is unambiguous and returns none otherwise (see the `sessions` requirement "`findActiveForTransport` MUST NOT guess under concurrent ambiguity"). No session SHALL be bound to the connection or transport, and no step SHALL consult per-connection state: the server keeps none. Each tool's description SHALL mention `sessionId` explicitly (not only via the input schema's per-argument `describe()`, since some MCP clients do not surface per-property schema descriptions to the model) with guidance to pass it only if genuinely known and never invent one.
 
 This closes a blind spot: `memory.session_summary`'s and `memory.session_end`'s zod schemas already declared `sessionId` as optional, but their tool descriptions never mentioned it — a model reading only the description had no reason to believe passing it was possible. `memory.save` and `memory.save_prompt` did not accept the argument at all prior to this requirement.
 
-An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.save_prompt`, `memory.capture_passive`) SHALL be validated before it is honored. The server SHALL resolve the named session row and require that it (a) is owned by the caller's token (`token_id` matches the request context), (b) belongs to the caller's effective project (`project_id` equals the connection's resolved project id), and (c) is not soft-deleted (`deleted_at IS NULL`). When (a) or (b) fails, the call SHALL be rejected with code `session_not_found` — the same masking code the session-lifecycle tools use, so a caller cannot probe which session ids exist under other tokens or projects. When (a) and (b) pass but (c) fails, the call SHALL be rejected with code `session_deleted`. On rejection no row SHALL be written. Validation applies only when `sessionId` is explicitly supplied; the transport/active-session fallback paths already resolve to a session owned by the caller within the effective scope. An `ended` (but not soft-deleted) session remains a valid attachment target. `memory.session_summary`/`memory.session_end` retain their existing service-layer cross-token + soft-delete checks. This closes a security blind spot: prior to this requirement an explicit `sessionId` was honored verbatim, letting a caller forge an attachment to another token's or another project's session.
+An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.save_prompt`, `memory.capture_passive`) SHALL be validated before it is honored. The server SHALL resolve the named session row and require that it (a) is owned by the caller's token (`token_id` matches the request context), (b) belongs to the caller's effective project (`project_id` equals the connection's resolved project id), and (c) is not soft-deleted (`deleted_at IS NULL`). When (a) or (b) fails, the call SHALL be rejected with code `session_not_found` — the same masking code the session-lifecycle tools use, so a caller cannot probe which session ids exist under other tokens or projects. When (a) and (b) pass but (c) fails, the call SHALL be rejected with code `session_deleted`. On rejection no row SHALL be written. Validation applies only when `sessionId` is explicitly supplied; the active-session fallback already resolves to a session owned by the caller within the effective scope. An `ended` (but not soft-deleted) session remains a valid attachment target. `memory.session_summary`/`memory.session_end` retain their existing service-layer cross-token + soft-delete checks. This closes a security blind spot: prior to this requirement an explicit `sessionId` was honored verbatim, letting a caller forge an attachment to another token's or another project's session.
 
 #### Scenario: memory.save accepts and prioritizes an explicit sessionId
 
 - **GIVEN** two sessions are concurrently active for the same `(tokenId, projectId)` (the ambiguous-fallback case where auto-resolution returns null)
 - **WHEN** the agent calls `memory.save({..., sessionId: '<S>'})` with an explicit, valid session id
 - **THEN** the saved memory's `session_id` SHALL be `'<S>'`, NOT null — the explicit value bypasses the ambiguous fallback entirely
+
+#### Scenario: A write without sessionId attaches to the sole active session or to none
+
+- **GIVEN** exactly one `active` session `<S>` for the caller's `(tokenId, projectId)`, with its last activity inside the staleness window
+- **WHEN** the agent calls `memory.save` without `sessionId`
+- **THEN** the saved memory's `session_id` SHALL be `'<S>'`
+- **AND** when a second session is concurrently `active` for the same `(tokenId, projectId)`, the same call SHALL persist `session_id = null` rather than either session, whichever session an earlier call on the same connection named or resumed
 
 #### Scenario: memory.save_prompt accepts and prioritizes an explicit sessionId
 
@@ -1087,7 +1006,7 @@ The server SHALL register a `memory.compare` tool that records a verdict on two 
 
 `memory.session_resume` is the tool for which this rule matters most, because it is the only one that can change `status` in the reviving direction: a soft-deleted row SHALL NOT be resumable, so an operator's Delete is not undone by an agent. Its gate SHALL be evaluated in the service against the row read in the same synchronous tick as the write, not only at the tool boundary, for the reason stated in the `sessions` capability under "Sessions MAY be soft-deleted while preserving the audit trail". Resume SHALL NOT clear `deleted_at`; undelete remains an operator-only action.
 
-`memory.session_start` is unaffected: it never resolves an existing row by id, and the row it may adopt is found by an active-session lookup that excludes soft-deleted rows, so it can neither target nor revive a deleted session. It does NOT always insert a new row — see "The MCP server MUST expose four session-lifecycle tools", which specifies the adoption path and its `reused` flag — and this requirement SHALL NOT be read as promising that it does.
+`memory.session_start` is unaffected: it never resolves an existing row by id, and the row it may adopt is found by an active-session lookup that excludes soft-deleted rows, so it can neither target nor revive a deleted session. It does NOT always insert a new row — see "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding", which specifies the adoption path and its `reused` flag — and this requirement SHALL NOT be read as promising that it does.
 
 #### Scenario: memory.session_end targets a soft-deleted session
 
@@ -1115,7 +1034,6 @@ The server SHALL register a `memory.compare` tool that records a verdict on two 
 - **WHEN** an MCP client authenticated as `<T>` calls `memory.session_resume` with `sessionId = <S>`
 - **THEN** the response SHALL be an MCP error containing `code: 'session_deleted'` and a message naming the deleted-at timestamp
 - **AND** `status`, `ended_at`, `last_activity_at` and `deleted_at` SHALL all be unchanged
-- **AND** the `SessionRouter` entry for the calling transport SHALL NOT be pointed at `<S>`
 
 ### Requirement: The MCP server MUST expose `memory.save_prompt` with optional metadata and refine semantics
 
@@ -1237,7 +1155,7 @@ Response shape:
 }
 ```
 
-The tool SHALL resolve effective project via the existing `scopeFromContext` precedence (path-scoped `ctx.project` → `SessionRouter` pin → the default project). It SHALL NOT leak prompts from any other scope.
+The tool SHALL resolve effective project via the shared scope resolver (path-scoped `ctx.project` → the default project on a path-less connection). It SHALL NOT leak prompts from any other scope.
 
 Because the input schema's bound exactly brackets the service's own range, no clamping can occur over the transport, and the response SHALL NOT carry a field reporting that `limit` was clamped (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"). The service MAY retain an in-process clamp over the same range as a defensive bound for a direct caller; it is unobservable over the transport and SHALL NOT be reported in the response. The tool's description SHALL name `limit`'s default and its maximum and SHALL state that a larger value is rejected rather than clamped — a rejection the caller was not told how to avoid is not a safe bound.
 
@@ -1408,7 +1326,7 @@ Annotations are advisory metadata only: they SHALL NOT change tool inputs, outpu
 #### Scenario: Mutating tools are not marked read-only
 
 - **WHEN** a client calls `tools/list`
-- **THEN** `memory.save`, `memory.confirm`, `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, `memory.session_summary`, `memory.session_end`, `memory.judge`, `memory.compare`, and `project.use` SHALL report `annotations.readOnlyHint === false`
+- **THEN** `memory.save`, `memory.confirm`, `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, `memory.session_summary`, `memory.session_end`, `memory.judge`, and `memory.compare` SHALL report `annotations.readOnlyHint === false`
 
 #### Scenario: Annotations do not alter the result contract
 
@@ -1459,71 +1377,6 @@ The MCP tool-handler layer at `packages/mcp/src/` SHALL place each tool domain i
 - **WHEN** the MCP server registers its tools after the reorganization
 - **THEN** the exact same set of tool names, input schemas, output schemas, and annotations SHALL be advertised as before, and every existing `mcp-api` tool-contract requirement SHALL continue to hold
 
-### Requirement: Every MCP tool call MUST be authorized against the token's scope
-
-Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → roots discovery → `SessionRouter`) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. **A tool that accepts an input widening the result set past the resolved scope — `memory.search`'s cross-project argument is the only one — SHALL additionally authorize each project the widening would admit, after the resolved-scope check, and SHALL drop the projects that fail rather than reject the call** (see the `auth` capability). The path-scoping error contract (`scope_locked`, `project_required`, `project_not_found`, `project_suggestion_pending`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
-
-Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.use` (against the requested project), `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read, using the same per-project predicate: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project; a set-scoped token sees exactly its members. **That predicate and the one that builds the widened search set SHALL be the same expression, so `project.list` and a widened `memory.search` can never disagree about a token's reach.**
-
-`project.use({autocreate: true})` on a slug that does not yet exist is a WRITE (it mints a new project row), even though `project.use` is otherwise read-classified: the server SHALL check `isAuthorized(tokenScope, 'write', {scope: 'project', projectId: null})` before creating the row. `autocreate: true` against an ALREADY-existing slug is unaffected (no row is created, so the normal read check against the resolved project applies).
-
-#### Scenario: Read-restricted token attempts a formerly-ungated write
-
-- **GIVEN** a token with scope `read:*` or `read:project:<id>`
-- **WHEN** the token invokes `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, or `memory.judge`
-- **THEN** the call SHALL be rejected with code `forbidden` and no row SHALL be written
-
-#### Scenario: Read-restricted token attempts memory.compare
-
-- **GIVEN** a token with scope `read:*` or `read:project:<id>`
-- **WHEN** the token invokes `memory.compare` with any two in-scope memories
-- **THEN** the call SHALL be rejected with code `forbidden`, no `memory_relations` row SHALL be written, and no target memory's `status` SHALL change
-
-#### Scenario: A read-only token cannot autocreate a project
-
-- **GIVEN** a token with scope `read:*` or `read:project:<id>`
-- **WHEN** the token calls `project.use({slug: 'brand-new-slug', autocreate: true})` for a slug that does not yet exist
-- **THEN** the call SHALL be rejected with code `forbidden` and no project row SHALL be created
-
-#### Scenario: A full-access token can still autocreate a project
-
-- **GIVEN** a token with scope `*`
-- **WHEN** the token calls `project.use({slug: 'brand-new-slug', autocreate: true})` for a slug that does not yet exist
-- **THEN** the project SHALL be created and the call SHALL succeed
-
-#### Scenario: Project-restricted token reads another project's context
-
-- **GIVEN** a token with scope `read:project:A` or `project:A`
-- **WHEN** the token opens `/mcp/B` (or resolves project B via `project.use`/roots discovery) and calls `memory.context`, `memory.timeline`, `memory.stats`, `memory.search_prompts`, or `memory.session_get`
-- **THEN** the call SHALL be rejected with code `forbidden` and no project-B data SHALL be returned
-
-#### Scenario: Project-restricted token on an unscoped connection resolving global scope
-
-The title predates this change: the scope a path-less connection resolves is the default project.
-
-- **GIVEN** a token with scope `read:project:A` connected to `/mcp` with no active project
-- **WHEN** the token calls a read tool whose effective scope resolves to the default project
-- **THEN** the call SHALL be rejected with code `forbidden`; after `project.use A` (authorized) the same call SHALL succeed against project A
-- **AND** passing the cross-project argument SHALL NOT make the refused call succeed, because the widening is authorized after the resolved-scope check, not instead of it
-
-#### Scenario: `project.list` is filtered by token scope
-
-- **GIVEN** projects A and B exist and a token with scope `project:A`
-- **WHEN** the token calls `project.list`
-- **THEN** the response SHALL contain project A only
-
-#### Scenario: `project.list` and a widened search agree
-
-- **GIVEN** any token and any set of projects
-- **WHEN** the token calls `project.list` and then `memory.search` with the cross-project argument
-- **THEN** the slugs in `searchedProjects` SHALL be a subset of the non-archived slugs `project.list` returned, and SHALL equal them when none is archived
-
-#### Scenario: Full-access tokens are unaffected
-
-- **GIVEN** a token with scope `*`
-- **WHEN** it invokes any tool on any `/mcp*` connection
-- **THEN** authorization SHALL never reject the call (path-scoping errors still apply)
-
 ### Requirement: `memory.judge` and `memory.compare` MUST validate their targets against the connection's effective scope
 
 `memory.judge` SHALL resolve the pending judgment (and `memory.compare` its two memories) through a scope-parameterized service read using the connection's effective scope. A judgment or memory outside that scope SHALL be rejected with code `not_found` (never `forbidden`), so cross-scope existence does not leak, matching the cross-scope-read invariant of `memory.get`.
@@ -1544,76 +1397,6 @@ The title predates this change: the scope a path-less connection resolves is the
 - **WHEN** `judgmentId` matches no row anywhere (never existed), single form
 - **THEN** the call SHALL be rejected with code `not_found` — the same code an out-of-scope-but-existing `judgmentId` produces, so a caller cannot use the response to infer whether the id exists in another scope. This supersedes the literal `memory_not_found` code the (now-internal-only) unscoped `RelationsService.judge` raises; `memory.judge` always calls the scope-parameterized `judgeInScope`, whose "not found" and "found but out of scope" paths are the same query and therefore the same code.
 - **AND** in the batch form, each item's `code` field follows the same rule: an unknown-or-out-of-scope `judgmentId` reports `code: 'not_found'`, not `memory_not_found`
-
-### Requirement: Scope-sensitive tools MUST share the single async scope resolver
-
-All scope-sensitive tools SHALL resolve the effective project through the same async resolver that `memory.save` uses (awaiting roots discovery on unscoped connections). The sync resolver that skipped discovery SHALL be removed. On a path-less connection the resolver SHALL return the default project when neither the URL path, roots discovery nor a prior `project.use` named one; it SHALL NOT return a scopeless result, so no tool can observe an unresolved scope.
-
-The shared resolver SHALL refuse with `project_not_found` rather than returning a scope when the path slug names no project, so no tool routed through it can inherit a fallback by omission — including a tool added after this requirement lands.
-
-A tool that resolves its own project rather than delegating to the resolver SHALL apply the same refusal. One does — `memory.session_start`, which binds the session row to a project — and it SHALL build its message and `suggestedSlugs[]` from the same shared constructor, so the refusals cannot drift in wording or payload. `memory.save` no longer classifies the request before resolving, because it no longer accepts a `scope` argument to classify; it delegates to the resolver like every other tool. That obligation SHALL be verified by enumeration over the registered tool list (below), never by counting resolver call sites — a tool absent from that list of call sites is exactly how this defect reached three separate write paths.
-
-Every tool routed through the resolver SHALL surface that refusal as a structured `mcpError` (`isError: true` with a JSON body carrying `code` and `message`), never as an exception escaping into the transport, because an escaped exception yields an error result with no machine-readable `code`. A tool SHALL therefore resolve scope inside the same error-translating boundary it already uses for authorization failures. Where a tool previously validated its arguments before resolving scope, scope resolution SHALL come first: an unusable connection is reported ahead of a malformed argument, because the call cannot succeed under any arguments.
-
-Coverage SHALL be asserted by enumeration rather than by inspection: a test SHALL drive the registered tool list, invoke every scope-sensitive tool on a connection whose path slug names no project, and assert the structured refusal. Tools exempt from scope resolution SHALL be enumerated explicitly in that test, so a newly registered tool fails it until it is classified.
-
-**The discovery the resolver awaits SHALL be reachable from the tool call that triggered it.** The resolver runs discovery from inside a tool handler, so the identity of that in-flight tool call is available at that point and SHALL be usable by the discovery path without being threaded through every resolver call site. A mechanism that requires each call site to pass it SHALL NOT be used, because a tool added later that omits the argument would silently revert to resolving the default project — the same "absent from the list of call sites" failure mode this requirement already records. The identity SHALL be captured once, at the single registration funnel through which every tool is registered, so a newly registered tool inherits it without action. Where no such identity is available, the resolver SHALL fall back to today's behaviour rather than failing the call.
-
-**The scenario below SHALL be guarded by a test that does not retry.** The test asserting that the first tool call on an unscoped, roots-discoverable connection returns the discovered project SHALL run with retries disabled, and SHALL be exercised in a process that has already served MCP traffic on the same host — not only in a freshly started process. Both conditions are load-bearing and neither is a style preference: measured, this scenario failed on the very first attempt in every warm arm and on none in a cold one, so a test that runs only cold cannot observe the failure, and a retried test asserts only that one of several attempts passed. A cold arm SHALL be retained alongside the warm one as the control, because with only a warm arm a harness that never reaches the discovery path is indistinguishable from a correct one.
-
-**A test that asserts only the resolved scope SHALL NOT be relied on as the guard for the routing behaviour**, because it passes whenever the underlying race is won and therefore passes both before and after a routing fix. The guard SHALL assert the routing property directly: discovery completes while the client's optional standalone server→client stream is absent.
-
-#### Scenario: `memory.context` at session start on an unscoped connection
-
-- **GIVEN** an unscoped `/mcp` connection whose project is resolvable via MCP roots discovery
-- **WHEN** the agent's first tool call is `memory.context` (before any other call has populated the router)
-- **THEN** the server SHALL await roots discovery and return the discovered PROJECT's context, not the default project's
-
-#### Scenario: The discovered scope holds on the first call in a warm process
-
-- **GIVEN** a server process that has already served MCP traffic for at least three prior client connections
-- **AND** a fresh unscoped `/mcp` connection whose client advertises `capabilities.roots` and whose first root's basename names an existing project
-- **WHEN** the agent's first tool call is `memory.context`, with test retries disabled
-- **THEN** the returned scope SHALL be the discovered project's on the first attempt
-- **AND** the same assertion SHALL hold for the equivalent connection in a process that has served no prior traffic
-
-#### Scenario: A connection that lost the discovery request is not stuck in the default project
-
-- **GIVEN** an unscoped `/mcp` connection whose first `roots/list` produced no answer of any kind
-- **WHEN** the agent issues a second `memory.context` call on that same connection
-- **THEN** the second call SHALL resolve to the discovered project rather than to the default project
-- **AND** `project.current` on that connection SHALL NOT report an empty `suggestedSlugs` while a discoverable root exists
-
-#### Scenario: `memory.capture_passive` while a project suggestion is pending
-
-- **GIVEN** an unscoped `/mcp` connection whose roots discovery surfaced a slug that names no project
-- **WHEN** the agent calls `memory.capture_passive` or `memory.save_prompt`
-- **THEN** the call SHALL succeed against the default project rather than being rejected, and no `project_suggestion_pending` code SHALL be emitted by any path
-- **AND** the scenario title predates this change: the gate it names is retired, because with a default project always active its precondition ("no project is active") can never hold
-
-#### Scenario: Every registered scope-sensitive tool refuses an unresolvable slug
-
-- **GIVEN** a connection whose path slug names no project and a token whose scope is `*`
-- **WHEN** the enumerating test invokes every tool in the registered tool list with minimally valid arguments
-- **THEN** every tool not on the explicit exemption list SHALL return a result carrying `isError: true` and a JSON body whose `code` is `project_not_found`
-
-#### Scenario: A newly registered tool cannot inherit the fallback
-
-- **GIVEN** a change that registers a new scope-sensitive MCP tool
-- **WHEN** the test suite runs without that tool being classified
-- **THEN** the enumerating test SHALL fail rather than the tool silently resolving to the default project
-
-#### Scenario: A newly registered tool inherits the tool-call identity without action
-
-- **GIVEN** a change that registers a new scope-sensitive MCP tool through the shared registration funnel
-- **WHEN** that tool is the first call on an unscoped, roots-discoverable connection
-- **THEN** discovery SHALL be reachable from it with no per-tool wiring, and the tool SHALL resolve to the discovered project
-
-#### Scenario: Scope resolution precedes argument validation
-
-- **GIVEN** a connection whose path slug names no project
-- **WHEN** the client calls `memory.get` with neither `id` nor `ids` (a malformed request)
-- **THEN** the response SHALL carry `code: 'project_not_found'` rather than `code: 'invalid_input'`
 
 ### Requirement: Unexpected errors on any HTTP-exposed surface MUST NOT leak internals
 
@@ -2256,11 +2039,11 @@ An error message on the MCP surface is read by an agent that will act on it, so 
 
 One consequence is normative:
 
-- The `forbidden` message returned when a token pinned to exactly one project is denied an action on a connection whose resolved scope is a DIFFERENT project — including the default project on a path-less connection — SHALL name the way out: activating the pinned project with `project.use({slug})`, or reconnecting at `/mcp/<slug>`. Naming only the token scope and the denied target reads as a misconfigured token and hides a one-call fix. This requirement changes no authorization outcome: the denial itself is correct and unchanged. The remedy's condition SHALL be expressed in terms of the resolved scope differing from the token's pin, NOT in terms of the resolved scope being global — a global-scope condition becomes permanently false when a path-less connection resolves to a project, which would silently stop the remedy being emitted and regress this requirement to a bare identifier with no next step.
+- The `forbidden` message returned when a token pinned to exactly one project is denied an action on a connection whose resolved scope is a DIFFERENT project — including the default project on a path-less connection — SHALL name the way out: reconnecting at `/mcp/<slug>` for the pinned project. It SHALL NOT name `project.use` or any other tool call, because no tool can change a connection's project. Naming only the token scope and the denied target reads as a misconfigured token and hides a one-line configuration fix. This requirement changes no authorization outcome: the denial itself is correct and unchanged. The remedy's condition SHALL be expressed in terms of the resolved scope differing from the token's pin, NOT in terms of the resolved scope being global — a global-scope condition becomes permanently false when a path-less connection resolves to a project, which would silently stop the remedy being emitted and regress this requirement to a bare identifier with no next step.
 
 The previously-normative consequence about `scope_locked` as a **scope** refusal is retired with the argument that produced it. `memory.save` accepts no `scope` argument, so no call can request a scope the connection forbids, and no message can promise a user-wide destination. A change SHALL NOT reintroduce a message naming a scope or user-wide memory, nor one instructing the operator to add a path-less `/mcp` entry for user-wide memory.
 
-The `scope_locked` code itself is NOT retired: it survives as the refusal for a **switch** a path-scoped connection cannot perform — `project.use({slug})` or `memory.session_start({project})` naming a project the URL contradicts. That refusal names the bound slug and no scope, so it is outside what the paragraph above forbids, and it is the only refusal for "this connection is fixed by its URL, you cannot change it from a tool". Its message SHALL keep that shape.
+The `scope_locked` code itself is NOT retired: it survives as the refusal for a **switch** no connection can perform — `memory.session_start({project})` naming a project other than the one the connection resolved, whether that project came from the URL path or is the default project on a path-less connection. That refusal names the resolved slug and no scope, so it is outside what the paragraph above forbids, and it is the only refusal for "this connection is fixed by its URL, you cannot change it from a tool". Its message SHALL keep that shape.
 
 #### Scenario: `scope_locked` does not promise a second connection
 
@@ -2273,9 +2056,9 @@ The `scope_locked` code itself is NOT retired: it survives as the refusal for a 
 #### Scenario: the surviving `scope_locked` refusals lock a switch, not a scope
 
 - **GIVEN** a path-scoped connection at `/mcp/foo`
-- **WHEN** the client calls `project.use({slug: 'bar'})` or `memory.session_start({project: 'bar'})`
-- **THEN** each call SHALL be refused with `code: 'scope_locked'`
-- **AND** each message SHALL name the bound slug `foo`, and SHALL name no scope, promise no second connection and mention no user-wide memory
+- **WHEN** the client calls `memory.session_start({project: 'bar'})`
+- **THEN** the call SHALL be refused with `code: 'scope_locked'`
+- **AND** the message SHALL name the bound slug `foo`, and SHALL name no scope, promise no second connection and mention no user-wide memory
 
 #### Scenario: `scope_locked` agrees with the connection's own instructions
 
@@ -2287,13 +2070,13 @@ The `scope_locked` code itself is NOT retired: it survives as the refusal for a 
 - **GIVEN** a path-less `/mcp` connection with a token whose scope is `project:<id of foo>`, where `foo` is not the default project
 - **WHEN** the client calls `memory.context` or `memory.search`
 - **THEN** the call SHALL be refused with `code: 'forbidden'` (unchanged)
-- **AND** the message SHALL name `project.use` and SHALL name the slug `foo`
+- **AND** the message SHALL name the slug `foo` and the `/mcp/foo` URL, and SHALL NOT name `project.use`
 
 #### Scenario: A full-access token's denial message is unaffected
 
 - **GIVEN** a path-less `/mcp` connection with a token whose scope is `read:*`
 - **WHEN** the client calls a write-classified tool
-- **THEN** the refusal SHALL carry `code: 'forbidden'` and the message SHALL NOT suggest `project.use`, since no project pin exists to activate
+- **THEN** the refusal SHALL carry `code: 'forbidden'` and the message SHALL NOT carry the pinned-project remedy, since the token has no project pin
 
 ### Requirement: A tool's description and its response MUST agree, and neither may promise an unreachable state
 
@@ -2381,34 +2164,34 @@ A connection at `/mcp` with no path slug SHALL resolve its effective scope to th
 
 Every site that previously fell back to the global scope on a path-less connection SHALL target the default project instead, and the set of such sites SHALL be exhaustive rather than sampled: the shared scope resolver, `memory.session_start`'s project binding, `project.current`'s authorization target, and the pinned-token remedy builder. A site missed here does not fail — it silently authorizes against, or reports, a scope that no longer exists.
 
-`project.use` SHALL still switch the connection to another project the token is authorized to read, and the default project SHALL be an ordinary target of that switch. Switching the connection's home scope is not the same operation as widening one read: a switch changes where writes land and what every subsequent tool sees by default, while a widening affects exactly one `memory.search` call and no write. Both are bounded by the same authorization, so neither reaches a project the token may not read.
+No tool SHALL switch a path-less connection to another project, and MCP roots SHALL NOT be consulted to choose one: the server keeps no per-connection state that could hold a switch. A path-less connection reaches another project only by being reconfigured to `/mcp/<slug>`. Reconfiguring the connection's home scope is not the same operation as widening one read: a home scope decides where writes land and what every tool sees by default, while a widening affects exactly one `memory.search` call and no write. Both are bounded by the same authorization, so neither reaches a project the token may not read.
 
 **Authorization is unchanged and still gates the default project.** A token pinned to one project, connecting path-lessly, SHALL be refused with `code: 'forbidden'` naming the default project — a project it was never granted. The denial is the same denial it receives today against the global scope; only the named target changes, and it changes to one an operator can open. The refusal SHALL carry the pinned-project remedy (see "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform").
 
 #### Scenario: A path-less save with no arguments succeeds
 
-- **GIVEN** a path-less `/mcp` connection, a token authorized to write the default project, and no `.rembric` file, no roots capability and no prior `project.use`
+- **GIVEN** a path-less `/mcp` connection, a token authorized to write the default project, and no `.rembric` file, whether or not the client advertises the roots capability
 - **WHEN** the client calls `memory.save` with only `type`, `title` and `content`
 - **THEN** the call SHALL succeed and the new row SHALL carry the default project's `project_id`
 - **AND** the call SHALL NOT be refused with `project_required` or `project_suggestion_pending`
 
 #### Scenario: `project.current` names the default project on a path-less connection
 
-- **GIVEN** a path-less `/mcp` connection with a token authorized to read the default project and no prior `project.use`
+- **GIVEN** a path-less `/mcp` connection with a token authorized to read the default project
 - **WHEN** the client calls `project.current`
-- **THEN** the response SHALL name the default project's slug and id, and `source` SHALL report that resolution came from the default rather than from a URL path, roots discovery or an explicit tool call
+- **THEN** the response SHALL name the default project's slug and id, and `source` SHALL report that resolution came from the default rather than from a URL path
 
 #### Scenario: A project-pinned token is refused, and told the way out
 
 - **GIVEN** a path-less `/mcp` connection with a token whose scope is `project:<id of foo>`, where `foo` is not the default project
 - **WHEN** the client calls `memory.search` or `project.current`
 - **THEN** the call SHALL be refused with `code: 'forbidden'`
-- **AND** the message SHALL name `project.use` and SHALL name the slug `foo`
+- **AND** the message SHALL name the slug `foo` and the `/mcp/foo` URL, and SHALL NOT name `project.use`
 
 #### Scenario: Switching to another project does not merge two projects
 
-- **GIVEN** a path-less `/mcp` connection resolved to the default project, a token authorized for both it and project `beta`, and memories in each
-- **WHEN** the client calls `project.use({slug: 'beta'})` and then `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`, none of them passing the cross-project argument
+- **GIVEN** a token authorized for both the default project and project `beta`, and memories in each
+- **WHEN** the client switches by reconfiguring its connection from `/mcp` to `/mcp/beta`, the only way left to switch, and calls `memory.search`, `memory.search` with an `entity`, `memory.context`, `memory.stats`, `memory.get` by id, `memory.get` by ids, and `memory.timeline`, none of them passing the cross-project argument
 - **THEN** every response SHALL contain only `beta`'s rows and counters, and none SHALL contain a row or counter from the default project
 
 #### Scenario: A widened search does not change where a subsequent write lands
@@ -2422,7 +2205,7 @@ Every site that previously fell back to the global scope on a path-less connecti
 - **GIVEN** a token authorized to read the default project
 - **WHEN** the client calls `project.list`
 - **THEN** the default project SHALL appear as an ordinary entry with its slug, display name, archived flag and `activeMemoryCount`
-- **AND** `project.use` with its slug SHALL activate it under the same rules as any other project
+- **AND** a connection at `/mcp/<its slug>` SHALL resolve to it under the same rules as any other project
 
 ### Requirement: No MCP tool surface MAY name a scope the server does not have
 
@@ -2456,7 +2239,7 @@ The reason is retirement, not tidiness. MCP has no version negotiation (see the 
 
 Strictness SHALL apply uniformly to the whole tool surface and SHALL NOT carry a per-tool exception list — an exempt tool is where the next retired argument goes on meaning something. It SHALL be applied at the single seam where tool input shapes are registered, so a tool added later inherits it rather than opting in, and SHALL reach nested object properties as well as top-level ones.
 
-A refusal for an unknown property is an **argument**-validation failure, not a scope-resolution refusal: it is reported as the transport's own invalid-parameters error and is not required to carry a `DomainError` code. This does not weaken "Scope-sensitive tools MUST share the single async scope resolver", whose subject is the refusal a resolver produces.
+A refusal for an unknown property is an **argument**-validation failure, not a scope-resolution refusal: it is reported as the transport's own invalid-parameters error and is not required to carry a `DomainError` code. This does not weaken "Scope-sensitive tools MUST share the single scope resolver over the URL path and the default project", whose subject is the refusal a resolver produces.
 
 #### Scenario: A retired argument is refused, not dropped
 
@@ -2473,7 +2256,7 @@ A refusal for an unknown property is an **argument**-validation failure, not a s
 #### Scenario: A legitimate call still succeeds
 
 - **GIVEN** a connection resolved to a project the token may read and write
-- **WHEN** the client calls `memory.save`, `memory.search`, `memory.get`, `memory.context`, `project.use` and `memory.session_start` with every argument each of them declares
+- **WHEN** the client calls `memory.save`, `memory.search`, `memory.get`, `memory.context`, `project.list` and `memory.session_start` with every argument each of them declares
 - **THEN** every call SHALL succeed
 - **AND** this scenario is the non-vacuity control for the two above: without it a server that refused everything would satisfy them
 
@@ -2568,269 +2351,6 @@ Satisfying this obligation SHALL stay within `DESCRIPTION_MAX_LENGTH`. Per "The 
 
 - **WHEN** the description is changed to carry this obligation
 - **THEN** its `String.length` measured from a real `tools/list` response SHALL be at or below `DESCRIPTION_MAX_LENGTH`, the change SHALL record the measured length and remaining headroom, and it SHALL name every clause it reclaimed
-
-### Requirement: The MCP server MUST expose four session-lifecycle tools
-
-The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_start`, `memory.session_end`, `memory.session_summary` and `memory.session_resume` with the following contracts. The tools are split by responsibility: `memory.session_start` opens a session, `memory.session_summary` writes summary/title without transitioning, `memory.session_end` is the state transition out of `active`, and `memory.session_resume` is the sole transition back into it.
-
-`memory.session_start` SHALL NOT always insert a row. When an `active` session already exists for the caller's `(tokenId, projectId)` on this transport — the ordinary case, because every supported host registers the session over HTTP before the agent runs — the call SHALL adopt that row instead of minting a second one, and SHALL report which of the two happened in a REQUIRED `reused` field: `true` when an existing row was adopted, `false` when a row was inserted. `reused` is the only signal distinguishing "you are now attached to the host's session" from "you just created a parallel session", which is the question a defensive `memory.session_start` call is asking. Its `outputSchema` SHALL mark it required, and the tool's description SHALL name it and state what `true` means (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"): a required field the description omits from a closed-form `Returns: { … }` list is undocumented surface on the one channel the model reads.
-
-The response SHALL additionally carry a REQUIRED `agent` field reporting the attribution the resolved row actually carries: on `reused: false` the value just written, and on `reused: true` the adopted row's own value, which MAY differ from the `agent` argument the call passed. It SHALL be read from the resolved row rather than from the argument, so the field reports what is stored and not what was requested. The adopt path SHALL NOT write the passed `agent` onto the adopted row: `sessions.agent` is immutable (see the `sessions` capability, "The system SHALL never physically delete a session row and SHALL never mutate the `agent`, `token_id`, `started_at`, or `project_id` of an existing session") and no verb re-attributes a session, so a differing argument is discarded permanently and every memory and summary version anchored to that row inherits the row's attribution instead. Reporting it is therefore the entire remedy available: `reused: true` alone tells the caller it is attached to a session it did not open but not whose, and without `agent` the discard is not merely unnoticed but unobservable. Refusing the call on a mismatch SHALL NOT be adopted as the remedy — a host-registered row whose `agent` string the hook chose, adopted by a model that names itself differently, is the ordinary case the reuse exists to serve — and neither SHALL `agent` be added to the reuse key, which would restore the duplicate-session bug the reuse prevents. `agent` SHALL be non-nullable and always present, since the column is `NOT NULL` and the insert path substitutes `'unknown'`; a nullable declaration would publish a state the tool cannot produce. Its `outputSchema` SHALL mark it required and the description's closed-form `Returns: { … }` list SHALL name it, per "A tool's description and its response MUST agree, and neither may promise an unreachable state".
-
-`memory.session_start` SHALL resolve the session it reports in this order, and the order is normative: (1) the calling transport's `SessionRouter` binding; (2) the windowed sole-active lookup (`findActiveForTransport`); (3) the sole-active reuse lookup that applies no staleness window (`findSoleActiveForReuse`); (4) a mint. Steps (2) and (3) are specified in the `sessions` capability, "`findActiveForTransport` MUST NOT guess under concurrent ambiguity", and their contracts are unchanged by step (1).
-
-Step (1) SHALL be consulted before either lookup. When `SessionRouter` names a session for `(tokenId, mcpSessionId)` and that row exists, carries `status = 'active'`, has `deleted_at IS NULL`, and belongs to the `(token_id, project_id)` this call resolved to, the call SHALL adopt that row and refresh its activity rather than resolve anything. This is an explicit pin for this transport, not a guess, and it is the same binding `memory.session_end`, `memory.session_resume` and the auto-attaching writes already honour — which is why it is consistent for `memory.session_start` to lead with it, and why a defensive second call can no longer snowball into one new row per call once a second row is live. The binding need not have come from a previous `memory.session_start`: a client MAY pin its own transport by calling `memory.session_resume` with an explicit id, and for the Pi extension that is the only way a binding ever arises, because it never calls `memory.session_start`. That start-up call lands on the already-`active` no-op path published above — successful, reporting `previousStatus: 'active'` with `previousEndedAt: null`, writing nothing to the row (`started_at` and `last_activity_at` included) and still (re-)establishing the binding — which is what makes an unconditional declaration at every process start safe rather than a periodic re-key. When the bound row fails any of those conditions the handler SHALL fall through to the lookups and SHALL NOT clear the binding: `memory.session_end` remains the only writer that clears it, because clearing it here would drop every later `memory.save` on that transport to `session_id = NULL`. A transport with no binding — a connection with no MCP session id, a server restart that emptied the in-memory router, or a resumed process that arrived on a new MCP session id — behaves exactly as if step (1) were skipped, which is what keeps steps (2) and (3) load-bearing rather than decorative.
-
-Both adoption paths report the same way: `reused: true` carrying the adopted row's `sessionId` and that row's stored `agent`, and neither SHALL insert a row. Only step (4) reports `reused: false`. Minting under two-or-more live rows with no binding is preserved as published behaviour; it is now bounded to at most one row per transport, because step (1) binds whatever the mint produced.
-
-The tool's description SHALL additionally tell the model not to repeat the call on a connection that already has a session — once a session is active on this connection, do not call `memory.session_start` again, because writes attach automatically. The description is the only surface that can reduce the volume of defensive calls that create these rows in the first place; the resolution order above bounds the damage per call, and this clause is what reduces the number of calls.
-
-`memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `packages/core/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
-
-`memory.session_summary` and `memory.session_end` SHALL NOT reject a call because the resolved row is in a terminal state. `memory.session_summary` SHALL apply its summary/title write subject to the `final` precedence rules regardless of `status`; `memory.session_end` takes no summary/title arguments, so on a terminal row it SHALL be a pure no-op returning the existing `ended_at`. Neither SHALL mutate `status`, `ended_at` or `last_activity_at` on a terminal row — see the `sessions` capability, "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`". `session_already_ended` SHALL NOT be a possible error code for either tool. This matters because the plugin's `PreCompact`, `SessionStart:compact` and `Stop` nudges instruct the agent to call `memory.session_summary`, and the stale-active retirement sweep can have flipped the row to `abandoned` (the documented steady state for two of the clients) before the agent gets there.
-
-`memory.session_summary`'s response SHALL carry a REQUIRED `applied: boolean` field. `applied` is `true` when the summary/title write landed on the row (whether the row was `active` or terminal without a prior curated summary). `applied` is `false` when the terminal first-curated-stands precedence rule blocked the write: the row is terminal (`ended` or `abandoned`), `summary_final` was already `true`, and the incoming curated summary was discarded. When `applied` is `false`, the response SHALL additionally carry `discardReason: 'terminal_final'` — the only discard reason today — to name the specific rule that blocked the write. When `applied` is `true`, `discardReason` SHALL be omitted from the response. The `outputSchema` SHALL declare `applied` as required (`z.boolean()`) and `discardReason` as optional (`z.string().optional()`). This field is the entire remedy available on the MCP surface: the row cannot be repaired, the first-curated-stands rule cannot be changed (there is no `replaces` chain for sessions, so losing a curated handoff is unrecoverable), and returning an error would violate the "SHALL NOT reject a call because the resolved row is in a terminal state" clause above.
-
-`memory.session_end`'s response SHALL carry a REQUIRED `applied: boolean` field. `applied` is `true` when the call transitioned an `active` row to `ended`. `applied` is `false` when the row was already terminal (`ended` or `abandoned`) and the call was a no-op. The `outputSchema` SHALL declare `applied` as required (`z.boolean()`). This makes the two session-lifecycle write tools consistent: both report whether the call achieved a state change.
-
-`memory.session_resume` SHALL accept `{ sessionId: string }` with `sessionId` REQUIRED, and SHALL call `AgentSessionsService.resume` (specified in the `sessions` capability) with the request's token id. Its response SHALL be `{ ok: true, sessionId, status: 'active', startedAt, resumedAt, previousStatus, previousEndedAt, title }`, where `previousStatus` is the row's `status` immediately before the call and `previousEndedAt` is the `ended_at` the call discarded (`null` when the row was already `active`). Those two fields are the ONLY report of a value the server does not retain, so the tool's `outputSchema` SHALL mark them required and the description SHALL name them. `resumedAt` SHALL be the row's effective last activity after the call — the instant of the resume on the transition path, and the row's PRIOR activity on the already-`active` no-op path, since that path writes nothing by design. `resumedAt` SHALL NOT be read as "the instant this call ran": `previousStatus` is what distinguishes a transition from a no-op, and the tool description SHALL say so.
-
-`sessionId` SHALL have no fallback resolution on `memory.session_resume`. Unlike the other three tools it SHALL NOT consult the `SessionRouter` entry, and SHALL NOT consult the sole-active-session lookup. Both fallbacks are structurally unavailable — `memory.session_end` cleared the router binding on its way out, and the active-session lookup filters `status = 'active'`, which the resume target by definition is not — so any fallback would have to select a terminal row by recency, precisely the heuristic the `sessions` capability's "`findActiveForTransport` MUST NOT guess under concurrent ambiguity" refuses. A call omitting `sessionId` SHALL be rejected at the zod boundary with `invalid_input`, never resolved to a guess.
-
-`memory.session_end` clears the `SessionRouter` transport binding for `(tokenId, mcpSessionId)` ONLY when the row it resolved is not `abandoned`. Before terminal writes were admitted, `end()` threw on an `abandoned` row and the clear was unreachable, so the binding survived; clearing it now would drop every later `memory.save` on that transport to `session_id = NULL`. That prior behaviour SHALL be preserved: ending an `abandoned` row SHALL leave the binding intact, ending an `active` or `ended` row SHALL clear it.
-
-`memory.session_resume` SHALL set that binding, and this is load-bearing rather than incidental. On success it SHALL call the same `SessionRouter.setActiveSession(tokenId, mcpSessionId, sessionId)` that `memory.session_start` calls, so the resuming transport resolves its session by an explicit pin rather than by the ambiguous-resolution fallback. Without the pin a resumed row is only reachable through the sole-active-session lookup, which returns nothing whenever a second session is concurrently live under the same `(token, project)`. It SHALL set the binding on the already-`active` no-op path too, since re-pinning is the useful half of a defensive call. It SHALL NOT set `setActiveProject`: resume names a session, not a project, and the project is whatever the connection already resolved.
-
-Session resolution is unchanged for the other three tools and SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an explicit `sessionId`, else the transport's `SessionRouter` entry, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The third source SHALL continue to consider only `active` rows, so an agent that supplies neither an explicit id nor a router-mapped session SHALL receive `session_not_found` rather than having its write attached to a closed session picked by recency.
-
-#### Scenario: `memory.session_start` opens a new session
-
-- **WHEN** an MCP client calls `memory.session_start` with `{ agent?: string, description?: string }`
-- **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, `project_id` from the request scope, and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` with `title_final = false`; **AND** the response SHALL be `{ sessionId, scope, projectId, startedAt, title, reused, agent }`, whose `agent` SHALL equal the value just written to the row
-
-#### Scenario: `memory.session_end` ends a session without summary
-
-- **WHEN** an MCP client calls `memory.session_end` with `{ sessionId: string }` for an active session
-- **THEN** the server SHALL set `status = 'ended'` and `ended_at = now` on that row, leave `summary` and `title` unchanged, and SHALL return `{ ok: true, sessionId, endedAt, applied: true }`
-
-#### Scenario: `memory.session_end` is idempotent on already-ended sessions
-
-- **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is already `'ended'`
-- **THEN** the server SHALL return `{ ok: true, sessionId, endedAt, applied: false }` with the existing `ended_at` and SHALL NOT mutate the row
-
-#### Scenario: `memory.session_end` is idempotent on abandoned sessions
-
-- **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is `'abandoned'` with `ended_at = E`
-- **THEN** the server SHALL return `{ ok: true, sessionId, endedAt: E, applied: false }`, SHALL leave `status = 'abandoned'` and `ended_at = E` untouched, and SHALL NOT return `session_already_ended`
-- **AND** the `SessionRouter` binding for the calling transport SHALL remain pointing at that session, so a subsequent `memory.save` on the same transport still auto-attaches its `session_id`
-
-#### Scenario: `memory.session_end` on an active session clears the transport binding
-
-- **WHEN** an MCP client calls `memory.session_end` on an `active` row and the call transitions it to `ended`
-- **THEN** the `SessionRouter` entry for `(tokenId, mcpSessionId)` SHALL be cleared, as before this requirement's revision
-
-#### Scenario: `memory.session_summary` writes summary and title without ending the session
-
-- **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string, title?: string }` and `summary.length <= SUMMARY_MAX_CHARS`
-- **THEN** the server SHALL resolve `sessionId` from the active MCP transport mapping when omitted, write `summary` with `summary_final = true`, write `title` (when provided, after validating length ≤100) with `title_final = true`, leave `status`/`ended_at` unchanged, and return `{ ok: true, sessionId, summary, title, summaryFinal: true, titleFinal: <true|false>, applied: true }`
-
-#### Scenario: `memory.session_summary` succeeds on a session the sweep already abandoned
-
-- **GIVEN** the agent's session was flipped to `status = 'abandoned'` with `ended_at = E` and `last_activity_at = L` by stale-active retirement while the conversation was still open, and the agent knows its `sessionId` (the plugin's nudge injects it)
-- **WHEN** the agent calls `memory.session_summary({ sessionId, summary, title })`
-- **THEN** the call SHALL succeed and return `{ ok: true, sessionId, summary, title, summaryFinal: true, applied: true }`
-- **AND** the row SHALL retain `status = 'abandoned'`, `ended_at = E` and `last_activity_at = L`
-- **AND** the call SHALL NOT return `session_already_ended`
-
-#### Scenario: `memory.session_summary` succeeds on an ended session
-
-- **GIVEN** a row whose `status = 'ended'` with `ended_at = E` and `summary_final = false` (no curated summary written yet)
-- **WHEN** the agent calls `memory.session_summary({ sessionId, summary })`
-- **THEN** the call SHALL succeed with `summaryFinal: true` and `applied: true`, and `status`/`ended_at` SHALL be unchanged
-
-#### Scenario: `memory.session_summary` with no resolvable session still reports `session_not_found`
-
-- **GIVEN** the agent passes no explicit `sessionId`, the transport has no `SessionRouter` entry, and the only candidate row for its `(token_id, project_id)` is `abandoned`
-- **WHEN** the agent calls `memory.session_summary({ summary })`
-- **THEN** the call SHALL be rejected with code `session_not_found` (NOT `session_already_ended`, and NOT silently attached to the abandoned row)
-
-#### Scenario: `memory.session_summary` may be called multiple times; the latest call wins
-
-- **GIVEN** an `active` session whose `summary_final = true` from a prior `memory.session_summary({summary: "A"})` call
-- **WHEN** the agent calls `memory.session_summary({summary: "B"})` again
-- **THEN** `summary` SHALL be replaced with "B" (last-final-wins among final writes on active rows) and `applied` SHALL be `true`
-
-#### Scenario: `memory.session_summary` discards a second curated write on a terminal row
-
-- **GIVEN** a terminal session (`status = 'ended'` or `'abandoned'`) whose `summary_final = true` from a prior curated write with summary "A"
-- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "B" })`
-- **THEN** the response SHALL carry `ok: true`, `summary: "A"` (the stored value, unchanged), `summaryFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
-- **AND** the session row SHALL be unchanged in every column
-
-#### Scenario: `memory.session_summary` discards a second curated title on a terminal row
-
-- **GIVEN** a terminal session whose `title_final = true` from a prior curated write with title "First"
-- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "new summary", title: "Second" })`
-- **THEN** the response SHALL carry `title: "First"` (the stored value, unchanged), `titleFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
-- **AND** the session row SHALL be unchanged in every column
-
-#### Scenario: `memory.session_summary` discards summary but applies title on a terminal row
-
-- **GIVEN** a terminal session whose `summary_final = true` and `title_final = false`
-- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "B", title: "New Title" })`
-- **THEN** the response SHALL carry `summary: "A"` (unchanged), `summaryFinal: true`, `title: "New Title"` (applied), `titleFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
-- **AND** the summary column SHALL be unchanged but the title column SHALL reflect the new value
-
-#### Scenario: `memory.session_summary` rejects empty summary
-
-- **WHEN** the agent submits `summary: ""` or whitespace-only
-- **THEN** the call SHALL be rejected with code `invalid_input`
-
-#### Scenario: `memory.session_summary` rejects title over 100 chars
-
-- **WHEN** the agent submits `title: "A".repeat(101)`
-- **THEN** the call SHALL be rejected with code `invalid_input`
-
-#### Scenario: `memory.session_summary` rejects summary over `SUMMARY_MAX_CHARS`
-
-- **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS + 1)` (one char over the cap)
-- **THEN** the call SHALL be rejected at the zod boundary with code `invalid_input`
-- **AND** the error message SHALL contain the decimal string of `SUMMARY_MAX_CHARS` so the agent can deduce the cap and retry with a tighter body on the first attempt
-- **AND** the session row SHALL NOT be mutated (no partial write, `summary_final` unchanged)
-
-#### Scenario: `memory.session_summary` accepts summary of exactly `SUMMARY_MAX_CHARS`
-
-- **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS)`
-- **THEN** the call SHALL succeed and the row SHALL have `summary` of length `SUMMARY_MAX_CHARS` with `summary_final = true` and `applied: true`
-
-#### Scenario: A session-lifecycle tool targets a session owned by a different token
-
-- **WHEN** any of the four tools is called with a `sessionId` whose `token_id` does not match the caller's token
-- **THEN** the call SHALL be rejected with code `session_not_found` (never `forbidden`, to avoid information disclosure)
-
-#### Scenario: A second `memory.session_start` adopts the first session and says so
-
-- **GIVEN** a connection with no active session for its `(tokenId, projectId)`
-- **WHEN** an MCP client calls `memory.session_start` twice in a row on that connection
-- **THEN** the first response SHALL carry `reused: false` and the second SHALL carry `reused: true`
-- **AND** both responses SHALL carry the SAME `sessionId` — the second call SHALL NOT insert a second `sessions` row
-- **AND** the `sessions` row count for that `(tokenId, projectId)` SHALL be 1 after both calls, which is the control that `reused: true` describes adoption rather than a coincidence of ids
-
-#### Scenario: `memory.session_start` reports the adopted session's `agent` rather than the argument
-
-- **GIVEN** exactly one `active` session for the caller's `(tokenId, projectId)`, created with `agent = 'claude-code'`
-- **WHEN** an MCP client calls `memory.session_start` with `{ agent: 'pi' }` on that connection
-- **THEN** the response SHALL carry `reused: true` AND `agent: 'claude-code'` — the adopted row's stored value, NOT the argument
-- **AND** the row's `agent` column SHALL still be `'claude-code'` and the `sessions` row count for that `(tokenId, projectId)` SHALL still be 1, so the report is of an adoption and not of a second row
-- **AND** the control, from the same connection state without the pre-existing session: `memory.session_start({ agent: 'pi' })` SHALL return `reused: false` with `agent: 'pi'`. Without it a passing adopt assertion cannot be told apart from a test that never adopted anything, and an implementation reading `agent` from the argument would satisfy the adopt assertion whenever the two values happen to agree
-
-#### Scenario: `memory.session_start` reuses the transport's bound session before any lookup
-
-- **GIVEN** a transport whose `SessionRouter` entry binds `(tokenId, mcpSessionId)` to session `<S>`, `<S>` is `active`, not soft-deleted and in the resolved scope, and `<S>`'s effective last activity is older than the staleness window
-- **AND** a second `active` row exists for the same `(tokenId, projectId)`, so both sole-active lookups would refuse
-- **WHEN** the client calls `memory.session_start` with no explicit `sessionId`
-- **THEN** the response SHALL carry `reused: true` and `sessionId = <S>`, the bound id rather than either lookup's answer
-- **AND** the `sessions` row count for that `(tokenId, projectId)` SHALL be unchanged, which is the control that the binding was followed rather than a fresh row minted and reported
-
-#### Scenario: `memory.session_start` adopts the sole active row when no fresh row exists
-
-- **GIVEN** a transport with no `SessionRouter` binding and exactly one `active`, non-deleted row `<S>` for the caller's `(tokenId, projectId)`, idle past the staleness window
-- **WHEN** the client calls `memory.session_start`
-- **THEN** the response SHALL carry `reused: true` and `sessionId = <S>`
-- **AND** the row count SHALL be unchanged, and the transport's binding SHALL afterwards point at `<S>` so the next call is answered by step (1)
-
-#### Scenario: `memory.session_start` falls through an unusable binding without clearing it
-
-- **GIVEN** a transport whose `SessionRouter` entry binds `(tokenId, mcpSessionId)` to a row that is terminal, or soft-deleted, or outside the `(token_id, project_id)` this call resolves to
-- **WHEN** the client calls `memory.session_start`
-- **THEN** the call SHALL resolve by the lookup order rather than by the binding, and SHALL NOT return the unusable row's id
-- **AND** the transport SHALL still carry a session binding after the call — the row this call resolved — and the entry SHALL NOT have been cleared, because clearing the binding belongs to `memory.session_end` alone and clearing it here would silently drop every later `memory.save` on this transport to `session_id = NULL`
-
-#### Scenario: `memory.session_start`'s description names every required output field
-
-- **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
-- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `title`, `reused` and `agent`
-- **AND** the description SHALL state that `reused: true` means the call adopted the host's already-active session rather than starting one
-- **AND** the description SHALL state that `agent` reports the attribution the resolved session carries and MAY differ from the `agent` argument the call passed, so the field is not read as an echo of that argument
-- **AND** a CI test SHALL compare the description against the `outputSchema`'s required list, so a field added to the schema without a description update fails the build
-
-#### Scenario: The `memory.session_start` description tells the model not to call again on an active connection
-
-- **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
-- **THEN** the description SHALL state that once a session is active on this connection the model SHALL NOT call `memory.session_start` again, and that writes attach automatically
-- **AND** it SHALL keep stating that in normal operation the model does not need to call the tool at all, so the two clauses read as one instruction rather than a contradiction
-- **AND** its `String.length` measured from a real `tools/list` response SHALL be at or below `DESCRIPTION_MAX_LENGTH = 1900`
-- **AND** the change SHALL record the measured length and the remaining headroom: the description measured **818 of 1900 characters, 1082 of headroom**, immediately before this clause was added, so the clause fits without reclaiming any mandated prose
-- **AND** the cap SHALL NOT be raised to accommodate it; if it ever ceases to fit, the clause is reworded shorter instead
-
-#### Scenario: `memory.session_resume` returns an ended session to active
-
-- **GIVEN** session `<S>` owned by the calling token, `status='ended'` with `ended_at = E`, in the connection's project
-- **WHEN** an MCP client calls `memory.session_resume` with `{ sessionId: <S> }`
-- **THEN** the response SHALL be `{ ok: true, sessionId: <S>, status: 'active', startedAt, resumedAt, previousStatus: 'ended', previousEndedAt: E, title }`
-- **AND** the row SHALL have `status='active'` and `ended_at IS NULL`
-
-#### Scenario: `memory.session_resume` returns an abandoned session to active identically
-
-- **GIVEN** session `<S>` owned by the calling token, `status='abandoned'` with `ended_at = E`
-- **WHEN** an MCP client calls `memory.session_resume` with `{ sessionId: <S> }`
-- **THEN** the response SHALL carry `previousStatus: 'abandoned'`, `previousEndedAt: E` and `status: 'active'`
-- **AND** the row SHALL be indistinguishable in every column from the same row resumed out of `ended`
-
-#### Scenario: `memory.session_resume` pins the transport binding
-
-- **GIVEN** an MCP transport whose `SessionRouter` entry carries no session (the state `memory.session_end` leaves behind)
-- **WHEN** the client calls `memory.session_resume` with `{ sessionId: <S> }` and it succeeds
-- **THEN** the `SessionRouter` entry for `(tokenId, mcpSessionId)` SHALL point at `<S>`
-- **AND** a subsequent `memory.save` on that transport, with no explicit `sessionId`, SHALL persist `session_id = <S>`
-- **AND** that SHALL hold even when a second `active` session exists for the same `(token_id, project_id)`, which is the case the sole-active-session fallback refuses to resolve
-
-#### Scenario: `memory.session_resume` refuses a call with no `sessionId`
-
-- **WHEN** an MCP client calls `memory.session_resume` with `{}`
-- **THEN** the call SHALL be rejected at the zod boundary with code `invalid_input`
-- **AND** no session SHALL be resolved from the `SessionRouter` entry or by recency, and no row SHALL be mutated
-
-#### Scenario: `memory.session_resume` refuses an unknown property
-
-- **WHEN** an MCP client calls `memory.session_resume` with `{ sessionId: <S>, epoch: 3 }`
-- **THEN** the call SHALL be rejected with `invalid_input` rather than having the unknown property silently stripped, because every tool's input schema is registered strict
-
-#### Scenario: `memory.session_resume` targets a session in another project
-
-- **GIVEN** session `<S>` owned by the calling token but belonging to a project other than the one this connection resolved
-- **WHEN** the client calls `memory.session_resume` with `{ sessionId: <S> }`
-- **THEN** the call SHALL be rejected with `session_not_found` and the row SHALL NOT be mutated
-
-#### Scenario: `memory.session_resume` on an already-active session succeeds and re-pins
-
-- **GIVEN** session `<S>` with `status='active'` and `last_activity_at = L`
-- **WHEN** the client calls `memory.session_resume` with `{ sessionId: <S> }`
-- **THEN** the call SHALL succeed with `previousStatus: 'active'` and `previousEndedAt: null`
-- **AND** the row SHALL NOT be mutated, so `last_activity_at` SHALL still be `L`
-- **AND** the `SessionRouter` entry SHALL nonetheless point at `<S>`
-
-#### Scenario: A client's start-up `memory.session_resume` is the binding that answers `memory.session_start`
-
-- **GIVEN** a host row `<H>` registered over HTTP (`agent = 'pi'`, `status = 'active'`, `last_activity_at = L`) and an MCP transport with no `SessionRouter` entry — the state a client that never called `memory.session_start` leaves behind
-- **AND** a second `active` row exists for the same `(token_id, project_id)`, so both sole-active lookups would refuse
-- **WHEN** the client calls `memory.session_resume({ sessionId: <H> })` at start-up and later calls `memory.session_start` on that transport
-- **THEN** the resume SHALL have succeeded with `previousStatus: 'active'` and `previousEndedAt: null`, and SHALL NOT have mutated `<H>`, so `started_at` and `last_activity_at` SHALL still hold their prior values — the control that a start-up declaration is a no-op rather than a re-key
-- **AND** the `memory.session_start` response SHALL carry `sessionId = <H>` with `reused: true` and the row count unchanged, which pins that step (1) answered from a binding established by `memory.session_resume` and not from either lookup
-
-#### Scenario: `memory.session_start` adopts a resumed session rather than minting a second row
-
-- **GIVEN** session `<S>` was resumed and is the only `active` row for the caller's `(token_id, project_id)`
-- **WHEN** the agent calls `memory.session_start`
-- **THEN** the response SHALL carry `sessionId = <S>` and `reused: true`
-- **AND** the `sessions` row count for that `(token_id, project_id)` SHALL be unchanged, which is the control that adoption happened rather than a coincidence of ids
-
-#### Scenario: `memory.session_resume`'s description names every required output field
-
-- **WHEN** an MCP client retrieves the tool description for `memory.session_resume` via `tools/list`
-- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `previousStatus` and `previousEndedAt`
-- **AND** the description SHALL state that `previousEndedAt` is not retained on the row after the call
-- **AND** the CI test that compares each description against its `outputSchema`'s required list SHALL cover this tool
 
 ### Requirement: The `memory.session_summary` description MUST state that the write replaces the stored summary and ask for the current complete state
 
@@ -3043,3 +2563,407 @@ The tag contract in this requirement and the updated shared-curation requirement
 - **WHEN** existing context reads and prompt saves are exercised after the tag change
 - **THEN** `memory.context` SHALL retain its existing response fields, defaults, and limits without a tag catalog or larger payload contract
 - **AND** `memory.save_prompt` SHALL retain its existing optional-tag semantics without memory-tag normalization
+
+### Requirement: The MCP server MUST expose two project-management tools under the `project.*` namespace
+
+The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list` and `project.current` with the following contracts. Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
+
+No tool SHALL activate, switch or create a project. A connection's project is fixed by its URL path, or is the default project on a path-less connection; projects are created from the dashboard. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
+
+`project.list`'s per-project count SHALL be named `activeMemoryCount` and SHALL count only memories whose `status` is `active`, in that project's scope. The name carries the filter because the count's previous name, `memoryCount`, stated neither dimension and was measured disagreeing with the corpus the same connection could read: after `memory.archive` on a project's only memory, `project.list` reported `1` while `memory.search` in that same scope returned `0`. The name is additionally reused elsewhere in the server for a different aggregate (memories saved in one session), so a bare `memoryCount` on this payload is ambiguous in two ways at once. Renaming rather than silently re-filtering is required: a changed value under an unchanged key gives a consumer no signal to re-read the contract.
+
+`activeMemoryCount` SHALL be computed by a repository read that takes the scope as a required parameter (see the `data-access` requirement "`project.list`'s per-project memory count MUST be a scoped repository read"). The scope SHALL be derived from the project row being reported, and the token-authorization filter over project rows SHALL be applied BEFORE any count is taken, so the handler can only count a scope the token was already authorized to read. This ordering is the entire basis on which a handler may name its own scope, and it SHALL NOT be relaxed into a post-filter.
+
+`project.list` SHALL NOT resolve an effective scope from the request context in order to produce the count, and SHALL continue to succeed on a connection whose URL slug resolves to no project (see "the connection is not bricked by the refusal").
+
+`project.list` SHALL NOT report a second, unfiltered per-project total. The per-status breakdown scoped to the request context is `memory.stats`' `memoriesByStatus`, and a second total on this payload would answer the same question on a path that deliberately does not resolve the caller's scope.
+
+`project.list`'s registered top-level description SHALL state that the count is of active memories. This SHALL be in the description string returned by `tools/list`, not only in a schema `describe()`, which some clients do not surface to the model.
+
+#### Scenario: No project-switching or project-creating tool is offered
+
+- **WHEN** an MCP client calls `tools/list` on `/mcp` or on `/mcp/<slug>`
+- **THEN** the response SHALL contain `project.list` and `project.current`
+- **AND** the response SHALL NOT contain `project.use`, nor any other tool that activates, switches or creates a project
+
+#### Scenario: `project.list` returns available slugs
+
+- **WHEN** an MCP client calls `project.list({includeArchived?: false})`
+- **THEN** the server SHALL return `{ projects: Array<{ slug, displayName, archived, activeMemoryCount }> }` ordered by slug ascending, filtering archived rows by default
+- **AND** the payload SHALL NOT contain a `memoryCount` key on any project entry
+
+#### Scenario: `activeMemoryCount` drops when a memory is archived
+
+- **GIVEN** projects `p` and `q`, where `p` holds exactly one memory with `status = 'active'` and `q` holds two
+- **WHEN** an MCP client calls `project.list`, then calls `memory.archive` on `p`'s only memory, then calls `project.list` again
+- **THEN** the first response SHALL report `activeMemoryCount` of 1 for `p`
+- **AND** the second response SHALL report `activeMemoryCount` of 0 for `p`
+- **AND** `q`'s `activeMemoryCount` SHALL be 2 in both responses
+
+#### Scenario: `activeMemoryCount` agrees with what the same connection can retrieve
+
+- **GIVEN** a project holding one `active` memory and one `archived` memory
+- **WHEN** an MCP client on a connection resolving to that project calls `project.list` and `memory.stats`
+- **THEN** `activeMemoryCount` for that project SHALL equal `memory.stats`' `memoriesByStatus.active` for the same scope
+- **AND** `activeMemoryCount` SHALL be strictly less than the project's total row count, so the filter is observable rather than vacuous
+
+#### Scenario: `activeMemoryCount` excludes memories outside the reported project
+
+- **GIVEN** projects `p` and `q` each holding `active` memories, plus at least one `active` memory in the default project
+- **WHEN** a token authorized for both projects calls `project.list`
+- **THEN** each entry's `activeMemoryCount` SHALL count only that entry's own project scope
+- **AND** no entry's `activeMemoryCount` SHALL include any other project's memories
+
+#### Scenario: A project-scoped token sees only its own project and its own count
+
+- **GIVEN** projects `p` and `q` both holding `active` memories, and a token with scope `project:<p.id>`
+- **WHEN** the token calls `project.list`
+- **THEN** the response SHALL contain `p` only, with `p`'s own `activeMemoryCount`
+- **AND** no count for `q` SHALL be computed or returned
+
+#### Scenario: `project.list` still succeeds on a connection whose slug resolves to no project
+
+- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
+- **WHEN** the client calls `project.list`
+- **THEN** the call SHALL succeed and SHALL report `activeMemoryCount` for every project the token may read
+- **AND** the call SHALL NOT be rejected with `project_not_found`
+
+#### Scenario: `project.list`'s description states that the count is of active memories
+
+- **WHEN** an MCP client retrieves the tool description for `project.list` via `tools/list`
+- **THEN** the description SHALL convey that the per-project count covers active memories
+- **AND** the description SHALL satisfy `DESCRIPTION_MAX_LENGTH` (see "Tool descriptions MUST stay below the client truncation ceiling")
+
+#### Scenario: `project.current` reports resolution provenance
+
+- **WHEN** an MCP client calls `project.current`
+- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'default' | 'none' }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'`
+- **AND** the response SHALL NOT carry a `suggestedSlugs` field
+
+### Requirement: Every MCP tool call MUST be authorized against the token's scope for the resolved project
+
+Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → the default project) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. **A tool that accepts an input widening the result set past the resolved scope — `memory.search`'s cross-project argument is the only one — SHALL additionally authorize each project the widening would admit, after the resolved-scope check, and SHALL drop the projects that fail rather than reject the call** (see the `auth` capability). The path-scoping error contract (`scope_locked`, `project_not_found`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
+
+Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read, using the same per-project predicate: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project; a set-scoped token sees exactly its members. **That predicate and the one that builds the widened search set SHALL be the same expression, so `project.list` and a widened `memory.search` can never disagree about a token's reach.**
+
+No MCP tool creates a project, so no tool call needs the project-creation authorization the retired `project.use({autocreate: true})` path carried; projects are created from the dashboard.
+
+#### Scenario: Read-restricted token attempts a formerly-ungated write
+
+- **GIVEN** a token with scope `read:*` or `read:project:<id>`
+- **WHEN** the token invokes `memory.capture_passive`, `memory.save_prompt`, `memory.session_start`, or `memory.judge`
+- **THEN** the call SHALL be rejected with code `forbidden` and no row SHALL be written
+
+#### Scenario: Read-restricted token attempts memory.compare
+
+- **GIVEN** a token with scope `read:*` or `read:project:<id>`
+- **WHEN** the token invokes `memory.compare` with any two in-scope memories
+- **THEN** the call SHALL be rejected with code `forbidden`, no `memory_relations` row SHALL be written, and no target memory's `status` SHALL change
+
+#### Scenario: Project-restricted token reads another project's context
+
+- **GIVEN** a token with scope `read:project:A` or `project:A`
+- **WHEN** the token opens `/mcp/B` and calls `memory.context`, `memory.timeline`, `memory.stats`, `memory.search_prompts`, or `memory.session_get`
+- **THEN** the call SHALL be rejected with code `forbidden` and no project-B data SHALL be returned
+
+#### Scenario: Project-restricted token on an unscoped connection resolving global scope
+
+The title predates this change: the scope a path-less connection resolves is the default project.
+
+- **GIVEN** a token with scope `read:project:A` connected to `/mcp` with no active project
+- **WHEN** the token calls a read tool whose effective scope resolves to the default project
+- **THEN** the call SHALL be rejected with code `forbidden`; the same call on a connection at `/mcp/A` SHALL succeed against project A
+- **AND** passing the cross-project argument SHALL NOT make the refused call succeed, because the widening is authorized after the resolved-scope check, not instead of it
+
+#### Scenario: `project.list` is filtered by token scope
+
+- **GIVEN** projects A and B exist and a token with scope `project:A`
+- **WHEN** the token calls `project.list`
+- **THEN** the response SHALL contain project A only
+
+#### Scenario: `project.list` and a widened search agree
+
+- **GIVEN** any token and any set of projects
+- **WHEN** the token calls `project.list` and then `memory.search` with the cross-project argument
+- **THEN** the slugs in `searchedProjects` SHALL be a subset of the non-archived slugs `project.list` returned, and SHALL equal them when none is archived
+
+#### Scenario: Full-access tokens are unaffected
+
+- **GIVEN** a token with scope `*`
+- **WHEN** it invokes any tool on any `/mcp*` connection
+- **THEN** authorization SHALL never reject the call (path-scoping errors still apply)
+
+### Requirement: Scope-sensitive tools MUST share the single scope resolver over the URL path and the default project
+
+All scope-sensitive tools SHALL resolve the effective project through the same async resolver that `memory.save` uses. The resolver SHALL have exactly two sources: the URL path slug, and — on a path-less connection — the default project. It SHALL NOT consult MCP roots, a per-connection project pin, or any other per-connection state, and it SHALL NOT issue any server→client request. It SHALL NOT return a scopeless result, so no tool can observe an unresolved scope.
+
+The shared resolver SHALL refuse with `project_not_found` rather than returning a scope when the path slug names no project, so no tool routed through it can inherit a fallback by omission — including a tool added after this requirement lands.
+
+A tool that resolves its own project rather than delegating to the resolver SHALL apply the same refusal. One does — `memory.session_start`, which binds the session row to a project — and it SHALL build its message and `suggestedSlugs[]` from the same shared constructor, so the refusals cannot drift in wording or payload. `memory.save` no longer classifies the request before resolving, because it no longer accepts a `scope` argument to classify; it delegates to the resolver like every other tool. That obligation SHALL be verified by enumeration over the registered tool list (below), never by counting resolver call sites — a tool absent from that list of call sites is exactly how this defect reached three separate write paths.
+
+Every tool routed through the resolver SHALL surface that refusal as a structured `mcpError` (`isError: true` with a JSON body carrying `code` and `message`), never as an exception escaping into the transport, because an escaped exception yields an error result with no machine-readable `code`. A tool SHALL therefore resolve scope inside the same error-translating boundary it already uses for authorization failures. Where a tool previously validated its arguments before resolving scope, scope resolution SHALL come first: an unusable connection is reported ahead of a malformed argument, because the call cannot succeed under any arguments.
+
+Coverage SHALL be asserted by enumeration rather than by inspection: a test SHALL drive the registered tool list, invoke every scope-sensitive tool on a connection whose path slug names no project, and assert the structured refusal. Tools exempt from scope resolution SHALL be enumerated explicitly in that test, so a newly registered tool fails it until it is classified.
+
+#### Scenario: A path-less connection resolves to the default project whatever the client advertises
+
+- **GIVEN** an unscoped `/mcp` connection whose client advertises `capabilities.roots` and whose first root's basename names an existing project other than the default project
+- **WHEN** the agent's first tool call is `memory.context`
+- **THEN** the server SHALL return the default project's context
+- **AND** the server SHALL NOT send a `roots/list` request, and a `notifications/roots/list_changed` from the client SHALL change no later call's resolved scope
+
+#### Scenario: Every registered scope-sensitive tool refuses an unresolvable slug
+
+- **GIVEN** a connection whose path slug names no project and a token whose scope is `*`
+- **WHEN** the enumerating test invokes every tool in the registered tool list with minimally valid arguments
+- **THEN** every tool not on the explicit exemption list SHALL return a result carrying `isError: true` and a JSON body whose `code` is `project_not_found`
+
+#### Scenario: A newly registered tool cannot inherit the fallback
+
+- **GIVEN** a change that registers a new scope-sensitive MCP tool
+- **WHEN** the test suite runs without that tool being classified
+- **THEN** the enumerating test SHALL fail rather than the tool silently resolving to the default project
+
+#### Scenario: Scope resolution precedes argument validation
+
+- **GIVEN** a connection whose path slug names no project
+- **WHEN** the client calls `memory.get` with neither `id` nor `ids` (a malformed request)
+- **THEN** the response SHALL carry `code: 'project_not_found'` rather than `code: 'invalid_input'`
+
+### Requirement: The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding
+
+The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_start`, `memory.session_end`, `memory.session_summary` and `memory.session_resume` with the following contracts. The tools are split by responsibility: `memory.session_start` opens a session, `memory.session_summary` writes summary/title without transitioning, `memory.session_end` is the state transition out of `active`, and `memory.session_resume` is the sole transition back into it.
+
+`memory.session_start` SHALL NOT always insert a row. When an `active` session already exists for the caller's `(tokenId, projectId)` — the ordinary case, because every supported host registers the session over HTTP before the agent runs — the call SHALL adopt that row instead of minting a second one, and SHALL report which of the two happened in a REQUIRED `reused` field: `true` when an existing row was adopted, `false` when a row was inserted. `reused` is the only signal distinguishing "you are now attached to the host's session" from "you just created a parallel session", which is the question a defensive `memory.session_start` call is asking. Its `outputSchema` SHALL mark it required, and the tool's description SHALL name it and state what `true` means (see "A tool's description and its response MUST agree, and neither may promise an unreachable state"): a required field the description omits from a closed-form `Returns: { … }` list is undocumented surface on the one channel the model reads.
+
+The response SHALL additionally carry a REQUIRED `agent` field reporting the attribution the resolved row actually carries: on `reused: false` the value just written, and on `reused: true` the adopted row's own value, which MAY differ from the `agent` argument the call passed. It SHALL be read from the resolved row rather than from the argument, so the field reports what is stored and not what was requested. The adopt path SHALL NOT write the passed `agent` onto the adopted row: `sessions.agent` is immutable (see the `sessions` capability, "The system SHALL never physically delete a session row and SHALL never mutate the `agent`, `token_id`, `started_at`, or `project_id` of an existing session") and no verb re-attributes a session, so a differing argument is discarded permanently and every memory and summary version anchored to that row inherits the row's attribution instead. Reporting it is therefore the entire remedy available: `reused: true` alone tells the caller it is attached to a session it did not open but not whose, and without `agent` the discard is not merely unnoticed but unobservable. Refusing the call on a mismatch SHALL NOT be adopted as the remedy — a host-registered row whose `agent` string the hook chose, adopted by a model that names itself differently, is the ordinary case the reuse exists to serve — and neither SHALL `agent` be added to the reuse key, which would restore the duplicate-session bug the reuse prevents. `agent` SHALL be non-nullable and always present, since the column is `NOT NULL` and the insert path substitutes `'unknown'`; a nullable declaration would publish a state the tool cannot produce. Its `outputSchema` SHALL mark it required and the description's closed-form `Returns: { … }` list SHALL name it, per "A tool's description and its response MUST agree, and neither may promise an unreachable state".
+
+`memory.session_start` SHALL resolve the session it reports in this order, and the order is normative: (1) the windowed sole-active lookup (`findActiveForTransport`); (2) the sole-active reuse lookup that applies no staleness window (`findSoleActiveForReuse`); (3) a mint. Steps (1) and (2) are specified in the `sessions` capability, "`findActiveForTransport` MUST NOT guess under concurrent ambiguity". No step SHALL consult a binding between the connection and a session: the server keeps no per-connection state, and neither `memory.session_start` nor `memory.session_resume` binds a session to the connection.
+
+Both adoption paths report the same way: `reused: true` carrying the adopted row's `sessionId` and that row's stored `agent`, and neither SHALL insert a row. Only step (3) reports `reused: false`. Minting under two-or-more live rows is preserved as published behaviour, and with no connection binding to answer a repeated call, each repeated call under that condition mints again; the description clause below is what limits repeated calls.
+
+`memory.session_start`'s optional `project` argument SHALL be an assertion, not an activation. When it names the project the connection resolved — from the URL path, or the default project on a path-less connection — the call SHALL proceed exactly as if the argument were omitted. When it names any other slug, the call SHALL be refused with `scope_locked`, naming the resolved slug, and SHALL insert, adopt and modify no row. It SHALL NOT activate, switch or create a project.
+
+The tool's description SHALL additionally tell the model not to repeat the call on a connection that already has a session — once a session is active on this connection, do not call `memory.session_start` again, because writes attach automatically. The description is the only surface that can reduce the volume of defensive calls that create these rows in the first place; the resolution order above bounds the damage per call, and this clause is what reduces the number of calls.
+
+`memory.session_summary` SHALL validate `summary` against the single canonical cap exported from `packages/core/src/services/agent-sessions.ts` (`SUMMARY_MAX_CHARS`, currently `10000`). The MCP zod schema SHALL be `summary: z.string().min(1).max(SUMMARY_MAX_CHARS)` so overflow is rejected at the transport boundary with `invalid_input` before the tool body runs. The rejected agent SHALL receive an error whose message contains the decimal string of `SUMMARY_MAX_CHARS` so it can retry with a tighter body on the first attempt.
+
+`memory.session_summary` and `memory.session_end` SHALL NOT reject a call because the resolved row is in a terminal state. `memory.session_summary` SHALL apply its summary/title write subject to the `final` precedence rules regardless of `status`; `memory.session_end` takes no summary/title arguments, so on a terminal row it SHALL be a pure no-op returning the existing `ended_at`. Neither SHALL mutate `status`, `ended_at` or `last_activity_at` on a terminal row — see the `sessions` capability, "Terminal session rows MUST accept late summary and title writes, and MUST NOT change status except through `resume`". `session_already_ended` SHALL NOT be a possible error code for either tool. This matters because the plugin's `PreCompact`, `SessionStart:compact` and `Stop` nudges instruct the agent to call `memory.session_summary`, and the stale-active retirement sweep can have flipped the row to `abandoned` (the documented steady state for two of the clients) before the agent gets there.
+
+`memory.session_summary`'s response SHALL carry a REQUIRED `applied: boolean` field. `applied` is `true` when the summary/title write landed on the row (whether the row was `active` or terminal without a prior curated summary). `applied` is `false` when the terminal first-curated-stands precedence rule blocked the write: the row is terminal (`ended` or `abandoned`), `summary_final` was already `true`, and the incoming curated summary was discarded. When `applied` is `false`, the response SHALL additionally carry `discardReason: 'terminal_final'` — the only discard reason today — to name the specific rule that blocked the write. When `applied` is `true`, `discardReason` SHALL be omitted from the response. The `outputSchema` SHALL declare `applied` as required (`z.boolean()`) and `discardReason` as optional (`z.string().optional()`). This field is the entire remedy available on the MCP surface: the row cannot be repaired, the first-curated-stands rule cannot be changed (there is no `replaces` chain for sessions, so losing a curated handoff is unrecoverable), and returning an error would violate the "SHALL NOT reject a call because the resolved row is in a terminal state" clause above.
+
+`memory.session_end`'s response SHALL carry a REQUIRED `applied: boolean` field. `applied` is `true` when the call transitioned an `active` row to `ended`. `applied` is `false` when the row was already terminal (`ended` or `abandoned`) and the call was a no-op. The `outputSchema` SHALL declare `applied` as required (`z.boolean()`). This makes the two session-lifecycle write tools consistent: both report whether the call achieved a state change.
+
+`memory.session_resume` SHALL accept `{ sessionId: string }` with `sessionId` REQUIRED, and SHALL call `AgentSessionsService.resume` (specified in the `sessions` capability) with the request's token id. Its response SHALL be `{ ok: true, sessionId, status: 'active', startedAt, resumedAt, previousStatus, previousEndedAt, title }`, where `previousStatus` is the row's `status` immediately before the call and `previousEndedAt` is the `ended_at` the call discarded (`null` when the row was already `active`). Those two fields are the ONLY report of a value the server does not retain, so the tool's `outputSchema` SHALL mark them required and the description SHALL name them. `resumedAt` SHALL be the row's effective last activity after the call — the instant of the resume on the transition path, and the row's PRIOR activity on the already-`active` no-op path, since that path writes nothing by design. `resumedAt` SHALL NOT be read as "the instant this call ran": `previousStatus` is what distinguishes a transition from a no-op, and the tool description SHALL say so.
+
+`sessionId` SHALL have no fallback resolution on `memory.session_resume`. Unlike the other three tools it SHALL NOT consult the sole-active-session lookup. That fallback is structurally unavailable — the active-session lookup filters `status = 'active'`, which the resume target by definition is not — so any fallback would have to select a terminal row by recency, precisely the heuristic the `sessions` capability's "`findActiveForTransport` MUST NOT guess under concurrent ambiguity" refuses. A call omitting `sessionId` SHALL be rejected at the zod boundary with `invalid_input`, never resolved to a guess.
+
+`memory.session_resume` SHALL NOT bind the resumed session to the connection, on the transition path or on the already-`active` no-op path, and SHALL NOT set a project: resume names a session, and the project is whatever the connection already resolved. A later write reaches the resumed session through an explicit `sessionId`, or through the sole-active-session lookup when the resumed session is the only `active` one for the caller's `(token, project)`. `memory.session_end` has no binding to clear.
+
+Session resolution is unchanged for the other three tools and SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an explicit `sessionId`, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The second source SHALL continue to consider only `active` rows, so an agent that supplies no explicit id SHALL receive `session_not_found` rather than having its write attached to a closed session picked by recency.
+
+#### Scenario: `memory.session_start` opens a new session
+
+- **WHEN** an MCP client calls `memory.session_start` with `{ agent?: string, description?: string }`
+- **THEN** the server SHALL insert a `sessions` row with `status = 'active'`, `started_at = now`, the provided `agent` (or `'unknown'`), `token_id` from the request context, `project_id` from the request scope, and a placeholder `title` of the form `basename(cwd) · HH:MM UTC` with `title_final = false`; **AND** the response SHALL be `{ sessionId, scope, projectId, startedAt, title, reused, agent }`, whose `agent` SHALL equal the value just written to the row
+
+#### Scenario: `memory.session_end` ends a session without summary
+
+- **WHEN** an MCP client calls `memory.session_end` with `{ sessionId: string }` for an active session
+- **THEN** the server SHALL set `status = 'ended'` and `ended_at = now` on that row, leave `summary` and `title` unchanged, and SHALL return `{ ok: true, sessionId, endedAt, applied: true }`
+
+#### Scenario: `memory.session_end` is idempotent on already-ended sessions
+
+- **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is already `'ended'`
+- **THEN** the server SHALL return `{ ok: true, sessionId, endedAt, applied: false }` with the existing `ended_at` and SHALL NOT mutate the row
+
+#### Scenario: `memory.session_end` is idempotent on abandoned sessions
+
+- **WHEN** an MCP client calls `memory.session_end` on a row whose `status` is `'abandoned'` with `ended_at = E`
+- **THEN** the server SHALL return `{ ok: true, sessionId, endedAt: E, applied: false }`, SHALL leave `status = 'abandoned'` and `ended_at = E` untouched, and SHALL NOT return `session_already_ended`
+
+#### Scenario: `memory.session_summary` writes summary and title without ending the session
+
+- **WHEN** an MCP client calls `memory.session_summary` with `{ sessionId?: string, summary: string, title?: string }` and `summary.length <= SUMMARY_MAX_CHARS`
+- **THEN** the server SHALL resolve `sessionId`, when omitted, to the unambiguous `active` session for the caller's `(token_id, project_id)`, write `summary` with `summary_final = true`, write `title` (when provided, after validating length ≤100) with `title_final = true`, leave `status`/`ended_at` unchanged, and return `{ ok: true, sessionId, summary, title, summaryFinal: true, titleFinal: <true|false>, applied: true }`
+
+#### Scenario: `memory.session_summary` succeeds on a session the sweep already abandoned
+
+- **GIVEN** the agent's session was flipped to `status = 'abandoned'` with `ended_at = E` and `last_activity_at = L` by stale-active retirement while the conversation was still open, and the agent knows its `sessionId` (the plugin's nudge injects it)
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary, title })`
+- **THEN** the call SHALL succeed and return `{ ok: true, sessionId, summary, title, summaryFinal: true, applied: true }`
+- **AND** the row SHALL retain `status = 'abandoned'`, `ended_at = E` and `last_activity_at = L`
+- **AND** the call SHALL NOT return `session_already_ended`
+
+#### Scenario: `memory.session_summary` succeeds on an ended session
+
+- **GIVEN** a row whose `status = 'ended'` with `ended_at = E` and `summary_final = false` (no curated summary written yet)
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary })`
+- **THEN** the call SHALL succeed with `summaryFinal: true` and `applied: true`, and `status`/`ended_at` SHALL be unchanged
+
+#### Scenario: `memory.session_summary` with no resolvable session still reports `session_not_found`
+
+- **GIVEN** the agent passes no explicit `sessionId`, and the only candidate row for its `(token_id, project_id)` is `abandoned`
+- **WHEN** the agent calls `memory.session_summary({ summary })`
+- **THEN** the call SHALL be rejected with code `session_not_found` (NOT `session_already_ended`, and NOT silently attached to the abandoned row)
+
+#### Scenario: `memory.session_summary` may be called multiple times; the latest call wins
+
+- **GIVEN** an `active` session whose `summary_final = true` from a prior `memory.session_summary({summary: "A"})` call
+- **WHEN** the agent calls `memory.session_summary({summary: "B"})` again
+- **THEN** `summary` SHALL be replaced with "B" (last-final-wins among final writes on active rows) and `applied` SHALL be `true`
+
+#### Scenario: `memory.session_summary` discards a second curated write on a terminal row
+
+- **GIVEN** a terminal session (`status = 'ended'` or `'abandoned'`) whose `summary_final = true` from a prior curated write with summary "A"
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "B" })`
+- **THEN** the response SHALL carry `ok: true`, `summary: "A"` (the stored value, unchanged), `summaryFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
+- **AND** the session row SHALL be unchanged in every column
+
+#### Scenario: `memory.session_summary` discards a second curated title on a terminal row
+
+- **GIVEN** a terminal session whose `title_final = true` from a prior curated write with title "First"
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "new summary", title: "Second" })`
+- **THEN** the response SHALL carry `title: "First"` (the stored value, unchanged), `titleFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
+- **AND** the session row SHALL be unchanged in every column
+
+#### Scenario: `memory.session_summary` discards summary but applies title on a terminal row
+
+- **GIVEN** a terminal session whose `summary_final = true` and `title_final = false`
+- **WHEN** the agent calls `memory.session_summary({ sessionId, summary: "B", title: "New Title" })`
+- **THEN** the response SHALL carry `summary: "A"` (unchanged), `summaryFinal: true`, `title: "New Title"` (applied), `titleFinal: true`, `applied: false`, and `discardReason: 'terminal_final'`
+- **AND** the summary column SHALL be unchanged but the title column SHALL reflect the new value
+
+#### Scenario: `memory.session_summary` rejects empty summary
+
+- **WHEN** the agent submits `summary: ""` or whitespace-only
+- **THEN** the call SHALL be rejected with code `invalid_input`
+
+#### Scenario: `memory.session_summary` rejects title over 100 chars
+
+- **WHEN** the agent submits `title: "A".repeat(101)`
+- **THEN** the call SHALL be rejected with code `invalid_input`
+
+#### Scenario: `memory.session_summary` rejects summary over `SUMMARY_MAX_CHARS`
+
+- **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS + 1)` (one char over the cap)
+- **THEN** the call SHALL be rejected at the zod boundary with code `invalid_input`
+- **AND** the error message SHALL contain the decimal string of `SUMMARY_MAX_CHARS` so the agent can deduce the cap and retry with a tighter body on the first attempt
+- **AND** the session row SHALL NOT be mutated (no partial write, `summary_final` unchanged)
+
+#### Scenario: `memory.session_summary` accepts summary of exactly `SUMMARY_MAX_CHARS`
+
+- **WHEN** the agent submits `summary: "A".repeat(SUMMARY_MAX_CHARS)`
+- **THEN** the call SHALL succeed and the row SHALL have `summary` of length `SUMMARY_MAX_CHARS` with `summary_final = true` and `applied: true`
+
+#### Scenario: A session-lifecycle tool targets a session owned by a different token
+
+- **WHEN** any of the four tools is called with a `sessionId` whose `token_id` does not match the caller's token
+- **THEN** the call SHALL be rejected with code `session_not_found` (never `forbidden`, to avoid information disclosure)
+
+#### Scenario: A second `memory.session_start` adopts the first session and says so
+
+- **GIVEN** a connection with no active session for its `(tokenId, projectId)`
+- **WHEN** an MCP client calls `memory.session_start` twice in a row on that connection
+- **THEN** the first response SHALL carry `reused: false` and the second SHALL carry `reused: true`
+- **AND** both responses SHALL carry the SAME `sessionId` — the second call SHALL NOT insert a second `sessions` row
+- **AND** the `sessions` row count for that `(tokenId, projectId)` SHALL be 1 after both calls, which is the control that `reused: true` describes adoption rather than a coincidence of ids
+
+#### Scenario: `memory.session_start` reports the adopted session's `agent` rather than the argument
+
+- **GIVEN** exactly one `active` session for the caller's `(tokenId, projectId)`, created with `agent = 'claude-code'`
+- **WHEN** an MCP client calls `memory.session_start` with `{ agent: 'pi' }` on that connection
+- **THEN** the response SHALL carry `reused: true` AND `agent: 'claude-code'` — the adopted row's stored value, NOT the argument
+- **AND** the row's `agent` column SHALL still be `'claude-code'` and the `sessions` row count for that `(tokenId, projectId)` SHALL still be 1, so the report is of an adoption and not of a second row
+- **AND** the control, from the same connection state without the pre-existing session: `memory.session_start({ agent: 'pi' })` SHALL return `reused: false` with `agent: 'pi'`. Without it a passing adopt assertion cannot be told apart from a test that never adopted anything, and an implementation reading `agent` from the argument would satisfy the adopt assertion whenever the two values happen to agree
+
+#### Scenario: `memory.session_start` adopts the sole active row when no fresh row exists
+
+- **GIVEN** exactly one `active`, non-deleted row `<S>` for the caller's `(tokenId, projectId)`, idle past the staleness window
+- **WHEN** the client calls `memory.session_start`
+- **THEN** the response SHALL carry `reused: true` and `sessionId = <S>`
+- **AND** the row count SHALL be unchanged
+
+#### Scenario: `memory.session_start` asserts the connection's project
+
+- **GIVEN** a connection whose resolved project is `foo`, either at `/mcp/foo` or path-less with `foo` as the default project
+- **WHEN** the client calls `memory.session_start({ project: 'bar' })`
+- **THEN** the call SHALL be refused with `code: 'scope_locked'` and a message naming `foo`
+- **AND** no `sessions` row SHALL be inserted or modified, and every later call on the connection SHALL still resolve to `foo`
+- **AND** the control, on the same connection: `memory.session_start({ project: 'foo' })` SHALL succeed exactly as `memory.session_start({})` does
+
+#### Scenario: `memory.session_start`'s description names every required output field
+
+- **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
+- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `title`, `reused` and `agent`
+- **AND** the description SHALL state that `reused: true` means the call adopted the host's already-active session rather than starting one
+- **AND** the description SHALL state that `agent` reports the attribution the resolved session carries and MAY differ from the `agent` argument the call passed, so the field is not read as an echo of that argument
+- **AND** a CI test SHALL compare the description against the `outputSchema`'s required list, so a field added to the schema without a description update fails the build
+
+#### Scenario: The `memory.session_start` description tells the model not to call again on an active connection
+
+- **WHEN** an MCP client retrieves the tool description for `memory.session_start` via `tools/list`
+- **THEN** the description SHALL state that once a session is active on this connection the model SHALL NOT call `memory.session_start` again, and that writes attach automatically
+- **AND** it SHALL keep stating that in normal operation the model does not need to call the tool at all, so the two clauses read as one instruction rather than a contradiction
+- **AND** its `String.length` measured from a real `tools/list` response SHALL be at or below `DESCRIPTION_MAX_LENGTH = 1900`
+- **AND** the change SHALL record the measured length and the remaining headroom: the description measured **818 of 1900 characters, 1082 of headroom**, immediately before this clause was added, so the clause fits without reclaiming any mandated prose
+- **AND** the cap SHALL NOT be raised to accommodate it; if it ever ceases to fit, the clause is reworded shorter instead
+
+#### Scenario: `memory.session_resume` returns an ended session to active
+
+- **GIVEN** session `<S>` owned by the calling token, `status='ended'` with `ended_at = E`, in the connection's project
+- **WHEN** an MCP client calls `memory.session_resume` with `{ sessionId: <S> }`
+- **THEN** the response SHALL be `{ ok: true, sessionId: <S>, status: 'active', startedAt, resumedAt, previousStatus: 'ended', previousEndedAt: E, title }`
+- **AND** the row SHALL have `status='active'` and `ended_at IS NULL`
+
+#### Scenario: `memory.session_resume` returns an abandoned session to active identically
+
+- **GIVEN** session `<S>` owned by the calling token, `status='abandoned'` with `ended_at = E`
+- **WHEN** an MCP client calls `memory.session_resume` with `{ sessionId: <S> }`
+- **THEN** the response SHALL carry `previousStatus: 'abandoned'`, `previousEndedAt: E` and `status: 'active'`
+- **AND** the row SHALL be indistinguishable in every column from the same row resumed out of `ended`
+
+#### Scenario: `memory.session_resume` binds nothing to the connection
+
+- **GIVEN** sessions `<S>` and `<T>` owned by the calling token in the connection's project, `<S>` `ended` and `<T>` `active`
+- **WHEN** the client calls `memory.session_resume` with `{ sessionId: <S> }`, it succeeds, and the client then calls `memory.save` with no explicit `sessionId`
+- **THEN** the saved row SHALL carry `session_id = NULL`, because two sessions are now `active` and the sole-active-session lookup refuses to choose
+- **AND** the same `memory.save` with `sessionId: <S>` SHALL persist `session_id = <S>`, which is the control that the resumed session is reachable by its explicit identifier
+
+#### Scenario: `memory.session_resume` refuses a call with no `sessionId`
+
+- **WHEN** an MCP client calls `memory.session_resume` with `{}`
+- **THEN** the call SHALL be rejected at the zod boundary with code `invalid_input`
+- **AND** no session SHALL be resolved by recency, and no row SHALL be mutated
+
+#### Scenario: `memory.session_resume` refuses an unknown property
+
+- **WHEN** an MCP client calls `memory.session_resume` with `{ sessionId: <S>, epoch: 3 }`
+- **THEN** the call SHALL be rejected with `invalid_input` rather than having the unknown property silently stripped, because every tool's input schema is registered strict
+
+#### Scenario: `memory.session_resume` targets a session in another project
+
+- **GIVEN** session `<S>` owned by the calling token but belonging to a project other than the one this connection resolved
+- **WHEN** the client calls `memory.session_resume` with `{ sessionId: <S> }`
+- **THEN** the call SHALL be rejected with `session_not_found` and the row SHALL NOT be mutated
+
+#### Scenario: `memory.session_resume` on an already-active session succeeds without mutating it
+
+- **GIVEN** session `<S>` with `status='active'` and `last_activity_at = L`
+- **WHEN** the client calls `memory.session_resume` with `{ sessionId: <S> }`
+- **THEN** the call SHALL succeed with `previousStatus: 'active'` and `previousEndedAt: null`
+- **AND** the row SHALL NOT be mutated, so `last_activity_at` SHALL still be `L`
+
+#### Scenario: `memory.session_start` adopts a resumed session rather than minting a second row
+
+- **GIVEN** session `<S>` was resumed and is the only `active` row for the caller's `(token_id, project_id)`
+- **WHEN** the agent calls `memory.session_start`
+- **THEN** the response SHALL carry `sessionId = <S>` and `reused: true`
+- **AND** the `sessions` row count for that `(token_id, project_id)` SHALL be unchanged, which is the control that adoption happened rather than a coincidence of ids
+
+#### Scenario: `memory.session_resume`'s description names every required output field
+
+- **WHEN** an MCP client retrieves the tool description for `memory.session_resume` via `tools/list`
+- **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `previousStatus` and `previousEndedAt`
+- **AND** the description SHALL state that `previousEndedAt` is not retained on the row after the call
+- **AND** the CI test that compares each description against its `outputSchema`'s required list SHALL cover this tool

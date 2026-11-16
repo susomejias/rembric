@@ -67,7 +67,7 @@ The two set arms SHALL NOT be spelled as a variant of `*` or `read:*`. A set tok
 - **GIVEN** a token with `scope = 'read:project:A'` or `project:A`
 - **WHEN** the token invokes a read-classified tool on a connection whose effective scope is any project other than A — including the default project on a path-less connection
 - **THEN** the call SHALL be rejected with code `forbidden`
-- **AND** the refusal SHALL name the pinned project and `project.use` (see the `mcp-api` requirement "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform")
+- **AND** the refusal SHALL name the pinned project and its `/mcp/<slug>` URL, and SHALL NOT name `project.use` (see the `mcp-api` requirement "MCP error messages MUST NOT instruct the agent to perform an action it cannot perform")
 
 #### Scenario: A set-scoped token reaches every project in its set
 
@@ -240,7 +240,7 @@ The title predates this change: the global widening it names is removed; a diffe
 
 The title predates this change: there is no global scope, but a full-access token does now have a wider scope to be widened into — every project it may read.
 
-- **GIVEN** a token with `scope = '*'` or `read:*`, on a connection whose effective scope is a project reached via `project.use`, and memories in a second project
+- **GIVEN** a token with `scope = '*'` or `read:*`, on a connection whose effective scope is a project reached via its `/mcp/<slug>` URL, and memories in a second project
 - **WHEN** the token calls `memory.search` **without** the widening argument
 - **THEN** the response SHALL contain only that project's memories
 - **AND** **WHEN** it calls `memory.search` **with** the widening argument, the response MAY contain the second project's memories and SHALL name both projects as searched
@@ -418,14 +418,21 @@ Deriving admin from breadth would make creating a project a privilege-altering o
 
 ### Requirement: A set-scoped token MUST NOT be able to create a project
 
-A set names projects that exist. A `projects` or `read:projects` token SHALL be refused `project.use` with `autocreate: true` for a slug that does not resolve, with the structured code the existing autocreate gate returns, because the project it would create is by construction not a member of its set.
+A set names projects that exist. No MCP tool creates a project — projects are created from the dashboard only — so a `projects` or `read:projects` token SHALL have no path to create one, and a connection naming a slug outside its set SHALL NOT create the project it names.
+
+#### Scenario: A set token cannot create a project by naming it
+
+- **GIVEN** a token with `scope = 'projects'` whose membership set is `{A}`, and no project with slug `brand-new`
+- **WHEN** the token connects at `/mcp/brand-new` and calls `project.list`, `project.current` and every scope-resolving tool
+- **THEN** every scope-resolving call SHALL be refused with `project_not_found`, and no `projects` row SHALL be created
+- **AND** an admin `*` token making the same calls SHALL likewise create no project, which is the control that the absence of a row comes from the removed creation path and not from the set
 
 #### Scenario: Autocreate is refused for a set token
 
 - **GIVEN** a token with `scope = 'projects'` whose membership set is `{A}`
 - **WHEN** the token calls `project.use({ slug: 'brand-new', autocreate: true })`
-- **THEN** the call SHALL be rejected with code `forbidden` and no `projects` row SHALL be created
-- **AND** an admin `*` token making the same call SHALL create the project
+- **THEN** the call SHALL be refused because no tool named `project.use` is registered, and no `projects` row SHALL be created
+- **AND** an admin `*` token making the same call SHALL be refused the same way, which is the control that the refusal comes from the removed tool and not from the set
 
 ### Requirement: The widened search set MUST be the token's read reach, and reaching every project MUST NOT confer admin
 

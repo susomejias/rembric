@@ -121,7 +121,7 @@ When `id` is NOT supplied, the service SHALL mint a ULID as today and SHALL retu
 
 ### Requirement: A session belongs to exactly one token and at most one project
 
-Every session row SHALL carry a `token_id` referencing an existing row in `tokens`, and SHALL carry the `project_id` its connection resolved to. Because every connection resolves to exactly one project — the slug's project on `/mcp/<slug>`, the router's project after `project.use` or roots discovery, and otherwise the default project — **no newly registered session SHALL carry a null `project_id`**.
+Every session row SHALL carry a `token_id` referencing an existing row in `tokens`, and SHALL carry the `project_id` its connection resolved to. Because every connection resolves to exactly one project — the slug's project on `/mcp/<slug>`, and otherwise the default project — **no newly registered session SHALL carry a null `project_id`**.
 
 **Existing rows with a null `project_id` SHALL be repointed to the default project by the migration that retires the global scope.** Leaving them would keep the retired scope alive in a second table after the change claims to have removed it, and the operator surface would keep rendering a scope label for rows whose scope no longer exists. The count of such rows on a real installation is every path-less session ever registered.
 
@@ -136,11 +136,11 @@ The column SHALL remain nullable in this release. Flipping nullability on SQLite
 
 - **WHEN** `memory.session_start` is called on `/mcp` with a token whose scope is `project:<id>` and the connection resolved to the default project
 - **THEN** the call SHALL be rejected with code `forbidden` and SHALL NOT insert a session row
-- **AND** the refusal SHALL name the pinned project and `project.use`
+- **AND** the refusal SHALL name the pinned project and its `/mcp/<slug>` URL, and SHALL NOT name `project.use`
 
 #### Scenario: A path-less session start binds to the default project
 
-- **GIVEN** a path-less `/mcp` connection with a token authorized to write the default project, no prior `project.use` and no roots discovery
+- **GIVEN** a path-less `/mcp` connection with a token authorized to write the default project, whether or not its client advertises the `roots` capability
 - **WHEN** `memory.session_start` is called
 - **THEN** the session row SHALL carry the default project's `project_id` and SHALL NOT carry a null `project_id`
 
@@ -156,12 +156,12 @@ The `memory` table SHALL gain a nullable `session_id` column referencing `sessio
 
 #### Scenario: An agent saves a memory after `memory.session_start`
 
-- **WHEN** the active MCP transport session has a registered Rembric session for `(token, project)` and `memory.save` is called without an explicit `session_id` argument
-- **THEN** the inserted row's `session_id` SHALL be set to the active Rembric session id
+- **WHEN** exactly one Rembric session is `active` for `(token, project)` inside the staleness window and `memory.save` is called without an explicit `sessionId` argument
+- **THEN** the inserted row's `session_id` SHALL be set to that session's id
 
 #### Scenario: An agent saves a memory without calling `memory.session_start`
 
-- **WHEN** `memory.save` is called and no Rembric session is active for `(token, project, mcp-session-id)`
+- **WHEN** `memory.save` is called without a `sessionId` and no Rembric session is resolvable for `(token, project)`
 - **THEN** the inserted row's `session_id` SHALL be null and the call SHALL succeed (backwards compatibility)
 
 #### Scenario: A pre-existing memory row predates this change
@@ -254,12 +254,19 @@ The tool SHALL accept an optional `title?: string` (≤100 chars) which when pre
 
 ### Requirement: `memory.session_start` MAY accept an explicit project slug
 
-The `memory.session_start` tool SHALL accept an optional `project?: string` argument (a slug, not a path). When provided, it SHALL override any auto-detected scope from `roots/list` but SHALL respect the connection-level scope from a path-scoped URL (`/mcp/<slug>`). The slug resolution rules of the `projects` capability apply: unknown slugs reject with `project_not_found` (with `suggestedSlugs[]`), and creation requires the agent to use `project.use({slug, autocreate: true})` separately first.
+The `memory.session_start` tool SHALL accept an optional `project?: string` argument (a slug, not a path). The argument SHALL be an assertion about the connection's resolved project, never a way to choose one: the resolved project comes from the URL path (`/mcp/<slug>`), or is the default project on a path-less connection, and no argument changes it. When `project` names the resolved project's slug, the call SHALL proceed exactly as if the argument were omitted. When it names any other slug — whether or not a project with that slug exists — the call SHALL be rejected with code `scope_locked`, naming the resolved slug, and no session row SHALL be inserted or adopted. On a connection whose URL slug names no project, the `project_not_found` refusal of the shared resolver SHALL take precedence. No argument of this tool SHALL create a project; projects are created from the dashboard.
+
+#### Scenario: `memory.session_start` with a slug matching the default project on `/mcp`
+
+- **GIVEN** a `/mcp` (no path slug) connection whose default project has slug `default`
+- **WHEN** the agent calls `memory.session_start({agent: 'claude-code', project: 'default'})`
+- **THEN** the call SHALL succeed exactly as `memory.session_start({agent: 'claude-code'})` does, and the session row SHALL carry the default project's `project_id`
 
 #### Scenario: `memory.session_start` with an explicit valid slug on `/mcp`
 
-- **WHEN** the agent calls `memory.session_start({agent: 'claude-code', project: 'rembric'})` on a `/mcp` (no path slug) connection and the slug exists
-- **THEN** the inserted session row SHALL have `project_id` set to that project, regardless of any `roots`-derived suggestion
+- **WHEN** the agent calls `memory.session_start({project: 'rembric'})` on a `/mcp` (no path slug) connection, the slug exists, and it is not the default project's slug
+- **THEN** the call SHALL be rejected with code `scope_locked` and a message naming the default project's slug
+- **AND** no session row SHALL be inserted, and the connection's later calls SHALL still resolve to the default project
 
 #### Scenario: `memory.session_start` with an explicit slug on `/mcp/<slug>` mismatching the path
 
@@ -268,29 +275,14 @@ The `memory.session_start` tool SHALL accept an optional `project?: string` argu
 
 #### Scenario: `memory.session_start` with an unknown slug
 
-- **WHEN** the agent calls `memory.session_start({project: 'unknown-slug'})` and the slug does not exist
-- **THEN** the call SHALL be rejected with code `project_not_found` and `suggestedSlugs[]` in the payload; no session row SHALL be inserted
-
-### Requirement: A project switch MUST NOT happen while a session is active
-
-When a session is `status = 'active'` for the current MCP transport, the `project.use` tool SHALL refuse to switch the active project — even with `confirmSwitch: true` — until the session is closed via `memory.session_end` or `memory.session_summary`.
-
-#### Scenario: `project.use` switch attempted with active session
-
-- **WHEN** the agent calls `project.use({slug: 'api', confirmSwitch: true})` while a session is active in project `'rembric'`
-- **THEN** the call SHALL be rejected with code `session_active_must_end` and a payload `{ activeSessionId, currentSlug, targetSlug }`
-
-#### Scenario: Closing a session then switching
-
-- **GIVEN** an active session in project `'rembric'`
-- **WHEN** the agent calls `memory.session_summary({summary})` and then `project.use({slug: 'api', confirmSwitch: true})`
-- **THEN** the second call SHALL succeed with `switched: true` and `previousSlug: 'rembric'`
+- **WHEN** the agent calls `memory.session_start({project: 'unknown-slug'})` on a connection that resolved to an existing project, and no project has slug `unknown-slug`
+- **THEN** the call SHALL be rejected with code `scope_locked`; no session row SHALL be inserted and no project row SHALL be created
 
 ### Requirement: Server restart MUST mark in-flight sessions as abandoned
 
 Stale-active retirement SHALL therefore run at startup **and** periodically thereafter (see "Session rows MUST record last activity, and stale-active retirement MUST be periodic"), and BOTH passes SHALL use the same single retirement query so they cannot diverge. That query SHALL key on `COALESCE(last_activity_at, started_at)` — not on `started_at` alone: a genuinely long-running session that is still being written to would otherwise be retired out from under its client at the 24-hour mark, and a row predating the `last_activity_at` column would otherwise never be retired at all. Rows whose effective last activity is older than the configured `SESSION_ABANDON_AFTER_MS` (default `24h`) SHALL be transitioned to `status = 'abandoned'` with `ended_at = now`.
 
-In-process session routing state (`mcp-session-id` → active Rembric session id) is not persisted, so a restart loses every route into a live session and the rows it pointed at can never be closed by their own client.
+The server keeps no route from an MCP connection to a live session, in process or on disk, so a client that dies while the server is down, or never returns after a restart, leaves its row `active` with nothing that will close it on its behalf.
 
 #### Scenario: Server restarts while a session is active
 
@@ -417,54 +409,6 @@ The detail view at `/dashboard/sessions/:id` SHALL render whether the row is sof
 - **GIVEN** an authenticated admin session
 - **WHEN** a POST to `/dashboard/sessions/<S>/delete` arrives without the `csrf` field
 - **THEN** the response SHALL be `403` with the standard `csrf_invalid` body
-
-### Requirement: Session-tool handlers MUST honor the documented scope-resolution precedence
-
-Every MCP tool handler under `packages/mcp/src/` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
-
-1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
-2. The `SessionRouter` entry for `(tokenId, mcpSessionId)`, populated by a prior `project.use` call or by roots-based discovery, when the connection is path-less (`ctx.requestedSlug === null`).
-3. **The default project**, when neither source resolves one. There is no fourth step and no scopeless outcome.
-
-A handler that resolves scope using only `ctx.project` and falls through directly to a scope of its own choosing SHALL be considered to be in violation of this requirement. In particular, a handler SHALL NOT construct the default project's scope itself — it SHALL obtain it from the shared resolver, so the resolution rule lives in one place and a change to it cannot leave a handler behind.
-
-#### Scenario: Path-less connection with router pin returns project scope
-
-- **GIVEN** a token connected to `/mcp` (path-less)
-- **AND** an agent has called `project.use({slug: 'foo', autocreate: true})` successfully
-- **WHEN** the agent calls `memory.context`
-- **THEN** the response SHALL include `scope: "project:<foo.id>"` and the project's recent memories
-
-#### Scenario: Path-less connection with no router entry returns global scope
-
-- **GIVEN** a token connected to `/mcp` (path-less)
-- **AND** no `project.use` call has been made on this MCP session
-- **AND** no roots-based discovery has populated the router
-- **WHEN** the agent calls `memory.context`
-- **THEN** the response SHALL include the default project's scope and only that project's memories
-- **AND** the scenario title predates this change: the fallback it names is the default project, not a global scope
-
-#### Scenario: Path-scoped connection ignores router fallback
-
-- **GIVEN** a token connected to `/mcp/bar` where project `bar` does not exist
-- **AND** the router has a leftover entry pointing to project `foo` from a previous session reusing the same `(tokenId, mcpSessionId)` keys
-- **WHEN** the agent calls `memory.context`
-- **THEN** the call SHALL be refused with `code: 'project_not_found'` rather than resolving to any project, and SHALL NOT fall back to the default project
-- **AND** the response SHALL NOT leak `foo`'s memories
-
-#### Scenario: Path-scoped connection to existing project returns that project's scope
-
-- **GIVEN** a token connected to `/mcp/baz` where project `baz` exists
-- **AND** auth has resolved `ctx.project` to the `baz` project
-- **WHEN** the agent calls `memory.context`
-- **THEN** the response SHALL include `scope: "project:<baz.id>"` regardless of any router state
-
-#### Scenario: `memory.search_prompts` honours router-based scope resolution
-
-- **GIVEN** a token connected to `/mcp` (path-less) with a `project.use({slug: 'foo'})` pin
-- **WHEN** the agent calls `memory.search_prompts({ query: "anything" })`
-- **THEN** the server SHALL resolve scope to `project:<foo.id>` via the `SessionRouter` entry
-- **AND** SHALL NOT return prompts from any other project, including the default project
 
 ### Requirement: Session rows MUST carry a title column with write-once-final precedence
 
@@ -784,7 +728,7 @@ A `NULL` stored session summary SHALL be emitted as `null` (not coerced to an em
 
 ### Requirement: `findActiveForTransport` MUST NOT guess under concurrent ambiguity
 
-`AgentSessionsService.findActiveForTransport({ tokenId, projectId })` (and the repository method behind it) is the fallback used to auto-attach an MCP write (`memory.save`, `memory.confirm`, `memory.session_summary`) or as `memory.session_start`'s first reuse check when the caller supplied no explicit `sessionId` and no `SessionRouter` entry exists for the calling transport. It SHALL query for `status='active'` rows matching `(tokenId, projectId)` and:
+`AgentSessionsService.findActiveForTransport({ tokenId, projectId })` (and the repository method behind it) is the fallback used to auto-attach an MCP write (`memory.save`, `memory.confirm`, `memory.session_summary`) or as `memory.session_start`'s first reuse check when the caller supplied no explicit `sessionId`. It is the only fallback: the server binds no session to a connection or transport. It SHALL query for `status='active'` rows matching `(tokenId, projectId)` and:
 
 1. Return that row when exactly one matches.
 2. Return `null` when zero rows match.
@@ -796,7 +740,7 @@ Rules 1–3 are published unchanged for this method itself, and they bind every 
 
 One caller is carved out, by name: `memory.session_start`. Its reuse precondition is _an unambiguous `active` candidate_, not _an unambiguous `active` candidate that is also inside the staleness window_. When `findActiveForTransport` returns a row, the tool adopts it exactly as it does today. When that lookup returns `null` — including the zero-fresh-rows case, where the only live row for the scope is idle past the staleness window — the tool SHALL consult a SEPARATE lookup, `AgentSessionsService.findSoleActiveForReuse({ tokenId, projectId })`, which SHALL filter the same `(tokenId, projectId)` + `status = 'active'` + `deleted_at IS NULL` set with NO staleness predicate, and SHALL be sole-or-nothing: it returns the row when exactly one matches and `null` when zero or two-or-more match. It SHALL NOT use recency (`started_at`, `last_activity_at`) or any other heuristic to select among two or more rows — rule 3's prohibition applies to both lookups identically, so the carve-out licenses adopting the sole `active` row and never licenses adopting _something_.
 
-Both reuse lookups are consulted only when the calling transport carries no reusable `SessionRouter` binding. Binding precedence for `memory.session_start` is specified in the `mcp-api` capability, "The MCP server MUST expose four session-lifecycle tools"; a binding names an id, so it is a pin rather than a tiebreak and is untouched by this requirement. A client MAY establish that binding itself at start-up by resuming its own row by id — the Pi extension does exactly that (see `pi-plugin`, "The Pi extension SHALL declare its session identity on the MCP transport") — and on such a transport neither lookup below is ever reached, so the mixed-fresh case (one conversation's row resumed while another's is still fresh) cannot attach to the wrong row. These two lookups remain the whole story for clients that declare no identity — the Claude Code and Codex hooks and opencode — and their contracts are unchanged by that declaration.
+No connection binding precedes either reuse lookup: the server keeps no per-connection state, and neither `memory.session_start` nor `memory.session_resume` binds a session to the connection. A client that runs concurrent sessions in one project SHALL therefore name its session explicitly on every write — the Pi extension passes its own `sessionId` on every tool that declares one (see `pi-plugin`, "The Pi extension SHALL declare its session identity on every session-attaching tool call") — and a write that names none is resolved by these lookups alone, which return no session rather than a wrong one when the choice is ambiguous.
 
 The carve-out SHALL NOT be generalized. `findSoleActiveForReuse` SHALL NOT be reached from, folded into, or substituted for `findActiveForTransport`, and SHALL NOT be consulted by an auto-attaching write, so `memory.save`, `memory.confirm` and `memory.session_summary` keep exactly the resolution semantics they have today, including `session_id = NULL` where they produce one now. Two or more `active` rows remain ambiguity on both paths, and the consequence for `memory.session_start` remains the mint recorded in the unchanged scenario below.
 
@@ -821,7 +765,7 @@ The carve-out SHALL NOT be generalized. `findSoleActiveForReuse` SHALL NOT be re
 
 #### Scenario: A memory.save with no explicit sessionId saves unattached under ambiguity
 
-- **GIVEN** two `active` sessions exist for the caller's `(tokenId, projectId)` and no `SessionRouter` entry exists for the calling transport
+- **GIVEN** two `active` sessions exist for the caller's `(tokenId, projectId)`, and one of them was resumed or started earlier on the same connection
 - **WHEN** `memory.save` is called without an explicit `sessionId`
 - **THEN** the saved row's `session_id` SHALL be `NULL`
 - **AND** neither of the two candidate sessions SHALL be chosen
@@ -848,7 +792,7 @@ The carve-out SHALL NOT be generalized. `findSoleActiveForReuse` SHALL NOT be re
 
 #### Scenario: A stale sole row is still not adopted by an auto-attaching write
 
-- **GIVEN** exactly one `active` session exists for the caller's `(tokenId, projectId)`, its effective last activity is older than the staleness window, and no `SessionRouter` entry exists for the calling transport
+- **GIVEN** exactly one `active` session exists for the caller's `(tokenId, projectId)` and its effective last activity is older than the staleness window
 - **WHEN** `memory.save` is called without an explicit `sessionId`
 - **THEN** the saved row's `session_id` SHALL be `NULL` — the sole-active reuse lookup SHALL NOT be consulted on this path
 - **AND** the pre-existing session SHALL NOT have been adopted, so it keeps its own anchored memories and summary
@@ -881,15 +825,15 @@ That exclusion is scoped to those callers. The one place in this contract where 
 
 #### Scenario: A sole row idle past the window is adopted by memory.session_start
 
-- **GIVEN** no `SessionRouter` binding exists for the calling transport and exactly one `active`, non-deleted row exists for the caller's `(token_id, project_id)`, its `last_activity_at` being older than the staleness window
+- **GIVEN** exactly one `active`, non-deleted row exists for the caller's `(token_id, project_id)`, its `last_activity_at` being older than the staleness window
 - **WHEN** the agent calls `memory.session_start`
 - **THEN** the response SHALL carry `reused: true` and the `sessionId` of that existing row
 - **AND** the `sessions` row count for that `(token_id, project_id)` SHALL be unchanged, which is the control that adoption happened rather than a mint that coincidentally reports the same id
-- **AND** the row's activity SHALL have been refreshed, so the next call on the same transport resolves it by the windowed lookup rather than by the fallback
+- **AND** the row's activity SHALL have been refreshed, so the next call for the same `(token_id, project_id)` resolves it by the windowed lookup rather than by the fallback
 
 #### Scenario: After the sweep abandons every row the next memory.session_start mints
 
-- **GIVEN** the periodic stale-active retirement pass has flipped the scope's only `active` row to `abandoned`, and no `SessionRouter` binding exists for the calling transport
+- **GIVEN** the periodic stale-active retirement pass has flipped the scope's only `active` row to `abandoned`
 - **WHEN** the agent calls `memory.session_start`
 - **THEN** the call SHALL insert a new `active` row and report `reused: false`
 - **AND** this SHALL be the designed outcome rather than a defect: the abandonment window is what makes a weeks-long idle conversation a new session, and no reuse path SHALL reach across a terminal row
@@ -1474,3 +1418,39 @@ Entries SHALL preserve id, agent, status, startedAt, endedAt, title and the full
 - **WHEN** a page contains20 large stored summaries
 - **THEN** each SHALL be returned intact even when the combined byte size is large
 - **AND** no session SHALL be touched and no fragment or byte-budget error SHALL appear
+
+### Requirement: Session-tool handlers MUST resolve scope from the URL path or the default project only
+
+Every MCP tool handler under `packages/mcp/src/` that needs to resolve the effective project (`memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.save_prompt`, `memory.search_prompts`, `memory.session_end`, `memory.session_summary`, `memory.capture_passive`) SHALL resolve scope by consulting, in this order:
+
+1. `ctx.project` from the request context, populated when the connection is path-scoped (`/mcp/<slug>`).
+2. **The default project**, when the connection is path-less (`ctx.requestedSlug === null`). There is no third step and no scopeless outcome: no per-connection pin, no MCP roots and no tool call contributes a project.
+
+A handler that resolves scope using only `ctx.project` and falls through directly to a scope of its own choosing SHALL be considered to be in violation of this requirement. In particular, a handler SHALL NOT construct the default project's scope itself — it SHALL obtain it from the shared resolver, so the resolution rule lives in one place and a change to it cannot leave a handler behind.
+
+#### Scenario: Path-less connection returns the default project's scope
+
+- **GIVEN** a token connected to `/mcp` (path-less), whether or not its client advertises the `roots` capability
+- **WHEN** the agent calls `memory.context`
+- **THEN** the response SHALL include the default project's scope and only that project's memories
+
+#### Scenario: Path-scoped connection to a missing project does not fall back
+
+- **GIVEN** a token connected to `/mcp/bar` where project `bar` does not exist, and an earlier connection by the same token that wrote to project `foo`
+- **WHEN** the agent calls `memory.context`
+- **THEN** the call SHALL be refused with `code: 'project_not_found'` rather than resolving to any project, and SHALL NOT fall back to the default project
+- **AND** the response SHALL NOT leak `foo`'s memories
+
+#### Scenario: Path-scoped connection to existing project returns that project's scope
+
+- **GIVEN** a token connected to `/mcp/baz` where project `baz` exists
+- **AND** auth has resolved `ctx.project` to the `baz` project
+- **WHEN** the agent calls `memory.context`
+- **THEN** the response SHALL include `scope: "project:<baz.id>"`
+
+#### Scenario: `memory.search_prompts` honours the shared scope resolution
+
+- **GIVEN** a token connected to `/mcp/foo` where project `foo` exists, and prompts saved in `foo` and in the default project
+- **WHEN** the agent calls `memory.search_prompts({ query: "anything" })`
+- **THEN** the server SHALL resolve scope to `project:<foo.id>`
+- **AND** SHALL NOT return prompts from any other project, including the default project

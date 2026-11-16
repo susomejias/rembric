@@ -124,7 +124,7 @@ The `save` (132) and `summary` (400) rows are removed with their fixtures: no cl
 
 **The server-composed notice is the first model-facing string in this plugin with no fixture, and its cap is therefore asserted elsewhere.** There is nothing to pin across languages — one implementation composes it and five clients print it — so its 640-byte bound is asserted on the server against the emitted string, including a case whose stored summary forces elision (`session-nudges`). The 640 figure is derived from the per-firing ceiling above and not chosen: 1063 − 125 − 90 − 204 − 4 leaves the notice 640.
 
-The `sessionIdTemplate` line remains the largest single per-turn client-composed contributor (51.0 tokens) and SHALL NOT be removed to reduce the budget. It is not redundant: of `resolveActiveSessionId`'s three paths, the `SessionRouter` fallback is populated only by `memory.session_start`, which the plugin never calls because the session lifecycle is HTTP, and `findActiveForTransport` refuses by design to guess under concurrent ambiguity within its staleness window. With two host sessions open on one repository the line is the only mechanism that attaches a memory to the right session.
+The `sessionIdTemplate` line remains the largest single per-turn client-composed contributor (51.0 tokens) and SHALL NOT be removed to reduce the budget. It is not redundant: `resolveActiveSessionId` has two paths, an explicit `sessionId` and `findActiveForTransport`; the server binds no session to a connection, and `findActiveForTransport` refuses by design to guess under concurrent ambiguity within its staleness window. With two host sessions open on one repository the line is the only mechanism that attaches a memory to the right session.
 
 #### Scenario: Every fixture line has its own asserted budget
 
@@ -734,6 +734,28 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - **WHEN** stdin carries an `agent_id`
 - **THEN** the script SHALL issue no request and print nothing
 
+### Requirement: A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard
+
+When the bridge falls back to path-less `/mcp` — no `.rembric`, a parse failure, no `PROJECT_SLUG`, or an invalid slug — the connection SHALL resolve to the server's default project for its whole life. The plugin SHALL NOT rely on MCP roots discovery or on any tool call to select another project: the server does neither, and no tool can switch a connection's project. The bridge's stderr diagnostic SHALL name the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`), as the `mcp-bridge` capability specifies.
+
+When the bridge path-scopes the URL with a slug that does not yet correspond to a Rembric project, every scope-resolving tool SHALL be refused with `project_not_found`, and the refusal SHALL point to the dashboard. The project SHALL be created from the dashboard; no agent-side bootstrap call exists, and the plugin's model-facing text SHALL NOT instruct the agent to create or switch a project. Subsequent tool calls on the same URL find the project once the operator has created it.
+
+To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`) and starts a new host session; there is no in-session override.
+
+#### Scenario: No slug means the default project
+
+- **GIVEN** a project directory with no `.rembric` and no `REMBRIC_PROJECT_SLUG`, and a host that advertises the `roots` capability
+- **WHEN** the agent calls `memory.save` through the plugin
+- **THEN** the row SHALL carry the default project's `project_id`
+- **AND** the server SHALL NOT have sent `roots/list` to the host
+
+#### Scenario: A new slug is created from the dashboard, not by the agent
+
+- **GIVEN** `.rembric` containing `PROJECT_SLUG=brand-new` and no project with that slug
+- **WHEN** the agent calls `memory.search` through the plugin
+- **THEN** the call SHALL be refused with `project_not_found`, the refusal SHALL point to the dashboard, and no `projects` row SHALL be inserted
+- **AND** after the operator creates `brand-new` from the dashboard, the same call on the same URL SHALL succeed against it
+
 ## Hook script invariants
 
 - Every hook script SHALL use `#!/usr/bin/env bash` and `set -u`.
@@ -754,20 +776,20 @@ The active Rembric project is signalled per directory by a `.rembric` config fil
 **Lookup location:**
 
 - The bridge SHALL look for `.rembric` in the project directory resolved by the precedence chain specified once under "MCP bridge contract" above — including its `PWD` step, which is what makes the bridge work under Codex, whose MCP launcher forwards the shell working directory rather than `CLAUDE_PROJECT_DIR` (`codex-distribution`'s `env_vars` requirement depends on it). The chain SHALL NOT be restated here; a second copy is how this line came to contradict it.
-- File absence, parse failure, missing `PROJECT_SLUG`, or invalid slug are all permitted; the bridge falls back to path-less `/mcp` with a stderr diagnostic. The session continues to operate, against the default project unless the agent pins another.
+- File absence, parse failure, missing `PROJECT_SLUG`, or invalid slug are all permitted; when `REMBRIC_PROJECT_SLUG` supplies no valid slug either, the bridge falls back to path-less `/mcp` with a stderr diagnostic that names the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`). The session continues to operate against the server's default project for its whole life (see "A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard").
 
 **Authority and precedence:**
 
-- When the bridge succeeds in path-scoping, the URL is `${server_url}/mcp/<slug>`. The Rembric server populates `ctx.project` from the URL slug during auth. All tool handlers honor `ctx.project` as the first source of truth, so the project is pinned deterministically without any agent-side `project.use` call.
-- When the bridge falls back to path-less `/mcp`, behavior reverts to the standard path-less codepath: roots discovery (if the client advertises `roots`), `project.use` writing to `SessionRouter`, and `scopeFromContext` consulting the router. This makes the plugin a strict superset of the path-less protocol — it works either way.
+- When the bridge succeeds in path-scoping, the URL is `${server_url}/mcp/<slug>`. The Rembric server populates `ctx.project` from the URL slug during auth. All tool handlers honor `ctx.project` as the first source of truth, so the project is pinned deterministically by the URL alone; no tool call selects or switches it.
+- When the bridge falls back to path-less `/mcp`, the server resolves the connection to its default project through the same resolver every scope-sensitive tool uses (`resolveEffectiveScope`). The server issues no `roots/list`, and no tool switches the connection's project, so a path-less connection never lands in a project other than the default.
 
 **Bootstrap for new slugs:**
 
-- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, the agent — guided by the protocol text the server delivers through the MCP `initialize.instructions` handshake (`packages/mcp/src/instructions.ts`) — can call `project.use({slug, autocreate: true})` once to create it. Subsequent connections find the project already created and skip the bootstrap.
+- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, every scope-resolving tool is refused with `project_not_found` (`project '<slug>' does not exist; create it from the dashboard`, carrying `suggestedSlugs`). The operator creates the project from the dashboard (`/dashboard/projects`); subsequent calls on the same URL find it. No agent-side bootstrap call exists.
 
 **Manual override during a session:**
 
-- The agent can call `project.use({slug: 'something-else', confirmSwitch: true})` to switch scope (allowed only when no session is active — close it first via `memory.session_summary`; add `autocreate: true` if the target project does not exist yet). This is independent of the bridge's URL path.
+- There is no in-session override. The bridge resolves the slug once, at startup, and builds one URL for the life of the process; to work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`) and starts a new host session.
 
 ## Out-of-scope behaviors
 
