@@ -18,7 +18,7 @@
     "test": "turbo run test && pnpm run test:hermes-plugin",
     "test:watch": "pnpm --filter @rembric/web run test:watch",
     "test:coverage": "pnpm --filter @rembric/web run test:coverage",
-    "test:hermes-plugin": "command -v python3 >/dev/null && python3 -m unittest discover -s apps/plugin/.hermes-plugin/tests -v || echo '[skip] python3 not available; Hermes plugin tests skipped'",
+    "test:hermes-plugin": "if command -v python3 >/dev/null; then python3 -m unittest discover -s apps/plugin/.hermes-plugin/tests -v; else echo '[skip] python3 not available; Hermes plugin tests skipped'; fi",
     "eval": "pnpm --filter @rembric/core exec tsx src/test-support/retrieval/run-eval.ts",
     "eval:save-time": "pnpm --filter @rembric/core exec tsx src/test-support/retrieval/run-save-time-sweep.ts",
     "corpus:build": "pnpm --filter @rembric/core exec tsx ../../apps/web/src/scripts/seed-volumetric.ts",
