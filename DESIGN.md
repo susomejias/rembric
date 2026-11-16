@@ -104,71 +104,62 @@ rounded:
   card: 16px
 
 components:
-  button-primary:
-    backgroundColor: '{colors.primary}'
-    textColor: '{colors.on-primary}'
-    typography: '{typography.label-md}'
+  button:
     rounded: '{rounded.button}'
+    typography: '{typography.body-sm}'
+    fontWeight: 500
+    height: '36px'
     padding: '16px'
-    height: '44px'
-  button-primary-hover:
+    gap: '8px'
+  button-sm:
+    height: '32px'
+    padding: '12px'
+  button-lg:
+    height: '40px'
+    padding: '24px'
+  button-default:
     backgroundColor: '{colors.primary}'
     textColor: '{colors.on-primary}'
+  button-outline:
+    backgroundColor: 'rgba(39,39,42,.3)'
+    textColor: '{colors.foreground}'
+    borderColor: '{colors.input}'
   button-secondary:
     backgroundColor: '{colors.raised}'
     textColor: '{colors.foreground}'
-    rounded: '{rounded.button}'
-    padding: '16px'
-    height: '44px'
+  button-ghost:
+    backgroundColor: 'transparent'
+    textColor: '{colors.foreground}'
   button-warn:
-    backgroundColor: 'transparent'
+    backgroundColor: 'rgba(255,140,0,.1)'
     textColor: '{colors.warn}'
-    rounded: '{rounded.button}'
-    padding: '16px'
-    height: '44px'
-  button-warn-hover:
-    backgroundColor: '{colors.warn}'
-    textColor: '{colors.on-primary}'
-  button-danger:
-    backgroundColor: 'transparent'
+    borderColor: 'rgba(255,140,0,.4)'
+  button-destructive:
+    backgroundColor: 'rgba(destructive,.2)'
     textColor: '{colors.destructive}'
-    rounded: '{rounded.button}'
-    padding: '16px'
-    height: '44px'
-  button-danger-hover:
-    backgroundColor: '{colors.destructive}'
-    textColor: '{colors.on-primary}'
-  button-sm:
-    typography: '{typography.label-sm}'
-    padding: '10px'
-    height: '28px'
   input:
-    backgroundColor: '{colors.input}'
+    backgroundColor: 'rgba(39,39,42,.3)'
     textColor: '{colors.foreground}'
     typography: '{typography.body-sm}'
     rounded: '{rounded.input}'
-    padding: '12px'
-    height: '44px'
-  status-pill:
-    backgroundColor: '{colors.raised}'
-    textColor: '{colors.foreground}'
-    typography: '{typography.label-sm}'
+    height: '36px'
+  pill:
+    typography: '{typography.body-sm}'
     rounded: '9999px'
-    padding: '8px'
-  stat-card:
+    padding: '10px'
+  alert:
     backgroundColor: '{colors.card}'
-    textColor: '{colors.foreground}'
-    rounded: '{rounded.card}'
-    padding: '24px'
+    rounded: '{rounded.input}'
+    padding: '16px'
   card:
     backgroundColor: '{colors.card}'
     textColor: '{colors.foreground}'
     rounded: '{rounded.card}'
   modal:
-    backgroundColor: '{colors.raised}'
+    backgroundColor: '{colors.card}'
     textColor: '{colors.foreground}'
     rounded: '{rounded.card}'
-    padding: '0px'
+    padding: '16px'
   row-hover:
     backgroundColor: '{colors.accent}'
   caption:
@@ -379,12 +370,17 @@ Hovers shift tone (surface or lime), they do not enlarge or float the element.
 The shape language is driven by the `--radius` token scale (`--radius: 1rem`)
 and expressed in Tailwind utilities:
 
-| Role           | Radius | Utility        |
-| -------------- | ------ | -------------- |
-| Cards / panels | 16 px  | `rounded-2xl`  |
-| Inputs         | 12 px  | `rounded-xl`   |
-| Buttons        | 10 px  | `rounded-lg`   |
-| Status pills   | full   | `rounded-full` |
+| Role                    | Radius | Where it is set                                       |
+| ----------------------- | ------ | ----------------------------------------------------- |
+| Cards, panels, modals   | 16 px  | `rounded-2xl`; `DialogContent` / `AlertDialogContent` |
+| Inputs, selects, alerts | 12 px  | `Input`, `SelectTrigger`, `Alert` (`rounded-xl`)      |
+| Buttons                 | 10 px  | `Button` / `buttonVariants` (`rounded-[10px]`)        |
+| Pills, quick filters    | full   | `StatusPill` / `TonePill` (`rounded-full`)            |
+
+The radius lives inside the primitive. A consumer never passes a `rounded-*`
+class to `Button`, `Input`, `SelectTrigger`, `DialogContent` or
+`AlertDialogContent`; `apps/web/src/components/ui/shape-radii.test.tsx` pins the
+values.
 
 Keep the scale restrained. Character comes from the monochrome palette, the lime
 accent, the typography, and 1-px lines — not from heavy rounding or mixed
@@ -398,28 +394,103 @@ Server components compose the new identity directly. Shared primitives live in
 
 ### Buttons
 
-`Button` (shadcn) drives tone, and tone semantics are **load-bearing**:
+Every clickable control that looks like a button is the shadcn `Button`
+(`apps/web/src/components/ui/button.tsx`). There is no second button style.
 
-| Variant         | Tone       | When to use                                                                       |
-| --------------- | ---------- | --------------------------------------------------------------------------------- |
-| `default`       | Lime fill  | Confirm / save / sign-in / filter — the affirmative action                        |
-| `secondary`     | Raised     | Cancel, dismissive, navigation                                                    |
-| `outline`/ghost | Borderless | Secondary or low-emphasis controls                                                |
-| `destructive`   | Red        | Irreversible (delete session, revoke token, bulk remove)                          |
-| warn-toned      | Amber      | Reversible-but-cautious (abandon session, archive memory, mark relation orphaned) |
+| Variant       | Look                  | Use it for                                                                  |
+| ------------- | --------------------- | --------------------------------------------------------------------------- |
+| `default`     | Lime fill, near-black | The one affirmative action of a region: Save, Connect, Create, Sign in      |
+| `outline`     | Input border, raised  | Secondary actions next to a primary: Add by hand, Cancel in a dialog footer |
+| `secondary`   | Raised fill           | Neutral actions on busy surfaces (Wrapped player controls)                  |
+| `ghost`       | No fill until hover   | Tertiary and in-row actions: Change, Ignore, row `⋯` triggers, icon buttons |
+| `warn`        | Amber tint            | Reversible but consequential: Archive, Abandon, Disconnect                  |
+| `destructive` | Red tint              | Irreversible: Delete, Revoke, Purge                                         |
+| `link`        | Lime text, underline  | Inline text actions inside a sentence (dark surface only)                   |
 
-Primary buttons are **lime fill + near-black text**. Every destructive button
-(warn/danger) MUST live inside a `<ConfirmSubmit>` inside its `<ActionForm>` so
-the confirmation dialog opens before submit.
+| Size                                    | Height | Use it for                                    |
+| --------------------------------------- | ------ | --------------------------------------------- |
+| `xs`                                    | 28 px  | Dense table cells                             |
+| `sm`                                    | 32 px  | Row actions, bulk bar, menus                  |
+| `default`                               | 36 px  | Page header actions, forms, dialog footers    |
+| `lg`                                    | 40 px  | Hero calls to action (Play your recap), login |
+| `icon`, `icon-xs`, `icon-sm`, `icon-lg` | square | Icon-only buttons; always with `aria-label`   |
 
-### StatusPill
+Spacing is shadcn's standard (new-york): `default` is `h-9 px-4 gap-2`, and
+`px-3` when it carries an icon; `sm` is `h-8 px-3`; `lg` is `h-10 px-6`. Inputs
+and select triggers share the 36 px height (`sm` select: 32 px) so a field and
+its button line up. Select and menu items are `py-1.5 pl-2` inside a `p-1`
+viewport; a select list is capped at 18 rem and scrolls.
 
-`StatusPill` (`apps/web/src/components/dashboard/ui.tsx`) is the shared,
-app-wide status pill: a `rounded-full` container with a dot plus a tinted
-background/border per tone (`TONE_PILL`), driven by the `STATUS_TONE` map
-(active/judged → lime, abandoned/superseded → amber, archived/ended/pending →
-dim, orphaned/deleted → danger). Use it for every status; never hand-roll a
-second badge.
+Rules:
+
+- **No shape overrides.** `className` on a `Button` carries layout only
+  (`w-full`, `flex-1`, `ml-auto`, `justify-start`). Never radius, height,
+  font size or weight, letter case, tracking or colour. If a tone is missing,
+  add a variant to `button.tsx`, as `warn` was.
+- **One lime per region.** A header, a dialog footer or a row has at most one
+  `default` button.
+- **Links that look like buttons** are `<Button asChild><Link …/></Button>`. A
+  button-looking label inside a larger link card (the Wrapped entry) is a
+  `<span className={buttonVariants({ size: 'lg' })}>`: a link never nests
+  another interactive element.
+- **Icons** are lucide-react, sized by the button (`size-4`, `size-3.5` at `sm`),
+  placed before the label; a trailing `ArrowUpRight` marks a call to action
+  that leaves the page. Never a text glyph such as `↗` or `→`.
+- **Labels** are sentence case: "Archive selected", not "ARCHIVE SELECTED".
+- **Touch-target exception.** Only the Wrapped story player and the share
+  dialog may add `min-h-11 min-w-11` for 44 px targets.
+
+### Modals and panels
+
+Pick the overlay by what it holds; never hand-roll a fixed overlay.
+
+| Primitive                         | Holds                               | Example                           |
+| --------------------------------- | ----------------------------------- | --------------------------------- |
+| `AlertDialog` via `ConfirmSubmit` | A yes/no confirmation of a mutation | Archive project, Disconnect       |
+| `Dialog`                          | A short form or a read-only panel   | Add a repository by hand, update  |
+| `Sheet` (`side="right"`)          | A longer form tied to a list row    | New project, Edit project, tokens |
+
+- `DialogContent` sets only its width (`sm:max-w-lg`); radius, padding and ring
+  come from the primitive. Content is `DialogHeader` (`DialogTitle` +
+  `DialogDescription`), the body, then `DialogFooter` with the buttons right
+  aligned: Cancel `outline`, then the single primary.
+- `ConfirmSubmit` renders Cancel as "Cancel" and the confirm action as
+  `variant="warn"` for `tone="warn"` and `variant="destructive"` for
+  `tone="danger"`. Its `confirmLabel` repeats the verb of the trigger.
+- Sheets use `bg-card`, `sm:max-w-md` and scroll their body.
+
+### Alerts
+
+`Alert` (`apps/web/src/components/ui/alert.tsx`) is the only inline message:
+form errors, created/failed results, conflict notices. Variants `default`,
+`success` (lime), `warn` (amber) and `destructive`. Put a lucide icon first
+(`CheckCircle2`, `AlertTriangle`), then `AlertDescription`, optionally
+`AlertTitle`. Titles are sentence case; no `ERROR` / `CREATED` stamps.
+`ActionForm` renders its error through `Alert`.
+
+### Pills
+
+`StatusPill` (`apps/web/src/components/dashboard/ui.tsx`) renders a status from
+the `STATUS_TONE` map (active/judged → lime, abandoned/superseded → amber,
+archived/ended/pending → dim, orphaned/deleted → danger). `TonePill` is the same
+pill for anything that is not a lifecycle status: kinds ("new", "conflict"),
+markers ("default", "legacy") and counts in tabs. Never hand-roll a
+`rounded-full border` span.
+
+### Tabs
+
+- **Between routes** (Projects / Repositories): `RouteTabs`
+  (`apps/web/src/components/dashboard/route-tabs.tsx`), an underline strip of
+  `next/link`s with `aria-current="page"` and an optional `TonePill` badge.
+- **Within a page**: `Tabs` from `apps/web/src/components/ui/tabs.tsx`.
+- **Filtering a list**: the Spectrum data-table quick-filter pills.
+
+### Selects and checkboxes
+
+Use `Select` (`components/ui/select.tsx`) and `Checkbox`
+(`components/ui/checkbox.tsx`); never a styled native `<select>`. When the value
+must reach a server action, keep it in state and submit it as a hidden input of
+the form.
 
 ### Spectrum data-table (list views)
 
@@ -455,8 +526,9 @@ Inputs use the shadcn primitives bound to the tokens (`bg-input`,
 
 `ConfirmSubmit` (`confirm-submit.tsx`) wires a Radix `AlertDialog` to the
 enclosing `ActionForm` via `useActionFormId`, so it only works **inside** an
-`<ActionForm>`, wrapping a `<Button type="button">` trigger. Pass
-`tone="danger"` for irreversible actions, `"warn"` for reversible ones.
+`<ActionForm>`, wrapping a `<Button type="button">` trigger whose variant
+matches the tone (`warn` or `destructive`). Pass `tone="danger"` for
+irreversible actions, `"warn"` for reversible ones.
 
 ### Time
 
@@ -482,8 +554,9 @@ with soft `shadow-black/40`.
 
 - Use the Tailwind utilities bound to the tokens in `globals.css` for every
   colour, spacing, and type reference. Never raw hex.
-- Use `StatusPill` for status and the Spectrum `DataTable` for list views —
-  copy `sessions-table.tsx` rather than inventing a table.
+- Use `StatusPill` / `TonePill` for pills and the Spectrum `DataTable` for list
+  views — copy `sessions-table.tsx` rather than inventing a table.
+- Use `Button` for every button and `Alert` for every inline message.
 - Route every mutation through `ActionForm` + `CsrfField` + `guardAction`.
 - Wrap every destructive action in `ConfirmSubmit` and pick the right tone
   (`warn` vs `danger`) — that's a semantic decision, not aesthetic.
@@ -504,7 +577,11 @@ with soft `shadow-black/40`.
   React + Tailwind v4.
 - Don't use lime text on a light surface, and don't spend more than one lime
   element per decision unit.
-- Don't hard-code a corner radius; use the 16 / 12 / 10 scale.
+- Don't hard-code a corner radius; the primitives carry the 16 / 12 / 10 scale.
+- Don't style a `<button>`, `<a>` or `<span>` to look like a button, and don't
+  pass radius, height, weight, case or colour classes to `Button`.
+- Don't build an overlay by hand; use `AlertDialog`, `Dialog` or `Sheet`.
+- Don't write `ALL CAPS` labels on buttons, dialog actions or alerts.
 - Don't layer decorative `box-shadow`s. Depth comes from tonal layers, soft
   shadows, and radial lime glows.
 - Don't add a CDN at runtime — fonts are self-hosted; the dashboard must work
@@ -593,6 +670,8 @@ Interactivity is React client components, not inline scripts. The shared ones:
 | `time.tsx`                  | Locale-renders `<time data-rembric-ts>` after mount        |
 | `action-form.tsx`           | `ActionForm` + `useActionFormId` for server-action forms   |
 | `confirm-submit.tsx`        | Radix `AlertDialog` bound to the enclosing form            |
+| `route-tabs.tsx`            | Underline tabs between sibling routes                      |
+| `repositories-*.tsx`        | Repositories tab: waiting list, connected list, add dialog |
 | `activity-chart.tsx`        | Lime/amber bar chart with hover tooltips                   |
 | `spectrumui/data-table.tsx` | List-view engine: search, quick filters, selection, detail |
 
@@ -603,7 +682,10 @@ apps/web/src/app/dashboard/layout.tsx              CommandFrame wrapper
 apps/web/src/app/dashboard/**/page.tsx             one async server component per route
 apps/web/src/components/dashboard/command-bar.tsx  floating command bar + shell
 apps/web/src/components/dashboard/sessions-table.tsx  canonical Spectrum data-table
-apps/web/src/components/dashboard/ui.tsx           StatusPill (live) + legacy primitives
+apps/web/src/components/dashboard/ui.tsx           StatusPill, TonePill (live) + legacy primitives
+apps/web/src/components/ui/button.tsx              Button variants and sizes (the only button)
+apps/web/src/components/ui/alert.tsx               Alert (the only inline message)
+apps/web/src/components/dashboard/route-tabs.tsx   RouteTabs
 apps/web/src/components/spectrumui/data-table.tsx  shared list-view table engine
 apps/web/src/components/dashboard/action-form.tsx  ActionForm + useActionFormId
 apps/web/src/components/dashboard/csrf-field.tsx   CsrfField
@@ -676,14 +758,16 @@ Superseded artifacts, retained only as history:
 
 ## Pending items
 
-- **Legacy primitives not yet restyled.** The consolidation and maintenance
-  pages (plus several detail pages) still carry the pre-redesign primitives
-  exported as LEGACY from `apps/web/src/components/dashboard/ui.tsx`
-  (`ViewHead`, `SectionBar`, `StatCard`/`StatGrid`, `Kv`/`KvGrid`,
-  `Panel`/`PanelHead`, `DataTable`, `Pill`/`ReviewPill`/`Chip`/`Tag`, `Bar`,
-  `Notice`, `Flash`) and from `filters.tsx` (`FilterForm`/`Pager`). When those
-  pages are restyled, replace the legacy primitives with the new identity
-  (`StatusPill`, the Spectrum `DataTable`), not with another legacy primitive.
+- **Legacy layout primitives still in use.** The settings, activity,
+  maintenance and consolidation pages (plus a few detail pages) still compose
+  `ViewHead`, `SectionBar`, `StatCard`/`StatGrid`, the legacy `DataTable`
+  family, `TableEmpty`, `Bar` and `BackLink` from
+  `apps/web/src/components/dashboard/ui.tsx`, and `filters.tsx`
+  (`FilterForm`/`Pager`). Their buttons, alerts and pills already use the
+  primitives above. When those pages are restyled, move them to the Spectrum
+  `DataTable` and the new identity, not to another legacy primitive.
+  `Flash`, `Notice`, `Pill`, `ReviewPill`, `Chip`, `MetaGrid` and `MetaRow`
+  were removed; use `Alert` and `TonePill`.
 - **Formal OpenSpec change pending.** The token unlock has not yet been
   formalized. Until the `dashboard` OpenSpec spec is updated and merged, the
   **live reference is the branch code** — `sessions-table.tsx`,

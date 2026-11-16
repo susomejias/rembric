@@ -140,9 +140,9 @@ unrestyled pages (consolidation, maintenance, and several detail pages) pending
 migration. Marked **LEGACY**; do not document or copy them as the standard:
 `ViewHead`, `SectionBar`, `StatCard`/`StatGrid`, `Kv`/`KvGrid`,
 `Panel`/`PanelHead`, `DataTable`/`DataHead`/`DataTh`/`DataBody`/`DataTr`/`DataTd`,
-`TableEmpty`, `Pill`/`ReviewPill`/`Chip`/`Tag`, `Bar`, `Notice`, `Flash`. The
-hard-bordered `Pill` and the `ViewHead` lime-block title belong to the old
-identity. `filters.tsx` (`FilterForm`/`Pager`) and the `app-sidebar.tsx` rail are
+`TableEmpty`, `Bar`, `BackLink`. The `ViewHead` lime-block title belongs to the
+old identity. `Flash`, `Notice`, `Pill`, `ReviewPill`, `Chip`, `MetaGrid` and
+`MetaRow` were removed: use `Alert` (`components/ui/alert.tsx`) and `TonePill`. `filters.tsx` (`FilterForm`/`Pager`) and the `app-sidebar.tsx` rail are
 legacy too — list pages now use the Spectrum data-table's own toolbar and
 pagination. When you restyle a legacy page, replace these with the new identity,
 not with another legacy primitive.
@@ -155,7 +155,16 @@ not with another legacy primitive.
   `quickFilter`, `selectable` + `bulkActions`, `rowActions` (the `⋯` menu),
   `renderDetail`, `pageSize`. Do not hand-roll a table and do not reach for the
   legacy `DataTable` from `ui.tsx`.
-- **Use `StatusPill` for status.** One pill, tone-driven, app-wide. Don't invent
+- **Controls come only from `components/ui`.** Every button is `Button`
+  (variants `default` / `outline` / `secondary` / `ghost` / `warn` /
+  `destructive` / `link`; sizes `xs` / `sm` / `default` / `lg` / `icon*`), with
+  no radius, height, weight, case or colour classes; links that look like
+  buttons use `<Button asChild>`. Confirmations are `ConfirmSubmit`
+  (AlertDialog), short forms are `Dialog`, row-bound long forms are `Sheet`;
+  inline messages are `Alert`; route tabs are `RouteTabs`; selects and
+  checkboxes are the Radix `Select` / `Checkbox`. The full table and the
+  exceptions are in `DESIGN.md` → Components.
+- **Use `StatusPill` for status, `TonePill` for other pills.** Tone-driven, app-wide. Don't invent
   a second status badge.
 - **Every mutation is a server action through `ActionForm`.** Import
   `ActionForm`/`ActionState` from `@/components/dashboard/action-form`, put a
@@ -219,13 +228,13 @@ DataTable<T>({
 DataTableColumn<T>({ id, header, cell?, value?, sortable?, numeric?, hideBelow?, … })
 
 // ui.tsx — LIVE
-StatusPill({ status })   Time({ value, className? })   LABEL
+StatusPill({ status })   TonePill({ tone?, children })   Time({ value, className? })   LABEL
 
 // ui.tsx — LEGACY (unrestyled pages only), see Legacy primitives above
 ViewHead({ num?, title, hl?, meta?, titleVisible? })   BackLink({ href, label })
 SectionBar({ name, meta?, more? })   StatCard / StatGrid   Kv / KvGrid
 Panel / PanelHead   DataTable / DataHead / DataTh / DataBody / DataTr / DataTd
-TableEmpty   Pill / ReviewPill / Chip / Tag / Bar / Notice / Flash
+TableEmpty   Bar
 
 // filters.tsx — LEGACY
 FilterForm({ action, children, className? })   FilterField / FilterInput / FilterSelect
