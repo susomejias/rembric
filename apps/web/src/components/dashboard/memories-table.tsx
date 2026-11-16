@@ -10,11 +10,12 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import { MENU_ITEM_BUTTON, MENU_ITEM_ROOT } from '@/components/dashboard/row-menu';
 import {
   useServerPagination,
   type TablePaginationSpec,
 } from '@/components/dashboard/server-pagination';
-import { ReviewPill, StatusPill, Time } from '@/components/dashboard/ui';
+import { StatusPill, Time, TonePill } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,9 +26,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-
-const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
-const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 export interface MemoryRowData {
   readonly id: string;
@@ -103,7 +101,7 @@ export function MemoriesTable({
       cell: (row) => (
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusPill status={row.status} />
-          {row.needsReview ? <ReviewPill /> : null}
+          {row.needsReview ? <TonePill tone="amber">needs review</TonePill> : null}
         </div>
       ),
     },
@@ -173,13 +171,9 @@ export function MemoriesTable({
                     } will stop appearing in active recall. ${skipped} non-active ${
                       skipped === 1 ? 'memory' : 'memories'
                     } will be skipped. The rows stay visible here and no content is deleted.`}
-                    confirmLabel="ARCHIVE SELECTED"
+                    confirmLabel="Archive selected"
                   >
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="border-warn/40 bg-warn/10 text-warn hover:bg-warn/20 hover:text-warn"
-                    >
+                    <Button type="button" variant="warn" size="sm">
                       Archive selected
                     </Button>
                   </ConfirmSubmit>
@@ -221,12 +215,7 @@ function MemoryRowMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Actions for memory ${row.title}`}
-          className="size-7 text-muted-foreground hover:text-foreground"
-        >
+        <Button variant="ghost" size="icon-sm" aria-label={`Actions for memory ${row.title}`}>
           <MoreHorizontal aria-hidden="true" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -248,7 +237,7 @@ function MemoryRowMenu({
                 tone="warn"
                 title="Re-affirm this memory?"
                 description="Records a memory.confirm_batch affirmation now, moving the row back to fresh past its per-type TTL. The content is unchanged."
-                confirmLabel="CONFIRM MEMORY"
+                confirmLabel="Confirm memory"
               >
                 <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                   Confirm memory
@@ -272,7 +261,7 @@ function MemoryRowMenu({
                   tone="warn"
                   title="Archive this memory?"
                   description="It will stop appearing in active recall. You can re-save the topic later to bring it back; the row is never deleted."
-                  confirmLabel="ARCHIVE MEMORY"
+                  confirmLabel="Archive memory"
                 >
                   <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                     Archive memory

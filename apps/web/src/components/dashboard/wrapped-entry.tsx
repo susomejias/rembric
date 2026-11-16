@@ -1,8 +1,11 @@
 'use client';
 
+import { ArrowUpRight } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
+
+import { buttonVariants } from '@/components/ui/button';
 
 export function WrappedEntry() {
   const link = useRef<HTMLAnchorElement>(null);
@@ -18,8 +21,9 @@ export function WrappedEntry() {
           <br />
           <span className="text-primary">Wrapped.</span>
         </h2>
-        <span className="mt-5 inline-flex min-h-11 items-center gap-4 rounded-[10px] bg-primary px-4 text-sm font-semibold text-primary-foreground">
-          Play your recap <span aria-hidden="true">↗</span>
+        <span className={buttonVariants({ size: 'lg', className: 'mt-5' })}>
+          Play your recap
+          <ArrowUpRight data-icon="inline-end" aria-hidden="true" />
         </span>
       </div>
       <div className="wrapped-entry-art" aria-hidden="true">

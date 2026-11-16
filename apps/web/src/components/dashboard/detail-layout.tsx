@@ -67,7 +67,7 @@ export function DetailLayout({
         </div>
         {primaryActions || actions ? (
           <div
-            className="ficha-actions gap-2 max-[760px]:gap-1 max-[760px]:[&_button]:px-2"
+            className="ficha-actions gap-2 max-[760px]:gap-1"
             role="group"
             aria-label={actionsLabel}
           >

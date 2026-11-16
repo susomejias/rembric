@@ -2,6 +2,8 @@
 
 import { useId, useState, type ReactNode } from 'react';
 
+import { Button } from '@/components/ui/button';
+
 export function DetailExpand({
   label,
   accessibleLabel = label,
@@ -20,16 +22,17 @@ export function DetailExpand({
   return (
     <>
       {!open ? (
-        <button
+        <Button
           type="button"
-          className={`ficha-expand ${className}`}
+          variant="outline"
+          size="xs"
           aria-label={accessibleLabel}
           aria-expanded={open}
           aria-controls={id}
           onClick={() => setOpen(true)}
         >
           {label}
-        </button>
+        </Button>
       ) : null}
       {!open ? collapsedContent : null}
       <div id={id} hidden={!open} className={className}>

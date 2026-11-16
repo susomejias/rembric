@@ -1,6 +1,6 @@
 'use client';
 
-import { Share2 } from 'lucide-react';
+import { Share2, X } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 
@@ -22,8 +22,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 
-const buttonClass =
-  'inline-flex min-h-11 items-center justify-center rounded-[10px] border border-border px-4 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50';
 type Prepared = DetailImage & {
   url: string;
   file: File;
@@ -115,14 +113,14 @@ export function DetailShare({ data }: { data: DetailShareData }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          <Share2 className="size-3.5" />
+        <Button type="button" variant="outline" size="lg">
+          <Share2 />
           Share
         </Button>
       </DialogTrigger>
       <DialogContent
         showCloseButton={false}
-        className="h-[min(92dvh,860px)] w-[calc(100%_-_2rem)] max-w-[960px] grid-cols-1 gap-0 overflow-y-auto rounded-2xl border border-border bg-card p-0 shadow-2xl shadow-black/60 sm:max-w-[960px] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[minmax(0,1fr)]"
+        className="h-[min(92dvh,860px)] w-[calc(100%_-_2rem)] max-w-[960px] grid-cols-1 gap-0 overflow-y-auto bg-card p-0 shadow-2xl shadow-black/60 sm:max-w-[960px] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[minmax(0,1fr)]"
       >
         <div
           tabIndex={0}
@@ -190,58 +188,59 @@ export function DetailShare({ data }: { data: DetailShareData }) {
                   PNG · {image.width} × {image.height} · grows to fit
                 </p>
                 {nativeShare ? (
-                  <button
+                  <Button
                     type="button"
+                    size="lg"
                     disabled={busy}
                     onClick={() => {
                       void act('share');
                     }}
-                    className={`${buttonClass} border-primary bg-primary font-medium text-primary-foreground`}
+                    className="min-h-11"
                   >
                     Share image
-                  </button>
+                  </Button>
                 ) : (
-                  <a
-                    href={image.url}
-                    download={image.file.name}
-                    className={`${buttonClass} border-primary bg-primary font-medium text-primary-foreground`}
-                  >
-                    Download PNG
-                  </a>
+                  <Button asChild size="lg" className="min-h-11">
+                    <a href={image.url} download={image.file.name}>
+                      Download PNG
+                    </a>
+                  </Button>
                 )}
                 <div className="flex flex-wrap gap-2">
                   {nativeShare ? (
-                    <a
-                      href={image.url}
-                      download={image.file.name}
-                      className={`${buttonClass} flex-1`}
-                    >
-                      Download PNG
-                    </a>
+                    <Button asChild variant="outline" size="lg" className="min-h-11 flex-1">
+                      <a href={image.url} download={image.file.name}>
+                        Download PNG
+                      </a>
+                    </Button>
                   ) : null}
                   {copySupported ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="lg"
                       disabled={busy}
                       onClick={() => {
                         void act('copy');
                       }}
-                      className={`${buttonClass} flex-1`}
+                      className="min-h-11 flex-1"
                     >
                       Copy image
-                    </button>
+                    </Button>
                   ) : null}
                 </div>
               </>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="lg"
                 disabled={!error}
                 onClick={() => setRetry((value) => value + 1)}
-                className={buttonClass}
+                className="min-h-11"
               >
                 {error ? 'Retry image' : 'Preparing image…'}
-              </button>
+              </Button>
             )}
             {error ? (
               <p role="alert" className="break-words text-sm text-destructive">
@@ -256,13 +255,15 @@ export function DetailShare({ data }: { data: DetailShareData }) {
           </div>
         </div>
         <DialogClose asChild>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="icon-lg"
             aria-label="Close share dialog"
-            className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-[10px] border border-border bg-card focus-visible:outline-2 focus-visible:outline-primary"
+            className="absolute top-3 right-3 min-h-11 min-w-11"
           >
-            ×
-          </button>
+            <X />
+          </Button>
         </DialogClose>
       </DialogContent>
     </Dialog>

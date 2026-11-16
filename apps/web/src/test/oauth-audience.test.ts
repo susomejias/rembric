@@ -468,7 +468,7 @@ describe('the consent screen names the bound project', () => {
     const html = await render('01NOSUCHPROJECT0000000000');
 
     expect(html).toContain('no longer exists');
-    expect(html).not.toContain('AUTHORIZE');
+    expect(html).not.toContain('value="approve"');
   });
 });
 

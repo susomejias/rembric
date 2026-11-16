@@ -6,6 +6,7 @@ import {
   type UndoResult,
 } from '@rembric/core';
 import type { Repositories } from '@rembric/db';
+import { ArrowRight, CircleCheck } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -14,6 +15,7 @@ import { partialUndo } from './undo-messages';
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
+import { Pager } from '@/components/dashboard/filters';
 import {
   PAGE_SIZE,
   pageParam,
@@ -29,15 +31,15 @@ import {
   DataTd,
   DataTh,
   DataTr,
-  Flash,
   Page,
-  Pill,
   SectionBar,
   StatCard,
   StatGrid,
   TableEmpty,
   Time,
+  TonePill,
 } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -179,15 +181,23 @@ export default async function ConsolidationPage({
 
       {undone !== '' ? (
         <div className="mt-6">
-          <Flash tone="lime" label="UNDONE">
-            Reverted {undone} consolidation op(s).
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Undone</AlertTitle>
+            <AlertDescription>
+              <p>Reverted {undone} consolidation op(s).</p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : purgedSessions !== '' ? (
         <div className="mt-6">
-          <Flash tone="lime" label="PURGED">
-            Removed {purgedSessions} empty session row(s) as part of this sweep.
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Purged</AlertTitle>
+            <AlertDescription>
+              <p>Removed {purgedSessions} empty session row(s) as part of this sweep.</p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : null}
 
@@ -229,9 +239,7 @@ export default async function ConsolidationPage({
               </p>
               <h2 className="mt-2 text-base font-medium">Sweep behavior</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              deterministic
-            </span>
+            <TonePill>deterministic</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             The sweep applies decay and deadline orphaning. It does not call an LLM and needs no
@@ -248,10 +256,10 @@ export default async function ConsolidationPage({
                 tone="danger"
                 title="Force a consolidation sweep across all scopes now?"
                 description="Decay and orphan ops are journaled and reversible, but this also purges empty sessions — that purge is irreversible."
-                confirmLabel="RUN SWEEP"
+                confirmLabel="Run sweep"
               >
                 <Button type="button" variant="outline" size="sm">
-                  RUN SWEEP NOW
+                  Run sweep now
                 </Button>
               </ConfirmSubmit>
             </ActionForm>
@@ -265,21 +273,19 @@ export default async function ConsolidationPage({
               </p>
               <h2 className="mt-2 text-base font-medium">Undoable work</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              journaled
-            </span>
+            <TonePill>journaled</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Every consolidation operation is recorded with its affected memory ids, the id it
             created and the reasoning attached by the sweep, so a change can be inspected and
             reversed.
           </p>
-          <Link
-            href="/dashboard/maintenance"
-            className="mt-5 inline-block font-mono text-[11px] uppercase tracking-[.12em] text-primary hover:underline"
-          >
-            DATABASE MAINTENANCE →
-          </Link>
+          <Button asChild variant="outline" size="sm" className="mt-5">
+            <Link href="/dashboard/maintenance">
+              Database maintenance
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -314,7 +320,7 @@ export default async function ConsolidationPage({
                   </DataTd>
                   <DataTd>{scopeLabel(repos, run.scope)}</DataTd>
                   <DataTd>
-                    <Pill
+                    <TonePill
                       tone={
                         counts.total === 0
                           ? 'dim'
@@ -332,7 +338,7 @@ export default async function ConsolidationPage({
                           : counts.reverted > 0
                             ? `${counts.reverted}/${counts.total} reverted`
                             : `${counts.total} ops`}
-                    </Pill>
+                    </TonePill>
                   </DataTd>
                 </DataTr>
               );
@@ -342,29 +348,14 @@ export default async function ConsolidationPage({
       )}
 
       {hasMore || page > 0 ? (
-        <div className="flex items-center justify-between gap-3 border-t border-border py-4 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
-          {page > 0 ? (
-            <Link
-              href={`/dashboard/consolidation?page=${page - 1}`}
-              className="rounded-xl border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
-            >
-              ‹ PREV
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span>PAGE {page + 1}</span>
-          {hasMore ? (
-            <Link
-              href={`/dashboard/consolidation?page=${page + 1}`}
-              className="rounded-xl border border-border px-3 py-2 transition-colors hover:border-primary hover:text-primary"
-            >
-              NEXT ›
-            </Link>
-          ) : (
-            <span />
-          )}
-        </div>
+        <Pager
+          page={page}
+          hasMore={hasMore}
+          total={total}
+          totalLabel={`${total} RUNS`}
+          path="/dashboard/consolidation"
+          query={{}}
+        />
       ) : null}
 
       <div className="mt-8">
@@ -380,10 +371,10 @@ export default async function ConsolidationPage({
                   tone="danger"
                   title="Revert every op in this run?"
                   description="All affected memories will return to their pre-run status."
-                  confirmLabel="UNDO ENTIRE RUN"
+                  confirmLabel="Undo entire run"
                 >
                   <Button type="button" variant="outline" size="sm">
-                    UNDO ENTIRE RUN
+                    Undo entire run
                   </Button>
                 </ConfirmSubmit>
               </ActionForm>
@@ -422,9 +413,9 @@ export default async function ConsolidationPage({
                   <span className="ml-2 font-mono text-[10px]">{shortId(op.id)}</span>
                 </DataTd>
                 <DataTd>
-                  <Pill tone={op.revertedAt ? 'amber' : 'lime'}>
+                  <TonePill tone={op.revertedAt ? 'amber' : 'lime'}>
                     {op.revertedAt ? 'reverted' : 'applied'}
-                  </Pill>
+                  </TonePill>
                 </DataTd>
                 <DataTd>
                   {op.revertedAt !== null ? (
@@ -443,10 +434,10 @@ export default async function ConsolidationPage({
                         tone="warn"
                         title="Revert this consolidation op?"
                         description="Affected memories will return to their pre-op status. This is journaled and itself reversible."
-                        confirmLabel="UNDO OP"
+                        confirmLabel="Undo op"
                       >
-                        <Button type="button" variant="outline" size="sm">
-                          UNDO OP
+                        <Button type="button" variant="warn" size="sm">
+                          Undo op
                         </Button>
                       </ConfirmSubmit>
                     </ActionForm>

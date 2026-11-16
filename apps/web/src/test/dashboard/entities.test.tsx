@@ -161,7 +161,9 @@ describe('dashboard entities view', () => {
     );
 
     const html = await renderEntities();
-    expect(html).toContain('View memories →');
+    expect(html).toMatch(
+      /<a(?=[^>]*data-slot="button")(?=[^>]*href="\/dashboard\/memories\?q=apps%2Fa\.ts")[^>]*>View memories<svg/,
+    );
     expect(html).toContain('Show path entity — apps/a.ts"');
   });
 });

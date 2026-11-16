@@ -27,6 +27,7 @@ import {
 } from './wrapped-image';
 
 import { NumberTicker } from '@/components/motion/number-ticker';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const TITLES = [
@@ -50,8 +51,6 @@ const JUDGMENT_LABELS: Record<RelationKind, string> = {
   not_conflict: 'Not conflicting',
 };
 const DAY_MS = 86_400_000;
-const buttonClass =
-  'flex min-h-11 min-w-11 items-center justify-center rounded-[10px] bg-secondary text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary disabled:opacity-30';
 
 export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }) {
   const [slide, setSlide] = useState(0);
@@ -242,29 +241,28 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
               className="pointer-events-none absolute right-0 text-muted-foreground"
             />
             <noscript>
-              <button type="submit" className={buttonClass}>
+              <Button type="submit" variant="secondary" size="lg" className="min-h-11">
                 View
-              </button>
+              </Button>
             </noscript>
           </form>
           {hasActivity && slide < TITLES.length - 1 && (
-            <button
+            <Button
               type="button"
-              className={cn(buttonClass, 'bg-transparent text-muted-foreground hover:bg-secondary')}
+              variant="ghost"
+              size="icon-lg"
+              className="min-h-11 min-w-11"
               onClick={() => setPaused((value) => !value)}
               aria-label={paused ? 'Play story' : 'Pause story'}
             >
-              {paused ? <Play size={16} /> : <Pause size={16} />}
-            </button>
+              {paused ? <Play /> : <Pause />}
+            </Button>
           )}
-          <Link
-            ref={close}
-            href="/dashboard#wrapped-entry"
-            className={buttonClass}
-            aria-label="Close Wrapped"
-          >
-            <X size={18} />
-          </Link>
+          <Button asChild variant="secondary" size="icon-lg" className="min-h-11 min-w-11">
+            <Link ref={close} href="/dashboard#wrapped-entry" aria-label="Close Wrapped">
+              <X />
+            </Link>
+          </Button>
         </header>
         <p className="sr-only">
           {data.yearToDate ? 'YEAR TO DATE' : 'CALENDAR YEAR'} · ALL PROJECTS · UTC
@@ -286,15 +284,12 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
               No saved memories, sessions or judgments in {data.year} yet. Choose another year, or
               come back after your next session.
             </p>
-            <Link
-              href="/dashboard#wrapped-entry"
-              className={cn(
-                buttonClass,
-                'bg-primary px-5 font-semibold text-primary-foreground hover:bg-primary/90',
-              )}
-            >
-              Back to dashboard <ArrowRight className="ml-2" size={18} />
-            </Link>
+            <Button asChild size="lg" className="min-h-11">
+              <Link href="/dashboard#wrapped-entry">
+                Back to dashboard
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </Button>
           </div>
         ) : (
           <>
@@ -588,12 +583,11 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
               className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex justify-between"
               aria-label="Story navigation"
             >
-              <button
+              <Button
                 type="button"
-                className={cn(
-                  buttonClass,
-                  'sr-only min-h-0 min-w-0 focus-visible:not-sr-only focus-visible:pointer-events-auto focus-visible:min-h-11 focus-visible:min-w-11 focus-visible:px-4',
-                )}
+                variant="secondary"
+                size="lg"
+                className="sr-only focus-visible:not-sr-only focus-visible:pointer-events-auto focus-visible:min-h-11 focus-visible:min-w-11"
                 disabled={slide === 0}
                 onClick={() => {
                   setPaused(true);
@@ -601,13 +595,12 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
                 }}
               >
                 Previous screen
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className={cn(
-                  buttonClass,
-                  'sr-only min-h-0 min-w-0 focus-visible:not-sr-only focus-visible:pointer-events-auto focus-visible:min-h-11 focus-visible:min-w-11 focus-visible:px-4',
-                )}
+                variant="secondary"
+                size="lg"
+                className="sr-only focus-visible:not-sr-only focus-visible:pointer-events-auto focus-visible:min-h-11 focus-visible:min-w-11"
                 disabled={slide === TITLES.length - 1}
                 onClick={() => {
                   setPaused(true);
@@ -615,7 +608,7 @@ export function Wrapped({ data, years }: { data: WrappedStats; years: number[] }
                 }}
               >
                 Next screen
-              </button>
+              </Button>
             </nav>
           </>
         )}
@@ -939,9 +932,8 @@ function ShareImage({ data }: { data: WrappedStats }) {
           <label
             key={value}
             className={cn(
-              buttonClass,
-              'cursor-pointer border px-3 text-xs has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary',
-              format === value ? 'border-primary' : 'border-border',
+              buttonVariants({ variant: format === value ? 'secondary' : 'outline', size: 'lg' }),
+              'min-h-11 cursor-pointer has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/50',
             )}
           >
             <input
@@ -958,20 +950,18 @@ function ShareImage({ data }: { data: WrappedStats }) {
       </fieldset>
       {ready ? (
         <>
-          <button
+          <Button
             type="button"
+            size="lg"
             disabled={!nativeShare || sharing}
             onClick={() => {
               void share();
             }}
-            className={cn(
-              buttonClass,
-              'gap-2 bg-primary px-4 font-semibold text-primary-foreground hover:bg-primary/90',
-            )}
+            className="min-h-11"
           >
-            <Share2 size={18} />
+            <Share2 data-icon="inline-start" />
             {sharing ? 'Opening sharing…' : 'Share Wrapped'}
-          </button>
+          </Button>
           {shareError && (
             <p role="alert" className="text-sm text-muted-foreground">
               {shareError}
@@ -992,17 +982,15 @@ function ShareImage({ data }: { data: WrappedStats }) {
           )}
         </>
       ) : (
-        <button
+        <Button
           type="button"
+          size="lg"
           disabled={!error}
           onClick={() => setRetry((n) => n + 1)}
-          className={cn(
-            buttonClass,
-            'gap-2 bg-primary px-4 font-semibold text-primary-foreground hover:bg-primary/90',
-          )}
+          className="min-h-11"
         >
           {error ? 'Retry image' : 'Preparing image…'}
-        </button>
+        </Button>
       )}
       <p className="text-center font-mono text-[10px] text-muted-foreground">
         {WRAPPED_IMAGE_SIZES[format].width} × {WRAPPED_IMAGE_SIZES[format].height} PNG · This

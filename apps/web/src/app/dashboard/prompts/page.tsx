@@ -1,5 +1,6 @@
 import { DomainError, sanitizeFtsQuery } from '@rembric/core';
 import type { Prompt } from '@rembric/db';
+import { CircleCheck } from 'lucide-react';
 import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -9,7 +10,8 @@ import { PageHelp } from '@/components/dashboard/page-help';
 import { PromptsTable } from '@/components/dashboard/prompts-table';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
-import { Flash, Page } from '@/components/dashboard/ui';
+import { Page } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -124,19 +126,31 @@ export default async function PromptsPage({
 
       {justDeleted ? (
         <div className="mt-6">
-          <Flash tone="lime" label="deleted">
-            Prompt <code className="font-mono">{justDeleted}</code> soft-deleted.{' '}
-            <Link href="/dashboard/prompts?include_deleted=1" className="hover:text-primary">
-              View deleted
-            </Link>{' '}
-            to undelete.
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Deleted</AlertTitle>
+            <AlertDescription>
+              <p>
+                Prompt <code className="font-mono">{justDeleted}</code> soft-deleted.{' '}
+                <Link href="/dashboard/prompts?include_deleted=1" className="hover:text-primary">
+                  View deleted
+                </Link>{' '}
+                to undelete.
+              </p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : justUndeleted ? (
         <div className="mt-6">
-          <Flash tone="lime" label="RESTORED">
-            Prompt <code className="font-mono">{justUndeleted}</code> restored.
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Restored</AlertTitle>
+            <AlertDescription>
+              <p>
+                Prompt <code className="font-mono">{justUndeleted}</code> restored.
+              </p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : null}
 

@@ -12,8 +12,9 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import { MENU_ITEM_BUTTON, MENU_ITEM_ROOT } from '@/components/dashboard/row-menu';
 import { TokenRotationResult, type RotationState } from '@/components/dashboard/token-rotation';
-import { Pill, Time } from '@/components/dashboard/ui';
+import { Time, TonePill } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,9 +24,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
-const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
-const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 export interface TokenRowData extends Pick<
   Token,
@@ -147,7 +145,7 @@ export function TokensTable({
       header: 'State',
       sortable: true,
       value: (row) => row.state,
-      cell: (row) => <Pill tone={row.stateTone}>{row.state}</Pill>,
+      cell: (row) => <TonePill tone={row.stateTone}>{row.state}</TonePill>,
     },
   ];
 
@@ -203,7 +201,7 @@ export function TokensTable({
                       } will lose access immediately. ${skipped} already-revoked ${
                         skipped === 1 ? 'token' : 'tokens'
                       } will be skipped.`}
-                      confirmLabel="REVOKE SELECTED"
+                      confirmLabel="Revoke selected"
                     >
                       <Button type="button" variant="destructive" size="sm">
                         Revoke selected
@@ -269,12 +267,7 @@ function TokenRowMenu({
   return (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Actions for token ${row.name}`}
-          className="size-7 text-muted-foreground hover:text-foreground"
-        >
+        <Button variant="ghost" size="icon-sm" aria-label={`Actions for token ${row.name}`}>
           <MoreHorizontal aria-hidden="true" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -359,7 +352,7 @@ function TokenRowMenu({
                   ? 'This token will be removed from the list. Session and memory history will be retained. This cannot be undone.'
                   : 'This is IRREVERSIBLE. Any agent using this token will lose access immediately.'
               }
-              confirmLabel={row.revoked ? 'Delete' : 'REVOKE TOKEN'}
+              confirmLabel={row.revoked ? 'Delete' : 'Revoke token'}
             >
               <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                 {row.revoked ? 'Delete' : 'Revoke token'}

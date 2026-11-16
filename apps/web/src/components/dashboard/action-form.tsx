@@ -1,8 +1,9 @@
 'use client';
 
+import { CircleAlert } from 'lucide-react';
 import { createContext, useActionState, useContext, useId, type ReactNode } from 'react';
 
-import { Flash } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export interface ActionState {
   error: string | null;
@@ -34,11 +35,11 @@ export function ActionForm({
     <FormIdContext.Provider value={formId}>
       <form id={formId} action={formAction} onSubmit={onSubmit} className={className}>
         {state.error === null ? null : (
-          <div className="mb-4">
-            <Flash tone="danger" label="ERROR">
-              {state.error}
-            </Flash>
-          </div>
+          <Alert variant="destructive" className="mb-4">
+            <CircleAlert />
+            <AlertTitle>Action failed</AlertTitle>
+            <AlertDescription>{state.error}</AlertDescription>
+          </Alert>
         )}
         {children}
       </form>

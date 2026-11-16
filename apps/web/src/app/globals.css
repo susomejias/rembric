@@ -299,36 +299,12 @@
 .detail-ficha div.ficha-extra-tags:not([hidden]) {
   display: contents;
 }
-.detail-ficha .ficha-expand {
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--chart-2);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  padding: 4px 0;
-}
-.detail-ficha button.ficha-extra-tags {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 9px;
-  color: var(--primary);
-  text-decoration: none;
-}
 .detail-ficha .ficha-actions {
   grid-area: actions;
   display: flex;
   align-items: center;
   align-self: end;
   position: relative;
-}
-.detail-ficha .ficha-actions button,
-.detail-ficha .detail-actions {
-  height: 36px;
-  border-radius: 10px;
-}
-.detail-ficha .ficha-actions .detail-actions {
-  width: 36px;
-  padding: 0;
 }
 .detail-ficha > [role='status'] {
   grid-column: 1 / -1;

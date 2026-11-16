@@ -1,9 +1,11 @@
 'use client';
 
 import type { UpdatePhase } from '@rembric/core';
+import { CircleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { Flash, LABEL } from '@/components/dashboard/ui';
+import { LABEL } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
 const STEP_DEFS = [
@@ -178,9 +180,13 @@ export function UpdateProgress({ initialVersion }: { initialVersion: string }) {
   return (
     <div>
       {error === null ? null : (
-        <Flash tone="danger" label="Update failed">
-          {error}
-        </Flash>
+        <Alert variant="destructive" className="mb-5">
+          <CircleAlert />
+          <AlertTitle>Update failed</AlertTitle>
+          <AlertDescription>
+            <p>{error}</p>
+          </AlertDescription>
+        </Alert>
       )}
       <div className="flex flex-col gap-3">
         {STEP_DEFS.map((step) => (

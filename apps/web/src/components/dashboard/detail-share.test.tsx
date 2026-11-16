@@ -6,6 +6,7 @@ import type * as DetailImageModule from './detail-image';
 import type { DetailImage } from './detail-image';
 import { DetailShare } from './detail-share';
 
+import { Button } from '@/components/ui/button';
 import { DialogContent } from '@/components/ui/dialog';
 
 const hooks = vi.hoisted(() => ({
@@ -110,7 +111,12 @@ const text = (node: ReactNode): string =>
         ? text((node as ReactElement<Props>).props.children)
         : '';
 const button = (label: string) =>
-  nodes.find((n) => n.type === 'button' && n.props.onClick && text(n.props.children) === label)!;
+  nodes.find(
+    (n) =>
+      (n.type === 'button' || n.type === Button) &&
+      n.props.onClick &&
+      text(n.props.children) === label,
+  )!;
 async function settle() {
   await Promise.resolve();
   await Promise.resolve();
@@ -159,14 +165,21 @@ describe('DetailShare', () => {
     const radios = nodes.filter((node) => node.type === 'input' && node.props.type === 'radio');
     expect(radios).toHaveLength(0);
   });
-  it('uses 10px action and close controls inside the share dialog', async () => {
+  it('renders every action and the close control as the shared Button primitive', async () => {
     open();
     await settle();
-    const controls = nodes.filter((node) => node.type === 'a' || node.type === 'button');
-    expect(controls).toHaveLength(2);
+    expect(nodes.some((node) => node.type === 'button')).toBe(false);
+    const anchors = nodes.filter((node) => node.type === 'a');
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]?.props.className).toBeUndefined();
+    const controls = nodes.filter((node) => node.type === Button);
+    expect(
+      controls.map((control) => control.props['aria-label'] ?? text(control.props.children)),
+    ).toEqual(['Share', 'Download PNG', 'Close share dialog']);
     for (const control of controls) {
-      expect(control.props.className).toContain('rounded-[10px]');
-      expect(control.props.className).not.toContain('rounded-lg');
+      expect(control.props.className ?? '').not.toMatch(
+        /rounded-|(?:^|\s)h-\d|text-(?:sm|xs)|bg-|border-/,
+      );
     }
   });
   it('prepares only when open and previews the actual PNG with measured dimensions and download fallback', async () => {

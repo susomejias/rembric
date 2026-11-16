@@ -2,6 +2,7 @@
 
 import { Info } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export function PageHelp({ text }: { text: string }) {
@@ -9,13 +10,9 @@ export function PageHelp({ text }: { text: string }) {
     <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={text}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Info aria-hidden="true" className="size-3.5" />
-          </button>
+          <Button type="button" variant="ghost" size="icon-xs" aria-label={text}>
+            <Info aria-hidden="true" />
+          </Button>
         </TooltipTrigger>
         <TooltipContent
           side="top"

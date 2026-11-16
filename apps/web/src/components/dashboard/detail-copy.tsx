@@ -5,7 +5,15 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
-export function DetailCopy({ text, label = 'Copy' }: { text: string; label?: string }) {
+export function DetailCopy({
+  text,
+  label = 'Copy',
+  size = 'sm',
+}: {
+  text: string;
+  label?: string;
+  size?: 'sm' | 'lg';
+}) {
   const [state, setState] = useState<'idle' | 'copied' | 'error'>('idle');
   async function copy() {
     try {
@@ -19,13 +27,13 @@ export function DetailCopy({ text, label = 'Copy' }: { text: string; label?: str
     <Button
       type="button"
       variant="outline"
-      size="sm"
+      size={size}
       aria-label={label}
       onClick={() => {
         void copy();
       }}
     >
-      <Copy className="size-3.5" />
+      <Copy />
       <span aria-live="polite">
         {state === 'copied' ? 'Copied' : state === 'error' ? 'Copy failed' : label}
       </span>

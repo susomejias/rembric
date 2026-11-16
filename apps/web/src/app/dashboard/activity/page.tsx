@@ -10,13 +10,13 @@ import {
   DataTh,
   DataTr,
   Page,
-  Pill,
   SectionBar,
   StatCard,
   StatGrid,
   TableEmpty,
   Time,
   ViewHead,
+  TonePill,
 } from '@/components/dashboard/ui';
 import { getServices } from '@/lib/services';
 
@@ -127,9 +127,7 @@ export default function ActivityPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">Meaningful changes only</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              no event table
-            </span>
+            <TonePill>no event table</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Activity is composed at read time from memory writes, judged relations, session starts
@@ -144,9 +142,7 @@ export default function ActivityPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">The audit trail is the data</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              SQLite
-            </span>
+            <TonePill>SQLite</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Every row this page shows is the record itself: append-only memories, the
@@ -176,7 +172,7 @@ export default function ActivityPage() {
             {signals.slice(0, 40).map((signal) => (
               <DataTr key={signal.id}>
                 <DataTd>
-                  <Pill tone={signal.tone}>{signal.kind}</Pill>
+                  <TonePill tone={signal.tone}>{signal.kind}</TonePill>
                 </DataTd>
                 <DataTd className="max-w-[560px] whitespace-normal">
                   <Link href={signal.href} className="transition-colors hover:text-primary">

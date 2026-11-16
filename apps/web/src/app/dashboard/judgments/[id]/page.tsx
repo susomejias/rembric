@@ -76,7 +76,7 @@ export default async function JudgmentDetailPage({ params }: { params: Promise<{
                 tone="danger"
                 title="Mark this judgment as orphaned?"
                 description="It will be removed from the pending queue and won't be re-judged automatically."
-                confirmLabel="MARK ORPHANED"
+                confirmLabel="Mark orphaned"
               >
                 <Button type="button" variant="destructive" size="sm">
                   Mark orphaned

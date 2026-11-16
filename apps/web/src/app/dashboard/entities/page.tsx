@@ -1,5 +1,6 @@
 import type { EntityBackfillWorker } from '@rembric/core';
 import type { EntityKind } from '@rembric/db';
+import { CircleCheck } from 'lucide-react';
 import { redirect } from 'next/navigation';
 
 import { readEntitiesFilters, type SearchParams } from './filters';
@@ -11,7 +12,8 @@ import { EntitiesTable } from '@/components/dashboard/entities-table';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
-import { Flash, Page } from '@/components/dashboard/ui';
+import { Page } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -83,12 +85,7 @@ export default async function EntitiesPage({
             description="Useful both to backfill a pending scan and to apply a tightened extraction rule retroactively. This does not touch any memory row — only derived entity/link data."
             confirmLabel="Rebuild entity index"
           >
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="rounded-[10px] border-border text-sm text-foreground"
-            >
+            <Button type="button" variant="outline">
               Rebuild entity index{backlog > 0 ? ` (${backlog} pending)` : ''}
             </Button>
           </ConfirmSubmit>
@@ -97,9 +94,15 @@ export default async function EntitiesPage({
 
       {rebuilt !== '' ? (
         <div className="mt-2">
-          <Flash tone="lime" label="REBUILT">
-            Entity index rebuilt ({rebuilt} memor{rebuilt === '1' ? 'y' : 'ies'} re-scanned).
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Rebuilt</AlertTitle>
+            <AlertDescription>
+              <p>
+                Entity index rebuilt ({rebuilt} memor{rebuilt === '1' ? 'y' : 'ies'} re-scanned).
+              </p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : null}
 

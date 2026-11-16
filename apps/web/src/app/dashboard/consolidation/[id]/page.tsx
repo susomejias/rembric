@@ -16,7 +16,7 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { shortId } from '@/components/dashboard/support';
-import { Pill, TableEmpty, Time } from '@/components/dashboard/ui';
+import { TableEmpty, Time, TonePill } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -141,7 +141,7 @@ export default async function ConsolidationRunPage({
       contentLabel="Run summary and operations"
       badges={
         <>
-          <Pill tone="dim">{ops.length} operations</Pill>
+          <TonePill tone="dim">{ops.length} operations</TonePill>
           <span className="ficha-byline">
             in <b>{scope}</b>, started <Time value={run.startedAt} />
           </span>
@@ -175,9 +175,9 @@ export default async function ConsolidationRunPage({
               tone="danger"
               title="Revert every op in this run?"
               description="All affected memories will return to their pre-run status."
-              confirmLabel="UNDO ENTIRE RUN"
+              confirmLabel="Undo entire run"
             >
-              <Button type="button" variant="destructive" size="sm">
+              <Button type="button" variant="destructive" size="lg">
                 Undo entire run
               </Button>
             </ConfirmSubmit>
@@ -213,9 +213,9 @@ export default async function ConsolidationRunPage({
                   className="min-w-0 rounded-[16px] border border-border bg-card p-4 sm:p-5"
                 >
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <Pill tone={TERMINAL_OP_TYPES.has(op.opType) ? 'dim' : 'lime'}>
+                    <TonePill tone={TERMINAL_OP_TYPES.has(op.opType) ? 'dim' : 'lime'}>
                       {op.opType}
-                    </Pill>
+                    </TonePill>
                     <span className="font-mono text-xs text-muted-foreground">
                       <Time value={op.appliedAt} />
                     </span>
@@ -266,9 +266,9 @@ export default async function ConsolidationRunPage({
                           tone="warn"
                           title="Revert this consolidation op?"
                           description="Affected memories will return to their pre-op status. This is journaled and itself reversible."
-                          confirmLabel="UNDO OP"
+                          confirmLabel="Undo op"
                         >
-                          <Button type="button" variant="outline" size="sm">
+                          <Button type="button" variant="warn" size="sm">
                             Undo op
                           </Button>
                         </ConfirmSubmit>

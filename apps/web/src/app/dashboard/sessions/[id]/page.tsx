@@ -1,4 +1,5 @@
 import { DomainError } from '@rembric/core';
+import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
@@ -13,7 +14,8 @@ import { DetailShare } from '@/components/dashboard/detail-share';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { RowTooltip } from '@/components/dashboard/row-tooltip';
 import { durationBetween, truncate } from '@/components/dashboard/support';
-import { Flash, StatusPill, Time } from '@/components/dashboard/ui';
+import { StatusPill, Time } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
@@ -247,7 +249,9 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
         <ActionForm action={undeleteSession}>
           <CsrfField form={UNDELETE_FORM} />
           <input type="hidden" name="id" value={row.id} />
-          <Button type="submit">Undelete</Button>
+          <Button type="submit" size="lg">
+            Undelete
+          </Button>
         </ActionForm>
       ) : (
         <>
@@ -259,9 +263,9 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
                 tone="warn"
                 title="Mark this session as abandoned?"
                 description={`Its ${memories.length} memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard.`}
-                confirmLabel="ABANDON SESSION"
+                confirmLabel="Abandon session"
               >
-                <Button type="button" variant="outline" size="sm">
+                <Button type="button" variant="warn" size="lg">
                   Abandon
                 </Button>
               </ConfirmSubmit>
@@ -274,9 +278,9 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
               tone="danger"
               title="Soft-delete this session?"
               description="Its memories stay queryable but the session is hidden from the list. You can restore it from the list with ?include_deleted=1."
-              confirmLabel="DELETE SESSION"
+              confirmLabel="Delete session"
             >
-              <Button type="button" variant="destructive" size="sm">
+              <Button type="button" variant="destructive" size="lg">
                 Delete
               </Button>
             </ConfirmSubmit>
@@ -304,7 +308,7 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
       }
       primaryActions={
         <>
-          <DetailCopy text={markdown} />
+          <DetailCopy text={markdown} size="lg" />
           <DetailShare data={shareData} />
           {lifecycleActions}
         </>
@@ -312,10 +316,17 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
       actionsLabel="Session actions"
       notices={
         row.deletedAt ? (
-          <Flash tone="danger" label="SOFT-DELETED">
-            Removed from the active list on <Time value={row.deletedAt} />. Memories that reference
-            it keep their <code className="font-mono">session_id</code> pointer intact.
-          </Flash>
+          <Alert variant="destructive" className="mb-5">
+            <CircleAlert />
+            <AlertTitle>Soft-deleted</AlertTitle>
+            <AlertDescription>
+              <p>
+                Removed from the active list on <Time value={row.deletedAt} />. Memories that
+                reference it keep their <code className="font-mono">session_id</code> pointer
+                intact.
+              </p>
+            </AlertDescription>
+          </Alert>
         ) : null
       }
       metadata={

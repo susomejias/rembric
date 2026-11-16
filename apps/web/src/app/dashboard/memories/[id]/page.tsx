@@ -158,11 +158,11 @@ export default async function MemoryDetailPage({
       : 0;
   const canConfirm = row.status !== 'superseded';
   const needsReview = canConfirm && reviewState === 'needs_review';
-  const confirmForm = (
+  const confirmForm = (size: 'sm' | 'lg') => (
     <ActionForm action={confirmMemory}>
       <CsrfField form={CONFIRM_FORM} />
       <input type="hidden" name="id" value={row.id} />
-      <Button type="submit" size="sm">
+      <Button type="submit" size={size}>
         Confirm
       </Button>
     </ActionForm>
@@ -177,7 +177,7 @@ export default async function MemoryDetailPage({
         description="It will stop appearing in active recall. You can re-save the topic later to bring it back."
         confirmLabel="Archive"
       >
-        <Button type="button" variant="outline" size="sm">
+        <Button type="button" variant="warn" size="lg">
           Archive
         </Button>
       </ConfirmSubmit>
@@ -265,7 +265,7 @@ export default async function MemoryDetailPage({
       }
       primaryActions={
         <>
-          <DetailCopy text={`# ${row.title}\n\n${row.content}`} />
+          <DetailCopy text={`# ${row.title}\n\n${row.content}`} size="lg" />
           <DetailShare
             data={{
               kind: 'memory',
@@ -278,7 +278,7 @@ export default async function MemoryDetailPage({
               tags: row.tags,
             }}
           />
-          {canConfirm && !needsReview ? confirmForm : null}
+          {canConfirm && !needsReview ? confirmForm('lg') : null}
           {row.status === 'active' ? archiveForm : null}
         </>
       }
@@ -295,7 +295,7 @@ export default async function MemoryDetailPage({
                 Not re-affirmed since <Time value={reviewBaseline} />. Confirm it if it still holds,
                 or save a new version under the same topic.
               </p>
-              {confirmForm}
+              {confirmForm('sm')}
             </div>
           ) : null}
           {row.status === 'superseded' ? (

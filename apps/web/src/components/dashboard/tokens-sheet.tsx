@@ -1,10 +1,12 @@
 'use client';
 
+import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useActionState, useEffect, useRef, useState } from 'react';
 
 import type { ActionState, FormAction } from '@/components/dashboard/action-form';
-import { Flash, LABEL } from '@/components/dashboard/ui';
+import { LABEL } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -53,7 +55,7 @@ export function CreateTokenSheet({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button type="button" size="sm" className="rounded-[10px]">
+        <Button type="button" size="sm">
           New token
         </Button>
       </SheetTrigger>
@@ -86,7 +88,7 @@ export function CopyPlaintextButton({ value }: { value: string }) {
   };
 
   return (
-    <Button type="button" variant="outline" size="sm" onClick={copy} className="rounded-[10px]">
+    <Button type="button" variant="outline" size="sm" onClick={copy}>
       {copied ? 'Copied' : 'Copy'}
     </Button>
   );
@@ -143,10 +145,16 @@ function CreateTokenForm({
       {tokenType === 'admin' ? (
         <>
           <input type="hidden" name="access" value="write" />
-          <Flash tone="amber" label="ADMINISTRATOR">
-            Full read/write access to every project and full server and dashboard administration,
-            including dashboard login.
-          </Flash>
+          <Alert variant="warn">
+            <TriangleAlert />
+            <AlertTitle>Administrator</AlertTitle>
+            <AlertDescription>
+              <p>
+                Full read/write access to every project and full server and dashboard
+                administration, including dashboard login.
+              </p>
+            </AlertDescription>
+          </Alert>
         </>
       ) : (
         <>
@@ -219,9 +227,13 @@ function CreateTokenForm({
 function SheetError({ error }: { error: string | null }) {
   if (error === null) return null;
   return (
-    <Flash tone="danger" label="ERROR">
-      {error}
-    </Flash>
+    <Alert variant="destructive">
+      <CircleAlert />
+      <AlertTitle>Could not create the token</AlertTitle>
+      <AlertDescription>
+        <p>{error}</p>
+      </AlertDescription>
+    </Alert>
   );
 }
 

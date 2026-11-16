@@ -1,5 +1,6 @@
 import { DomainError } from '@rembric/core';
 import { AGENT_SESSION_STATUSES, type AgentSessionStatus } from '@rembric/db';
+import { CircleCheck } from 'lucide-react';
 import { revalidatePath } from 'next/cache';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -10,7 +11,7 @@ import { SessionUndoPill } from '@/components/dashboard/session-undo-pill';
 import { SessionsTable } from '@/components/dashboard/sessions-table';
 import { PAGE_SIZE, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
-import { Flash } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -196,20 +197,32 @@ export default async function SessionsPage({
       {justDeleted ? (
         <SessionUndoPill id={justDeleted} restoreAction={undeleteSession} />
       ) : justRestored ? (
-        <Flash tone="lime" label="RESTORED">
-          Session <code className="font-mono">{justRestored}</code> restored.
-        </Flash>
+        <Alert variant="success" className="mb-5">
+          <CircleCheck />
+          <AlertTitle>Restored</AlertTitle>
+          <AlertDescription>
+            <p>
+              Session <code className="font-mono">{justRestored}</code> restored.
+            </p>
+          </AlertDescription>
+        </Alert>
       ) : justAbandoned ? (
-        <Flash tone="lime" label="ABANDONED">
-          Session <code className="font-mono">{justAbandoned}</code> marked as abandoned.{' '}
-          <Link
-            href={`/dashboard/sessions/${justAbandoned}`}
-            className="underline-offset-2 hover:underline"
-          >
-            View
-          </Link>
-          .
-        </Flash>
+        <Alert variant="success" className="mb-5">
+          <CircleCheck />
+          <AlertTitle>Abandoned</AlertTitle>
+          <AlertDescription>
+            <p>
+              Session <code className="font-mono">{justAbandoned}</code> marked as abandoned.{' '}
+              <Link
+                href={`/dashboard/sessions/${justAbandoned}`}
+                className="underline-offset-2 hover:underline"
+              >
+                View
+              </Link>
+              .
+            </p>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       <SessionsTable

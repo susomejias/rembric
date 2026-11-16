@@ -1,3 +1,4 @@
+import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 
 import { resolveDataDir } from '@/app/dashboard/maintenance/data';
@@ -11,12 +12,13 @@ import {
   DataTh,
   DataTr,
   Page,
-  Pill,
   SectionBar,
   StatCard,
   StatGrid,
   ViewHead,
+  TonePill,
 } from '@/components/dashboard/ui';
+import { Button } from '@/components/ui/button';
 import { getServices } from '@/lib/services';
 
 export const dynamic = 'force-dynamic';
@@ -62,9 +64,7 @@ export default function SettingsPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">Local-first by construction</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              one process
-            </span>
+            <TonePill>one process</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             One Node process, one SQLite file, no external service and no API key required. The
@@ -79,20 +79,18 @@ export default function SettingsPage() {
               </p>
               <h2 className="mt-2 text-base font-medium">Configured at the server boundary</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              env
-            </span>
+            <TonePill>env</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Updates, tokens, retention and OAuth are set where the server boots, not stored in the
             database — so a change is one restart and always visible in the process environment.
           </p>
-          <Link
-            href="/dashboard/tokens"
-            className="mt-5 inline-block font-mono text-[11px] uppercase tracking-[.12em] text-primary hover:underline"
-          >
-            MANAGE ACCESS TOKENS →
-          </Link>
+          <Button asChild variant="outline" size="sm" className="mt-5">
+            <Link href="/dashboard/tokens">
+              Manage access tokens
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -186,7 +184,7 @@ function SettingRow({
       <DataTd>{name}</DataTd>
       <DataTd className="max-w-[520px] whitespace-normal text-muted-foreground">{value}</DataTd>
       <DataTd>
-        <Pill tone={tone}>{state}</Pill>
+        <TonePill tone={tone}>{state}</TonePill>
       </DataTd>
     </DataTr>
   );

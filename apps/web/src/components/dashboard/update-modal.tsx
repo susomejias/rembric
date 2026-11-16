@@ -1,6 +1,7 @@
 'use client';
 
 import type { UpdateInfo } from '@rembric/core';
+import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -14,6 +15,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -61,17 +63,12 @@ export function UpdateModal({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent
-        showCloseButton={false}
-        className="max-h-[85vh] max-w-lg gap-4 overflow-y-auto rounded-2xl border border-border bg-card p-5 sm:max-w-lg md:p-6"
-      >
-        <DialogHeader className="gap-3">
+      <DialogContent showCloseButton={false} className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
           <p className="font-mono text-[11px] uppercase tracking-[.14em] text-primary">
             Update available
           </p>
-          <DialogTitle className="text-xl font-semibold tracking-tight">
-            A newer Rembric is published
-          </DialogTitle>
+          <DialogTitle>A newer Rembric is published</DialogTitle>
           <DialogDescription>
             v{info.latestVersion} can be installed from this dashboard — Rembric backs up the
             database, then a short-lived upgrader container replaces and restarts the server.
@@ -99,14 +96,12 @@ export function UpdateModal({
               What&apos;s new
             </span>
             {info.releaseUrl ? (
-              <a
-                href={info.releaseUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground transition-colors hover:text-primary"
-              >
-                View release on GitHub ›
-              </a>
+              <Button asChild variant="ghost" size="xs">
+                <a href={info.releaseUrl} target="_blank" rel="noopener noreferrer">
+                  View release on GitHub
+                  <ArrowUpRight data-icon="inline-end" />
+                </a>
+              </Button>
             ) : null}
           </div>
           <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground [&_a]:break-all">
@@ -124,27 +119,23 @@ export function UpdateModal({
             tone="danger"
             title={`Install v${info.latestVersion}?`}
             description={`Rembric will back up the database, stop, replace its container with v${info.latestVersion} and restart. Your data and configuration are preserved.`}
-            confirmLabel="UPDATE NOW"
+            confirmLabel="Update now"
           >
-            <Button type="button" className="w-full">
-              UPDATE TO v{info.latestVersion} →
+            <Button type="button" size="lg" className="w-full">
+              Update to v{info.latestVersion}
+              <ArrowRight data-icon="inline-end" />
             </Button>
           </ConfirmSubmit>
         </ActionForm>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={dismiss}
-            className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground"
-          >
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={dismiss}>
             Later
           </Button>
-          <Button asChild variant="secondary">
-            <Link href="/dashboard/update">OPEN UPDATE PAGE →</Link>
+          <Button asChild variant="outline">
+            <Link href="/dashboard/update">Open update page</Link>
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

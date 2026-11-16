@@ -39,11 +39,11 @@ export function ConfirmSubmit({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>CANCEL</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             type="submit"
             form={formId ?? undefined}
-            variant={tone === 'danger' ? 'destructive' : 'default'}
+            variant={tone === 'danger' ? 'destructive' : 'warn'}
           >
             {confirmLabel}
           </AlertDialogAction>

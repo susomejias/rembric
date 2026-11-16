@@ -133,7 +133,7 @@ describe('token promotion confirmation wiring', () => {
     expect(html).toContain('full read/write access to every project');
     expect(html).toContain('dashboard and server administration');
     expect(html).toMatch(/type="button"[^>]*data-slot="alert-dialog-cancel"/);
-    expect(html).toContain('CANCEL');
+    expect(html).toContain('>Cancel<');
     expect(html).toMatch(
       /type="submit"[^>]*data-slot="alert-dialog-action"[^>]*data-variant="destructive"/,
     );
@@ -162,7 +162,7 @@ describe('token rotation confirmation wiring', () => {
     expect(html).toContain('dashboard sessions');
     expect(html).toContain('OAuth');
     expect(html).toContain('reconnect');
-    expect(html).toContain('CANCEL');
+    expect(html).toContain('>Cancel<');
   });
 
   it.each(['revoked', 'expired', 'inert', 'no projects', 'deleted'])(

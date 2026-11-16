@@ -1,3 +1,4 @@
+import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -12,7 +13,8 @@ import type { DetailShareData } from '@/components/dashboard/detail-image';
 import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-layout';
 import { DetailShare } from '@/components/dashboard/detail-share';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
-import { Flash, StatusPill, Time } from '@/components/dashboard/ui';
+import { StatusPill, Time } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { getServices } from '@/lib/services';
@@ -80,10 +82,16 @@ export default async function PromptDetailPage({ params }: { params: Promise<{ i
       actionsLabel="Prompt actions"
       notices={
         row.deletedAt ? (
-          <Flash tone="danger" label="SOFT-DELETED">
-            Removed from the active list on <Time value={row.deletedAt} />. Restore it to make it
-            visible again.
-          </Flash>
+          <Alert variant="destructive" className="mb-5">
+            <CircleAlert />
+            <AlertTitle>Soft-deleted</AlertTitle>
+            <AlertDescription>
+              <p>
+                Removed from the active list on <Time value={row.deletedAt} />. Restore it to make
+                it visible again.
+              </p>
+            </AlertDescription>
+          </Alert>
         ) : null
       }
       metadata={
@@ -156,13 +164,15 @@ export default async function PromptDetailPage({ params }: { params: Promise<{ i
       }
       primaryActions={
         <>
-          <DetailCopy text={row.content} />
+          <DetailCopy text={row.content} size="lg" />
           <DetailShare data={shareData} />
           {row.deletedAt ? (
             <ActionForm action={undeletePrompt}>
               <CsrfField form="prompt.undelete" />
               <input type="hidden" name="id" value={row.id} />
-              <Button type="submit">Undelete</Button>
+              <Button type="submit" size="lg">
+                Undelete
+              </Button>
             </ActionForm>
           ) : (
             <ActionForm action={deletePrompt}>
@@ -172,9 +182,9 @@ export default async function PromptDetailPage({ params }: { params: Promise<{ i
                 tone="danger"
                 title="Soft-delete this prompt?"
                 description="It is hidden from default lists, memory.context.recentPrompts, and memory.search_prompts; restorable via the Undelete action."
-                confirmLabel="DELETE PROMPT"
+                confirmLabel="Delete prompt"
               >
-                <Button type="button" variant="destructive" size="sm">
+                <Button type="button" variant="destructive" size="lg">
                   Delete
                 </Button>
               </ConfirmSubmit>

@@ -1,4 +1,5 @@
 import type { SelfUpdateCapability, UpdateInfo, UpdateStatus } from '@rembric/core';
+import { ArrowRight, ArrowUpRight, CircleAlert, CircleCheck } from 'lucide-react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
@@ -13,7 +14,8 @@ import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { singleParam } from '@/components/dashboard/support';
-import { Flash, Page, Time } from '@/components/dashboard/ui';
+import { Page, Time } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { REMBRIC_VERSION } from '@/lib/version';
 
@@ -57,11 +59,13 @@ export default async function UpdatePage({
       </header>
 
       {notice ? (
-        <div className="mt-5">
-          <Flash tone={notice.tone === 'error' ? 'danger' : 'lime'} label={notice.label}>
-            {notice.body}
-          </Flash>
-        </div>
+        <Alert variant={notice.tone === 'error' ? 'destructive' : 'success'} className="mt-5">
+          {notice.tone === 'error' ? <CircleAlert /> : <CircleCheck />}
+          <AlertTitle>{notice.label}</AlertTitle>
+          <AlertDescription>
+            <p>{notice.body}</p>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       {!enabled ? (
@@ -105,12 +109,12 @@ export default async function UpdatePage({
               copyLabel="Copy changelog"
               action={
                 info.releaseUrl ? (
-                  <Link
-                    href={info.releaseUrl}
-                    className="rounded-xl border border-border px-3.5 py-2 text-sm text-foreground transition-colors hover:bg-accent"
-                  >
-                    Open on GitHub
-                  </Link>
+                  <Button asChild variant="outline">
+                    <Link href={info.releaseUrl}>
+                      Open on GitHub
+                      <ArrowUpRight data-icon="inline-end" />
+                    </Link>
+                  </Button>
                 ) : null
               }
             />
@@ -205,9 +209,12 @@ function UpdateActionBlock({
               tone="danger"
               title={`Install v${info.latestVersion}?`}
               description={`Rembric will back up the database, stop, replace its container with v${info.latestVersion} and restart. Your data and configuration are preserved.`}
-              confirmLabel="UPDATE NOW"
+              confirmLabel="Update now"
             >
-              <Button type="button">UPDATE TO v{info.latestVersion} →</Button>
+              <Button type="button">
+                Update to v{info.latestVersion}
+                <ArrowRight data-icon="inline-end" />
+              </Button>
             </ConfirmSubmit>
           </ActionForm>
         </div>

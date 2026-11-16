@@ -1,3 +1,4 @@
+import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
@@ -5,8 +6,10 @@ import { ActivityChart } from '@/components/dashboard/activity-chart';
 import { OverviewRefreshButton } from '@/components/dashboard/overview-refresh-button';
 import { RowTooltip } from '@/components/dashboard/row-tooltip';
 import { formatBytes, relativeTime, truncate } from '@/components/dashboard/support';
+import { TonePill } from '@/components/dashboard/ui';
 import { WrappedEntry } from '@/components/dashboard/wrapped-entry';
 import { NumberTicker } from '@/components/motion/number-ticker';
+import { Button } from '@/components/ui/button';
 import { getServices } from '@/lib/services';
 import { cn } from '@/lib/utils';
 import { getWrappedSeason } from '@/lib/wrapped-season';
@@ -125,7 +128,7 @@ export default function DashboardOverviewPage() {
               <span className="font-mono text-[10px] text-muted-foreground">30d</span>
             </span>
           }
-          link={{ href: '/dashboard/memories', label: 'memories →' }}
+          link={{ href: '/dashboard/memories', label: 'Memories' }}
         >
           <div className="flex items-center gap-3 px-5 pt-1">
             <NumberTicker
@@ -146,13 +149,9 @@ export default function DashboardOverviewPage() {
           order="order-1 lg:order-2"
           label="ACTIVE SESSIONS"
           labelExtra={
-            activeSessions > 0 ? (
-              <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
-                {activeSessions} LIVE
-              </span>
-            ) : null
+            activeSessions > 0 ? <TonePill tone="lime">{activeSessions} live</TonePill> : null
           }
-          link={{ href: '/dashboard/sessions', label: 'view all →' }}
+          link={{ href: '/dashboard/sessions', label: 'View all' }}
           featured
         >
           <div className="px-5 pt-1">
@@ -187,9 +186,9 @@ export default function DashboardOverviewPage() {
                       href={`/dashboard/sessions/${session.id}`}
                       className="flex items-center gap-3 rounded-lg px-5 py-2 hover:bg-accent/50"
                     >
-                      <span className="w-20 shrink-0 whitespace-nowrap rounded bg-primary/15 px-1.5 py-0.5 text-center font-mono text-[9px] uppercase text-primary">
+                      <TonePill tone="lime" className="shrink-0">
                         {session.agent}
-                      </span>
+                      </TonePill>
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                         {session.title ?? session.projectSlug ?? '—'}
                       </span>
@@ -203,7 +202,7 @@ export default function DashboardOverviewPage() {
             )}
             {activeSessions > activeSessionRows.length ? (
               <li className="px-5 pt-2 font-mono text-[10px] text-muted-foreground">
-                +{activeSessions - activeSessionRows.length} more active · view all →
+                +{activeSessions - activeSessionRows.length} more active
               </li>
             ) : null}
           </ul>
@@ -213,7 +212,7 @@ export default function DashboardOverviewPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[440fr_180fr_628fr]">
         <WidgetCard
           label="LATEST JUDGMENTS"
-          link={{ href: '/dashboard/judgments', label: 'view all →' }}
+          link={{ href: '/dashboard/judgments', label: 'View all' }}
         >
           <ul className="mt-1 flex flex-col">
             {recentJudgments.length === 0 ? (
@@ -254,16 +253,9 @@ export default function DashboardOverviewPage() {
                         {truncate(relation.sourceTitle, 34)}
                       </span>
                       {relation.relation !== null ? (
-                        <span
-                          className={cn(
-                            'shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px]',
-                            index === 0
-                              ? 'bg-primary/15 text-primary'
-                              : 'bg-input text-muted-foreground',
-                          )}
-                        >
+                        <TonePill tone={index === 0 ? 'lime' : 'dim'} className="shrink-0">
                           {relation.relation}
-                        </span>
+                        </TonePill>
                       ) : null}
                       <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                         {relativeTime(relation.judgedAt ?? relation.createdAt, nowMs)}
@@ -276,7 +268,7 @@ export default function DashboardOverviewPage() {
           </ul>
         </WidgetCard>
 
-        <WidgetCard label="ACTIVE TOKENS" link={{ href: '/dashboard/tokens', label: 'tokens →' }}>
+        <WidgetCard label="ACTIVE TOKENS" link={{ href: '/dashboard/tokens', label: 'Tokens' }}>
           <div className="flex items-center gap-2 px-5 pt-1">
             <NumberTicker
               value={activeTokens.length}
@@ -298,7 +290,7 @@ export default function DashboardOverviewPage() {
               {healthy ? 'healthy' : 'attention'}
             </span>
           }
-          link={{ href: '/dashboard/consolidation', label: 'consolidation →' }}
+          link={{ href: '/dashboard/consolidation', label: 'Consolidation' }}
         >
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 pt-1 sm:grid-cols-4">
             <Metric value={lastRunOps.total} label="OPS APPLIED" />
@@ -329,14 +321,8 @@ export default function DashboardOverviewPage() {
         <WidgetCard
           label="LIVE AGENT ACTIVITY"
           featured
-          labelExtra={
-            activeSessions > 0 ? (
-              <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
-                LIVE
-              </span>
-            ) : null
-          }
-          link={{ href: '/dashboard/sessions', label: 'view all →' }}
+          labelExtra={activeSessions > 0 ? <TonePill tone="lime">Live</TonePill> : null}
+          link={{ href: '/dashboard/sessions', label: 'View all' }}
         >
           <ul className="mt-1 flex flex-col">
             {feed.length === 0 ? (
@@ -368,16 +354,13 @@ export default function DashboardOverviewPage() {
                           item.live ? 'animate-pulse bg-primary' : 'bg-chart-4',
                         )}
                       />
-                      <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary">
+                      <TonePill tone="lime" className="shrink-0">
                         {item.kind}
-                      </span>
+                      </TonePill>
                       {item.meta.map((chip) => (
-                        <span
-                          key={chip}
-                          className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] uppercase text-muted-foreground"
-                        >
+                        <TonePill key={chip} className="shrink-0">
                           {chip}
-                        </span>
+                        </TonePill>
                       ))}
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                         {item.text}
@@ -401,12 +384,9 @@ export default function DashboardOverviewPage() {
             <HealthRow label="DB size" value={dbSize} />
           </div>
           <div className="px-5 pt-4">
-            <Link
-              href="/dashboard/maintenance"
-              className="flex h-10 items-center justify-center rounded-lg bg-input text-sm text-foreground transition-colors hover:bg-accent"
-            >
-              Run maintenance…
-            </Link>
+            <Button asChild variant="secondary" size="lg" className="w-full">
+              <Link href="/dashboard/maintenance">Run maintenance</Link>
+            </Button>
           </div>
         </WidgetCard>
       </div>
@@ -443,12 +423,12 @@ function WidgetCard({
         <h2 className="font-mono text-[10px] tracking-[.14em] text-muted-foreground">{label}</h2>
         {labelExtra}
         {link ? (
-          <Link
-            href={link.href}
-            className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {link.label}
-          </Link>
+          <Button asChild variant="ghost" size="xs" className="ml-auto">
+            <Link href={link.href}>
+              {link.label}
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </Button>
         ) : null}
       </header>
       {children}

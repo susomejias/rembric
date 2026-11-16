@@ -10,6 +10,7 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import { MENU_ITEM_BUTTON, MENU_ITEM_ROOT } from '@/components/dashboard/row-menu';
 import {
   useServerPagination,
   type TablePaginationSpec,
@@ -26,9 +27,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-
-const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
-const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 export interface SessionRowData {
   readonly id: string;
@@ -217,13 +215,9 @@ export function SessionsTable({
                         } will be marked abandoned. ${skipped} non-active ${
                           skipped === 1 ? 'session' : 'sessions'
                         } will be skipped. Their memories stay queryable and the rows stay visible.`}
-                        confirmLabel="ABANDON SELECTED"
+                        confirmLabel="Abandon selected"
                       >
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="border-warn/40 bg-warn/10 text-warn hover:bg-warn/20 hover:text-warn"
-                        >
+                        <Button type="button" variant="warn" size="sm">
                           Mark as abandoned
                         </Button>
                       </ConfirmSubmit>
@@ -237,7 +231,7 @@ export function SessionsTable({
                         tone="danger"
                         title={`Soft-delete ${context.ids.length} selected sessions?`}
                         description="Their memories stay queryable but the sessions are hidden from the list. You can restore them from the deleted view."
-                        confirmLabel="DELETE SELECTED"
+                        confirmLabel="Delete selected"
                       >
                         <Button type="button" variant="destructive" size="sm">
                           Delete selected
@@ -321,12 +315,7 @@ function SessionRowMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Actions for session ${row.title}`}
-          className="size-7 text-muted-foreground hover:text-foreground"
-        >
+        <Button variant="ghost" size="icon-sm" aria-label={`Actions for session ${row.title}`}>
           <MoreHorizontal aria-hidden="true" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -364,7 +353,7 @@ function SessionRowMenu({
                     tone="warn"
                     title="Mark this session as abandoned?"
                     description="Its memories stay queryable and the row stays visible in the list. This transition is not reversible from the dashboard."
-                    confirmLabel="ABANDON SESSION"
+                    confirmLabel="Abandon session"
                   >
                     <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                       Abandon session
@@ -386,7 +375,7 @@ function SessionRowMenu({
                   tone="danger"
                   title="Soft-delete this session?"
                   description="Its memories stay queryable but the session is hidden from the list. You can restore it from the deleted view."
-                  confirmLabel="DELETE SESSION"
+                  confirmLabel="Delete session"
                 >
                   <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                     Delete session

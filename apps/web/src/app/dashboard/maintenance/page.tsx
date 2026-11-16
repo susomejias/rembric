@@ -1,4 +1,5 @@
 import { DomainError } from '@rembric/core';
+import { ArrowRight, CircleCheck, Download, Info } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -18,16 +19,15 @@ import {
   DataTd,
   DataTh,
   DataTr,
-  Flash,
-  Notice,
   Page,
-  Pill,
   SectionBar,
   StatCard,
   StatGrid,
   TableEmpty,
+  TonePill,
   Time,
 } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -122,27 +122,43 @@ export default async function MaintenancePage({
 
       {purgedSessions !== '' ? (
         <div className="mt-6">
-          <Flash tone="lime" label="PURGED">
-            Removed {purgedSessions} empty session row(s).
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Purged</AlertTitle>
+            <AlertDescription>
+              <p>Removed {purgedSessions} empty session row(s).</p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : purgedMemories !== '' ? (
         <div className="mt-6">
-          <Flash tone="lime" label="PURGED">
-            Removed {purgedMemories} disconnected archived memory row(s).
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Purged</AlertTitle>
+            <AlertDescription>
+              <p>Removed {purgedMemories} disconnected archived memory row(s).</p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : purgedPrompts !== '' ? (
         <div className="mt-6">
-          <Flash tone="lime" label="PURGED">
-            Removed {purgedPrompts} deleted prompt row(s).
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Purged</AlertTitle>
+            <AlertDescription>
+              <p>Removed {purgedPrompts} deleted prompt row(s).</p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : backedUp !== '' ? (
         <div className="mt-6">
-          <Flash tone="lime" label="BACKED UP">
-            Snapshot written ({backedUp} bytes).
-          </Flash>
+          <Alert variant="success" className="mb-5">
+            <CircleCheck />
+            <AlertTitle>Backed up</AlertTitle>
+            <AlertDescription>
+              <p>Snapshot written ({backedUp} bytes).</p>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : null}
 
@@ -181,7 +197,7 @@ export default async function MaintenancePage({
                 this deployment — this dashboard never replaces its own image.
               </p>
             </div>
-            <Pill tone="lime">pending restart</Pill>
+            <TonePill tone="lime">pending restart</TonePill>
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
             <p className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
@@ -192,12 +208,9 @@ export default async function MaintenancePage({
               )}{' '}
               · BACKUP BEFORE UPDATING
             </p>
-            <Link
-              href="/dashboard/update"
-              className="rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Open the release
-            </Link>
+            <Button asChild>
+              <Link href="/dashboard/update">Open the release</Link>
+            </Button>
           </div>
         </section>
       ) : null}
@@ -211,9 +224,7 @@ export default async function MaintenancePage({
               </p>
               <h2 className="mt-2 text-base font-medium">Safe purges</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              journaled
-            </span>
+            <TonePill>journaled</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             Physical deletion is reserved for empty sessions, disconnected archived memories, and
@@ -228,9 +239,7 @@ export default async function MaintenancePage({
               </p>
               <h2 className="mt-2 text-base font-medium">Disk recovery</h2>
             </div>
-            <span className="rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[.12em] text-muted-foreground">
-              freelist
-            </span>
+            <TonePill>freelist</TonePill>
           </div>
           <p className="mt-3 max-w-lg text-xs leading-5 text-muted-foreground">
             The freelist is space SQLite has already reclaimed inside the file. `VACUUM` is the
@@ -264,9 +273,9 @@ export default async function MaintenancePage({
             formName={PURGE_SESSIONS_FORM}
             confirmTitle={`Purge ${state.emptySessions} empty session row(s)?`}
             confirmDescription="This is irreversible. The deletion is journaled in consolidation_ops for audit."
-            confirmLabel={`PURGE ${state.emptySessions} SESSIONS`}
-            buttonLabel={`PURGE EMPTY SESSIONS (${state.emptySessions})`}
-            emptyLabel="NO EMPTY SESSIONS TO PURGE"
+            confirmLabel={`Purge ${state.emptySessions} sessions`}
+            buttonLabel={`Purge empty sessions (${state.emptySessions})`}
+            emptyLabel="No empty sessions to purge"
           />
           <PurgeRow
             label="Disconnected archived memories"
@@ -276,9 +285,9 @@ export default async function MaintenancePage({
             formName={PURGE_MEMORIES_FORM}
             confirmTitle={`Purge ${state.archivedMemories} disconnected archived memory row(s)?`}
             confirmDescription="This is irreversible. memory_vec and memory_fts shadow rows are also removed. The deletion is journaled in consolidation_ops for audit."
-            confirmLabel={`PURGE ${state.archivedMemories} MEMORIES`}
-            buttonLabel={`PURGE DISCONNECTED ARCHIVED (${state.archivedMemories})`}
-            emptyLabel="NO DISCONNECTED ARCHIVED TO PURGE"
+            confirmLabel={`Purge ${state.archivedMemories} memories`}
+            buttonLabel={`Purge disconnected archived (${state.archivedMemories})`}
+            emptyLabel="No disconnected archived to purge"
           />
           <PurgeRow
             label="Deleted prompts"
@@ -288,9 +297,9 @@ export default async function MaintenancePage({
             formName={PURGE_PROMPTS_FORM}
             confirmTitle={`Purge ${state.deletedPrompts} soft-deleted prompt row(s)?`}
             confirmDescription="This is irreversible. prompts_fts shadow rows are also removed. The deletion is journaled in consolidation_ops for audit."
-            confirmLabel={`PURGE ${state.deletedPrompts} PROMPTS`}
-            buttonLabel={`PURGE DELETED PROMPTS (${state.deletedPrompts})`}
-            emptyLabel="NO DELETED PROMPTS TO PURGE"
+            confirmLabel={`Purge ${state.deletedPrompts} prompts`}
+            buttonLabel={`Purge deleted prompts (${state.deletedPrompts})`}
+            emptyLabel="No deleted prompts to purge"
           />
         </DataBody>
       </DataTable>
@@ -343,10 +352,10 @@ export default async function MaintenancePage({
                   tone="warn"
                   title="Write a fresh database snapshot now?"
                   description="This is reversible — it only reads the live database and writes a new file; nothing existing is modified."
-                  confirmLabel="BACKUP NOW"
+                  confirmLabel="Backup now"
                 >
                   <Button type="button" variant="outline" size="sm">
-                    BACKUP NOW
+                    Backup now
                   </Button>
                 </ConfirmSubmit>
               </ActionForm>
@@ -362,7 +371,7 @@ export default async function MaintenancePage({
                 Last backup: <Time value={state.latestOnDemand.createdAt} /> ·{' '}
                 <Link
                   href="/dashboard/maintenance/backup/download"
-                  className="font-mono uppercase tracking-[.12em] text-primary hover:underline"
+                  className="text-primary underline-offset-4 hover:underline"
                 >
                   Download latest
                 </Link>
@@ -395,12 +404,12 @@ export default async function MaintenancePage({
                       {formatBytes(backup.sizeBytes)}
                     </DataTd>
                     <DataTd>
-                      <Link
-                        href={`/dashboard/maintenance/backup/download/${backup.file}`}
-                        className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
-                      >
-                        Download →
-                      </Link>
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/dashboard/maintenance/backup/download/${backup.file}`}>
+                          <Download />
+                          Download
+                        </Link>
+                      </Button>
                     </DataTd>
                   </DataTr>
                 ))}
@@ -410,10 +419,16 @@ export default async function MaintenancePage({
         </div>
       </div>
 
-      <Notice badge="Operator step" className="mt-6">
-        Restoring a snapshot and running `VACUUM` are host operations: stop the server, then work on
-        the file in <code className="font-mono">{state.backupsDir}</code>.
-      </Notice>
+      <Alert className="mt-6">
+        <Info />
+        <AlertTitle>Operator step</AlertTitle>
+        <AlertDescription>
+          <p>
+            Restoring a snapshot and running `VACUUM` are host operations: stop the server, then
+            work on the file in <code className="font-mono">{state.backupsDir}</code>.
+          </p>
+        </AlertDescription>
+      </Alert>
     </Page>
   );
 }
@@ -445,16 +460,16 @@ function PurgeRow({
     <DataTr>
       <DataTd>{label}</DataTd>
       <DataTd>
-        <Pill tone={count > 0 ? 'amber' : 'dim'}>{count}</Pill>
+        <TonePill tone={count > 0 ? 'amber' : 'dim'}>{count}</TonePill>
       </DataTd>
       <DataTd>
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={href}
-            className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
-          >
-            Inspect candidates →
-          </Link>
+          <Button asChild variant="ghost" size="sm">
+            <Link href={href}>
+              Inspect candidates
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </Button>
           {count > 0 ? (
             <ActionForm action={action}>
               <CsrfField form={formName} />

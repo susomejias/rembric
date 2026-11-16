@@ -1,5 +1,6 @@
 'use client';
 
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 
@@ -134,15 +135,10 @@ export function FilterSelect({
 export function FilterActions({ clearHref }: { clearHref: string }) {
   return (
     <div className="ml-auto flex items-center gap-2">
-      <Button type="submit" className="h-8 font-mono text-[10px] uppercase tracking-[.14em]">
-        Filter
+      <Button type="submit">Filter</Button>
+      <Button asChild variant="ghost">
+        <Link href={clearHref}>Clear</Link>
       </Button>
-      <Link
-        href={clearHref}
-        className={cn('px-2 text-muted-foreground transition-colors hover:text-primary', LABEL)}
-      >
-        Clear
-      </Link>
     </div>
   );
 }
@@ -173,12 +169,18 @@ export function Pager({
       <div className="flex items-center gap-2">
         {page > 0 ? (
           <Button variant="outline" size="sm" asChild>
-            <Link href={`${path}${queryWithPage(query, page - 1)}`}>‹ Prev</Link>
+            <Link href={`${path}${queryWithPage(query, page - 1)}`}>
+              <ChevronLeft data-icon="inline-start" />
+              Prev
+            </Link>
           </Button>
         ) : null}
         {hasMore ? (
           <Button variant="outline" size="sm" asChild>
-            <Link href={`${path}${queryWithPage(query, page + 1)}`}>Next ›</Link>
+            <Link href={`${path}${queryWithPage(query, page + 1)}`}>
+              Next
+              <ChevronRight data-icon="inline-end" />
+            </Link>
           </Button>
         ) : null}
       </div>

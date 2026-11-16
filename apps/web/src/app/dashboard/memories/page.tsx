@@ -13,6 +13,7 @@ import {
   type MemoryType,
   MEMORY_STATUSES,
 } from '@rembric/db';
+import { CircleCheck } from 'lucide-react';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
@@ -23,7 +24,8 @@ import { MemoriesTable } from '@/components/dashboard/memories-table';
 import { PageHelp } from '@/components/dashboard/page-help';
 import { PAGE_SIZE, shortId, singleParam } from '@/components/dashboard/support';
 import { TableSearch } from '@/components/dashboard/table-search';
-import { Flash, Page } from '@/components/dashboard/ui';
+import { Page } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
 import { dashboardCsrfToken } from '@/lib/session';
@@ -241,13 +243,25 @@ export default async function MemoriesPage({
       </section>
 
       {justArchived ? (
-        <Flash tone="lime" label="ARCHIVED">
-          Memory <code className="font-mono">{shortId(justArchived)}</code> archived.
-        </Flash>
+        <Alert variant="success" className="mb-5">
+          <CircleCheck />
+          <AlertTitle>Archived</AlertTitle>
+          <AlertDescription>
+            <p>
+              Memory <code className="font-mono">{shortId(justArchived)}</code> archived.
+            </p>
+          </AlertDescription>
+        </Alert>
       ) : justConfirmed ? (
-        <Flash tone="lime" label="CONFIRMED">
-          Memory <code className="font-mono">{shortId(justConfirmed)}</code> re-affirmed.
-        </Flash>
+        <Alert variant="success" className="mb-5">
+          <CircleCheck />
+          <AlertTitle>Confirmed</AlertTitle>
+          <AlertDescription>
+            <p>
+              Memory <code className="font-mono">{shortId(justConfirmed)}</code> re-affirmed.
+            </p>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       <div className="mt-6">

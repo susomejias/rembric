@@ -405,7 +405,7 @@ describe('memory detail hub', () => {
     expect(html).toContain('Not re-affirmed since');
     expect(html).toContain('Overdue by');
     expect(html.match(/>Confirm<\/button>/g)).toHaveLength(1);
-    expect(html).not.toContain('>CONFIRMED<');
+    expect(html).not.toContain('>Confirmed<');
   });
 });
 

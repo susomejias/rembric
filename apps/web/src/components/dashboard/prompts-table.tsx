@@ -9,12 +9,13 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import { MENU_ITEM_BUTTON, MENU_ITEM_ROOT } from '@/components/dashboard/row-menu';
 import {
   useServerPagination,
   type TablePaginationSpec,
 } from '@/components/dashboard/server-pagination';
 import { shortId } from '@/components/dashboard/support';
-import { Pill, Time } from '@/components/dashboard/ui';
+import { Time, TonePill } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,9 +26,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-
-const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
-const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 export interface PromptRowData {
   readonly id: string;
@@ -98,7 +96,9 @@ export function PromptsTable({
       header: 'Status',
       sortable: true,
       value: (row) => row.status,
-      cell: (row) => <Pill tone={row.status === 'deleted' ? 'dim' : 'lime'}>{row.status}</Pill>,
+      cell: (row) => (
+        <TonePill tone={row.status === 'deleted' ? 'dim' : 'lime'}>{row.status}</TonePill>
+      ),
     },
     {
       id: 'session',
@@ -149,7 +149,7 @@ export function PromptsTable({
                     context.ids.length === 1 ? 'prompt' : 'prompts'
                   }?`}
                   description="They are hidden from default lists, memory.context.recentPrompts, and memory.search_prompts; restorable from the deleted view."
-                  confirmLabel="DELETE SELECTED"
+                  confirmLabel="Delete selected"
                 >
                   <Button type="button" variant="destructive" size="sm">
                     Delete selected
@@ -187,12 +187,7 @@ function PromptRowMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Actions for prompt ${row.title}`}
-          className="size-7 text-muted-foreground hover:text-foreground"
-        >
+        <Button variant="ghost" size="icon-sm" aria-label={`Actions for prompt ${row.title}`}>
           <MoreHorizontal aria-hidden="true" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -230,7 +225,7 @@ function PromptRowMenu({
                   tone="danger"
                   title="Soft-delete this prompt?"
                   description="It is hidden from default lists, memory.context.recentPrompts, and memory.search_prompts; restorable via the Undelete action."
-                  confirmLabel="DELETE PROMPT"
+                  confirmLabel="Delete prompt"
                 >
                   <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                     Delete prompt

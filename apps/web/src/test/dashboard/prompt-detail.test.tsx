@@ -233,7 +233,7 @@ describe('prompt detail', () => {
     seed({ deletedAt: new Date(2_000) });
     const html = await renderToHtml(await detail());
     expect(html).toContain('Original body');
-    expect(html).toContain('SOFT-DELETED');
+    expect(html).toContain('>Soft-deleted<');
     expect(html).toContain('deleted');
     expect(html).toContain('>Undelete</button>');
     expect(html).not.toContain('>Delete</button>');

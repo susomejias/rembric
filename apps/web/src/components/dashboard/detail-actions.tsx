@@ -1,18 +1,20 @@
 'use client';
 
+import { Ellipsis } from 'lucide-react';
 import { Popover } from 'radix-ui';
 import { useState, type ReactNode } from 'react';
+
+import { Button } from '@/components/ui/button';
 
 export function DetailActions({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger
-        aria-label={label}
-        className="detail-actions cursor-pointer shrink-0 rounded-lg border border-border px-3 py-1 text-xl hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
-      >
-        <span aria-hidden="true">⋯</span>
+      <Popover.Trigger asChild>
+        <Button type="button" variant="outline" size="icon-lg" aria-label={label}>
+          <Ellipsis aria-hidden="true" />
+        </Button>
       </Popover.Trigger>
       <Popover.Content
         forceMount

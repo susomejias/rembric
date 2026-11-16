@@ -35,8 +35,30 @@ describe('ConfirmSubmit shared shapes', () => {
     expect(html).toMatch(/data-slot="alert-dialog-cancel"[^>]*class="[^"]*rounded-\[10px\]/);
     expect(html).toMatch(/data-slot="alert-dialog-action"[^>]*class="[^"]*rounded-\[10px\]/);
     expect(html).toContain('form="radius-test-form"');
-    expect(html).toContain(`data-variant="${tone === 'danger' ? 'destructive' : 'default'}"`);
+    expect(html).toContain(`data-variant="${tone === 'danger' ? 'destructive' : 'warn'}"`);
     expect(html).toContain('type="submit"');
     expect(html).toContain('type="button"');
+  });
+
+  it.each([
+    ['danger', 'destructive'],
+    ['warn', 'warn'],
+  ] as const)('maps tone %s to the %s action variant with a Cancel label', (tone, variant) => {
+    const dialog = ConfirmSubmit({
+      tone,
+      title: 'Archive record?',
+      description: 'It can be restored later.',
+      confirmLabel: 'Archive selected',
+      children: <Button type="button">Open</Button>,
+    });
+    const html = renderToStaticMarkup(cloneElement(dialog, { defaultOpen: true }));
+    expect(html).toMatch(
+      new RegExp(
+        `data-slot="alert-dialog-action"[^>]*data-variant="${variant}"|data-variant="${variant}"[^>]*data-slot="alert-dialog-action"`,
+      ),
+    );
+    expect(html).toMatch(/data-slot="alert-dialog-cancel"[^>]*>Cancel</);
+    expect(html).not.toContain('CANCEL');
+    expect(html).toContain('Archive selected');
   });
 });

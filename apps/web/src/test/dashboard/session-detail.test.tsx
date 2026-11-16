@@ -708,7 +708,7 @@ describe('session detail curation-state rendering', () => {
     expect(html).not.toContain('detail-actions-panel');
     expect(html.match(/name="csrf"/g)).toHaveLength(labels.length);
     expect(html.match(/name="id" value="S-EMPTY"/g)).toHaveLength(labels.length);
-    expect(html.includes('SOFT-DELETED')).toBe(deleted);
+    expect(html.includes('>Soft-deleted<')).toBe(deleted);
     const ids = [...html.matchAll(/<form id="([^"]+)"/g)].map((match) => match[1]);
     expect(new Set(ids).size).toBe(labels.length);
     expect((html.match(/data-slot="alert-dialog-trigger"/g) ?? []).length).toBe(

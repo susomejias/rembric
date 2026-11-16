@@ -9,11 +9,12 @@ import {
   useServerQuickFilter,
   type TableQuickFilterSpec,
 } from '@/components/dashboard/quick-filter';
+import { MENU_ITEM_BUTTON, MENU_ITEM_ROOT } from '@/components/dashboard/row-menu';
 import {
   useServerPagination,
   type TablePaginationSpec,
 } from '@/components/dashboard/server-pagination';
-import { StatusPill, Time } from '@/components/dashboard/ui';
+import { StatusPill, Time, TonePill } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,9 +25,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-
-const MENU_ITEM_ROOT = 'flex h-8 w-full items-center px-2';
-const MENU_ITEM_BUTTON = 'h-full w-full justify-start px-0 text-sm font-normal';
 
 type RelationTone = 'lime' | 'amber' | 'dim';
 
@@ -39,45 +37,12 @@ const RELATION_TONE: Record<string, RelationTone> = {
   orphaned: 'dim',
 };
 
-const RELATION_PILL: Record<
-  RelationTone,
-  { border: string; bg: string; text: string; dot: string }
-> = {
-  lime: {
-    border: 'border-primary/40',
-    bg: 'bg-primary/10',
-    text: 'text-primary',
-    dot: 'bg-primary',
-  },
-  amber: {
-    border: 'border-warn/40',
-    bg: 'bg-warn/10',
-    text: 'text-warn',
-    dot: 'bg-warn',
-  },
-  dim: {
-    border: 'border-border',
-    bg: 'bg-input/60',
-    text: 'text-muted-foreground',
-    dot: 'bg-muted-foreground',
-  },
-};
-
 function RelationChip({ relation }: { relation: string | null }) {
   const label = relation ?? 'pending';
-  const tone = RELATION_PILL[RELATION_TONE[label] ?? 'dim'];
   return (
-    <span
-      className={cn(
-        'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
-        tone.border,
-        tone.bg,
-        tone.text,
-      )}
-    >
-      <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', tone.dot)} />
+    <TonePill tone={RELATION_TONE[label] ?? 'dim'} className="capitalize">
       {label}
-    </span>
+    </TonePill>
   );
 }
 
@@ -223,7 +188,7 @@ export function JudgmentsTable({
                     } will be removed from the queue and won't be re-judged automatically. ${skipped} non-pending ${
                       skipped === 1 ? 'judgment' : 'judgments'
                     } will be skipped.`}
-                    confirmLabel="MARK ORPHANED"
+                    confirmLabel="Mark orphaned"
                   >
                     <Button type="button" variant="destructive" size="sm">
                       Mark orphaned
@@ -271,9 +236,8 @@ function JudgmentRowMenu({
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
+          size="icon-sm"
           aria-label={`Actions for judgment ${row.sourceTitle}`}
-          className="size-7 text-muted-foreground hover:text-foreground"
         >
           <MoreHorizontal aria-hidden="true" className="size-4" />
         </Button>
@@ -302,7 +266,7 @@ function JudgmentRowMenu({
                   tone="danger"
                   title="Mark this judgment as orphaned?"
                   description="It will be removed from the pending queue and won't be re-judged automatically."
-                  confirmLabel="MARK ORPHANED"
+                  confirmLabel="Mark orphaned"
                 >
                   <Button type="button" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
                     Mark orphaned

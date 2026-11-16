@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -10,21 +11,12 @@ import {
   useServerPagination,
   type TablePaginationSpec,
 } from '@/components/dashboard/server-pagination';
+import { TonePill } from '@/components/dashboard/ui';
 import { DataTable, type DataTableColumn } from '@/components/spectrumui/data-table';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 function KindPill({ kind }: { kind: string }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
-        'border-border bg-input/60 text-muted-foreground',
-      )}
-    >
-      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-muted-foreground" />
-      {kind}
-    </span>
-  );
+  return <TonePill className="capitalize">{kind}</TonePill>;
 }
 
 export interface EntityRowData {
@@ -106,12 +98,12 @@ export function EntitiesTable({
         </div>
       )}
       rowActions={(row) => (
-        <Link
-          href={`/dashboard/memories?q=${encodeURIComponent(row.value)}`}
-          className="font-mono text-[11px] uppercase tracking-[.14em] text-muted-foreground hover:text-primary"
-        >
-          View memories →
-        </Link>
+        <Button asChild variant="ghost" size="sm">
+          <Link href={`/dashboard/memories?q=${encodeURIComponent(row.value)}`}>
+            View memories
+            <ArrowRight data-icon="inline-end" />
+          </Link>
+        </Button>
       )}
       toolbar={toolbar}
       quickFilterControl={quickFilterControl ?? undefined}

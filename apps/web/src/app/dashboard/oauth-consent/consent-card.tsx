@@ -1,10 +1,11 @@
 import { resolveGrantedScope } from '@rembric/core';
+import { ArrowRight, CircleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { CONSENT_FORM } from './session';
 
 import { CsrfField } from '@/components/dashboard/csrf-field';
-import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -102,16 +103,17 @@ export function ConsentCard({
           <CsrfField form={CONSENT_FORM} />
           <input type="hidden" name="areq" value={blob} />
           <input type="hidden" name="decision" value="approve" />
-          <Button type="submit" className="h-11 w-full rounded-[10px]">
-            AUTHORIZE →
+          <Button type="submit" size="lg" className="w-full">
+            Authorize
+            <ArrowRight data-icon="inline-end" />
           </Button>
         </form>
         <form action="/dashboard/oauth/consent" method="post" className="sm:flex-1">
           <CsrfField form={CONSENT_FORM} />
           <input type="hidden" name="areq" value={blob} />
           <input type="hidden" name="decision" value="deny" />
-          <Button type="submit" variant="outline" className="h-11 w-full rounded-[10px]">
-            DENY
+          <Button type="submit" variant="outline" size="lg" className="w-full">
+            Deny
           </Button>
         </form>
       </div>
@@ -157,12 +159,13 @@ export function ConsentShell({
 
 export function ErrorNotice({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-2.5">
-      <Badge variant="destructive" className="mt-0.5 shrink-0 font-mono tracking-[.14em]">
-        ERROR
-      </Badge>
-      <span className="text-sm leading-relaxed text-foreground">{message}</span>
-    </div>
+    <Alert variant="destructive">
+      <CircleAlert />
+      <AlertTitle>Authorization unavailable</AlertTitle>
+      <AlertDescription>
+        <p>{message}</p>
+      </AlertDescription>
+    </Alert>
   );
 }
 

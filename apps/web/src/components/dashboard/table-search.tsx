@@ -4,6 +4,7 @@ import { Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import * as React from 'react';
 
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
@@ -76,17 +77,19 @@ export function TableSearch({
         )}
       />
       {query ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={() => {
             setQuery('');
             if (lastPushed.current !== '') push('');
           }}
           aria-label="Clear search"
-          className="absolute inset-y-0 end-1 my-auto grid size-7 place-items-center rounded-lg text-muted-foreground transition-colors duration-150 ease-out hover:text-foreground focus-visible:outline-none"
+          className="absolute inset-y-0 end-1 my-auto"
         >
-          <X aria-hidden="true" className="size-3.5" />
-        </button>
+          <X aria-hidden="true" />
+        </Button>
       ) : null}
     </div>
   );

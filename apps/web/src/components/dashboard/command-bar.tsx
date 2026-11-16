@@ -8,6 +8,7 @@ import { useState, type ReactNode } from 'react';
 
 import { updaterReadState, type UpdaterInput } from './app-sidebar';
 
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,14 +50,15 @@ function NavMoreMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label="More pages"
-        className={cn(
-          'flex size-9 items-center justify-center rounded-lg transition-colors',
-          moreActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
-        )}
-      >
-        <MoreHorizontal aria-hidden="true" className="size-5" />
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant={moreActive ? 'secondary' : 'ghost'}
+          size="icon-lg"
+          aria-label="More pages"
+        >
+          <MoreHorizontal aria-hidden="true" className="size-5" />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="border-border bg-popover">
         <DropdownMenuLabel className="font-mono text-[10px] tracking-[.14em] text-muted-foreground">
@@ -138,7 +140,7 @@ function UpdaterChip({
       title={label}
       aria-label={label}
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[10px] tabular-nums transition-colors',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium tabular-nums transition-colors',
         available
           ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
           : 'border-border text-muted-foreground hover:text-foreground',
@@ -314,11 +316,16 @@ function CommandBar({
               <UpdaterChip state={updaterState} version={version} />
               <LogoutMenu account={account} />
               <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-                <SheetTrigger
-                  aria-label="Open navigation"
-                  className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground md:hidden"
-                >
-                  <Menu aria-hidden="true" className="size-5" />
+                <SheetTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-lg"
+                    aria-label="Open navigation"
+                    className="md:hidden"
+                  >
+                    <Menu aria-hidden="true" className="size-5" />
+                  </Button>
                 </SheetTrigger>
                 <SheetContent side="right" className="w-72 border-border bg-card p-0">
                   <SheetHeader className="border-b border-border px-4 py-4">

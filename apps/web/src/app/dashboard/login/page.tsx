@@ -1,7 +1,10 @@
+import { ArrowRight, CircleAlert } from 'lucide-react';
+
 import { LOGIN_CLIENTS, loginErrorMessage, safeNext } from './clients';
 
 import { singleParam } from '@/components/dashboard/support';
-import { Flash, LABEL } from '@/components/dashboard/ui';
+import { LABEL } from '@/components/dashboard/ui';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -67,11 +70,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           {next ? <input type="hidden" name="next" value={next} /> : null}
 
           {error ? (
-            <div id="login-error" role="alert">
-              <Flash tone="danger" label="ERROR">
-                {error}
-              </Flash>
-            </div>
+            <Alert id="login-error" variant="destructive">
+              <CircleAlert />
+              <AlertTitle>Sign-in failed</AlertTitle>
+              <AlertDescription>
+                <p>{error}</p>
+              </AlertDescription>
+            </Alert>
           ) : null}
 
           <div className="flex flex-col gap-2">
@@ -93,8 +98,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
 
           <div className="flex gap-3">
-            <Button type="submit" className="min-h-11 w-full">
-              SIGN IN →
+            <Button type="submit" size="lg" className="w-full">
+              Sign in
+              <ArrowRight data-icon="inline-end" />
             </Button>
           </div>
         </form>

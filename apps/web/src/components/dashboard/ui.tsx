@@ -31,14 +31,6 @@ const TONE_DOT: Record<Tone, string> = {
   danger: 'bg-destructive',
 };
 
-const TONE_BORDER: Record<Tone, string> = {
-  fg: 'border-border text-foreground',
-  lime: 'border-primary/40 text-primary',
-  amber: 'border-warn/40 text-warn',
-  dim: 'border-border text-muted-foreground',
-  danger: 'border-destructive/40 text-destructive',
-};
-
 function Bullet({ tone = 'lime', className }: { tone?: Tone; className?: string }) {
   return (
     <span
@@ -190,40 +182,6 @@ export function StatGrid({
   );
 }
 
-export function MetaGrid({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <dl
-      className={cn(
-        'mb-5 grid gap-x-6 gap-y-5 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-3',
-        className,
-      )}
-    >
-      {children}
-    </dl>
-  );
-}
-
-export function MetaRow({
-  k,
-  v,
-  tone = 'fg',
-  mono = false,
-}: {
-  k: string;
-  v: ReactNode;
-  tone?: Tone;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <dt className={cn('text-muted-foreground', LABEL)}>{k}</dt>
-      <dd className={cn('min-w-0 break-words text-sm', TONE_TEXT[tone], mono && 'font-mono')}>
-        {v}
-      </dd>
-    </div>
-  );
-}
-
 export function DataTable({ children }: { children: ReactNode }) {
   return (
     <div className="w-full overflow-hidden overflow-x-auto rounded-2xl border border-border bg-card">
@@ -279,20 +237,6 @@ export function TableEmpty({ children }: { children: ReactNode }) {
     >
       {children}
     </div>
-  );
-}
-
-export function Pill({ children, tone = 'dim' }: { children: ReactNode; tone?: Tone }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex w-fit items-center gap-2 rounded-full border bg-transparent px-2.5 py-0.5 font-mono text-[10px] whitespace-nowrap uppercase tracking-[.12em]',
-        TONE_BORDER[tone],
-      )}
-    >
-      <Bullet tone={tone} className="size-[7px]" />
-      {children}
-    </span>
   );
 }
 
@@ -375,23 +319,6 @@ export function StatusPill({ status }: { status: string }) {
   );
 }
 
-export function ReviewPill() {
-  return <Pill tone="amber">needs review</Pill>;
-}
-
-export function Chip({ children, tone = 'lime' }: { children: ReactNode; tone?: Tone }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex w-fit items-center border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[.12em]',
-        TONE_BORDER[tone],
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
 export function Bar({
   percent,
   tone = 'lime',
@@ -409,63 +336,6 @@ export function Bar({
         )}
         style={{ width: `${clamped}%` }}
       />
-    </div>
-  );
-}
-
-export function Notice({
-  tone = 'lime',
-  badge,
-  children,
-  className,
-}: {
-  tone?: Tone;
-  badge: ReactNode;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        'flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3',
-        tone === 'amber'
-          ? 'border-warn/40'
-          : tone === 'danger'
-            ? 'border-destructive/40'
-            : 'border-primary/40',
-        className,
-      )}
-    >
-      <span className={cn('flex items-center gap-2 font-semibold', LABEL, TONE_TEXT[tone])}>
-        <Bullet tone={tone} />
-        {badge}
-      </span>
-      <span className="text-xs text-muted-foreground">{children}</span>
-    </div>
-  );
-}
-
-export function Flash({
-  tone = 'lime',
-  label,
-  children,
-}: {
-  tone?: Tone;
-  label: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        'mb-5 flex flex-wrap items-center gap-4 rounded-xl border bg-card px-5 py-4',
-        TONE_BORDER[tone],
-      )}
-    >
-      <span className={cn('flex items-center gap-2 font-semibold', LABEL, TONE_TEXT[tone])}>
-        <Bullet tone={tone} />
-        {label}
-      </span>
-      <span className="text-sm">{children}</span>
     </div>
   );
 }
