@@ -29,6 +29,7 @@ export * from './services/oauth.js';
 export * from './services/projects.js';
 export * from './services/prompts.js';
 export * from './services/relations.js';
+export * from './services/repository-bindings.js';
 export * from './services/review.js';
 export * from './services/save-curation.js';
 export * from './services/save-time-candidates.js';

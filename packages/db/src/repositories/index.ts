@@ -6,7 +6,11 @@ import { DashboardSessionsRepository } from './dashboard-sessions-repository.js'
 import { EntitiesRepository } from './entities-repository.js';
 import { MemoryRepository } from './memory-repository.js';
 import { OAuthRepository } from './oauth-repository.js';
-import { ProjectsRepository } from './projects-repository.js';
+import {
+  PendingRepositoriesRepository,
+  ProjectsRepository,
+  RepositoryBindingsRepository,
+} from './projects-repository.js';
 import { PromptsRepository } from './prompts-repository.js';
 import { RelationsRepository } from './relations-repository.js';
 import { TermStatisticsRepository } from './term-statistics-repository.js';
@@ -39,7 +43,13 @@ export {
   type BoundedEndpoint,
 } from './memory-repository.js';
 export { OAuthRepository } from './oauth-repository.js';
-export { ProjectsRepository } from './projects-repository.js';
+export {
+  PendingRepositoriesRepository,
+  ProjectsRepository,
+  RepositoryBindingsRepository,
+  type PendingRepositoryTokenView,
+  type RepositoryBindingView,
+} from './projects-repository.js';
 export {
   PromptsRepository,
   type AdminListPromptsOpts,
@@ -76,6 +86,8 @@ export interface Repositories {
   entities: EntitiesRepository;
   termStatistics: TermStatisticsRepository;
   wrapped: WrappedRepository;
+  repositoryBindings: RepositoryBindingsRepository;
+  pendingRepositories: PendingRepositoriesRepository;
 }
 
 export function createRepositories(db: Db): Repositories {
@@ -93,5 +105,7 @@ export function createRepositories(db: Db): Repositories {
     entities: new EntitiesRepository(db),
     termStatistics: new TermStatisticsRepository(db),
     wrapped: new WrappedRepository(db),
+    repositoryBindings: new RepositoryBindingsRepository(db),
+    pendingRepositories: new PendingRepositoriesRepository(db),
   };
 }

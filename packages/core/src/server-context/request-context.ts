@@ -8,6 +8,8 @@ export interface RequestContext extends TokenReach {
   token: Token;
   project: Project | null;
   requestedSlug: string | null;
+  /** Absent without an `X-Rembric-Repo-Fingerprint` header; `fingerprint` is null for `unavailable`. */
+  repository?: { fingerprint: string | null };
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();

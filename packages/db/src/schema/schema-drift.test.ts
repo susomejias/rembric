@@ -160,6 +160,10 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE UNIQUE INDEX projects_is_default_uidx ON projects(is_default) WHERE is_default = 1',
   },
   {
+    name: 'project_repositories_project_idx',
+    sql: 'CREATE INDEX project_repositories_project_idx ON project_repositories (project_id)',
+  },
+  {
     name: 'projects_slug_unique',
     sql: 'CREATE UNIQUE INDEX projects_slug_unique ON projects (slug)',
   },
@@ -168,6 +172,14 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX prompts_project_created_idx ON prompts (project_id, created_at)',
   },
   { name: 'prompts_session_idx', sql: 'CREATE INDEX prompts_session_idx ON prompts (session_id)' },
+  {
+    name: 'repository_pending_identity_uidx',
+    sql: "CREATE UNIQUE INDEX repository_pending_identity_uidx ON repository_pending (fingerprint, kind, coalesce(project_id, ''))",
+  },
+  {
+    name: 'repository_pending_tokens_token_idx',
+    sql: 'CREATE INDEX repository_pending_tokens_token_idx ON repository_pending_tokens (token_id)',
+  },
   {
     name: 'sessions_project_started_idx',
     sql: 'CREATE INDEX sessions_project_started_idx ON sessions (project_id, started_at)',
@@ -191,8 +203,11 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
   { name: 'sqlite_autoindex_oauth_authorization_codes_1', sql: null },
   { name: 'sqlite_autoindex_oauth_clients_1', sql: null },
   { name: 'sqlite_autoindex_oauth_tokens_1', sql: null },
+  { name: 'sqlite_autoindex_project_repositories_1', sql: null },
   { name: 'sqlite_autoindex_projects_1', sql: null },
   { name: 'sqlite_autoindex_prompts_1', sql: null },
+  { name: 'sqlite_autoindex_repository_pending_1', sql: null },
+  { name: 'sqlite_autoindex_repository_pending_tokens_1', sql: null },
   { name: 'sqlite_autoindex_sessions_1', sql: null },
   { name: 'sqlite_autoindex_tokens_1', sql: null },
   { name: 'tokens_name_unique', sql: 'CREATE UNIQUE INDEX tokens_name_unique ON tokens (name)' },
@@ -319,6 +334,28 @@ const EXPECTED_COLUMNS: Record<
   token_projects: [
     { name: 'token_id', type: 'TEXT', notnull: 1, pk: 1 },
     { name: 'project_id', type: 'TEXT', notnull: 1, pk: 2 },
+  ],
+  project_repositories: [
+    { name: 'fingerprint', type: 'TEXT', notnull: 1, pk: 1 },
+    { name: 'project_id', type: 'TEXT', notnull: 1, pk: 2 },
+    { name: 'remotes', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'created_at', type: 'INTEGER', notnull: 1, pk: 0 },
+    { name: 'created_by', type: 'TEXT', notnull: 1, pk: 0 },
+  ],
+  repository_pending: [
+    { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },
+    { name: 'fingerprint', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'kind', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'project_id', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'remotes', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'root_name', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'first_seen_at', type: 'INTEGER', notnull: 1, pk: 0 },
+    { name: 'last_seen_at', type: 'INTEGER', notnull: 1, pk: 0 },
+    { name: 'discarded_at', type: 'INTEGER', notnull: 0, pk: 0 },
+  ],
+  repository_pending_tokens: [
+    { name: 'pending_id', type: 'TEXT', notnull: 1, pk: 1 },
+    { name: 'token_id', type: 'TEXT', notnull: 1, pk: 2 },
   ],
 };
 
