@@ -1882,3 +1882,128 @@ describe('RembricPluginV2 (opencode 2.x)', () => {
     stream.end();
   });
 });
+
+describe('project resolution for the lifecycle handlers', () => {
+  const GIT_ENV = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Fixture Author',
+    GIT_AUTHOR_EMAIL: 'author@example.test',
+    GIT_COMMITTER_NAME: 'Fixture Committer',
+    GIT_COMMITTER_EMAIL: 'committer@example.test',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+  };
+  let dir: string;
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let resolveReply: { status: number; body: unknown };
+  let written: string[];
+  let stderrSpy: ReturnType<typeof spyOnStderr>;
+
+  function git(...args: string[]) {
+    execFileSync('git', args, { cwd: dir, env: GIT_ENV });
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-resolve-'));
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(dir, 'a.txt'), 'a\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'root');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+    delete process.env.REMBRIC_PROJECT_SLUG;
+    resolveReply = { status: 200, body: { ok: true, outcome: 'bound', slug: 'shop' } };
+    fetchMock = vi.fn(async (url: string) =>
+      String(url).endsWith('/api/repositories/resolve')
+        ? Response.json(resolveReply.body, { status: resolveReply.status })
+        : new Response('', { status: 200 }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    written = [];
+    stderrSpy = spyOnStderr(written);
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+    delete process.env.REMBRIC_PROJECT_SLUG;
+    vi.restoreAllMocks();
+  });
+
+  const urls = () => fetchMock.mock.calls.map(([url]) => String(url));
+  const created = (id: string) => ({
+    event: { type: 'session.created', properties: { info: { id, parentID: '', title: 'work' } } },
+  });
+
+  it('a bound fingerprint scopes the lifecycle calls, resolved once for every session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('bound-1') as never);
+    await handlers.event!(created('bound-2') as never);
+
+    expect(urls().filter((u) => u.endsWith('/api/repositories/resolve'))).toHaveLength(1);
+    expect(urls().filter((u) => u === 'http://localhost:9999/api/shop/sessions')).toHaveLength(2);
+  });
+
+  it('an unbound checkout posts nothing to any project endpoint and says why once', async () => {
+    resolveReply = { status: 200, body: { ok: true, outcome: 'unbound', reason: 'not_bound' } };
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('unbound-1') as never);
+    await handlers['chat.message']!(
+      { sessionID: 'unbound-1' } as never,
+      { parts: [{ type: 'text', text: 'hi' }], message: {} } as never,
+    );
+
+    expect(urls()).toEqual(['http://localhost:9999/api/repositories/resolve']);
+    const reasons = written.filter((line) => line.includes('plugin disabled'));
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('not bound to a project');
+  });
+
+  it('a server without the resolve endpoint posts nothing either', async () => {
+    resolveReply = { status: 404, body: { error: 'not found' } };
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('old-1') as never);
+    expect(urls()).toEqual(['http://localhost:9999/api/repositories/resolve']);
+  });
+
+  it('REMBRIC_PROJECT_SLUG applies when no .rembric resolves, and .rembric still beats it', async () => {
+    process.env.REMBRIC_PROJECT_SLUG = 'from-env';
+    resolveReply = {
+      status: 200,
+      body: { ok: true, outcome: 'explicit', slug: 'x', conflict: null },
+    };
+    const fromEnv = await RembricPlugin({ directory: dir } as never);
+    await fromEnv.event!(created('env-1') as never);
+    expect(urls()).toContain('http://localhost:9999/api/from-env/sessions');
+
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=from-file\n');
+    const fromFile = await RembricPlugin({ directory: dir } as never);
+    await fromFile.event!(created('file-1') as never);
+    expect(urls()).toContain('http://localhost:9999/api/from-file/sessions');
+  });
+
+  it('the 2.x entry point resolves the same way and registers nothing when unbound', async () => {
+    resolveReply = { status: 200, body: { ok: true, outcome: 'unbound', reason: 'not_bound' } };
+    const hooks = new Map<string, unknown>();
+    const context = {
+      app: { version: '2.0.23' },
+      location: { directory: dir },
+      session: {
+        hook: async (name: string, cb: unknown) => hooks.set(name, cb),
+        get: async () => ({}),
+      },
+      tool: { hook: async (name: string, cb: unknown) => hooks.set(name, cb) },
+      event: {
+        subscribe: () => ({
+          [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+        }),
+      },
+    };
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+    expect(hooks.size).toBe(0);
+    expect(cleanup).toBeUndefined();
+    expect(urls()).toEqual(['http://localhost:9999/api/repositories/resolve']);
+  });
+});

@@ -27,8 +27,11 @@ OPENCODE_JSON="${OPENCODE_DIR}/opencode.json"
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 PLUGIN_DEST="${OPENCODE_PLUGINS_DIR}/rembric.ts"
 DOTENV_LIB='rembric-dotenv.mjs'
+PROJECT_LIB='rembric-project.mjs'
 CORE_LIB='rembric-plugin-core.mjs'
-SHARED_LIBS="$DOTENV_LIB $CORE_LIB"
+SHARED_LIBS="$DOTENV_LIB $PROJECT_LIB $CORE_LIB"
+# rembric-dotenv.mjs is reached through rembric-project.mjs's own relative import.
+IMPORTED_LIBS="$PROJECT_LIB $CORE_LIB"
 
 if ! mkdir -p "$OPENCODE_PLUGINS_DIR" 2>/dev/null; then
   printf '[rembric] error: cannot create %s\n' "$OPENCODE_PLUGINS_DIR" >&2
@@ -62,6 +65,7 @@ fetch_file() {
 }
 
 fetch_file "${MCP_BRIDGE_SRC}/${DOTENV_LIB}" "${REMBRIC_BIN_DIR}/${DOTENV_LIB}" || exit 1
+fetch_file "${MCP_BRIDGE_SRC}/${PROJECT_LIB}" "${REMBRIC_BIN_DIR}/${PROJECT_LIB}" || exit 1
 fetch_file "${BIN_SRC}/${CORE_LIB}" "${REMBRIC_BIN_DIR}/${CORE_LIB}" || exit 1
 for lib in $SHARED_LIBS; do chmod 644 "${REMBRIC_BIN_DIR}/${lib}"; done
 
@@ -72,12 +76,13 @@ trap 'rm -f "$TMP_PLUGIN"' EXIT
 fetch_file "${PLUGIN_SRC}/plugin.ts" "$TMP_PLUGIN" || exit 1
 REWRITE=''
 REWRITE="s|'\.\./mcp-bridge/rembric-dotenv\.mjs'|'${REMBRIC_BIN_DIR}/${DOTENV_LIB}'|g
+s|'\.\./mcp-bridge/rembric-project\.mjs'|'${REMBRIC_BIN_DIR}/${PROJECT_LIB}'|g
 s|'\.\./bin/rembric-plugin-core\.mjs'|'${REMBRIC_BIN_DIR}/${CORE_LIB}'|g
 "
 sed "$REWRITE" "$TMP_PLUGIN" >"$PLUGIN_DEST"
 # An import that drifts from its sed pattern above no-ops silently and crashes
 # the installed plugin at load, so EVERY destination is verified, not one.
-for lib in $SHARED_LIBS; do
+for lib in $IMPORTED_LIBS; do
   dest="${REMBRIC_BIN_DIR}/${lib}"
   if ! grep -qF "$dest" "$PLUGIN_DEST"; then
     rm -f "$PLUGIN_DEST"
@@ -85,6 +90,11 @@ for lib in $SHARED_LIBS; do
     exit 1
   fi
 done
+if grep -qF "'../" "$PLUGIN_DEST"; then
+  rm -f "$PLUGIN_DEST"
+  printf '[rembric] error: import rewrite failed — plugin.ts still has a relative ../ import after sed; removed the broken plugin file\n' >&2
+  exit 1
+fi
 chmod 644 "$PLUGIN_DEST"
 
 cat <<EOF

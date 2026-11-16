@@ -1045,6 +1045,7 @@ describe('opencode installer verifications', () => {
     const files = [
       join(home, '.config', 'opencode', 'plugins', 'rembric.ts'),
       join(home, '.config', 'rembric', 'bin', 'rembric-dotenv.mjs'),
+      join(home, '.config', 'rembric', 'bin', 'rembric-project.mjs'),
       join(home, '.config', 'rembric', 'bin', 'rembric-plugin-core.mjs'),
     ];
     const first = run(['--agent=opencode', '--action=install'], { home });
@@ -1144,15 +1145,15 @@ describe('opencode installer verifications', () => {
   });
 
   it.each([
-    { label: 'core', good: 'rembric-dotenv.mjs', drifted: 'rembric-plugin-core.mjs' },
-    { label: 'dotenv', good: 'rembric-plugin-core.mjs', drifted: 'rembric-dotenv.mjs' },
+    { label: 'core', good: 'rembric-project.mjs', drifted: 'rembric-plugin-core.mjs' },
+    { label: 'project', good: 'rembric-plugin-core.mjs', drifted: 'rembric-project.mjs' },
   ])('a drifted $label import aborts even though the other rewrite succeeded', ({ drifted }) => {
     const drift = mkdtempSync(join(tmpdir(), 'rembric-drift-'));
     writeFileSync(
       join(drift, 'plugin.ts'),
       [
         '// @rembric-plugin-version 0.0.0',
-        "import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';",
+        "import { resolveProject } from '../mcp-bridge/rembric-project.mjs';",
         "import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';",
         'export const RembricPlugin = () => ({});',
         '',
@@ -1160,7 +1161,7 @@ describe('opencode installer verifications', () => {
         .join('\n')
         // Drift ONE import out of the sed pattern's reach; the other still rewrites.
         .replace(
-          `../${drifted === 'rembric-dotenv.mjs' ? 'mcp-bridge' : 'bin'}/${drifted}`,
+          `../${drifted === 'rembric-project.mjs' ? 'mcp-bridge' : 'bin'}/${drifted}`,
           `./lib/${drifted}`,
         ),
     );
@@ -1177,6 +1178,34 @@ describe('opencode installer verifications', () => {
     expect(code).toBe(1);
     expect(out).toContain('rewrite failed');
     expect(out).toContain(drifted);
+    expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
+  });
+
+  it('a relative import no sed pattern covers aborts and removes the partial plugin', () => {
+    const drift = mkdtempSync(join(tmpdir(), 'rembric-drift-'));
+    writeFileSync(
+      join(drift, 'plugin.ts'),
+      [
+        '// @rembric-plugin-version 0.0.0',
+        "import { resolveProject } from '../mcp-bridge/rembric-project.mjs';",
+        "import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';",
+        "import { unknown } from '../mcp-bridge/unlisted.mjs';",
+        'export const RembricPlugin = () => ({});',
+        '',
+      ].join('\n'),
+    );
+    const { code, out } = run([], {
+      home,
+      script: OPENCODE_INSTALL,
+      env: {
+        PLUGIN_SRC: drift,
+        BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin'),
+        MCP_BRIDGE_SRC: join(REPO_ROOT, 'apps', 'plugin', 'mcp-bridge'),
+      },
+    });
+    rmSync(drift, { recursive: true, force: true });
+    expect(code).toBe(1);
+    expect(out).toContain('relative ../ import');
     expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
   });
 

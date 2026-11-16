@@ -1,7 +1,7 @@
 import { keyHint } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
 
-// These two specifiers are rewritten to `./bin/` at publish time.
+// These specifiers are rewritten to `./bin/` at publish time.
 import type { SessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import {
   createSessionProtocol,
@@ -9,7 +9,7 @@ import {
   extractCommandPaths,
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
-import { readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
+import { FINGERPRINT_HEADER, resolveProject } from '../mcp-bridge/rembric-project.mjs';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -105,7 +105,7 @@ function discoveryDeadline(): AbortSignal {
   );
 }
 
-function createMcpClient(endpoint: string, apiToken: string) {
+function createMcpClient(endpoint: string, apiToken: string, fingerprint: string | null) {
   let mcpSessionId: string | null = null;
   let negotiatedVersion = PROTOCOL_VERSION;
   let nextId = 1;
@@ -119,6 +119,7 @@ function createMcpClient(endpoint: string, apiToken: string) {
       'MCP-Protocol-Version': negotiatedVersion,
     };
     if (mcpSessionId) out['mcp-session-id'] = mcpSessionId;
+    if (fingerprint) out[FINGERPRINT_HEADER] = fingerprint;
     return out;
   }
 
@@ -322,31 +323,7 @@ export default function rembric(pi: ExtensionApi): void {
     return core.isRegistered(hostSessionId) ? { ...params, sessionId: hostSessionId } : params;
   }
 
-  pi.on('session_start', async (_event, ctx) => {
-    if (core) return;
-
-    const cwd = ctx.cwd;
-    const slug = readRembricSlug(cwd);
-    const apiToken = process.env.REMBRIC_API_TOKEN ?? '';
-    const protocol = createSessionProtocol({
-      agent: 'pi',
-      serverUrl: process.env.REMBRIC_SERVER_URL,
-      apiToken,
-      slug,
-      cwd,
-    });
-    if (protocol.disabled) {
-      ctx.ui?.notify(
-        `Rembric is off — ${protocol.disabledReason}. Fix it and restart Pi.`,
-        'warning',
-      );
-      return;
-    }
-
-    const client = createMcpClient(`${protocol.baseUrl}/mcp/${slug}`, apiToken);
-    core = protocol;
-    mcp = client;
-
+  async function discoverTools(client: McpClient, ctx: ExtensionContext): Promise<void> {
     try {
       const deadline = discoveryDeadline();
       await client.initialize(deadline);
@@ -392,6 +369,49 @@ export default function rembric(pi: ExtensionApi): void {
       diag(`tool discovery failed: ${detail}`);
       ctx.ui?.notify(`Rembric tools unavailable — ${detail}`, 'error');
     }
+  }
+
+  pi.on('session_start', async (_event, ctx) => {
+    if (core || mcp) return;
+
+    const cwd = ctx.cwd;
+    const serverUrl = process.env.REMBRIC_SERVER_URL;
+    const apiToken = process.env.REMBRIC_API_TOKEN ?? '';
+    const project = await resolveProject({ startDir: cwd, env: process.env, serverUrl, apiToken });
+
+    if (project.mode === 'unbound' && serverUrl) {
+      diag(project.message);
+      ctx.ui?.notify(`Rembric: ${project.message}`, 'warning');
+      mcp = createMcpClient(`${serverUrl.replace(/\/$/, '')}/mcp`, apiToken, project.header);
+      await discoverTools(mcp, ctx);
+      return;
+    }
+
+    const slug = project.mode === 'project' ? project.slug : null;
+    const protocol = createSessionProtocol({
+      agent: 'pi',
+      serverUrl,
+      apiToken,
+      slug,
+      cwd,
+      projectIssue: project.mode === 'refused' ? project.message : null,
+    });
+    if (protocol.disabled) {
+      ctx.ui?.notify(
+        `Rembric is off — ${protocol.disabledReason}. Fix it and restart Pi.`,
+        'warning',
+      );
+      return;
+    }
+    if (project.conflict && project.message) {
+      diag(project.message);
+      ctx.ui?.notify(`Rembric: ${project.message}`, 'warning');
+    }
+
+    const client = createMcpClient(`${protocol.baseUrl}/mcp/${slug}`, apiToken, project.header);
+    core = protocol;
+    mcp = client;
+    await discoverTools(client, ctx);
   });
 
   pi.on('before_agent_start', async (event: BeforeAgentStartEvent, ctx) => {
