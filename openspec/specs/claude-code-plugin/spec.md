@@ -752,7 +752,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 
 When the bridge falls back to path-less `/mcp` outside a git work tree — no `.rembric`, a parse failure, no `PROJECT_SLUG`, or an invalid slug — the connection SHALL resolve to the server's default project for its whole life. Inside a git work tree there is no such fallback: a checkout that no `.rembric`, `REMBRIC_PROJECT_SLUG` or bound fingerprint resolves is unbound, or gets no connection at all, as the `repository-binding` and `mcp-bridge` capabilities specify. The plugin SHALL NOT rely on MCP roots discovery or on any tool call to select another project: the server does neither, and no tool can switch a connection's project. The bridge's stderr diagnostic SHALL name the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`), as the `mcp-bridge` capability specifies.
 
-When the bridge path-scopes the URL with a slug that does not yet correspond to a Rembric project, every scope-resolving tool SHALL be refused with `project_not_found`, and the refusal SHALL point to the dashboard. The project SHALL be created from the dashboard; no agent-side bootstrap call exists, and the plugin's model-facing text SHALL NOT instruct the agent to create or switch a project. Subsequent tool calls on the same URL find the project once the operator has created it.
+When the bridge path-scopes the URL with a slug that does not yet correspond to a Rembric project, every scope-resolving tool SHALL be refused with `project_not_found`, and the refusal SHALL point to the dashboard. The project SHALL be created from the dashboard, or by an admin token through `project.create`, after which subsequent tool calls on the same URL find it; the plugin's model-facing text SHALL NOT instruct the agent to create or switch a project.
 
 To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`), or an admin changes the repository's binding, and starts a new host session; there is no in-session override.
 
@@ -806,7 +806,7 @@ The active Rembric project is resolved once per host session by the cascade the 
 
 **Bootstrap for new slugs:**
 
-- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, every scope-resolving tool is refused with `project_not_found` (`project '<slug>' does not exist; create it from the dashboard`, carrying `suggestedSlugs`). The operator creates the project from the dashboard (`/dashboard/projects`); subsequent calls on the same URL find it. No agent-side bootstrap call exists.
+- The first time the bridge connects with a slug that does not yet correspond to a Rembric project, every scope-resolving tool is refused with `project_not_found`, carrying `suggestedSlugs`. For a token whose scope is not `*` the message is `project '<slug>' does not exist; create it from the dashboard`; for an admin token it is `project '<slug>' does not exist; create it from the dashboard or with project.create({ slug: '<slug>' })`. The operator creates the project from the dashboard (`/dashboard/projects`), or an admin token creates it with `project.create`; subsequent calls on the same URL find it. No other agent-side bootstrap call exists.
 
 **Manual override during a session:**
 

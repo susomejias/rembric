@@ -10,7 +10,7 @@ Defines project identity and scope resolution for Rembric, including path-based 
 
 The `projects` table SHALL store the canonical identifier of each project in a column named `slug` (renamed from `path` in this change). `slug` SHALL be `TEXT NOT NULL UNIQUE`. A migration SHALL rename the column atomically; no value normalization SHALL occur during the rename — legacy values continue to function for read and write.
 
-Projects SHALL be created from the dashboard only; no MCP tool SHALL create a project. For _new_ slugs created after this change, the value SHALL match the strict regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Paths SHALL NOT be persisted in the projects table and SHALL NOT be accepted by any tool argument.
+Projects SHALL be created from the dashboard, or by an admin token through the `project.create` MCP tool (see the `mcp-api` capability); no other MCP tool, argument or resolution path SHALL create a project. For _new_ slugs created after this change, the value SHALL match the strict regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. Paths SHALL NOT be persisted in the projects table and SHALL NOT be accepted by any tool argument.
 
 #### Scenario: Renaming the column at migration time
 
@@ -20,12 +20,12 @@ Projects SHALL be created from the dashboard only; no MCP tool SHALL create a pr
 
 #### Scenario: Creating a new project with a valid slug
 
-- **WHEN** the operator creates a project with slug `rembric-api` from the dashboard and the slug does not exist
+- **WHEN** the operator creates a project with slug `rembric-api` from the dashboard, or an admin token calls `project.create({ slug: 'rembric-api' })`, and the slug does not exist
 - **THEN** a new row SHALL be inserted with that slug
 
 #### Scenario: No MCP tool creates a project
 
-- **WHEN** an MCP client calls any registered tool on a connection whose slug names no project, with any arguments
+- **WHEN** an MCP client calls any registered tool other than `project.create` on a connection whose slug names no project, with any arguments
 - **THEN** no `projects` row SHALL be inserted
 
 #### Scenario: Creating a new project with an invalid slug

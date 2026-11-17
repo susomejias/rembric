@@ -117,7 +117,7 @@ The title predates this change: there are no global memories left to leak, and t
 - **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
 - **WHEN** the client calls `project.current`, `project.list` or `memory.about`
 - **THEN** each call SHALL succeed
-- **AND** the `project_not_found` refusal that every scope-resolving tool returns on that connection SHALL name the dashboard as the place to create the project, and SHALL NOT name a tool call as a way to create or activate it
+- **AND** the `project_not_found` refusal that every scope-resolving tool returns on that connection SHALL name the dashboard as the place to create the project; for a token whose scope is `*` it SHALL also name `project.create`, the one tool call that creates a project, and for any other token it SHALL NOT name a tool call as a way to create it. It SHALL NOT name a tool call as a way to activate it, for any token
 
 ### Requirement: The MCP endpoint MUST support path-based project scoping
 
@@ -2581,11 +2581,11 @@ The tag contract in this requirement and the updated shared-curation requirement
 - **THEN** `memory.context` SHALL retain its existing response fields, defaults, and limits without a tag catalog or larger payload contract
 - **AND** `memory.save_prompt` SHALL retain its existing optional-tag semantics without memory-tag normalization
 
-### Requirement: The MCP server MUST expose three project-management tools under the `project.*` namespace
+### Requirement: The MCP server MUST expose four project-management tools under the `project.*` namespace
 
-The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list`, `project.current` and `project.bind_repository` with the following contracts; `project.bind_repository` is specified in "The MCP server MUST expose `project.bind_repository` to admin tokens". Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
+The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list`, `project.current`, `project.bind_repository` and `project.create` with the following contracts; `project.bind_repository` is specified in "The MCP server MUST expose `project.bind_repository` to admin tokens", and `project.create` in "The MCP server MUST expose `project.create` to admin tokens". Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
 
-No tool SHALL activate, switch or create a project. A connection's project is fixed by its URL path, or is the default project on a path-less connection, or is absent on an unbound request; projects are created from the dashboard. `project.bind_repository` binds a repository fingerprint to an existing project for later sessions and SHALL NOT change the project of the connection it is called on. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
+No tool SHALL activate or switch a project, and no tool other than `project.create` SHALL create one. A connection's project is fixed by its URL path, or is the default project on a path-less connection, or is absent on an unbound request; projects are created from the dashboard, or by an admin token through `project.create`. `project.bind_repository` binds a repository fingerprint to an existing project for later sessions, `project.create` creates a project and, when asked, binds the repository to it, and neither SHALL change the project of the connection it is called on. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
 
 `project.list`'s per-project count SHALL be named `activeMemoryCount` and SHALL count only memories whose `status` is `active`, in that project's scope. The name carries the filter because the count's previous name, `memoryCount`, stated neither dimension and was measured disagreeing with the corpus the same connection could read: after `memory.archive` on a project's only memory, `project.list` reported `1` while `memory.search` in that same scope returned `0`. The name is additionally reused elsewhere in the server for a different aggregate (memories saved in one session), so a bare `memoryCount` on this payload is ambiguous in two ways at once. Renaming rather than silently re-filtering is required: a changed value under an unchanged key gives a consumer no signal to re-read the contract.
 
@@ -2597,11 +2597,11 @@ No tool SHALL activate, switch or create a project. A connection's project is fi
 
 `project.list`'s registered top-level description SHALL state that the count is of active memories. This SHALL be in the description string returned by `tools/list`, not only in a schema `describe()`, which some clients do not surface to the model.
 
-#### Scenario: No project-switching or project-creating tool is offered
+#### Scenario: No project-switching tool is offered, and only `project.create` creates a project
 
 - **WHEN** an MCP client calls `tools/list` on `/mcp` or on `/mcp/<slug>`
-- **THEN** the response SHALL contain `project.list`, `project.current` and `project.bind_repository`
-- **AND** the response SHALL NOT contain `project.use`, nor any other tool that activates, switches or creates a project
+- **THEN** the response SHALL contain `project.list`, `project.current`, `project.bind_repository` and `project.create`
+- **AND** the response SHALL NOT contain `project.use`, nor any tool that activates or switches a project, nor any tool other than `project.create` that creates one
 
 #### Scenario: `project.list` returns available slugs
 
@@ -2676,7 +2676,7 @@ Every registered MCP tool except `memory.about` SHALL be classified as `read` or
 
 Write classification: `memory.save`, `memory.save_prompt`, `memory.capture_passive`, `memory.confirm`, `memory.judge`, `memory.compare`, `memory.session_start`, `memory.session_summary`, `memory.session_end`. `memory.compare` is a write because it always persists a `memory_relations` row (`status='judged'`) and, for `relation='supersedes'`, flips the target memory's `status` to `superseded` and appends to the source's `replaces[]` — a lifecycle mutation, not a read. Read classification: `memory.search`, `memory.get`, `memory.context`, `memory.timeline`, `memory.stats`, `memory.doctor`, `memory.search_prompts`, `memory.suggest_topic_key`, `memory.session_get`, `project.current`. `project.list` SHALL filter its result to the projects the token is authorized to read, using the same per-project predicate: `*` and `read:*` tokens see all projects; `project:<id>` and `read:project:<id>` tokens see only that project; a set-scoped token sees exactly its members. **That predicate and the one that builds the widened search set SHALL be the same expression, so `project.list` and a widened `memory.search` can never disagree about a token's reach.**
 
-No MCP tool creates a project, so no tool call needs the project-creation authorization the retired `project.use({autocreate: true})` path carried; projects are created from the dashboard.
+`project.create` is the only MCP tool that creates a project. It SHALL NOT go through the effective-scope resolver: the project it names does not exist before the call, and its authorization is the admin check, the literal token scope `*`, evaluated before any other validation (see "The MCP server MUST expose `project.create` to admin tokens"). No other tool call SHALL carry a project-creation authorization, including the one the retired `project.use({autocreate: true})` path carried.
 
 #### Scenario: Read-restricted token attempts a formerly-ungated write
 
@@ -3038,3 +3038,72 @@ The tool SHALL be callable on path-scoped, path-less and unbound requests alike,
 
 - **WHEN** a client calls `project.bind_repository` with a `fingerprint` property
 - **THEN** the call SHALL be refused by the strict input schema as an unknown property
+
+### Requirement: The MCP server MUST expose `project.create` to admin tokens
+
+`project.create` SHALL create a project and, when asked, bind the repository identified by the request's `X-Rembric-Repo-Fingerprint` header to it. Its strict input schema SHALL declare exactly three properties: `slug` (required), `displayName` (optional) and `bindRepository` (optional boolean, default false). The fingerprint SHALL NOT be a tool argument.
+
+`project.create` is a `project.*` tool registered on `/mcp` and `/mcp/<slug>` alongside `project.list`, `project.current` and `project.bind_repository`, and it is the only tool that creates a project (see "The MCP server MUST expose four project-management tools under the `project.*` namespace"): it creates a project, and like every other tool it SHALL NOT activate or switch one. `tools/list` SHALL contain it, and SHALL contain no other tool that creates a project.
+
+The tool SHALL refuse, in this order, inserting no row:
+
+1. a token whose scope is not `*`, with `admin_token_required`, after the strict input schema and before any other check — the slug rule, the existing slugs and the fingerprint;
+2. a `slug` that does not match the strict slug regex, with `invalid_slug`;
+3. a `slug` that names an existing project, archived or not, with `project_already_exists`, whose message SHALL name `project.bind_repository` as the way to bind a repository to an existing project.
+
+A successful call SHALL insert the project and SHALL return `{ slug, projectId, displayName, binding: { status, fingerprint, reason }, message }`:
+
+- without `bindRepository`, or with `bindRepository: false`, no binding SHALL be created and `binding` SHALL be `{ status: 'not_requested', fingerprint: null, reason: null }`;
+- with `bindRepository: true` and a request whose header carries a fingerprint with no binding, the fingerprint SHALL be bound to the new project exactly as `project.bind_repository` binds it — copying the normalized remotes of the fingerprint's pending rows and removing its pending row of kind `unbound` — and `binding` SHALL be `{ status: 'bound', fingerprint, reason: null }`;
+- with `bindRepository: true` and a request without the header, or whose header is `unavailable`, the project SHALL still be created, no binding SHALL be created, and `binding` SHALL be `{ status: 'skipped', fingerprint: null, reason: 'repository_fingerprint_unavailable' }`;
+- with `bindRepository: true` and a fingerprint that already has any binding, the project SHALL still be created, the existing bindings SHALL be unchanged, and `binding` SHALL be `{ status: 'skipped', fingerprint, reason: 'repository_already_bound' }`, with `message` naming the bound projects and the dashboard as the place to move a binding.
+
+`message` SHALL state that a binding applies from the next session whenever `binding.status` is `bound`. The connection's own project SHALL NOT change.
+
+The tool SHALL be callable on path-scoped, path-less and unbound requests alike, including a connection whose URL slug names no project, and SHALL resolve no effective scope. Because the server resolves the URL slug on every request and keeps no per-connection state, a connection at `/mcp/<slug>` whose calls were refused with `project_not_found` SHALL resolve to the project from the first request after `project.create` creates `<slug>`; that is the URL path resolving, not the tool switching the connection's project. On such a connection, the `project_not_found` message SHALL name `project.create` for an admin token, after the dashboard, and SHALL NOT name it for any other token. Its registered description SHALL state that it requires an admin token and that binding the current repository is opt-in, within `DESCRIPTION_MAX_LENGTH`. Its behavioural annotations SHALL declare it non-read-only, non-destructive and non-idempotent.
+
+#### Scenario: An admin creates a project and binds an unbound repository from an unbound session
+
+- **GIVEN** an unbound fingerprint `F`, no project with slug `shop`, and an unbound path-less connection carrying `X-Rembric-Repo-Fingerprint: F` with a token of scope `*`
+- **WHEN** the client calls `project.create({ slug: 'shop', bindRepository: true })`
+- **THEN** a project `shop` SHALL exist, and a binding of `F` to `shop` SHALL exist
+- **AND** `binding` SHALL be `{ status: 'bound', fingerprint: F, reason: null }`
+- **AND** a subsequent `memory.save` on the same connection SHALL still be refused with `project_unbound`
+
+#### Scenario: An agent connected at a slug that names no project creates it and keeps working
+
+- **GIVEN** no project with slug `acme`, and a client without plugin connected at `/mcp/acme` with a token of scope `*`
+- **WHEN** the client calls `memory.save`, then `project.create({ slug: 'acme' })`, then `memory.save` again on the same URL
+- **THEN** the first `memory.save` SHALL be refused with `project_not_found`, and its message SHALL name `project.create`
+- **AND** `project.create` SHALL succeed, and the second `memory.save` SHALL write its row into `acme`
+- **AND** with a token whose scope is not `*`, the first refusal's message SHALL NOT name `project.create`
+
+#### Scenario: Binding is opt-in
+
+- **GIVEN** an unbound fingerprint `F` and a token of scope `*`
+- **WHEN** a client whose requests carry `X-Rembric-Repo-Fingerprint: F` calls `project.create({ slug: 'store' })`
+- **THEN** a project `store` SHALL exist, `F` SHALL have no binding, and `binding.status` SHALL be `not_requested`
+
+#### Scenario: A repository that is not a bind candidate does not stop the creation
+
+- **GIVEN** fingerprint `F` bound to `shop`, and a token of scope `*`
+- **WHEN** a client whose requests carry `X-Rembric-Repo-Fingerprint: F` calls `project.create({ slug: 'store', bindRepository: true })`
+- **THEN** a project `store` SHALL exist, `F` SHALL still be bound to `shop` only, and `binding` SHALL be `{ status: 'skipped', fingerprint: F, reason: 'repository_already_bound' }`
+- **AND** the same call, with a new slug, from a client sending no header SHALL create the project and report `reason: 'repository_fingerprint_unavailable'`
+
+#### Scenario: A non-admin token cannot create a project
+
+- **GIVEN** a token whose scope is `project:<id of shop>`, with write access
+- **WHEN** it calls `project.create({ slug: 'brand-new', bindRepository: true })` with a valid fingerprint header, and again with an invalid slug
+- **THEN** both calls SHALL be refused with `admin_token_required`, and no `projects` row and no binding SHALL be created
+
+#### Scenario: An existing slug is refused and points at binding
+
+- **GIVEN** a project `shop`, and a token of scope `*`
+- **WHEN** the client calls `project.create({ slug: 'shop' })`
+- **THEN** the call SHALL be refused with `project_already_exists`, its message SHALL name `project.bind_repository`, and no row SHALL be inserted
+
+#### Scenario: The fingerprint cannot come from the model
+
+- **WHEN** a client calls `project.create` with a `fingerprint` property
+- **THEN** the call SHALL be refused by the strict input schema as an unknown property, and no row SHALL be inserted
