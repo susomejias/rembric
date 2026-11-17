@@ -51,6 +51,8 @@ import {
   buildProjectHandlers,
   projectBindRepositoryOutput,
   projectBindRepositorySchema,
+  projectCreateOutput,
+  projectCreateSchema,
   projectCurrentOutput,
   projectCurrentSchema,
   projectListOutput,
@@ -519,6 +521,17 @@ Does NOT end the session — use memory.session_end for that.`,
       annotations: WRITE_ANNOTATIONS('Bind repository'),
     },
     projectHandlers.bindRepository,
+  );
+  registerTool(
+    'project.create',
+    {
+      description:
+        'Admin token (scope *) only. Create a project from a new `slug` (lowercase letters, digits and inner hyphens) and an optional `displayName`; a connection at /mcp/<slug> reaches it from its next call. Binding the git repository this client runs in is opt-in: pass `bindRepository: true` only when the project is for this repository. It binds a repository that has no binding yet and applies from the next session; a repository that cannot be bound is reported in `binding` and the project is still created.',
+      inputSchema: projectCreateSchema,
+      outputSchema: projectCreateOutput,
+      annotations: WRITE_ANNOTATIONS('Create project'),
+    },
+    projectHandlers.create,
   );
 
   // ── Relations tools (judgment graph) ──────────────────────────────

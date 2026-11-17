@@ -26,6 +26,7 @@ export type DomainErrorCode =
   | 'project_unbound'
   | 'repository_ambiguous'
   | 'repository_already_bound'
+  | 'project_already_exists'
   | 'repository_fingerprint_unavailable'
   | 'invalid_repository_fingerprint';
 

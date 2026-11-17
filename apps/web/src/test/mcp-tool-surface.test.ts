@@ -137,14 +137,15 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
     return (result as { tools: Tool[] }).tools;
   }
 
-  it('returns the base tools minus project.use plus project.bind_repository, changed only where those reach', async () => {
+  it('returns the base tools minus project.use plus project.bind_repository and project.create, changed only where those reach', async () => {
     const all = await liveTools();
-    const live = all.filter((t) => t.name !== 'project.bind_repository');
+    const added = ['project.bind_repository', 'project.create'];
+    const live = all.filter((t) => !added.includes(t.name));
     const byName = new Map(live.map((t) => [t.name, t]));
 
     const base = (JSON.parse(readFileSync(BASE_TOOLS_LIST, 'utf8')) as { tools: Tool[] }).tools;
     expect(base).toHaveLength(25);
-    expect(all).toHaveLength(25);
+    expect(all).toHaveLength(26);
     expect(live).toHaveLength(24);
     expect(byName.has('project.use')).toBe(false);
 
@@ -218,6 +219,35 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
       additionalProperties: false,
     });
     expect(Object.keys((tool?.inputSchema as { properties: object }).properties)).toEqual(['slug']);
+    expect(tool?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    });
+  });
+
+  it('adds project.create with a strict input, an opt-in bind and write annotations', async () => {
+    const tool = (await liveTools()).find((t) => t.name === 'project.create');
+    expect(tool).toBeDefined();
+    const description = tool?.description ?? '';
+    expect(description.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    expect(description).toContain('Admin token');
+    expect(description).toContain('opt-in');
+    expect(tool?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        slug: { type: 'string' },
+        displayName: { type: 'string' },
+        bindRepository: { type: 'boolean' },
+      },
+      required: ['slug'],
+      additionalProperties: false,
+    });
+    expect(Object.keys((tool?.inputSchema as { properties: object }).properties).sort()).toEqual([
+      'bindRepository',
+      'displayName',
+      'slug',
+    ]);
     expect(tool?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: false,

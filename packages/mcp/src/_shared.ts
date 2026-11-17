@@ -18,12 +18,18 @@ export interface EffectiveScope {
   source: ProjectResolutionSource;
 }
 
-export function unresolvableSlugError(slug: string, projects: ProjectsService): DomainError {
-  return new DomainError(
-    'project_not_found',
-    `project '${slug}' does not exist; create it from the dashboard`,
-    { suggestedSlugs: projects.findSimilarSlugs(slug) },
-  );
+export function unresolvableSlugError(
+  slug: string,
+  projects: ProjectsService,
+  scope: TokenScope,
+): DomainError {
+  const remedy =
+    scope === '*'
+      ? `create it from the dashboard or with project.create({ slug: '${slug}' })`
+      : 'create it from the dashboard';
+  return new DomainError('project_not_found', `project '${slug}' does not exist; ${remedy}`, {
+    suggestedSlugs: projects.findSimilarSlugs(slug),
+  });
 }
 
 export function resolveEffectiveScope(deps: ScopeResolutionDeps): Promise<EffectiveScope> {
@@ -34,7 +40,8 @@ function connectionScope(projects: ProjectsService): EffectiveScope {
   const ctx = getRequestContext();
   if (ctx.project)
     return { scope: projectScope(ctx.project.id), project: ctx.project, source: 'url-path' };
-  if (ctx.requestedSlug !== null) throw unresolvableSlugError(ctx.requestedSlug, projects);
+  if (ctx.requestedSlug !== null)
+    throw unresolvableSlugError(ctx.requestedSlug, projects, ctx.scope);
   if (ctx.repository !== undefined) throw unboundError(ctx.scope, ctx.repository.fingerprint);
   return defaultProjectScope(projects);
 }
@@ -61,7 +68,7 @@ export function unboundMessage(scope: TokenScope, fingerprint: string | null): s
   }
   const remedy =
     scope === '*'
-      ? 'bind it from the dashboard or with project.bind_repository({ slug })'
+      ? 'bind it from the dashboard or with project.bind_repository({ slug }), or create its project and bind it in one call with project.create({ slug, bindRepository: true })'
       : 'ask an admin to bind it from the dashboard, or add a .rembric file with PROJECT_SLUG=<slug> at the checkout root';
   return (
     `repository ${fingerprint.slice(0, 12)} is not bound to a project, so nothing is read or written; ` +

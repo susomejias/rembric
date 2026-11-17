@@ -251,7 +251,7 @@ describe('the refusal does not brick the connection', () => {
     const { isError, body } = decode(refused);
     expect(isError).toBe(true);
     expect(body.message).toBe(
-      `project '${UNRESOLVABLE}' does not exist; create it from the dashboard`,
+      `project '${UNRESOLVABLE}' does not exist; create it from the dashboard or with project.create({ slug: '${UNRESOLVABLE}' })`,
     );
   });
 
@@ -460,6 +460,7 @@ const EXEMPT: Record<string, Record<string, unknown>> = {
   'project.list': {},
   'project.current': {},
   'project.bind_repository': { slug: 'rembric' },
+  'project.create': { slug: 'exempt-created' },
 };
 
 const FINGERPRINT = 'ab'.repeat(20);
@@ -573,7 +574,11 @@ describe('every registered scope-sensitive tool refuses an unresolvable slug', (
           : mintTestToken(db.handle, { projects: [realProject, member], access: 'write' }).token;
       const ctx = ctxFor({ token, scope, memberProjectIds });
       const before = projects.list(true).length;
-      for (const name of [...Object.keys(MINIMAL_ARGS), ...Object.keys(EXEMPT)]) {
+      const creators = ['project.create'];
+      const others = [...Object.keys(MINIMAL_ARGS), ...Object.keys(EXEMPT)].filter(
+        (name) => !creators.includes(name),
+      );
+      for (const name of others) {
         const args: Record<string, unknown> = { ...MINIMAL_ARGS[name], ...EXEMPT[name] };
         if (name === 'memory.session_start') args.project = UNRESOLVABLE;
         await runWithContext(ctx, () => client.callTool({ name, arguments: args }));

@@ -222,7 +222,7 @@ export class RepositoryBindingsService {
       if (!project) {
         throw new DomainError(
           'project_not_found',
-          `project '${input.slug}' does not exist; create it from the dashboard`,
+          `project '${input.slug}' does not exist; create it and bind this repository in one call with project.create({ slug: '${input.slug}', bindRepository: true }), or create it from the dashboard`,
         );
       }
       if (project.archivedAt) {

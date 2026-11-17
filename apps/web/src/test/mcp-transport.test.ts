@@ -1045,10 +1045,11 @@ describe('MCP protocol conformance', () => {
         'project.list',
         'project.current',
         'project.bind_repository',
+        'project.create',
       ]),
     );
     expect(names).not.toContain('project.use');
-    expect(names).toHaveLength(25);
+    expect(names).toHaveLength(26);
     await client.close();
   });
 
@@ -2169,6 +2170,7 @@ describe('MCP protocol conformance', () => {
       'memory.judge_batch',
       'memory.compare',
       'project.bind_repository',
+      'project.create',
     ]);
 
     const client = await connect();
@@ -2834,15 +2836,18 @@ describe('MCP protocol conformance', () => {
     const expected: Record<string, { code: string; message: string }> = {
       'unresolvable slug / save': {
         code: 'project_not_found',
-        message: "project 'no-such-project-here' does not exist; create it from the dashboard",
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or with project.create({ slug: 'no-such-project-here' })",
       },
       'unresolvable slug / search': {
         code: 'project_not_found',
-        message: "project 'no-such-project-here' does not exist; create it from the dashboard",
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or with project.create({ slug: 'no-such-project-here' })",
       },
       'unresolvable slug / context': {
         code: 'project_not_found',
-        message: "project 'no-such-project-here' does not exist; create it from the dashboard",
+        message:
+          "project 'no-such-project-here' does not exist; create it from the dashboard or with project.create({ slug: 'no-such-project-here' })",
       },
       'path-less / session_start elsewhere': {
         code: 'scope_locked',

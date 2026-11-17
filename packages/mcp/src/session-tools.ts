@@ -170,7 +170,10 @@ async function handleSessionStart(
 
   const deadSlug = unresolvableSlug();
   if (deadSlug !== null) {
-    return errToMcp(unresolvableSlugError(deadSlug, deps.projects), deps.logInternalError);
+    return errToMcp(
+      unresolvableSlugError(deadSlug, deps.projects, ctx.scope),
+      deps.logInternalError,
+    );
   }
 
   let scope: Scope;

@@ -1423,6 +1423,7 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
           },
         );
         expect(unknown.body['code']).toBe('project_not_found');
+        expect(String(unknown.body['message'])).toContain('project.create');
         const gone = await callTool(
           'project.bind_repository',
           { slug: archived.slug },
@@ -1464,6 +1465,196 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
         );
         expect(r.isError).toBe(true);
         expect(JSON.stringify(r)).toMatch(/fingerprint/);
+        expect(bindings(fp)).toEqual([]);
+        expect(bindings(FP_SHA256)).toEqual([]);
+      });
+    });
+
+    describe('project.create', () => {
+      const exists = (slug: string) => services.projects.findBySlug(slug) !== undefined;
+
+      it('an admin creates a project and binds an unbound repository from an unbound session', async () => {
+        const fp = '61'.repeat(20);
+        services.repositoryBindings.resolve(
+          { tokenId: 'pc-t', scope: 'projects', memberProjectIds: [shop.id] },
+          { fingerprint: fp, remotes: ['github.com/acme/pc-bound'] },
+        );
+        expect(
+          services.repos.pendingRepositories.findByIdentity(fp, 'unbound', null),
+        ).toBeDefined();
+        const r = await callTool(
+          'project.create',
+          { slug: 'pc-bound', displayName: 'PC Bound', bindRepository: true },
+          { headers: { [HEADER]: fp } },
+        );
+        expect(r.isError).toBe(false);
+        const created = services.projects.findBySlug('pc-bound');
+        expect(r.body).toMatchObject({
+          slug: 'pc-bound',
+          projectId: created?.id,
+          displayName: 'PC Bound',
+          binding: { status: 'bound', fingerprint: fp, reason: null },
+        });
+        expect(String(r.body['message'])).toContain('next session');
+        expect(bindings(fp)).toEqual(['pc-bound']);
+        expect(
+          services.repos.pendingRepositories.findByIdentity(fp, 'unbound', null),
+        ).toBeUndefined();
+        expect(
+          services.repos.repositoryBindings.unsafeListAllForFingerprint(fp)[0]?.remotes,
+        ).toEqual(['github.com/acme/pc-bound']);
+        const after = await callTool('memory.save', SAVE, { headers: { [HEADER]: fp } });
+        expect(after.body['code']).toBe('project_unbound');
+      });
+
+      it('binding is opt-in, and the connection keeps its project', async () => {
+        const fp = '72'.repeat(20);
+        const omitted = await callTool(
+          'project.create',
+          { slug: 'pc-optin' },
+          { headers: { [HEADER]: fp }, ctx: at(shop.slug) },
+        );
+        expect(omitted.isError).toBe(false);
+        expect(omitted.body['binding']).toEqual({
+          status: 'not_requested',
+          fingerprint: null,
+          reason: null,
+        });
+        const declined = await callTool(
+          'project.create',
+          { slug: 'pc-optout', bindRepository: false },
+          { headers: { [HEADER]: fp }, ctx: at(shop.slug) },
+        );
+        expect(declined.body['binding']).toMatchObject({ status: 'not_requested' });
+        expect(exists('pc-optin')).toBe(true);
+        expect(exists('pc-optout')).toBe(true);
+        expect(bindings(fp)).toEqual([]);
+        const current = await callTool(
+          'project.current',
+          {},
+          { headers: { [HEADER]: fp }, ctx: at(shop.slug) },
+        );
+        expect(current.body).toMatchObject({ slug: shop.slug, source: 'url-path' });
+      });
+
+      it('a repository that is not a bind candidate does not stop the creation', async () => {
+        const fp = '83'.repeat(20);
+        services.repositoryBindings.bind({
+          fingerprint: fp,
+          projectId: shop.id,
+          createdBy: 'test',
+        });
+        const bound = await callTool(
+          'project.create',
+          { slug: 'pc-skip-bound', bindRepository: true },
+          { headers: { [HEADER]: fp } },
+        );
+        expect(bound.isError).toBe(false);
+        expect(bound.body['binding']).toEqual({
+          status: 'skipped',
+          fingerprint: fp,
+          reason: 'repository_already_bound',
+        });
+        expect(String(bound.body['message'])).toContain(shop.slug);
+        expect(String(bound.body['message'])).toContain('dashboard');
+        expect(exists('pc-skip-bound')).toBe(true);
+        expect(bindings(fp)).toEqual([shop.slug]);
+
+        const noHeader = await callTool('project.create', {
+          slug: 'pc-skip-none',
+          bindRepository: true,
+        });
+        expect(noHeader.body['binding']).toEqual({
+          status: 'skipped',
+          fingerprint: null,
+          reason: 'repository_fingerprint_unavailable',
+        });
+        const unavailable = await callTool(
+          'project.create',
+          { slug: 'pc-skip-unavailable', bindRepository: true },
+          { headers: { [HEADER]: 'unavailable' } },
+        );
+        expect(unavailable.body['binding']).toMatchObject({
+          status: 'skipped',
+          reason: 'repository_fingerprint_unavailable',
+        });
+        expect(exists('pc-skip-none')).toBe(true);
+        expect(exists('pc-skip-unavailable')).toBe(true);
+      });
+
+      it('a non-admin token cannot create a project, and is refused before any validation', async () => {
+        const fp = '94'.repeat(20);
+        const before = services.projects.list(true).length;
+        for (const token of [shopWriter, bothWriter]) {
+          const valid = await callTool(
+            'project.create',
+            { slug: 'pc-denied', bindRepository: true },
+            { token, headers: { [HEADER]: fp }, ctx: at(shop.slug) },
+          );
+          expect(valid.body['code']).toBe('admin_token_required');
+          const invalid = await callTool(
+            'project.create',
+            { slug: 'Not_A_Slug' },
+            { token, ctx: at(shop.slug) },
+          );
+          expect(invalid.body['code']).toBe('admin_token_required');
+          const taken = await callTool('project.create', { slug: shop.slug }, { token });
+          expect(taken.body['code']).toBe('admin_token_required');
+        }
+        expect(services.projects.list(true)).toHaveLength(before);
+        expect(bindings(fp)).toEqual([]);
+
+        const control = await callTool(
+          'project.create',
+          { slug: 'pc-denied', bindRepository: true },
+          { headers: { [HEADER]: fp }, ctx: at(shop.slug) },
+        );
+        expect(control.isError).toBe(false);
+        expect(exists('pc-denied')).toBe(true);
+      });
+
+      it('refuses an invalid slug and an existing one, archived or not', async () => {
+        const before = services.projects.list(true).length;
+        const invalid = await callTool('project.create', { slug: 'Not_A_Slug' });
+        expect(invalid.body['code']).toBe('invalid_slug');
+        for (const slug of [shop.slug, archived.slug]) {
+          const taken = await callTool('project.create', { slug });
+          expect(taken.body['code']).toBe('project_already_exists');
+          expect(String(taken.body['message'])).toContain('project.bind_repository');
+        }
+        expect(services.projects.list(true)).toHaveLength(before);
+      });
+
+      it('an agent connected at a slug that names no project creates it and keeps working', async () => {
+        const slug = 'pc-acme';
+        const denied = await callTool('memory.save', SAVE, { token: shopWriter, ctx: at(slug) });
+        expect(denied.body['code']).toBe('project_not_found');
+        expect(String(denied.body['message'])).not.toContain('project.create');
+        const refused = await callTool('memory.save', SAVE, { ctx: at(slug) });
+        expect(refused.body['code']).toBe('project_not_found');
+        expect(String(refused.body['message'])).toContain('project.create');
+
+        const created = await callTool('project.create', { slug }, { ctx: at(slug) });
+        expect(created.isError).toBe(false);
+
+        const saved = await callTool('memory.save', SAVE, { ctx: at(slug) });
+        expect(saved.isError).toBe(false);
+        const row = services.db.raw
+          .prepare('SELECT project_id FROM memory WHERE id = ?')
+          .get(saved.body['id']) as { project_id: string };
+        expect(row.project_id).toBe(created.body['projectId']);
+      });
+
+      it('the fingerprint cannot come from the model', async () => {
+        const fp = 'a5'.repeat(20);
+        const r = await callTool(
+          'project.create',
+          { slug: 'pc-model', bindRepository: true, fingerprint: fp },
+          { headers: { [HEADER]: FP_SHA256 } },
+        );
+        expect(r.isError).toBe(true);
+        expect(JSON.stringify(r)).toMatch(/fingerprint/);
+        expect(exists('pc-model')).toBe(false);
         expect(bindings(fp)).toEqual([]);
         expect(bindings(FP_SHA256)).toEqual([]);
       });

@@ -15,7 +15,7 @@ URL:    http(s)://your-host:8787/mcp[/<project-slug>]
 Header: Authorization: Bearer <agent-token>
 ```
 
-- `/mcp` → the default project, except for a bundled-plugin session inside a git repository nobody has bound, which runs in [unbound mode](#inside-a-git-repository-no-default-project) instead. To work in another project, connect at `/mcp/<slug>`; the bundled plugins pick the slug for you, as described in [How a client selects its project](#how-a-client-selects-its-project). No tool switches or creates a project; projects are created from the dashboard.
+- `/mcp` → the default project, except for a bundled-plugin session inside a git repository nobody has bound, which runs in [unbound mode](#inside-a-git-repository-no-default-project) instead. To work in another project, connect at `/mcp/<slug>`; the bundled plugins pick the slug for you, as described in [How a client selects its project](#how-a-client-selects-its-project). No tool switches a project. Projects are created from the dashboard or, with the admin token (`*`), with [`project.create`](#creating-a-project-from-an-agent).
 - `/mcp/<slug>` → path-scoped. The agent's home project is fixed to that slug and cannot be switched for the life of the connection; every write lands there and no argument names another destination. Reads are the same as anywhere else — the opt-in `across_projects` search below works here too, because the path fixes which project is home, not which projects the token may read. If the slug names no project the handshake still succeeds, but every tool that resolves a scope is refused with `code: project_not_found` plus `suggestedSlugs[]` — it is never silently redirected to the default project. `project.list`/`project.current`/`memory.about` stay available, and the refusal points at the dashboard, where the project is created.
 
 Mint per-agent tokens from the dashboard at `/dashboard/tokens`. Plaintext shown exactly once.
@@ -76,7 +76,7 @@ An explicit selection (`.rembric` or `REMBRIC_PROJECT_SLUG`) works against any s
 
 **Unbound mode** keeps the session out of every project:
 
-- The bridge and Pi still connect, path-less, with an `X-Rembric-Repo-Fingerprint` header. Every tool that reads or writes a project's memory is refused with `code: project_unbound`. `project.list`, `project.current` and `project.bind_repository` keep working, and `project.current` answers `source: 'unbound'` with a `repository` field carrying the fingerprint.
+- The bridge and Pi still connect, path-less, with an `X-Rembric-Repo-Fingerprint` header. Every tool that reads or writes a project's memory is refused with `code: project_unbound`. `project.list`, `project.current`, `project.bind_repository` and `project.create` keep working, and `project.current` answers `source: 'unbound'` with a `repository` field carrying the fingerprint.
 - No session is registered and nothing is posted: no turn reports, summaries, recall hints, file notes or end events.
 - The session starts with a notice that names the first 12 characters of the fingerprint and how to get out of unbound mode. In Claude Code and Codex the hook prints it to the agent:
 
@@ -103,10 +103,19 @@ Only an admin binds a repository, either from the dashboard or with the admin to
 
 - **Dashboard.** A project's create and edit sheets carry a **Repositories** section. It lists the repositories bound to the project, the pending repositories relevant to it (each with a bind action), and a field that binds a fingerprint you paste: 40 or 64 lowercase hexadecimal characters, the output of the `git rev-list` command above. Removing a binding asks for confirmation; memories and sessions already written stay in the project, and later sessions from that repository stop resolving there. The projects list shows how many repositories are pending, and the pending view lists them all. Moving a binding to another project is done there too.
 - **`project.bind_repository({ slug })`**, from an agent session running inside the repository with the admin token. It reads the fingerprint from the session, binds only a repository that has no binding yet, and takes effect from the next session; the current session's project does not change. It refuses with `admin_token_required` for any other token, `repository_fingerprint_unavailable` when the session has no fingerprint, and `repository_already_bound` when the repository is already bound. Moving or removing a binding is dashboard-only.
+- **`project.create({ slug, bindRepository: true })`**, when the project does not exist yet: it creates the project and binds the repository in one call. See [Creating a project from an agent](#creating-a-project-from-an-agent).
 
 A repository can be bound to several projects. A token only sees the bindings to projects it can read; a binding it cannot read behaves exactly as if it did not exist. A token that can read more than one binding gets `repository_ambiguous` and needs an explicit selection.
 
 **Unknown remotes.** Once a binding knows a repository's remotes, a checkout whose remotes are all unknown to it is not resolved. It runs in unbound mode, and the notice says its remotes do not match. The checkout appears in the pending list as an unknown remote, where an admin can accept the remote into the binding, bind the repository to another project, or discard it. This keeps a second project started from the same boilerplate history out of the first one's memory. A fork that keeps the original repository as a remote resolves, and its new remote is learned. A checkout with no remote resolves without this check.
+
+### Creating a project from an agent
+
+With the admin token (`*`), `project.create({ slug, displayName?, bindRepository? })` creates a project without the dashboard. Any other token is refused with `admin_token_required` before the arguments are looked at.
+
+- **A client without a plugin connected at `/mcp/<slug>`** for a project that does not exist gets `project_not_found` on every memory tool; with the admin token, its message names `project.create`. After `project.create({ slug: '<slug>' })`, the next call on the same URL already works: the server resolves the slug on every request, so no reconnect or new session is needed.
+- **Binding the repository is opt-in.** Pass `bindRepository: true` only when the new project is for the repository the client runs in; it binds that repository when it has no binding yet, and takes effect from the next session. If the request carries no fingerprint, or the repository is already bound, the project is still created and `binding` says why it was not bound (`repository_fingerprint_unavailable` or `repository_already_bound`). Without it, `binding.status` is `not_requested`.
+- A slug that is already taken, archived or not, is refused with `project_already_exists`; bind a repository to it with `project.bind_repository`. A slug must be lowercase letters, digits and inner hyphens, at most 64 characters, or the call is refused with `invalid_slug`.
 
 ### Pending repositories
 
@@ -647,7 +656,7 @@ If your client is stdio-only, use `npx -y @rembric/mcp-bridge@<exact-version>` a
 
 ## Path-less connections
 
-A connection to `/mcp` (path-less) resolves to the default project, unless it carries the `X-Rembric-Repo-Fingerprint` header that the bundled plugins send from inside a git repository: such a connection is [unbound](#inside-a-git-repository-no-default-project) and every memory tool is refused with `project_unbound`. A plugin uses `/mcp/<slug>` whenever [its cascade](#how-a-client-selects-its-project) selects a project. Projects are created from the dashboard; no tool creates one.
+A connection to `/mcp` (path-less) resolves to the default project, unless it carries the `X-Rembric-Repo-Fingerprint` header that the bundled plugins send from inside a git repository: such a connection is [unbound](#inside-a-git-repository-no-default-project) and every memory tool is refused with `project_unbound`. A plugin uses `/mcp/<slug>` whenever [its cascade](#how-a-client-selects-its-project) selects a project. Projects are created from the dashboard, or by the admin token with [`project.create`](#creating-a-project-from-an-agent); no other tool creates one.
 
 Earlier releases refused some path-less writes with `project_suggestion_pending`, on the stated reasoning that write tools would otherwise "fall through to global" silently. `memory.save` never did — its `scope` argument defaulted to `project` and a path-less save was refused loudly. The gate was load-bearing for `memory.session_start`, `memory.save_prompt` and `memory.capture_passive`, which without it wrote user-wide rows silently. That scope no longer exists, so neither does the gate.
 

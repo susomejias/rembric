@@ -17,6 +17,8 @@ describe('the project_unbound message', () => {
   it('control: still names the remedy the token can perform and when it applies', () => {
     expect(unboundMessage('*', fingerprint)).toContain('project.bind_repository');
     expect(unboundMessage('project:p1', fingerprint)).not.toContain('project.bind_repository');
+    expect(unboundMessage('*', fingerprint)).toContain('project.create');
+    expect(unboundMessage('project:p1', fingerprint)).not.toContain('project.create');
     expect(unboundMessage('*', fingerprint)).toContain('A binding applies from the next session');
   });
 });
