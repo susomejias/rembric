@@ -1627,6 +1627,36 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
         expect(exists('pc-denied')).toBe(true);
       });
 
+      it('an OAuth grant consented on the path-less /mcp creates a project; one bound to a project does not', async () => {
+        const oauth = services.oauth;
+        if (oauth === null) throw new Error('fixture: OAuth service is disabled');
+        const redirectUri = 'https://client.example/callback';
+        const client = oauth.registerClient({ redirectUris: [redirectUri] });
+        const grant = (projectId?: string) =>
+          oauth.redeemCode({
+            code: oauth.issueCode({
+              clientId: client.clientId,
+              redirectUri,
+              codeChallenge: 'challenge',
+              scope: '*',
+              subject: 'oauth-subject',
+              ...(projectId === undefined ? {} : { projectId }),
+            }),
+            clientId: client.clientId,
+            redirectUri,
+          }).accessToken;
+        const bound = await callTool(
+          'project.create',
+          { slug: 'pc-oauth-bound' },
+          { token: grant(shop.id) },
+        );
+        expect(bound.body['code']).toBe('admin_token_required');
+        expect(exists('pc-oauth-bound')).toBe(false);
+        const pathless = await callTool('project.create', { slug: 'pc-oauth' }, { token: grant() });
+        expect(pathless.isError).toBe(false);
+        expect(exists('pc-oauth')).toBe(true);
+      });
+
       it('refuses an invalid slug and an existing one, archived or not', async () => {
         const before = services.projects.list(true).length;
         const invalid = await callTool('project.create', { slug: 'Not_A_Slug' });
