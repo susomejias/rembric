@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.31.5](https://github.com/susomejias/rembric/compare/server-v0.31.4...server-v0.31.5) (2026-11-17)
+
+
+### Features
+
+* **mcp:** add project.create so an admin agent creates projects without the dashboard ([04e90f5](https://github.com/susomejias/rembric/commit/04e90f58cb46555c4a8a609e084596df84876044))
+
+
+### Bug Fixes
+
+* **db:** answer a taken project slug with conflict, not a raw SQLite error ([621920b](https://github.com/susomejias/rembric/commit/621920b0434539f24b8049685156e845a1cf68d0))
+
+
+### Documentation
+
+* **openspec:** reconcile project.create with the path-scoped isolation contract ([13159db](https://github.com/susomejias/rembric/commit/13159db98d5507cf8f03f4a4812a960aa31ecdf9))
+
 ## [0.31.4](https://github.com/susomejias/rembric/compare/server-v0.31.3...server-v0.31.4) (2026-11-16)
 
 
