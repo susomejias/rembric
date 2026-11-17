@@ -1,5 +1,93 @@
 ## MODIFIED Requirements
 
+### Requirement: Path-scoped connections MUST enforce strict project isolation
+
+When the MCP connection is path-scoped (`/mcp/<slug>`) the server SHALL enforce a hard isolation contract on every tool call. The connection's project is the only scope the server chooses on the caller's behalf:
+
+- `memory.save` SHALL be persisted with `project_id` equal to the path-bound project regardless of any other argument the agent supplies. There is no argument by which an agent can name a different destination: `memory.save` accepts no `scope` argument, so the destination is determined entirely by the connection the operator configured.
+- `memory.search` SHALL return only memories whose `project_id` equals the bound project, **unless the caller explicitly passes the cross-project argument specified in "`memory.search` MUST accept an opt-in cross-project read and report which projects it read", in which case it SHALL return only memories from projects the token is authorized to read.** No other argument SHALL widen the result set past the bound project, and `include_global` remains absent from the tool's input schema. **Widening is a property of the caller's request and the token's reach, not of the connection: a path-scoped connection may widen exactly as a path-less one may, because the path fixes which project is the caller's home, not which projects the token may read.**
+- `memory.get` and `memory.confirm` SHALL respond with structured code `not_found` when the requested memory belongs to a different project, regardless of whether the memory exists, to avoid leaking existence across scopes. **Neither accepts a widening argument**, so this clause is unchanged by the cross-project search.
+
+Because there is exactly one kind of scope, the isolation this requirement describes is no longer a property of path-scoped connections specifically — it holds on every connection. What remains specific to a path-scoped connection is that its home project is fixed by the URL. No tool can change a connection's home project, on a path-scoped connection or a path-less one.
+
+A path slug that does not resolve to an existing project SHALL NOT establish any scope. Such a connection has no bound project, so the clauses above have nothing to bind to; instead **every** tool that resolves scope SHALL be refused with structured code `project_not_found`, reads and writes alike, and SHALL NOT fall back to any other project — in particular not to the default project, whose role is to serve path-LESS connections, and **in particular not by widening**: with no resolved home project there is nothing to widen from, and the cross-project argument SHALL NOT make such a connection usable. An operator who typed a slug asked to be confined to it, and answering a typo with someone else's project is worse than refusing.
+
+The `not_found` clause above governs a connection whose slug DOES resolve, where the comparison is between the bound project and the requested memory. On an unresolvable slug there is no bound project to compare against, so `project_not_found` — which names the unusable connection — takes precedence over `not_found`, and the two do not conflict.
+
+#### Scenario: save with scope='global' on a path-scoped connection
+
+- **GIVEN** a path-scoped connection at `/mcp/foo` with a valid token
+- **WHEN** the client calls `memory.save` with an argument named `scope`
+- **THEN** the call SHALL be rejected by the input schema as an unrecognized argument, and no refusal SHALL name the scope the argument used to request
+- **AND** the scenario title predates this change: the argument it names has been removed, so no call can ask for a scope and be refused one. `scope_locked` survives only as a refusal of a project **switch** (see "the surviving `scope_locked` refusals lock a switch, not a scope"); it SHALL NOT be reintroduced as a refusal of a scope
+
+#### Scenario: search on a path-scoped connection does not leak globals
+
+The title predates this change: there are no global memories left to leak, and the only cross-project read is one the caller asked for and the token was authorized for — everything else stays closed, which is what this scenario now pins.
+
+- **GIVEN** a path-scoped connection at `/mcp/foo` and memories in another project
+- **WHEN** the client calls `memory.search` with any argument other than the cross-project one
+- **THEN** the response SHALL contain only project `foo`'s memories, and no such argument SHALL admit another project's rows
+- **AND** `include_global` SHALL still be refused as an unrecognized argument
+
+#### Scenario: a path-scoped connection may widen deliberately
+
+- **GIVEN** a path-scoped connection at `/mcp/foo`, a token authorized to read `foo` and `bar`, and memories in each
+- **WHEN** the client calls `memory.search` with the cross-project argument
+- **THEN** the response MAY contain `bar`'s memories and SHALL name both projects as searched
+- **AND** `memory.save` on the same connection SHALL still write to `foo`, so widening a read has not widened a write
+
+#### Scenario: get across project boundaries
+
+- **GIVEN** a path-scoped connection at `/mcp/foo` and a memory M whose `project_id` is another project
+- **WHEN** the client calls `memory.get('M')`
+- **THEN** the response SHALL be an MCP error with `code: 'not_found'`, identical to the response for a non-existent id
+- **AND** this SHALL hold whether or not a prior `memory.search` on the same connection widened and returned M, because `memory.get` accepts no widening argument
+
+#### Scenario: search on an unresolvable slug refuses instead of reading global memory
+
+- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and memories in the default project
+- **WHEN** the client calls `memory.search`, with or without the cross-project argument
+- **THEN** the response SHALL be an MCP error with `code: 'project_not_found'`
+- **AND** the response SHALL contain no memory, in particular none from the default project and none from any other project the token may read
+- **AND** the scenario title predates this change: there is no global memory to read, and the refusal it pins is unchanged
+
+#### Scenario: get on a global id from an unresolvable slug refuses
+
+- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project, a token whose scope is `*`, and a memory M in the default project
+- **WHEN** the client calls `memory.get({id: M})`
+- **THEN** the response SHALL be an MCP error with `code: 'project_not_found'` and SHALL NOT return M's `content`
+- **AND** the scenario title predates this change: M is a memory in the default project, not a global one, which is what its body already says
+
+#### Scenario: writes on an unresolvable slug do not land in global memory
+
+- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project and a token whose scope is `*`
+- **WHEN** the client calls `memory.capture_passive` with text containing a well-formed Key Learnings section, or calls `memory.save_prompt`
+- **THEN** each call SHALL be refused with `code: 'project_not_found'`
+- **AND** no row SHALL be inserted into `memory` or `prompts`, in the default project or any other
+- **AND** the scenario title predates this change: there is no global memory to land in, and the refusal it pins is unchanged
+
+#### Scenario: a session is not opened in the global scope from an unresolvable slug
+
+- **GIVEN** a connection at `/mcp/no-such-project` whose slug names no project and a token whose scope is `*`
+- **WHEN** the client calls `memory.session_start`
+- **THEN** the call SHALL be refused with `code: 'project_not_found'`
+- **AND** no `agent_sessions` row SHALL be inserted, in the default project or any other
+- **AND** the scenario title predates this change: there is no global scope to open a session in, and the refusal it pins is unchanged
+
+#### Scenario: the refusal names candidate slugs
+
+- **GIVEN** a project with slug `rembric` exists and a connection at `/mcp/rembic`
+- **WHEN** the client calls any tool that resolves scope
+- **THEN** the error payload SHALL include `suggestedSlugs` containing `rembric`
+
+#### Scenario: the connection is not bricked by the refusal
+
+- **GIVEN** a connection at `/mcp/no-such-project` and a token authorized to read the existing projects
+- **WHEN** the client calls `project.current`, `project.list` or `memory.about`
+- **THEN** each call SHALL succeed
+- **AND** the `project_not_found` refusal that every scope-resolving tool returns on that connection SHALL name the dashboard as the place to create the project; for a token whose scope is `*` it SHALL also name `project.create`, the one tool call that creates a project, and for any other token it SHALL NOT name a tool call as a way to create it. It SHALL NOT name a tool call as a way to activate it, for any token
+
 ### Requirement: Every MCP tool call MUST be authorized against the token's scope for the resolved project
 
 Every registered MCP tool except `memory.about` SHALL be classified as `read` or `write` and SHALL, before touching any data, resolve the connection's effective scope through the single async resolver (path slug → the default project) and check `isAuthorized(tokenScope, action, resolvedScope)`. A failed check SHALL be rejected with code `forbidden`. **A tool that accepts an input widening the result set past the resolved scope — `memory.search`'s cross-project argument is the only one — SHALL additionally authorize each project the widening would admit, after the resolved-scope check, and SHALL drop the projects that fail rather than reject the call** (see the `auth` capability). The path-scoping error contract (`scope_locked`, `project_not_found`) SHALL be preserved unchanged and SHALL be evaluated before the authorization check where it applies today.
@@ -64,7 +152,7 @@ The title predates this change: the scope a path-less connection resolves is the
 
 The tool SHALL refuse, in this order, inserting no row:
 
-1. a token whose scope is not `*`, with `admin_token_required`, before validating any argument;
+1. a token whose scope is not `*`, with `admin_token_required`, after the strict input schema and before any other check — the slug rule, the existing slugs and the fingerprint;
 2. a `slug` that does not match the strict slug regex, with `invalid_slug`;
 3. a `slug` that names an existing project, archived or not, with `project_already_exists`, whose message SHALL name `project.bind_repository` as the way to bind a repository to an existing project.
 

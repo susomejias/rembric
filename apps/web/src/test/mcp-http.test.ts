@@ -1585,7 +1585,21 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
       it('a non-admin token cannot create a project, and is refused before any validation', async () => {
         const fp = '94'.repeat(20);
         const before = services.projects.list(true).length;
-        for (const token of [shopWriter, bothWriter]) {
+        const shopReader = services.tokens.create({
+          name: 'pc-shop-reader',
+          project: services.projects.getById(shop.id)!,
+          access: 'read',
+        }).plaintext;
+        const setReader = services.tokens.create({
+          name: 'pc-set-reader',
+          projects: [services.projects.getById(shop.id)!, services.projects.getById(sandbox.id)!],
+          access: 'read',
+        }).plaintext;
+        const allReader = services.tokens.create({
+          name: 'pc-all-reader',
+          scope: 'read:*',
+        }).plaintext;
+        for (const token of [shopWriter, bothWriter, shopReader, setReader, allReader]) {
           const valid = await callTool(
             'project.create',
             { slug: 'pc-denied', bindRepository: true },

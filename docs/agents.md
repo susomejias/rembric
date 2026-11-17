@@ -111,7 +111,7 @@ A repository can be bound to several projects. A token only sees the bindings to
 
 ### Creating a project from an agent
 
-With the admin token (`*`), `project.create({ slug, displayName?, bindRepository? })` creates a project without the dashboard. Any other token is refused with `admin_token_required` before the arguments are looked at.
+With the admin token (`*`), `project.create({ slug, displayName?, bindRepository? })` creates a project without the dashboard. Any other token is refused with `admin_token_required` before any check beyond the tool's input schema. An OAuth connector consented on the path-less `/mcp` holds `*` too, so it can create projects; one consented on `/mcp/<slug>`, or for read access, cannot.
 
 - **A client without a plugin connected at `/mcp/<slug>`** for a project that does not exist gets `project_not_found` on every memory tool; with the admin token, its message names `project.create`. After `project.create({ slug: '<slug>' })`, the next call on the same URL already works: the server resolves the slug on every request, so no reconnect or new session is needed.
 - **Binding the repository is opt-in.** Pass `bindRepository: true` only when the new project is for the repository the client runs in; it binds that repository when it has no binding yet, and takes effect from the next session. If the request carries no fingerprint, or the repository is already bound, the project is still created and `binding` says why it was not bound (`repository_fingerprint_unavailable` or `repository_already_bound`). Without it, `binding.status` is `not_requested`.

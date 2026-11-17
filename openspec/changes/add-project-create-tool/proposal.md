@@ -29,6 +29,8 @@ None.
 - `mcp-api`: a fourth `project.*` tool, `project.create`, with its contract; the authorization requirement names it as the only tool that creates a project.
 - `auth`: only an admin token may create a project; set-scoped tokens still have no path to one.
 - `repository-binding`: the admin remedy in the `project_unbound` message names `project.create`.
+- `mcp-api` also: the `project_not_found` refusal on a path-scoped connection names `project.create` for an admin token ("Path-scoped connections MUST enforce strict project isolation").
+- `claude-code-plugin` (archive-time, task 4.3): its requirement that a new slug is created from the dashboard with no agent-side bootstrap call gains the `project.create` exception; `select-project-by-repo-fingerprint` modifies the same requirement, so the edit cannot be a delta yet.
 
 ## Impact
 

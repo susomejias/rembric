@@ -24,9 +24,9 @@ This matches the dashboard's create action and the request as stated ("bind it w
 
 Alternative rejected: one transaction around both steps, refusing the whole call when the bind cannot happen. It needs a new cross-service method for a case the caller can read from the response, and it would refuse the creation the caller asked for.
 
-### 3. `admin_token_required` comes before any validation
+### 3. `admin_token_required` comes before any check beyond the input schema
 
-The admin check runs first, so a non-admin token learns nothing about slug validity or which slugs exist. Same order as `project.bind_repository`.
+The MCP SDK validates the strict input schema before the handler runs, so an unknown property or a slug outside 1–128 characters is refused with a schema error for every token. The admin check is the handler's first statement, so a non-admin token learns nothing about the slug rule or which slugs exist. Same order as `project.bind_repository`.
 
 ### 4. A duplicate slug answers `project_already_exists`
 
@@ -34,9 +34,9 @@ The admin check runs first, so a non-admin token learns nothing about slug valid
 
 ### 5. No effective scope
 
-Like `project.bind_repository`, the tool resolves no effective scope, so it works on path-scoped, path-less and unbound requests, and never switches the connection's project. A connection reaches the new project from its next session (`/mcp/<slug>` or a binding).
+Like `project.bind_repository`, the tool resolves no effective scope, so it works on path-scoped, path-less and unbound requests, and never switches the connection's project. A connection at `/mcp/<slug>` reaches the new project from its next call, because the server resolves the slug on every request; a binding applies from the next session, because the client resolves it once at session start.
 
 ## Risks / Trade-offs
 
-- **Any admin-token holder can now create projects from an agent.** The same token already creates them from the dashboard, whose login requires it; the tool adds a surface, not an authority. → Mitigation: the admin check is the tool's first statement and is mutation-tested.
+- **Any `*` token can now create projects from an agent.** For a static admin token this adds a surface, not an authority: the same token already creates projects from the dashboard, whose login requires it. An OAuth grant consented on the path-less `/mcp` connection also resolves to `*` (`mcp-oauth`: "A grant consented on the path-less `/mcp` connection SHALL remain unbound") and can now create projects, which it could not before, because dashboard login accepts static tokens only. Such a grant is issued only after an operator signs in to the dashboard with the admin token and consents, so it is authority the admin delegated; `project.bind_repository` already accepts it the same way. → Mitigation: the admin check is the tool's first statement and is mutation-tested; a project-bound or read OAuth grant is refused.
 - **A project created by mistake stays.** There is no delete; archive is dashboard-only. → The tool is opt-in for the agent like any write, and an empty project costs one row.
