@@ -370,6 +370,18 @@ describe('creating a project with repositories', () => {
     expect(snapshot()).toBe(before);
   });
 
+  it('answers a taken slug with a form error instead of throwing', async () => {
+    const slug = `taken-${sequence++}`;
+    const { createProject } = await actions();
+    await redirectTarget(() => createProject({ error: null }, form('project.create', { slug })));
+    const before = snapshot();
+    const result = (await createProject({ error: null }, form('project.create', { slug }))) as {
+      error: string;
+    };
+    expect(result.error).toContain('already exists');
+    expect(snapshot()).toBe(before);
+  });
+
   it('still creates a project without any repository field', async () => {
     const slug = `plain-${sequence++}`;
     const { createProject } = await actions();

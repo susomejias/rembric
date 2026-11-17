@@ -19,7 +19,12 @@ export class ProjectsRepository {
   constructor(private readonly db: Db) {}
 
   insert(values: NewProject): Project | undefined {
-    const row = this.db.insert(projects).values(values).returning().get();
+    const row = this.db
+      .insert(projects)
+      .values(values)
+      .onConflictDoNothing({ target: projects.slug })
+      .returning()
+      .get();
     if (row) ensureProjectLexicalIndex(this.db.$client, row.id);
     return row;
   }

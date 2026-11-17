@@ -34,6 +34,24 @@ describe('ProjectsService.findBySlug / create', () => {
     expect(b?.id).toBe(a.id);
   });
 
+  it('refuses a taken slug with conflict and inserts no row, archived or not', () => {
+    const taken = projects.create({ slug: 'taken' });
+    const gone = projects.create({ slug: 'gone' });
+    projects.archive(gone.id);
+    const before = projects.list(true).length;
+    for (const slug of [taken.slug, gone.slug]) {
+      let caught: unknown;
+      try {
+        projects.create({ slug });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toMatchObject({ name: 'DomainError', code: 'conflict' });
+    }
+    expect(projects.list(true)).toHaveLength(before);
+    expect(projects.findBySlug('taken')?.id).toBe(taken.id);
+  });
+
   it('rejects an invalid slug (uppercase)', () => {
     expect(() => projects.create({ slug: 'Bad-Slug' })).toThrow(/invalid|must match/);
   });
