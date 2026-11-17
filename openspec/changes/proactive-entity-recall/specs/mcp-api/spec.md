@@ -57,9 +57,9 @@ The measured result is 1873 of 1900 characters, 27 remaining, pinned by an exact
 
 ### Requirement: The MCP `initialize` response MUST ship a protocol-teaching `instructions` block
 
-When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 1000 characters or fewer in both variants. This cap is a self-imposed token budget rather than the binding limit: the MCP specification defines `InitializeResult.instructions` as an optional free-form string with no maximum length or truncation rule, but at least one consuming client DOES impose a ceiling — Claude Code truncates `instructions` at 2048 characters with the same `LB` constant it applies to tool descriptions, appending `… [truncated]`. The 1000-character cap is therefore chosen for token cost, at less than half the known client ceiling, and it binds first. Any future change RAISING this cap SHALL keep it below the verified client ceiling (see "Tool descriptions MUST stay below the client truncation ceiling").
+When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 1000 characters or fewer in every variant. This cap is a self-imposed token budget rather than the binding limit: the MCP specification defines `InitializeResult.instructions` as an optional free-form string with no maximum length or truncation rule, but at least one consuming client DOES impose a ceiling — Claude Code truncates `instructions` at 2048 characters with the same `LB` constant it applies to tool descriptions, appending `… [truncated]`. The 1000-character cap is therefore chosen for token cost, at less than half the known client ceiling, and it binds first. Any future change RAISING this cap SHALL keep it below the verified client ceiling (see "Tool descriptions MUST stay below the client truncation ceiling").
 
-Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect, and name a `/mcp/<slug>` URL as the way to reach another project. Neither variant SHALL name `project.use` or roots-based auto-detection, because neither exists.
+Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect, and name a `/mcp/<slug>` URL as the way to reach another project. An unbound connection — a path-less request carrying the `X-Rembric-Repo-Fingerprint` header — SHALL get a third variant instead of the path-less one: it SHALL state that no project is selected because the repository is not bound and that memory tools answer `project_unbound`, whose message carries the remedies the token can perform; it SHALL NOT name the default project, and SHALL NOT name `project.bind_repository`, which only an admin token can call. No variant SHALL name `project.use` or roots-based auto-detection, because neither exists.
 
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
@@ -112,6 +112,14 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **WHEN** the `initialize` handshake completes against `/mcp`
 - **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect and a `/mcp/<slug>` URL as the way to reach another project. It SHALL NOT name `project.use` or roots-based auto-detection. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `packages/mcp/src/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
 
+#### Scenario: An unbound MCP client connects
+
+- **GIVEN** a path-less `/mcp` request carrying a valid `X-Rembric-Repo-Fingerprint` header
+- **WHEN** the `initialize` handshake completes
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows as the other variants and a note stating that no project is selected and that memory tools answer `project_unbound`
+- **AND** the note SHALL NOT name the default project, `project.bind_repository`, `project.use`, roots-based auto-detection, `global`, `include_global` or user-wide memory
+- **AND** the same request without the header SHALL still receive the path-less variant naming the default project
+
 #### Scenario: Instructions length is checked at build time
 
 - **WHEN** the test suite runs against both `/mcp` and `/mcp/<slug>` variants of `buildInstructions(ctx)`
@@ -134,7 +142,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 #### Scenario: instructions.test.ts asserts the protocol flows are present
 
-- **WHEN** `apps/server/src/mcp/instructions.test.ts` runs against `buildInstructions({requestedSlug: 'demo'})` and `buildInstructions({requestedSlug: null})`
+- **WHEN** `packages/mcp/src/instructions.test.ts` runs against `buildInstructions({requestedSlug: 'demo'})` and `buildInstructions({requestedSlug: null})`
 - **THEN** both outputs SHALL contain the substrings `memory.save`, `memory.context`, `memory.session_summary`, AND `memory.about`
 - **AND** both outputs SHALL be ≤1000 chars
 - **AND** existing assertions for `memory.search`, the scope note, the `10000` cap, and the proactive (non-"done"-bound) session-summary phrasing SHALL pass, with the scope-note assertion updated to the project-only wording

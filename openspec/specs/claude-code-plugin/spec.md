@@ -174,7 +174,8 @@ To keep `session-start.sh`, `post-compact.sh`, `session-end.sh`, `pre-compact.sh
 
 - Resolves `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from the environment.
 - Exposes `rembric_parse_dotenv`, which parses `${cwd}/.rembric` for `PROJECT_SLUG` (reusing the same dotenv parser logic as the bridge). The parser SHALL trim BOTH leading and trailing whitespace from each value before quote-stripping — trailing whitespace SHALL NOT be left in the parsed value, and this trim SHALL also strip a trailing carriage return, so a `.rembric` file saved with CRLF line endings resolves to the same slug the JS bridge (`bin/rembric-dotenv.mjs`, which trims both sides) resolves.
-- Exposes `rembric_read_project_slug <cwd>`, the wrapper every hook script actually calls to go from a working directory to a validated slug.
+- Exposes `rembric_read_project_slug <dir>`, which returns the validated `PROJECT_SLUG` of the nearest `.rembric` at or above `<dir>`, stopping after the checkout root inside a git work tree and checking only `<dir>` outside one.
+- Exposes `rembric_session_project <session-id> <cwd>`, the wrapper every hook script actually calls to go from a session and a working directory to the session's project. It SHALL return the outcome cached for that session under `${TMPDIR:-/tmp}/rembric-project/`; on a cache miss it SHALL resolve with the cascade the `repository-binding` capability defines — `rembric_read_project_slug`, then `REMBRIC_PROJECT_SLUG`, then, inside a git work tree, the fingerprint through `POST /api/repositories/resolve` — and SHALL cache the outcome, including an unbound, ambiguous or unavailable outcome, writing the cache only when no entry exists so the first resolution in a session wins. A cached outcome that is not a slug SHALL make the calling hook skip every POST. `session-start.sh` SHALL resolve first. For an unbound repository or a conflicting explicit selection it SHALL print one hook JSON object whose `systemMessage` carries the session-start text the `repository-binding` capability specifies, so the host shows it to the user, and whose `hookSpecificOutput` (`hookEventName: "SessionStart"`) `additionalContext` carries the same text plus an instruction to tell the user in the first reply; with no such text it SHALL keep printing the plain-text nudge.
 - Exposes `rembric_post <path> <json-body>`, which issues `curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --max-time "${REMBRIC_POST_MAX_TIME:-3}" -d "$body" -w '\n%{http_code}' "$URL"`. The budget SHALL be overridable through `REMBRIC_POST_MAX_TIME` and SHALL default to `3` when unset, so a caller running under a host-imposed budget tighter than 3 seconds can fit the request inside it. Codex's `SessionEnd` is the case that forces this: the host allows that one event 1 second by default and 3 seconds at most, against 600 for every other hook, so a fixed 3-second POST consumes the entire budget and leaves nothing for the transcript read or the failure diagnostic (`codex-distribution`). A caller SHALL set the variable only where a tighter budget applies; every other script inherits the default and SHALL NOT restate it. It SHALL use `-s` and NOT `-f`: the status code is captured via `-w` and split off the response, so that a non-2xx response can be reported with its body in the stderr diagnostic required by `plugin-session-protocol`'s failed-POST requirement. `-f` would suppress exactly that body. An empty body argument SHALL be normalised to `{}`.
 - Exposes `rembric_turn_report <path> <json-body>`, the ONE function in this file besides `rembric_session_ensure` that reads a response body. It SHALL echo the response's `lines` array as one newline-separated block, or nothing on failure, on a non-2xx status, or when the array is empty. Keeping it separate from `rembric_post` is what stops the body-reading capability from later being pointed at a `/summary` response, which `plugin-session-protocol` forbids.
 - Exposes `rembric_pending_write <session-id> <text>` and `rembric_pending_take <session-id>`, a per-session line cache under `${TMPDIR:-/tmp}/rembric-pending/`. `_take` SHALL print and remove in one step, so a notice is printed exactly once. `_write` SHALL NOT overwrite a non-empty cache with an empty value — a second report within one turn would otherwise swallow a pending notice.
@@ -276,6 +277,19 @@ Each hook script SHALL `source` `_api.sh` (and `_transcript.sh` where transcript
 - **WHEN** `rembric_json_escape` is called on it
 - **THEN** the output SHALL contain the escape sequence in place of the raw byte
 - **AND** embedding the output as a JSON string value and parsing it back SHALL reproduce the original byte exactly
+
+#### Scenario: Every hook in a session reuses the first resolution
+
+- **GIVEN** `session-start.sh` resolved session `S` to slug `shop` by fingerprint
+- **WHEN** an admin moves the binding to `store` and `stop-report.sh` then runs for `S`
+- **THEN** `stop-report.sh` SHALL POST to `/api/shop/sessions/S/turn`
+- **AND** it SHALL NOT call `/api/repositories/resolve`
+
+#### Scenario: An unbound session posts nothing from any hook
+
+- **GIVEN** `session-start.sh` resolved session `S` as unbound
+- **WHEN** `prompt-search.sh`, `stop-report.sh`, `pre-compact.sh`, `post-compaction.sh` and `session-end.sh` run for `S`
+- **THEN** none of them SHALL issue a request to any `/api/<slug>/` path
 
 ### Requirement: The plugin MUST NOT implement migration or coexistence behaviors with other agent memory systems
 
@@ -504,7 +518,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Matcher: `startup|resume|clear|fork`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh claude-code`.
 - The script SHALL read `session_id`, `cwd`, and `source` from hook stdin. It SHALL NOT branch on `source`: all four matched values register a row, and `fork` carries a new session id, so registration is the correct response to every one of them.
-- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge.
+- The script SHALL resolve the session's project with `rembric_session_project <session_id> <cwd>` from `_api.sh`, which runs the `repository-binding` cascade once per session and caches the outcome; this is the session's first resolution.
 - When a valid slug is resolved, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": "<session_id>", "cwd": "<cwd>", "agent": "claude-code"}`. The server-side handler writes the placeholder title.
 - Immediately afterwards, and only when the ensure was attempted, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. On a fresh row that is a documented no-op; on a row a previous run ended or the sweep abandoned, it is what returns the conversation's memories to it.
 - The script SHALL emit the generic nudge `rembric: If this is a continuation of recent work, call memory.context before responding.` to stdout.
@@ -515,7 +529,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`.
 - Matcher: `compact`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.sh claude-code`.
-- The script SHALL read `session_id` and `cwd` from hook stdin (slug resolution piggybacks on `.rembric` as elsewhere).
+- The script SHALL read `session_id` and `cwd` from hook stdin and SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session.
 - When both `session_id` and a valid slug resolve, the script SHALL re-POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` as an idempotent session-row ensure, and SHALL then POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. The pair is what covers the case where the stale sweep abandoned the row between the pre-compact moment and the resume; the ensure alone never could, because the ensure path returns a terminal row untouched (`http-api`). This hook is NOT stdout-only.
 - The script SHALL emit an imperative instruction block to stdout, prefixed `rembric:` so Codex's `looks_like_json` heuristic does not flag it. Its content and its ≤700-byte cap are governed by `plugin-session-protocol`'s post-compaction requirement, which this change rewords for the section-wise merge; the reworded block SHALL be re-measured in the same commit.
 - Output cap: ≤175 tokens. `plugin-session-protocol` asserts the same number and the two SHALL be changed together.
@@ -554,7 +568,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh claude-code`. The agent-name argument SHALL be passed explicitly rather than left to the script's default, because Codex CLI wires the same single script with `codex-cli` to select its own transcript parser (`codex-distribution`), and a bare invocation on one client against an argument on the other is the shape that lets the two drift.
 - The script SHALL read `session_id`, `cwd`, `transcript_path`, and `reason` from hook stdin.
-- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG`.
+- The script SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session.
 - When both resolve, the script SHALL read `transcript_path` if the file exists and build the fallback body, PREFERRING the deterministic fact extraction over the raw transcript format and falling through to the format when the extractor is unavailable or yields nothing (`sessions`, "A session that ends without a curated summary MUST still leave grounded, checkable facts"). It SHALL extract a title from the first non-empty assistant message (truncated to 100 chars) and POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/end` with body `{"summary": "<body>", "title": "<derived>", "final": false}`.
 - When `transcript_path` is missing/unreadable/empty, the script SHALL POST `/end {}` (degraded mode — transition without summary).
 - The script SHALL discard the response, SHALL emit no stdout (`SessionEnd` is not stdout-injected), and SHALL exit `0` on any error.
@@ -736,15 +750,15 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 
 ### Requirement: A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard
 
-When the bridge falls back to path-less `/mcp` — no `.rembric`, a parse failure, no `PROJECT_SLUG`, or an invalid slug — the connection SHALL resolve to the server's default project for its whole life. The plugin SHALL NOT rely on MCP roots discovery or on any tool call to select another project: the server does neither, and no tool can switch a connection's project. The bridge's stderr diagnostic SHALL name the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`), as the `mcp-bridge` capability specifies.
+When the bridge falls back to path-less `/mcp` outside a git work tree — no `.rembric`, a parse failure, no `PROJECT_SLUG`, or an invalid slug — the connection SHALL resolve to the server's default project for its whole life. Inside a git work tree there is no such fallback: a checkout that no `.rembric`, `REMBRIC_PROJECT_SLUG` or bound fingerprint resolves is unbound, or gets no connection at all, as the `repository-binding` and `mcp-bridge` capabilities specify. The plugin SHALL NOT rely on MCP roots discovery or on any tool call to select another project: the server does neither, and no tool can switch a connection's project. The bridge's stderr diagnostic SHALL name the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`), as the `mcp-bridge` capability specifies.
 
 When the bridge path-scopes the URL with a slug that does not yet correspond to a Rembric project, every scope-resolving tool SHALL be refused with `project_not_found`, and the refusal SHALL point to the dashboard. The project SHALL be created from the dashboard; no agent-side bootstrap call exists, and the plugin's model-facing text SHALL NOT instruct the agent to create or switch a project. Subsequent tool calls on the same URL find the project once the operator has created it.
 
-To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`) and starts a new host session; there is no in-session override.
+To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`), or an admin changes the repository's binding, and starts a new host session; there is no in-session override.
 
 #### Scenario: No slug means the default project
 
-- **GIVEN** a project directory with no `.rembric` and no `REMBRIC_PROJECT_SLUG`, and a host that advertises the `roots` capability
+- **GIVEN** a project directory outside any git work tree with no `.rembric` and no `REMBRIC_PROJECT_SLUG`, and a host that advertises the `roots` capability
 - **WHEN** the agent calls `memory.save` through the plugin
 - **THEN** the row SHALL carry the default project's `project_id`
 - **AND** the server SHALL NOT have sent `roots/list` to the host
@@ -756,6 +770,13 @@ To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_
 - **THEN** the call SHALL be refused with `project_not_found`, the refusal SHALL point to the dashboard, and no `projects` row SHALL be inserted
 - **AND** after the operator creates `brand-new` from the dashboard, the same call on the same URL SHALL succeed against it
 
+#### Scenario: An unbound checkout does not reach the default project
+
+- **GIVEN** a git checkout with no `.rembric`, no `REMBRIC_PROJECT_SLUG`, and an unbound fingerprint
+- **WHEN** the agent calls `memory.save` through the plugin
+- **THEN** the call SHALL be refused with `project_unbound`
+- **AND** no row SHALL carry the default project's `project_id`
+
 ## Hook script invariants
 
 - Every hook script SHALL use `#!/usr/bin/env bash` and `set -u`.
@@ -765,7 +786,7 @@ To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_
 
 ## Project slug selection
 
-The active Rembric project is signalled per directory by a `.rembric` config file containing `PROJECT_SLUG=<slug>`. The plugin's bridge (`bin/rembric-bridge.mjs`) reads this file at MCP session startup and path-scopes the URL accordingly.
+The active Rembric project is resolved once per host session by the cascade the `repository-binding` capability defines: the nearest `.rembric` config file containing `PROJECT_SLUG=<slug>`, then `REMBRIC_PROJECT_SLUG`, then, inside a git work tree, the repository fingerprint resolved through `POST /api/repositories/resolve`. The plugin's bridge (`bin/rembric-bridge.mjs`) runs this cascade at MCP session startup, as the `mcp-bridge` capability specifies, and path-scopes the URL accordingly. The hook scripts run the same cascade through `rembric_session_project` in `_api.sh`, which caches the first outcome for the session.
 
 **Format requirements:**
 
@@ -775,13 +796,13 @@ The active Rembric project is signalled per directory by a `.rembric` config fil
 
 **Lookup location:**
 
-- The bridge SHALL look for `.rembric` in the project directory resolved by the precedence chain specified once under "MCP bridge contract" above — including its `PWD` step, which is what makes the bridge work under Codex, whose MCP launcher forwards the shell working directory rather than `CLAUDE_PROJECT_DIR` (`codex-distribution`'s `env_vars` requirement depends on it). The chain SHALL NOT be restated here; a second copy is how this line came to contradict it.
-- File absence, parse failure, missing `PROJECT_SLUG`, or invalid slug are all permitted; when `REMBRIC_PROJECT_SLUG` supplies no valid slug either, the bridge falls back to path-less `/mcp` with a stderr diagnostic that names the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`). The session continues to operate against the server's default project for its whole life (see "A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard").
+- The bridge SHALL look for the nearest `.rembric` starting from the project directory resolved by the precedence chain specified once under "MCP bridge contract" above — including its `PWD` step, which is what makes the bridge work under Codex, whose MCP launcher forwards the shell working directory rather than `CLAUDE_PROJECT_DIR` (`codex-distribution`'s `env_vars` requirement depends on it). Inside a git work tree it walks up to the checkout root; outside one it checks only that directory. The chain and the walk SHALL NOT be restated here; a second copy is how this line came to contradict it.
+- File absence, parse failure, missing `PROJECT_SLUG`, or invalid slug are all permitted. Outside a git work tree, when `REMBRIC_PROJECT_SLUG` supplies no valid slug either, the bridge falls back to path-less `/mcp` with a stderr diagnostic that names the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`). The session continues to operate against the server's default project for its whole life (see "A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard"). Inside a git work tree there is no such fallback: a checkout that no explicit selection or bound fingerprint resolves is unbound or gets no connection (see "A client MUST NOT fall back to the default project inside a git work tree").
 
 **Authority and precedence:**
 
 - When the bridge succeeds in path-scoping, the URL is `${server_url}/mcp/<slug>`. The Rembric server populates `ctx.project` from the URL slug during auth. All tool handlers honor `ctx.project` as the first source of truth, so the project is pinned deterministically by the URL alone; no tool call selects or switches it.
-- When the bridge falls back to path-less `/mcp`, the server resolves the connection to its default project through the same resolver every scope-sensitive tool uses (`resolveEffectiveScope`). The server issues no `roots/list`, and no tool switches the connection's project, so a path-less connection never lands in a project other than the default.
+- When the bridge falls back to path-less `/mcp`, the server resolves the connection to its default project through the same resolver every scope-sensitive tool uses (`resolveEffectiveScope`). The server issues no `roots/list`, and no tool switches the connection's project, so a path-less connection never lands in a project other than the default. A path-less request carrying `X-Rembric-Repo-Fingerprint` resolves to no project instead (see "Unbound mode MUST permit no write").
 
 **Bootstrap for new slugs:**
 
@@ -789,7 +810,7 @@ The active Rembric project is signalled per directory by a `.rembric` config fil
 
 **Manual override during a session:**
 
-- There is no in-session override. The bridge resolves the slug once, at startup, and builds one URL for the life of the process; to work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`) and starts a new host session.
+- There is no in-session override. The bridge resolves the slug once, at startup, and builds one URL for the life of the process; to work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`), or an admin changes the repository's binding, and starts a new host session.
 
 ## Out-of-scope behaviors
 

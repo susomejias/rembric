@@ -64,8 +64,8 @@
 ## 10. Documentation
 
 - [ ] 10.1 Update `docs/agents.md`, `apps/plugin/README.md` and each client README: how a project is selected, unbound mode, how an admin binds a repository, `REMBRIC_REPO_PENDING_TTL_DAYS` and `REMBRIC_REPO_PENDING_MAX_PER_TOKEN`
-- [ ] 10.2 At archive time, hand-edit what deltas cannot reach: `## Project slug selection` in `openspec/specs/claude-code-plugin/spec.md`, the hook-script requirement lines there and in `codex-distribution` that restate "read `${cwd}/.rembric`", so they point to `rembric_session_project`
-- [ ] 10.3 At archive time, reconcile the MODIFIED `mcp-api` requirement "The MCP `initialize` response MUST ship a protocol-teaching `instructions` block" with `proactive-entity-recall`, which modifies the same requirement: whichever change archives second carries the other's text
+- [x] 10.2 At archive time, hand-edit what deltas cannot reach: `## Project slug selection` in `openspec/specs/claude-code-plugin/spec.md`, the hook-script requirement lines there and in `codex-distribution` that restate "read `${cwd}/.rembric`", so they point to `rembric_session_project`
+- [x] 10.3 At archive time, reconcile the MODIFIED `mcp-api` requirement "The MCP `initialize` response MUST ship a protocol-teaching `instructions` block" with `proactive-entity-recall`, which modifies the same requirement: whichever change archives second carries the other's text
 
 ## 11. Release
 

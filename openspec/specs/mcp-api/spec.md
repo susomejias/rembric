@@ -810,9 +810,9 @@ This requirement constrains description prose only. It SHALL NOT be read as re-s
 
 ### Requirement: The MCP `initialize` response MUST ship a protocol-teaching `instructions` block
 
-When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 1000 characters or fewer in both variants. This cap is a self-imposed token budget rather than the binding limit: the MCP specification defines `InitializeResult.instructions` as an optional free-form string with no maximum length or truncation rule, but at least one consuming client DOES impose a ceiling — Claude Code truncates `instructions` at 2048 characters with the same `LB` constant it applies to tool descriptions, appending `… [truncated]`. The 1000-character cap is therefore chosen for token cost, at less than half the known client ceiling, and it binds first. Any future change RAISING this cap SHALL keep it below the verified client ceiling (see "Tool descriptions MUST stay below the client truncation ceiling").
+When the MCP server is constructed, its `instructions` field SHALL be populated with a scope-aware string that teaches the agent when to call each tool. The string SHALL be 1000 characters or fewer in every variant. This cap is a self-imposed token budget rather than the binding limit: the MCP specification defines `InitializeResult.instructions` as an optional free-form string with no maximum length or truncation rule, but at least one consuming client DOES impose a ceiling — Claude Code truncates `instructions` at 2048 characters with the same `LB` constant it applies to tool descriptions, appending `… [truncated]`. The 1000-character cap is therefore chosen for token cost, at less than half the known client ceiling, and it binds first. Any future change RAISING this cap SHALL keep it below the verified client ceiling (see "Tool descriptions MUST stay below the client truncation ceiling").
 
-Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect, and name a `/mcp/<slug>` URL as the way to reach another project. Neither variant SHALL name `project.use` or roots-based auto-detection, because neither exists.
+Neither variant SHALL name `global`, `include_global` or user-wide memory (see "No MCP tool surface MAY name a scope the server does not have"). The path-scoped variant SHALL state which project the connection is bound to; the path-less variant SHALL state that a project is always active, name the default project as the scope in effect, and name a `/mcp/<slug>` URL as the way to reach another project. An unbound connection — a path-less request carrying the `X-Rembric-Repo-Fingerprint` header — SHALL get a third variant instead of the path-less one: it SHALL state that no project is selected because the repository is not bound and that memory tools answer `project_unbound`, whose message carries the remedies the token can perform; it SHALL NOT name the default project, and SHALL NOT name `project.bind_repository`, which only an admin token can call. No variant SHALL name `project.use` or roots-based auto-detection, because neither exists.
 
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
@@ -848,6 +848,14 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 - **WHEN** the `initialize` handshake completes against `/mcp`
 - **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows (the proactive save flow, the on-demand recall flow, the session-close flow with the `10000`-char cap, AND the `memory.about` update-guidance pointer) and a note stating that a project is always active — naming the default project as the scope in effect and a `/mcp/<slug>` URL as the way to reach another project. It SHALL NOT name `project.use` or roots-based auto-detection. It SHALL NOT name the retired `X-Rembric-Project` header, which is asserted absent from both variants by `packages/mcp/src/instructions.test.ts`, and SHALL NOT name `global`, `include_global` or user-wide memory.
+
+#### Scenario: An unbound MCP client connects
+
+- **GIVEN** a path-less `/mcp` request carrying a valid `X-Rembric-Repo-Fingerprint` header
+- **WHEN** the `initialize` handshake completes
+- **THEN** the `InitializeResult.instructions` SHALL contain the same protocol flows as the other variants and a note stating that no project is selected and that memory tools answer `project_unbound`
+- **AND** the note SHALL NOT name the default project, `project.bind_repository`, `project.use`, roots-based auto-detection, `global`, `include_global` or user-wide memory
+- **AND** the same request without the header SHALL still receive the path-less variant naming the default project
 
 #### Scenario: Instructions length is checked at build time
 
@@ -2160,7 +2168,9 @@ An in-process bound sitting behind the rejecting boundary MAY be retained as a d
 
 ### Requirement: A path-less `/mcp` connection MUST resolve to the default project
 
-A connection at `/mcp` with no path slug SHALL resolve its effective scope to the **default project** — the single `projects` row marked as the system default (see the `projects` capability). There SHALL be no state in which a connection is authenticated but has no project scope, and no tool SHALL be reachable in such a state.
+A connection at `/mcp` with no path slug SHALL resolve its effective scope to the **default project** — the single `projects` row marked as the system default (see the `projects` capability) — unless its request carries the `X-Rembric-Repo-Fingerprint` header. Such a request is **unbound** (see the `repository-binding` capability): it is authenticated and has no project scope, and every tool that resolves an effective scope SHALL be refused with structured code `project_unbound`, reads and writes alike, without falling back to the default project and without widening. The only tools reachable on an unbound request are those that resolve no effective scope: `project.list`, `project.current` and `project.bind_repository`. Apart from unbound requests there SHALL be no state in which a connection is authenticated but has no project scope.
+
+The `project_unbound` refusal SHALL name only remedies the calling token can perform, as the `repository-binding` capability's unbound-mode requirement specifies, and SHALL NOT name `project.bind_repository` to a token whose scope is not `*`.
 
 Every site that previously fell back to the global scope on a path-less connection SHALL target the default project instead, and the set of such sites SHALL be exhaustive rather than sampled: the shared scope resolver, `memory.session_start`'s project binding, `project.current`'s authorization target, and the pinned-token remedy builder. A site missed here does not fail — it silently authorizes against, or reports, a scope that no longer exists.
 
@@ -2170,7 +2180,7 @@ No tool SHALL switch a path-less connection to another project, and MCP roots SH
 
 #### Scenario: A path-less save with no arguments succeeds
 
-- **GIVEN** a path-less `/mcp` connection, a token authorized to write the default project, and no `.rembric` file, whether or not the client advertises the roots capability
+- **GIVEN** a path-less `/mcp` connection without an `X-Rembric-Repo-Fingerprint` header, a token authorized to write the default project, and no `.rembric` file, whether or not the client advertises the roots capability
 - **WHEN** the client calls `memory.save` with only `type`, `title` and `content`
 - **THEN** the call SHALL succeed and the new row SHALL carry the default project's `project_id`
 - **AND** the call SHALL NOT be refused with `project_required` or `project_suggestion_pending`
@@ -2206,6 +2216,13 @@ No tool SHALL switch a path-less connection to another project, and MCP roots SH
 - **WHEN** the client calls `project.list`
 - **THEN** the default project SHALL appear as an ordinary entry with its slug, display name, archived flag and `activeMemoryCount`
 - **AND** a connection at `/mcp/<its slug>` SHALL resolve to it under the same rules as any other project
+
+#### Scenario: An unbound request is refused, and its project tools still answer
+
+- **GIVEN** a path-less `/mcp` connection whose requests carry `X-Rembric-Repo-Fingerprint: <fingerprint>` and a token authorized to read and write the default project
+- **WHEN** the client calls `memory.save`, `memory.search`, `memory.context` and `memory.session_start`
+- **THEN** every call SHALL be refused with `project_unbound` and no row SHALL be written
+- **AND** `project.list` and `project.current` SHALL succeed, and `project.current` SHALL report `source: 'unbound'`
 
 ### Requirement: No MCP tool surface MAY name a scope the server does not have
 
@@ -2564,11 +2581,11 @@ The tag contract in this requirement and the updated shared-curation requirement
 - **THEN** `memory.context` SHALL retain its existing response fields, defaults, and limits without a tag catalog or larger payload contract
 - **AND** `memory.save_prompt` SHALL retain its existing optional-tag semantics without memory-tag normalization
 
-### Requirement: The MCP server MUST expose two project-management tools under the `project.*` namespace
+### Requirement: The MCP server MUST expose three project-management tools under the `project.*` namespace
 
-The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list` and `project.current` with the following contracts. Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
+The `/mcp` and `/mcp/<slug>` endpoints SHALL register `project.list`, `project.current` and `project.bind_repository` with the following contracts; `project.bind_repository` is specified in "The MCP server MUST expose `project.bind_repository` to admin tokens". Tool names live under the top-level `project.*` namespace (not `memory.project_*`) to distinguish project management from memory CRUD.
 
-No tool SHALL activate, switch or create a project. A connection's project is fixed by its URL path, or is the default project on a path-less connection; projects are created from the dashboard. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
+No tool SHALL activate, switch or create a project. A connection's project is fixed by its URL path, or is the default project on a path-less connection, or is absent on an unbound request; projects are created from the dashboard. `project.bind_repository` binds a repository fingerprint to an existing project for later sessions and SHALL NOT change the project of the connection it is called on. `project.use` SHALL NOT be registered and SHALL NOT appear in `tools/list`.
 
 `project.list`'s per-project count SHALL be named `activeMemoryCount` and SHALL count only memories whose `status` is `active`, in that project's scope. The name carries the filter because the count's previous name, `memoryCount`, stated neither dimension and was measured disagreeing with the corpus the same connection could read: after `memory.archive` on a project's only memory, `project.list` reported `1` while `memory.search` in that same scope returned `0`. The name is additionally reused elsewhere in the server for a different aggregate (memories saved in one session), so a bare `memoryCount` on this payload is ambiguous in two ways at once. Renaming rather than silently re-filtering is required: a changed value under an unchanged key gives a consumer no signal to re-read the contract.
 
@@ -2583,7 +2600,7 @@ No tool SHALL activate, switch or create a project. A connection's project is fi
 #### Scenario: No project-switching or project-creating tool is offered
 
 - **WHEN** an MCP client calls `tools/list` on `/mcp` or on `/mcp/<slug>`
-- **THEN** the response SHALL contain `project.list` and `project.current`
+- **THEN** the response SHALL contain `project.list`, `project.current` and `project.bind_repository`
 - **AND** the response SHALL NOT contain `project.use`, nor any other tool that activates, switches or creates a project
 
 #### Scenario: `project.list` returns available slugs
@@ -2637,8 +2654,21 @@ No tool SHALL activate, switch or create a project. A connection's project is fi
 #### Scenario: `project.current` reports resolution provenance
 
 - **WHEN** an MCP client calls `project.current`
-- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'default' | 'none' }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'`
+- **THEN** the server SHALL return `{ slug: string | null, projectId: string | null, source: 'url-path' | 'default' | 'unbound' | 'none', repository?: { fingerprint: string | null, boundSlugs: string[], conflict: boolean } }` where `source: 'default'` reports the default-project fallback — a resolution that happened, so it SHALL NOT be reported as `'none'` — and `source: 'unbound'` reports an unbound request, with `slug` and `projectId` null
+- **AND** `repository` SHALL be present exactly when the request carries the `X-Rembric-Repo-Fingerprint` header: `fingerprint` SHALL be the header's value, or null for `unavailable`; `boundSlugs` SHALL list only the bound projects the token may read, sorted ascending; and `conflict` SHALL be true exactly when the connection is path-scoped, `boundSlugs` is non-empty and it does not contain the connection's slug
 - **AND** the response SHALL NOT carry a `suggestedSlugs` field
+
+#### Scenario: `project.current` reports an explicit selection that overrides a binding
+
+- **GIVEN** fingerprint `F` bound to `shop`, and a token authorized for `shop` and `sandbox`
+- **WHEN** a client at `/mcp/sandbox` whose requests carry `X-Rembric-Repo-Fingerprint: F` calls `project.current`
+- **THEN** the response SHALL report `slug: 'sandbox'`, `source: 'url-path'` and `repository: { fingerprint: F, boundSlugs: ['shop'], conflict: true }`
+
+#### Scenario: `project.current` does not reveal a binding the token cannot read
+
+- **GIVEN** fingerprint `F` bound only to `secret`, and a token not authorized for `secret`
+- **WHEN** a client at `/mcp/shop` whose requests carry `X-Rembric-Repo-Fingerprint: F` calls `project.current`
+- **THEN** `repository.boundSlugs` SHALL be empty and `repository.conflict` SHALL be false
 
 ### Requirement: Every MCP tool call MUST be authorized against the token's scope for the resolved project
 
@@ -2967,3 +2997,44 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 - **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `previousStatus` and `previousEndedAt`
 - **AND** the description SHALL state that `previousEndedAt` is not retained on the row after the call
 - **AND** the CI test that compares each description against its `outputSchema`'s required list SHALL cover this tool
+
+### Requirement: The MCP server MUST expose `project.bind_repository` to admin tokens
+
+`project.bind_repository` SHALL bind the repository identified by the request's `X-Rembric-Repo-Fingerprint` header to an existing project. Its strict input schema SHALL declare exactly one property, `slug`. The fingerprint SHALL NOT be a tool argument: it comes from the header the client computed from the working tree, so the model cannot mistype or invent it.
+
+The tool SHALL refuse, in this order:
+
+1. a token whose scope is not `*`, with `admin_token_required`;
+2. a request without the header, or whose header is `unavailable`, with `repository_fingerprint_unavailable`;
+3. a `slug` that names no project, with `project_not_found`, or an archived project, with `project_archived`;
+4. a fingerprint that already has any binding, with `repository_already_bound`, naming every bound project's slug and stating that moving or removing a binding is done from the dashboard.
+
+The tool SHALL bind only a fingerprint with no binding at all. It SHALL NOT move, replace or remove a binding; those operations exist only in the dashboard. A successful call SHALL create the binding, SHALL copy the normalized remotes of the fingerprint's pending rows into it, SHALL remove the fingerprint's pending row of kind `unbound`, and SHALL return `{ slug, fingerprint }` with text stating that the binding applies from the next session. The connection's own project SHALL NOT change.
+
+The tool SHALL be callable on path-scoped, path-less and unbound requests alike, and SHALL resolve no effective scope. Its registered description SHALL state that it requires an admin token and binds only an unbound repository, within `DESCRIPTION_MAX_LENGTH`. Its behavioural annotations SHALL declare it non-read-only, non-destructive and non-idempotent.
+
+#### Scenario: An admin binds an unbound repository from an unbound session
+
+- **GIVEN** an unbound fingerprint `F`, an existing project `shop`, and an unbound path-less connection carrying `X-Rembric-Repo-Fingerprint: F` with a token of scope `*`
+- **WHEN** the client calls `project.bind_repository({ slug: 'shop' })`
+- **THEN** a binding of `F` to `shop` SHALL exist
+- **AND** a subsequent `memory.save` on the same connection SHALL still be refused with `project_unbound`
+- **AND** the next session started from that checkout SHALL resolve to `shop`
+
+#### Scenario: A non-admin token cannot bind
+
+- **GIVEN** a token whose scope is `project:<id of shop>`
+- **WHEN** it calls `project.bind_repository({ slug: 'shop' })` with a valid fingerprint header
+- **THEN** the call SHALL be refused with `admin_token_required` and no binding SHALL be created
+
+#### Scenario: A bound repository is not moved by the tool
+
+- **GIVEN** fingerprint `F` bound to `shop`
+- **WHEN** an admin token calls `project.bind_repository({ slug: 'store' })` with `X-Rembric-Repo-Fingerprint: F`
+- **THEN** the call SHALL be refused with `repository_already_bound`, its message SHALL name `shop` and the dashboard
+- **AND** `F` SHALL still be bound to `shop` only
+
+#### Scenario: The fingerprint cannot come from the model
+
+- **WHEN** a client calls `project.bind_repository` with a `fingerprint` property
+- **THEN** the call SHALL be refused by the strict input schema as an unknown property

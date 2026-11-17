@@ -284,7 +284,7 @@ Because the extension connects to `/mcp/<slug>`, the server resolves its project
 
 The extension SHALL read `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` from `process.env`, matching how the Hermes plugin and the in-process side of the opencode plugin already obtain them. The harness does not inject environment variables from its own settings file, so no settings-file credential path SHALL be documented or implemented.
 
-The project slug SHALL be resolved from `.rembric::PROJECT_SLUG` via `readRembricSlug` from `apps/plugin/mcp-bridge/rembric-dotenv.mjs`. The extension SHALL NOT parse `.rembric` itself and SHALL NOT declare its own slug regex.
+The project SHALL be resolved once per session through the shared resolver in `apps/plugin/mcp-bridge/rembric-project.mjs`, with the cascade the `repository-binding` capability defines: `.rembric::PROJECT_SLUG` of the nearest `.rembric` up to the checkout root, read via `readRembricSlug` from `apps/plugin/mcp-bridge/rembric-dotenv.mjs`; then `REMBRIC_PROJECT_SLUG`; then, inside a git work tree, the repository fingerprint. The extension SHALL NOT parse `.rembric` itself, SHALL NOT declare its own slug regex and SHALL NOT compute the fingerprint itself. Because the extension speaks MCP without the bridge, it SHALL itself add the `X-Rembric-Repo-Fingerprint` header to every MCP request inside a git work tree, and SHALL connect path-less only on an `unbound` answer, as the `repository-binding` capability requires.
 
 When either environment variable is absent the extension SHALL disable itself, SHALL emit exactly one one-line stderr diagnostic naming which configuration is missing, and SHALL NOT break the host harness. The diagnostic SHALL NOT include the token.
 
@@ -325,10 +325,17 @@ The reason string SHALL come from `createSessionProtocol`, which already derives
 #### Scenario: Slug resolution uses the shared parser
 
 - **WHEN** `apps/plugin/.pi-plugin/index.ts` is read at HEAD
-- **THEN** it imports `readRembricSlug` from the shared dotenv module
-- **AND** it declares no local `function parseDotenv` and no local `SLUG_RE`
+- **THEN** it imports its project resolution from the shared `rembric-project.mjs` module
+- **AND** it declares no local `function parseDotenv`, no local `SLUG_RE` and no local `git rev-list` invocation
 
 **Amendment for the bridge move:** The canonical shared dotenv module is now `apps/plugin/mcp-bridge/rembric-dotenv.mjs`, because it is shipped in the published zero-dependency bridge package. The extension SHALL import `readRembricSlug` from `../mcp-bridge/rembric-dotenv.mjs`; no `apps/plugin/mcp-bridge/rembric-dotenv.mjs` copy SHALL remain. The rest of this requirement, including the scenarios above, is unchanged.
+
+#### Scenario: An unbound checkout says so in the harness UI
+
+- **GIVEN** a git checkout with no `.rembric`, no `REMBRIC_PROJECT_SLUG`, and an unbound fingerprint
+- **WHEN** the harness starts a session
+- **THEN** one notification SHALL be raised at `warning` severity stating that the repository is not bound to a project
+- **AND** every MCP request SHALL carry `X-Rembric-Repo-Fingerprint` and no session SHALL be registered
 
 ### Requirement: Slash commands reuse the shared command markdown
 

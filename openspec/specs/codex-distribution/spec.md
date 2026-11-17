@@ -272,7 +272,7 @@ The authoritative table of which hook POSTs what for both clients is `plugin-ses
 - **WHEN** the `Stop` hook fires (which it does once per agent turn under Codex semantics)
 - **THEN** the single entry SHALL invoke `${CLAUDE_PLUGIN_ROOT}/scripts/stop-report.sh codex-cli` — the same script Claude Code's `Stop` hook invokes with `claude-code`, diverging in exactly TWO ways selected by that agent-name argument: (1) the transcript marker used to detect tool use (`"function_call"` / `mcp_tool_call` vs `"type":"tool_use"`), and (2) the stdout contract (Codex MUST `printf '{}'`; Claude Code MUST emit nothing)
 - **AND** the script SHALL read `session_id`, `cwd`, `transcript_path` and `stop_hook_active` from stdin
-- **AND** SHALL read `${cwd}/.rembric` for the slug
+- **AND** SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session
 - **AND** SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/turn` with `{"usedTools": <bool>}` and cache the response's `lines`
 - **AND** SHALL emit `'{}'` to stdout and nothing else
 - **AND** SHALL exit zero even on internal error
