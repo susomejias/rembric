@@ -1,0 +1,7 @@
+rembric retrieval eval — loading embedder...
+ingesting 70 corpus memories through MemoryService...
+hybrid           P@8=0.212 R@8=0.975 MRR@8=0.900 tokens=344 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 140 rows)
+grep             P@8=0.206 R@8=0.900 MRR@8=0.764 tokens=539 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+memory-md-dump   P@8=0.075 R@8=0.525 MRR@8=0.236 tokens=525 abstainFP=1.00 overAbstain=0.00 foreignScope=0.000 (over 208 rows)
+
+rembric retrieval eval passed.

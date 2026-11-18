@@ -1,6 +1,6 @@
 {
   "retriever": "grep",
-  "embeddingModelId": "onnx-community/gte-multilingual-base",
+  "embeddingModelId": "hindsight-ai/hs-embed-1",
   "discriminatingMetric": "recall@k vs 'hybrid' — how far naive substring matching gets alone",
   "ceilings": {
     "5": {

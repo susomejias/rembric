@@ -18,8 +18,11 @@ import {
   VEC_THRESHOLD,
   type CandidateOptions,
 } from '@rembric/core';
+import { EMBEDDING_DIMS } from '@rembric/core';
 
 import { createTestDb, defaultProjectScope, type TestDb } from '../test-support/index.js';
+
+const LOW_DENSE = (VEC_THRESHOLD + CANDIDATE_LOW_BAND_CEILING) / 2;
 
 describe('classifyCandidateBand', () => {
   const dense = (vecSimilarity: number | null) => ({
@@ -62,7 +65,7 @@ describe('classifyCandidateBand', () => {
   });
 
   it('a lexically admitted pair is never low', () => {
-    expect(classifyCandidateBand({ vecSimilarity: 0.72, lexical: true, entity: false })).toBe(
+    expect(classifyCandidateBand({ vecSimilarity: LOW_DENSE, lexical: true, entity: false })).toBe(
       'middle',
     );
     expect(classifyCandidateBand({ vecSimilarity: 0.3, lexical: true, entity: true })).toBe(
@@ -80,7 +83,7 @@ describe('classifyCandidateBand', () => {
 });
 
 describe('save-time bands through the curation path', () => {
-  const DIMS = 768;
+  const DIMS = EMBEDDING_DIMS;
   let db: TestDb;
   let repos: Repositories;
   let memorySvc: MemoryService;
@@ -152,7 +155,7 @@ describe('save-time bands through the curation path', () => {
 
   it('a low-band pair writes no pending row and is reported in related[] without a judgmentId', async () => {
     const target = seed('Quarterly restore drill', 'staging restores happen every quarter', {
-      cosine: 0.72,
+      cosine: LOW_DENSE,
     });
     const out = await saveProbe('backup copies sit in an off-site bucket');
 
@@ -250,7 +253,7 @@ describe('save-time bands through the curation path', () => {
 
   it('related[] is bounded by the same per-save maximum', async () => {
     for (let i = 0; i < 3; i++)
-      seed(`Loose neighbour ${i}`, `alpha${i} beta${i}`, { cosine: 0.71 });
+      seed(`Loose neighbour ${i}`, `alpha${i} beta${i}`, { cosine: LOW_DENSE });
     const out = await saveProbe('gamma delta epsilon', { perSaveMax: 2 });
 
     expect(out.related).toHaveLength(2);
@@ -259,7 +262,7 @@ describe('save-time bands through the curation path', () => {
 
   it('with bands disabled every admitted pair is a pending candidate (the sweep baseline)', async () => {
     const target = seed('Quarterly restore drill', 'staging restores happen every quarter', {
-      cosine: 0.72,
+      cosine: LOW_DENSE,
     });
     const out = await saveProbe('backup copies sit in an off-site bucket', {
       perSaveMax: 5,

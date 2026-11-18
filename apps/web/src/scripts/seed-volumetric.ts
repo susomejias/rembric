@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
-import { AgentSessionsService } from '@rembric/core';
+import { AgentSessionsService, EMBEDDING_DIMS } from '@rembric/core';
 import { extractEntities } from '@rembric/core';
 import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
@@ -208,7 +208,7 @@ export const VOLUMETRIC_SHAPE = {
   relationsOrphanedFraction: 0.05,
   promptBytesP50: 260,
   promptsDeletedFraction: 0.15,
-  embeddingDims: 768,
+  embeddingDims: EMBEDDING_DIMS,
 } as const;
 
 const RELATION_ORPHAN_CUTOFF =

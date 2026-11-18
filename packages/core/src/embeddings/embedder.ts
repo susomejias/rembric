@@ -4,8 +4,9 @@ import { availableParallelism } from 'node:os';
 import identity from './model-identity.json' with { type: 'json' };
 
 export const EMBEDDING_MODEL_ID = identity.modelId;
-// JSON module types widen string literals; the transformers.js `dtype` option is a union.
-export const EMBEDDING_DTYPE = identity.dtype as 'q8';
+// JSON module types widen string literals; the transformers.js `dtype` and `pooling` options are unions.
+export const EMBEDDING_DTYPE = identity.dtype as 'fp32';
+export const EMBEDDING_POOLING = identity.pooling as 'mean';
 export const EMBEDDING_DIMS = identity.dims;
 export const EMBEDDING_MODEL_REVISION = identity.revision;
 export const EMBEDDING_ONNX_ARTIFACT = identity.onnxArtifact;
@@ -33,7 +34,7 @@ export function embedderModelIsBaked(): boolean {
 }
 
 export interface Embedder {
-  /** Compute a normalized 768-dim embedding. */
+  /** Compute a normalized `EMBEDDING_DIMS`-dim embedding. */
   embed(text: string): Promise<Float32Array>;
   readonly modelId: string;
 }
@@ -58,7 +59,7 @@ export async function loadEmbedder(): Promise<Embedder> {
   return {
     modelId: EMBEDDING_MODEL_ID,
     async embed(text: string): Promise<Float32Array> {
-      const out = await pipe(text, { pooling: 'cls', normalize: true });
+      const out = await pipe(text, { pooling: EMBEDDING_POOLING, normalize: true });
       // Tensor.data is a union of typed arrays; pooling + normalize yields fp32.
       const data = out.data as Float32Array | number[];
       const vector = data instanceof Float32Array ? data : Float32Array.from(data);

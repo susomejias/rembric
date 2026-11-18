@@ -1,7 +1,8 @@
 {
-  "modelId": "onnx-community/gte-multilingual-base",
-  "dtype": "q8",
-  "dims": 768,
-  "revision": "2edbf5e672aab465f9ed4c154a8b61791c082c69",
-  "onnxArtifact": "onnx/model_quantized.onnx"
+  "modelId": "hindsight-ai/hs-embed-1",
+  "dtype": "fp32",
+  "dims": 384,
+  "pooling": "mean",
+  "revision": "3164caa4db95a03faac8a327f914f7c8f42d2f98",
+  "onnxArtifact": "onnx/model.onnx"
 }

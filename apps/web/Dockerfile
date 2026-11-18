@@ -182,15 +182,15 @@ RUN set -eux; \
     }; \
     [ -d /runtime/packages/db/dist/migrations ]; \
     migrations=$(find /runtime/packages/db/dist/migrations -maxdepth 1 -name '*.sql' -type f | wc -l); \
-    [ "$migrations" -eq 40 ] || { \
-      echo "expected 40 migrations in the runtime tree, found $migrations" >&2; \
+    [ "$migrations" -eq 41 ] || { \
+      echo "expected 41 migrations in the runtime tree, found $migrations" >&2; \
       find /runtime -name '*.sql' | head -50 >&2; \
       exit 1; \
     }; \
     [ -f /runtime/dist/scripts/upgrade-helper.js ]; \
     [ -f /runtime/dist/services/self-update/engine-api.js ]; \
     [ -f /runtime/dist/package.json ]; \
-    [ -f /models/onnx-community/gte-multilingual-base/onnx/model_quantized.onnx ]; \
+    [ -f /models/hindsight-ai/hs-embed-1/onnx/model.onnx ]; \
     dangling=$(find /runtime -xtype l); \
     [ -z "$dangling" ] || { echo "dangling symlinks in the runtime tree: $dangling" >&2; exit 1; }; \
     cd /runtime/apps/web; \

@@ -2,6 +2,7 @@ import { AgentSessionsService } from '@rembric/core';
 import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
+import { CANDIDATE_LOW_BAND_CEILING, EMBEDDING_DIMS, VEC_THRESHOLD } from '@rembric/core';
 import { runWithContext, type RequestContext } from '@rembric/core';
 import {
   createRepositories,
@@ -19,6 +20,8 @@ import { buildObservabilityHandlers, doctorOutput, parseRunSummary } from '@remb
 
 import { createTestDb, defaultProjectScope, type TestDb } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
+
+const LOW_DENSE = (VEC_THRESHOLD + CANDIDATE_LOW_BAND_CEILING) / 2;
 
 describe('doctor consolidation.lastRunOps contract', () => {
   const lastRunOpsSchema = z.object(doctorOutput).shape.consolidation.shape.lastRunOps;
@@ -210,7 +213,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
 
   it('reports related[] and convergeWith[] like memory.save, and omits them with candidates when empty', async () => {
     const vectorAt = (cosine: number, axis: number) => {
-      const v = new Float32Array(768);
+      const v = new Float32Array(EMBEDDING_DIMS);
       v[0] = cosine;
       v[axis] = Math.sqrt(1 - cosine * cosine);
       return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
@@ -226,7 +229,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
       repos.vectors.insertEmbedding(m.id, vectorAt(cosine, axis), partitionKeyFor(m.projectId!));
       return m.id;
     };
-    const low = seed('staging restores happen every quarter', 0.72, 2);
+    const low = seed('staging restores happen every quarter', LOW_DENSE, 2);
     const high = seed('scheduler binds port 8781', 0.92, 3);
 
     const out = parse<{
@@ -264,7 +267,7 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
 
   it('convergeWith names each pair by judgment id, so two learnings near one target stay distinct', async () => {
     const unit = (weights: Record<number, number>) => {
-      const v = new Float32Array(768);
+      const v = new Float32Array(EMBEDDING_DIMS);
       let norm = 0;
       for (const [axis, w] of Object.entries(weights)) norm += (v[Number(axis)] = w) ** 2;
       for (let i = 0; i < v.length; i++) v[i]! /= Math.sqrt(norm);

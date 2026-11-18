@@ -1,6 +1,6 @@
 {
   "retriever": "memory-md-dump",
-  "embeddingModelId": "onnx-community/gte-multilingual-base",
+  "embeddingModelId": "hindsight-ai/hs-embed-1",
   "discriminatingMetric": "avgTokensReturned vs 'hybrid' at comparable recall — the token cost of the context-dump alternative",
   "ceilings": {
     "5": {

@@ -101,6 +101,28 @@ describe('migration 0012_drop_summary_length_check (summary CHECK removed)', () 
   });
 });
 
+const VECTORS_EMPTIED = '0040_';
+
+function copyBefore(dir: string, prefix: string): void {
+  const all = readdirSync(fullMigrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+  for (const f of all) {
+    if (f.startsWith(prefix)) break;
+    copyFileSync(join(fullMigrationsDir, f), join(dir, f));
+  }
+}
+
+function copyThrough(dir: string, prefix: string): void {
+  const all = readdirSync(fullMigrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+  for (const f of all) {
+    copyFileSync(join(fullMigrationsDir, f), join(dir, f));
+    if (f.startsWith(prefix)) break;
+  }
+}
+
 describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   let dataDir: string;
   let slicedDir: string;
@@ -164,7 +186,8 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
     raw.prepare('INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)').run('p1', embP);
 
     // Apply 0014 (and anything after) over the populated 2-column table.
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
+    copyBefore(slicedDir, VECTORS_EMPTIED);
+    const result = migrate(raw, { migrationsDir: slicedDir, ...SILENT });
     expect(result.applied).toContain('0014_hybrid_search_vec_rebuild.sql');
 
     // No FK damage and the rebuild scratch table is gone.
@@ -226,7 +249,8 @@ describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   });
 
   it('is a no-op-safe rebuild when memory_vec is empty', () => {
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
+    copyBefore(slicedDir, VECTORS_EMPTIED);
+    const result = migrate(raw, { migrationsDir: slicedDir, ...SILENT });
     expect(result.applied).toContain('0014_hybrid_search_vec_rebuild.sql');
     expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     // Fresh inserts use the new 5-column shape.
@@ -447,7 +471,8 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
       );
     const before = countAll();
 
-    const result = migrate(raw, { migrationsDir: fullMigrationsDir, ...SILENT });
+    copyThrough(slicedDir, '0015_');
+    const result = migrate(raw, { migrationsDir: slicedDir, ...SILENT });
     expect(result.applied).toContain('0015_tidy_consolidation_journal.sql');
 
     // No corruption anywhere in the file, and no dangling foreign keys.
@@ -596,6 +621,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0037_batch_period_indexes.sql',
       '0038_token_deleted_at.sql',
       '0039_repository_bindings.sql',
+      '0040_memory_vec_384.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1066,6 +1092,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
       '0037_batch_period_indexes.sql',
       '0038_token_deleted_at.sql',
       '0039_repository_bindings.sql',
+      '0040_memory_vec_384.sql',
     ]);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);

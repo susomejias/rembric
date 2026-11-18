@@ -9,6 +9,7 @@ import {
   deriveOAuthAreqKey,
   deriveSessionKey,
   DomainError,
+  EMBEDDING_DIMS,
   ensureVectorModel,
   EntityBackfillWorker,
   ProjectsService,
@@ -721,7 +722,7 @@ describe('consolidation sweep and undo', () => {
     const save = (content: string) =>
       services.memory.save({ type: 'project', title: content, content }, scope);
     const axis = (i: number) => {
-      const v = new Float32Array(768);
+      const v = new Float32Array(EMBEDDING_DIMS);
       v[i] = 1;
       return Buffer.from(v.buffer);
     };

@@ -17,6 +17,7 @@ const MODEL_ID = identity.modelId;
 const REVISION = identity.revision;
 const DTYPE = identity.dtype;
 const DIMS = identity.dims;
+const POOLING = identity.pooling;
 
 const target = process.argv[2];
 if (!target) {
@@ -82,7 +83,7 @@ const validator = `
   env.localModelPath = ${JSON.stringify(target)};
   env.allowRemoteModels = false;
   const extractor = await pipeline('feature-extraction', ${JSON.stringify(MODEL_ID)}, { dtype: ${JSON.stringify(DTYPE)} });
-  const embed = async (t) => (await extractor(t, { pooling: 'cls', normalize: true })).data;
+  const embed = async (t) => (await extractor(t, { pooling: ${JSON.stringify(POOLING)}, normalize: true })).data;
   const cos = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
   const a = await embed('purge empty sessions from the database');
   const b = await embed('empty sessions get deleted from the database');
