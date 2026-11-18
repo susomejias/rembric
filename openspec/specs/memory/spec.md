@@ -164,53 +164,22 @@ The ancestry projection is bounded and content-free — see "Supersedes-chain re
 - **WHEN** `memory.get('N')` is called
 - **THEN** the response's `relations` array SHALL include `{ kind: 'pending_conflict', targetId: 'M', judgmentId, status: 'pending' }`
 
-### Requirement: Embeddings MUST be computed in-process by a model loaded at boot
-
-The embedding model (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`) SHALL be loaded during bootstrap, BEFORE the HTTP listener starts. A model that cannot load SHALL abort the boot with a non-zero exit (fail fast — a listening server always has a warm model; there is no cold state). Each newly saved memory SHALL receive its embedding inline before candidate detection runs (ms-scale). The text embedded for each memory SHALL be the concatenation of its `title` and `content` (the same `embeddingInput` recipe at save time and in the background drain), so the curated headline contributes to the stored vector. An inference failure SHALL NOT fail the save: detection degrades to FTS5 for that save and the background drain retries the row. There SHALL be no external embedding endpoint, no API key, and no off switch. The same in-process embedder SHALL also embed the incoming query text on the `memory.search` text-query branch, so the stored vectors back BOTH save-time candidate detection AND interactive search. The `memory_vec` row written for each memory SHALL carry a scope-derived partition key and the memory's `status` and `type`, **derived from the memory row's current values in the same `INSERT` statement**, so that search kNN can filter scope, status, and type inside the index without a window where a concurrent status change (e.g. a topic-key supersede racing an in-flight embed) could leave the vector row's status stale.
-
-#### Scenario: Saving a memory
-
-- **WHEN** `memory.save(…)` is called
-- **THEN** the row's embedding SHALL be computed inline from its `title + content` and persisted into `memory_vec` (together with its partition key, `status`, and `type`) before candidate detection runs, so vec-sourced candidates can surface in the same save's response
-
-#### Scenario: The model cannot load at boot
-
-- **WHEN** the server starts and the embedding model fails to load (missing, corrupt, or incompatible artifacts)
-- **THEN** the boot SHALL fail with a non-zero exit before the HTTP listener starts — the server SHALL NOT run in a degraded no-embeddings mode
-
-#### Scenario: A single inference fails at save time
-
-- **WHEN** `memory.save(…)` is called and the inline embedding throws
-- **THEN** the save SHALL succeed, candidate detection SHALL operate on FTS5 only for that save, the failure SHALL be logged, and the drain SHALL retry the row
-
-#### Scenario: A search query is embedded on demand
-
-- **WHEN** `memory.search` is called with a non-empty text query
-- **THEN** the in-process embedder SHALL embed the query text and the vector branch SHALL run a scoped kNN against `memory_vec`; no external embedding call SHALL be made
-
-#### Scenario: A status change racing an in-flight embed does not leave a stale vector
-
-- **GIVEN** a memory row is saved and its inline embedding inference is in flight
-- **WHEN** a concurrent write (e.g. a `topic_key` supersede) changes that row's `status` before the embedding inference completes
-- **THEN** the `memory_vec` row inserted once inference completes SHALL carry the row's current `status` at insert time, not the `status` captured when embedding started
-- **AND** `memory.search` SHALL NOT return that row for a status filter it no longer matches, regardless of which retrieval branch (lexical or dense) surfaced its id
-
 ### Requirement: Stale vectors MUST be re-embedded after a model change
 
-The data dir SHALL record the embedding identity, comprising BOTH the compiled-in model id AND the embedding-input recipe version (`EMBEDDING_INPUT_VERSION`). When the server starts and the recorded identity differs from the compiled-in identity on EITHER axis — a model change (including the upgrade from the external-provider era) OR a change to the text recipe fed to the embedder (e.g. moving from `content` to `title + content`) — all non-archived memories SHALL be re-embedded in batches by the in-process embedder, resumable across restarts, with progress logged. "Non-archived" explicitly includes `superseded` memories, whose vectors are retained for semantic recoverability — so the re-embed set covers every vector the index keeps semantically guaranteed searchable, and the searchable set SHALL NOT mix embedding spaces once the backfill completes. `archived` rows remain text-searchable while present, but are outside the semantic-search guarantee because they are intentionally excluded from the post-change backfill. Candidate detection AND search SHALL keep working (FTS5 + whatever vectors are fresh) throughout the backfill.
+The data dir SHALL record the embedding identity, comprising BOTH the compiled-in model id AND the embedding-input recipe version (`EMBEDDING_INPUT_VERSION`). When the embedder first loads and the recorded identity differs from the compiled-in identity on EITHER axis — a model change (including the upgrade from the external-provider era) OR a change to the text recipe fed to the embedder (e.g. moving from `content` to `title + content`) — all non-archived memories SHALL be re-embedded in batches by the in-process embedder, resumable across restarts, with progress logged. "Non-archived" explicitly includes `superseded` memories, whose vectors are retained for semantic recoverability — so the re-embed set covers every vector the index keeps semantically guaranteed searchable, and the searchable set SHALL NOT mix embedding spaces once the backfill completes. `archived` rows remain text-searchable while present, but are outside the semantic-search guarantee because they are intentionally excluded from the post-change backfill. Candidate detection AND search SHALL keep working (FTS5 + whatever vectors are fresh) throughout the backfill.
 
-The re-embed is conditional on the reset committing. Since marker maintenance no longer aborts the boot (see "The embedding-identity reset MUST be crash-safe and MUST NOT be able to abort the boot"), a boot that cannot maintain the marker SHALL defer the whole reset rather than perform a partial one: the index keeps serving vectors from the previous recipe, no backfill is owed by any row, and the mismatch is re-checked on the next boot. That deferred state SHALL be operator-visible rather than silent, which is why it is warned about there.
+The re-embed is conditional on the reset committing. Since marker maintenance never blocks the server (see "The embedding-identity reset MUST be crash-safe and MUST NOT abort the server"), a load that cannot maintain the marker SHALL defer the whole reset rather than perform a partial one: the index keeps serving vectors from the previous recipe, no backfill is owed by any row, and the mismatch is re-checked on the next load or boot. That deferred state SHALL be operator-visible rather than silent, which is why it is warned about there.
 
 #### Scenario: First boot after the upgrade
 
 - **GIVEN** a data dir whose `memory_vec` rows were produced by a different model
-- **WHEN** the server starts
+- **WHEN** the embedder first loads
 - **THEN** the backfill SHALL begin in the background, the server SHALL serve requests immediately, and after completion every active AND superseded memory SHALL have a vector produced by the compiled-in model
 
 #### Scenario: First boot after an embedding-input recipe change
 
 - **GIVEN** a data dir whose `memory_vec` rows were produced by the same model but an older `EMBEDDING_INPUT_VERSION` (e.g. content-only)
-- **WHEN** the server starts after the recipe changes to `title + content`
+- **WHEN** the embedder first loads after the recipe changes to `title + content`
 - **THEN** the recorded identity SHALL mismatch on the input-version axis, the stale vectors SHALL be wiped, and the background drain SHALL re-embed every non-archived row from `title + content`
 
 #### Scenario: Backfill interrupted by a restart
@@ -223,80 +192,6 @@ The re-embed is conditional on the reset committing. Since marker maintenance no
 - **GIVEN** a `superseded` memory whose retained vector was produced by the previous model
 - **WHEN** the post-model-change backfill runs
 - **THEN** that memory's vector SHALL be regenerated by the compiled-in model, so a future search over retained history does not compare across incompatible embedding spaces
-
-### Requirement: The embedding-identity reset MUST be crash-safe and MUST NOT be able to abort the boot
-
-The reset that follows an embedding-identity mismatch has two effects that live in different storage systems — the vectors are removed from SQLite, the new identity is recorded in a file under the data dir — and there is no transaction spanning both. The recipe marker SHALL therefore be maintained in two phases: it SHALL record an **in-progress** reset for the compiled-in identity BEFORE any vector is removed, and it SHALL assert that identity as **settled** only AFTER the wipe has committed. An in-progress marker SHALL be treated as an identity mismatch, so an interrupted reset is retried on a later boot. A marker whose in-progress field is present but is not a boolean SHALL also be read as in-progress: unlike the input-version axis, where an unexpected value already mismatches, a corrupt value here would otherwise skip the retry, so the fail-safe direction is to retry.
-
-Three properties follow, and each SHALL hold for every reachable interleaving:
-
-1. **The index SHALL NOT be observed empty under a settled marker asserting the current identity.** That combination is the unrecoverable one: the vectors are gone and nothing will ever conclude they need rebuilding.
-2. **A reset that fails at any point SHALL leave the reset owed, and SHALL leave the marker NOT asserting the compiled-in identity as settled.** The debt is carried by the state itself, not by a flag the reset writes for the drain: either the wipe committed — a memory row with no `memory_vec` row is already what the drain selects, so a committed wipe is self-announcing — or the marker still records an in-progress reset, which forces the wipe to be retried. When the failure happens BEFORE the wipe, neither carrier is visible in the vector data at all: every row keeps a vector from the previous recipe, so the embedding backlog reads zero and the marker is the only record of the debt. That state SHALL therefore be surfaced to the operator explicitly — logged at boot with the marker's path, and reported as a `memory.doctor` warning naming the affected row count for as long as the reset is owed AND the index still holds rows — because dense results are unreliable in it while every other health counter reads normal. The warning SHALL be silent when the index is empty (there is nothing stale left to distrust) and SHALL NOT pay for a count of the vector table on the healthy path.
-3. **Recording the in-progress marker SHALL precede the wipe on EVERY boot that detects a mismatch**, including a boot whose marker already carries the compiled-in identity but records the reset as in progress. This is what bounds the failure: when the data dir is unwritable, the in-progress write fails before any vector is removed, so a persistently unwritable data dir SHALL perform zero wipes rather than one per boot.
-
-Marker maintenance SHALL NOT abort the boot, and responsibility for that is split deliberately. The pre-wipe write SHALL NOT be swallowed by the reset routine — its failure SHALL propagate to the routine's caller, because that propagation is exactly what prevents the wipe from running; a routine that caught it and carried on to the wipe would reinstate the defect this requirement exists to prevent. The boot SHALL therefore wrap the whole reset (pre-wipe write, wipe, settle) and degrade any failure to "leave the index as it is and re-check on the next boot", logged with the marker's path, without preventing the HTTP listener from binding. Only the settling write SHALL be handled inside the reset routine, and its failure SHALL be reported to the caller as an outcome rather than thrown, so the wipe count survives it.
-
-This SHALL NOT be read as relaxing the model-load rule: an embedding model that cannot load still aborts the boot with a non-zero exit. The distinction is deliberate — a server without a warm model cannot serve its core function, whereas a server whose derived vector index is stale or mid-rebuild serves every request with the documented lexical degradation.
-
-A wipe that commits and a marker that fails to settle SHALL be reported as two separate facts, because their operator consequences differ: the first announces a rebuild that is now under way, the second announces that the rebuild may be repeated on the next boot. The wipe SHALL be reported as an identity reset rather than as a model change: a boot that retries an unsettled reset wipes an index no recipe change had invalidated, so naming a model change there would name the wrong cause.
-
-A marker written by a build that predates the two-phase scheme carries no in-progress field, and its absence SHALL be read as "settled". An upgrade SHALL therefore perform no reset that the previous build would not have performed.
-
-#### Scenario: The marker cannot be written and no vector is lost
-
-- **GIVEN** an identity mismatch and a data dir where writing the marker fails (full or read-only)
-- **WHEN** the server starts
-- **THEN** no row SHALL be removed from `memory_vec`, the boot SHALL proceed to bind the listener, and the failure SHALL be logged with the marker path
-
-#### Scenario: The wipe commits but the marker cannot be settled
-
-- **GIVEN** an identity mismatch where the in-progress marker persists, the wipe commits, and settling the marker then fails
-- **WHEN** the server starts
-- **THEN** the boot SHALL proceed, the wipe and the marker failure SHALL be logged as separate facts, and the marker SHALL NOT assert the compiled-in identity as settled
-- **AND** the background drain SHALL re-embed the corpus, because every non-archived memory now lacks a `memory_vec` row
-
-#### Scenario: An interrupted reset converges on the next boot
-
-- **GIVEN** a marker left recording an in-progress reset for the compiled-in identity
-- **WHEN** the server starts again with a writable data dir
-- **THEN** the marker SHALL be treated as a mismatch, the reset SHALL be retried, and the marker SHALL end settled on the compiled-in identity
-
-#### Scenario: A persistently unwritable data dir performs no wipes at all
-
-- **GIVEN** an identity mismatch and a data dir that stays unwritable across restarts
-- **WHEN** the server is started repeatedly
-- **THEN** the number of wipes performed SHALL be zero, because each boot re-attempts the in-progress write before the wipe and fails there
-- **AND** every one of those boots SHALL still bind the listener
-
-#### Scenario: An in-progress marker is not mistaken for a completed reset
-
-- **GIVEN** a marker recording an in-progress reset whose model id and input version already equal the compiled-in identity
-- **WHEN** the server starts
-- **THEN** the reset SHALL run rather than short-circuit, so an index still holding pre-change vectors cannot be left mixing embedding spaces
-
-#### Scenario: A corrupt in-progress field errs toward retrying
-
-- **GIVEN** a marker naming the compiled-in model id and input version whose in-progress field is present but is not a boolean (a string, a number, an object, or null)
-- **WHEN** the server starts
-- **THEN** the recorded identity SHALL be reported as not matching and the reset SHALL run
-
-#### Scenario: An owed reset is visible while the index still holds rows
-
-- **GIVEN** a boot that could not perform the reset, leaving the index populated with vectors from the previous recipe
-- **WHEN** `memory.doctor` runs
-- **THEN** the report SHALL carry a warning naming the number of rows that may predate the current recipe, even though the embedding backlog reads zero
-- **AND** no such warning SHALL be produced once the reset has committed, nor while the index holds no rows
-
-#### Scenario: Upgrading over a marker from an earlier build resets nothing
-
-- **GIVEN** a populated install whose marker records the compiled-in model id and input version and has no in-progress field
-- **WHEN** the server starts on a build that implements the two-phase marker
-- **THEN** the marker SHALL be read as settled, no vector SHALL be removed, and no write to the marker SHALL be attempted
-
-#### Scenario: A model that cannot load still fails the boot
-
-- **WHEN** the embedding model fails to load and the marker is perfectly healthy
-- **THEN** the boot SHALL still abort with a non-zero exit — the non-fatal treatment applies to identity-marker maintenance only
 
 ### Requirement: Memory search MUST implement standard hybrid retrieval on the text-query branch
 
@@ -740,7 +635,7 @@ For each candidate surfaced, a `memory_relations` row SHALL be inserted with `st
 
 Candidates that were detected but fall outside `CANDIDATES_PER_SAVE_MAX` SHALL NOT be recorded: no `memory_relations` row, no `judgment_id`, no journal entry. This is not an information loss, and the requirement states why so that a future change does not "fix" it by recording them.
 
-A candidate pair is DERIVED: its two endpoints and its `similarity` are a function of `memory.title` and `memory.content` — immutable under "Memories MUST be append-only" — together with recipes pinned in the shipped image behind version markers (the FTS5 tokenizer, the entity extractor behind `EXTRACTOR_VERSION`, and the embedding identity behind `EMBEDDING_INPUT_VERSION` and the pinned model constants, per "Embeddings MUST be computed in-process by a model loaded at boot" and "Stale vectors MUST be re-embedded after a model change"). It therefore satisfies the same test the `persistence` capability applies to its own derived tables (`memory_fts`, `memory_vec`, `memory_replaces`, and the entity tables, which that capability requires to be "declared derived, never primary"): dropping it loses nothing that cannot be recomputed from rows still in the database. An agent's VERDICT on a pair is the opposite — SOURCE data, recomputable by nothing — which is precisely what earns a row.
+A candidate pair is DERIVED: its two endpoints and its `similarity` are a function of `memory.title` and `memory.content` — immutable under "Memories MUST be append-only" — together with recipes pinned in the shipped image behind version markers (the FTS5 tokenizer, the entity extractor behind `EXTRACTOR_VERSION`, and the embedding identity behind `EMBEDDING_INPUT_VERSION` and the pinned model constants, per "Embeddings MUST be computed in-process by a model loaded on first use" and "Stale vectors MUST be re-embedded after a model change"). It therefore satisfies the same test the `persistence` capability applies to its own derived tables (`memory_fts`, `memory_vec`, `memory_replaces`, and the entity tables, which that capability requires to be "declared derived, never primary"): dropping it loses nothing that cannot be recomputed from rows still in the database. An agent's VERDICT on a pair is the opposite — SOURCE data, recomputable by nothing — which is precisely what earns a row.
 
 Dropping a candidate therefore discards a prompt, not a fact, and the prompt is re-derivable at any time from the surviving inputs via `memory.search` over the memory's own text (lexical and dense channels) and `memory.search` with an `entity` filter (entity channel).
 
@@ -1839,3 +1734,120 @@ The dense branch SHALL name its partitions rather than omitting the partition pr
 - **GIVEN** a historical memory with absent tags or noncanonical tags such as `[' Dashboard ']`
 - **WHEN** it is read through existing memory reads
 - **THEN** its stored tag values SHALL be returned without canonicalization or backfill
+
+### Requirement: Embeddings MUST be computed in-process by a model loaded on first use
+
+The embedding model (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`) SHALL be loaded in-process on first use — the first `memory.save`, `memory.search` query, or background drain tick that needs a vector — and SHALL NOT be loaded during bootstrap. The server SHALL therefore bind its HTTP listener without loading the model; an idle server that needs no embedding holds no model. The embedder SHALL be loaded at most once per process: every load site SHALL share one memoized load. A model that cannot load SHALL NOT abort the server: the load failure SHALL surface as the documented degradation (the operation that needed the vector proceeds lexically and the drain retries the load on a later tick), it SHALL be logged, and `memory.doctor` SHALL continue to surface the reset-owed warning while the identity is unsettled. The embedding-identity check (`ensureVectorModel`) SHALL run exactly once per process, immediately after the first load resolves and BEFORE that embedder serves its first vector, so a recorded-identity mismatch wipes the stale vectors and settles the marker before any new vector is written. Each newly saved memory SHALL receive its embedding inline before candidate detection runs (ms-scale). The text embedded for each memory SHALL be the concatenation of its `title` and `content` (the same `embeddingInput` recipe at save time and in the background drain), so the curated headline contributes to the stored vector. An inference failure SHALL NOT fail the save: detection degrades to FTS5 for that save and the background drain retries the row. There SHALL be no external embedding endpoint, no API key, and no off switch. The same in-process embedder SHALL also embed the incoming query text on the `memory.search` text-query branch, so the stored vectors back BOTH save-time candidate detection AND interactive search. The `memory_vec` row written for each memory SHALL carry a scope-derived partition key and the memory's `status` and `type`, **derived from the memory row's current values in the same `INSERT` statement**, so that search kNN can filter scope, status, and type inside the index without a window where a concurrent status change (e.g. a topic-key supersede racing an in-flight embed) could leave the vector row's status stale.
+
+#### Scenario: Saving a memory
+
+- **WHEN** `memory.save(…)` is called
+- **THEN** the row's embedding SHALL be computed inline from its `title + content` and persisted into `memory_vec` (together with its partition key, `status`, and `type`) before candidate detection runs, so vec-sourced candidates can surface in the same save's response
+
+#### Scenario: The model cannot load on first use
+
+- **WHEN** the embedder first loads the embedding model and it fails to load (missing, corrupt, or incompatible artifacts)
+- **THEN** the server SHALL keep serving, the affected operation SHALL proceed lexically, the failure SHALL be logged, and a later drain tick SHALL retry the load — the boot SHALL NOT abort
+
+#### Scenario: An idle boot does not load the model
+
+- **WHEN** the process starts and no request and no drained row has needed an embedding
+- **THEN** the embedding model SHALL NOT have been loaded, and the HTTP listener SHALL already be serving
+
+#### Scenario: The identity check runs once at the first load
+
+- **GIVEN** a data dir whose recorded embedding identity does not match the compiled-in identity, with vectors present
+- **WHEN** the embedder first loads
+- **THEN** the stale vectors SHALL be wiped and the marker settled BEFORE the embedder returns its first vector, so the searchable set does not mix embedding spaces
+- **AND** the check SHALL run no more than once per process for that embedder
+
+#### Scenario: A single inference fails at save time
+
+- **WHEN** `memory.save(…)` is called and the inline embedding throws
+- **THEN** the save SHALL succeed, candidate detection SHALL operate on FTS5 only for that save, the failure SHALL be logged, and the drain SHALL retry the row
+
+#### Scenario: A search query is embedded on demand
+
+- **WHEN** `memory.search` is called with a non-empty text query
+- **THEN** the in-process embedder SHALL embed the query text and the vector branch SHALL run a scoped kNN against `memory_vec`; no external embedding call SHALL be made
+
+#### Scenario: A status change racing an in-flight embed does not leave a stale vector
+
+- **GIVEN** a memory row is saved and its inline embedding inference is in flight
+- **WHEN** a concurrent write (e.g. a `topic_key` supersede) changes that row's `status` before the embedding inference completes
+- **THEN** the `memory_vec` row inserted once inference completes SHALL carry the row's current `status` at insert time, not the `status` captured when embedding started
+- **AND** `memory.search` SHALL NOT return that row for a status filter it no longer matches, regardless of which retrieval branch (lexical or dense) surfaced its id
+
+### Requirement: The embedding-identity reset MUST be crash-safe and MUST NOT abort the server
+
+The reset that follows an embedding-identity mismatch has two effects that live in different storage systems — the vectors are removed from SQLite, the new identity is recorded in a file under the data dir — and there is no transaction spanning both. The recipe marker SHALL therefore be maintained in two phases: it SHALL record an **in-progress** reset for the compiled-in identity BEFORE any vector is removed, and it SHALL assert that identity as **settled** only AFTER the wipe has committed. An in-progress marker SHALL be treated as an identity mismatch, so an interrupted reset is retried on a later load. A marker whose in-progress field is present but is not a boolean SHALL also be read as in-progress: unlike the input-version axis, where an unexpected value already mismatches, a corrupt value here would otherwise skip the retry, so the fail-safe direction is to retry.
+
+Three properties follow, and each SHALL hold for every reachable interleaving:
+
+1. **The index SHALL NOT be observed empty under a settled marker asserting the current identity.** That combination is the unrecoverable one: the vectors are gone and nothing will ever conclude they need rebuilding.
+2. **A reset that fails at any point SHALL leave the reset owed, and SHALL leave the marker NOT asserting the compiled-in identity as settled.** The debt is carried by the state itself, not by a flag the reset writes for the drain: either the wipe committed — a memory row with no `memory_vec` row is already what the drain selects, so a committed wipe is self-announcing — or the marker still records an in-progress reset, which forces the wipe to be retried. When the failure happens BEFORE the wipe, neither carrier is visible in the vector data at all: every row keeps a vector from the previous recipe, so the embedding backlog reads zero and the marker is the only record of the debt. That state SHALL therefore be surfaced to the operator explicitly — logged at load with the marker's path, and reported as a `memory.doctor` warning naming the affected row count for as long as the reset is owed AND the index still holds rows — because dense results are unreliable in it while every other health counter reads normal. The warning SHALL be silent when the index is empty (there is nothing stale left to distrust) and SHALL NOT pay for a count of the vector table on the healthy path.
+3. **Recording the in-progress marker SHALL precede the wipe on EVERY load that detects a mismatch**, including a load whose marker already carries the compiled-in identity but records the reset as in progress. This is what bounds the failure: when the data dir is unwritable, the in-progress write fails before any vector is removed, so a persistently unwritable data dir SHALL perform zero wipes rather than one per load.
+
+Marker maintenance SHALL NOT abort the server, and responsibility for that is split deliberately. The pre-wipe write SHALL NOT be swallowed by the reset routine — its failure SHALL propagate to the routine's caller, because that propagation is exactly what prevents the wipe from running; a routine that caught it and carried on to the wipe would reinstate the defect this requirement exists to prevent. The embedder load path SHALL therefore wrap the whole reset (pre-wipe write, wipe, settle) and degrade any failure to "leave the index as it is and re-check on the next load or boot", logged with the marker's path, without preventing the HTTP listener from binding or preventing the embedder from serving the call that triggered the load. Only the settling write SHALL be handled inside the reset routine, and its failure SHALL be reported to the caller as an outcome rather than thrown, so the wipe count survives it.
+
+This SHALL NOT be read as demanding a warm model at boot: the model loads lazily and a load failure degrades rather than aborts. The reset protects a derived index, not the source corpus, so neither the reset nor the model load may take the server down.
+
+A wipe that commits and a marker that fails to settle SHALL be reported as two separate facts, because their operator consequences differ: the first announces a rebuild that is now under way, the second announces that the rebuild may be repeated on the next load. The wipe SHALL be reported as an identity reset rather than as a model change: a load that retries an unsettled reset wipes an index no recipe change had invalidated, so naming a model change there would name the wrong cause.
+
+A marker written by a build that predates the two-phase scheme carries no in-progress field, and its absence SHALL be read as "settled". An upgrade SHALL therefore perform no reset that the previous build would not have performed.
+
+#### Scenario: The marker cannot be written and no vector is lost
+
+- **GIVEN** an identity mismatch and a data dir where writing the marker fails (full or read-only)
+- **WHEN** the embedder first loads
+- **THEN** no row SHALL be removed from `memory_vec`, the server SHALL keep serving, and the failure SHALL be logged with the marker path
+
+#### Scenario: The wipe commits but the marker cannot be settled
+
+- **GIVEN** an identity mismatch where the in-progress marker persists, the wipe commits, and settling the marker then fails
+- **WHEN** the embedder first loads
+- **THEN** the server SHALL keep serving, the wipe and the marker failure SHALL be logged as separate facts, and the marker SHALL NOT assert the compiled-in identity as settled
+- **AND** the background drain SHALL re-embed the corpus, because every non-archived memory now lacks a `memory_vec` row
+
+#### Scenario: An interrupted reset converges on the next load
+
+- **GIVEN** a marker left recording an in-progress reset for the compiled-in identity
+- **WHEN** the embedder loads again with a writable data dir
+- **THEN** the marker SHALL be treated as a mismatch, the reset SHALL be retried, and the marker SHALL end settled on the compiled-in identity
+
+#### Scenario: A persistently unwritable data dir performs no wipes at all
+
+- **GIVEN** an identity mismatch and a data dir that stays unwritable across restarts
+- **WHEN** the embedder is loaded repeatedly across those restarts
+- **THEN** the number of wipes performed SHALL be zero, because each load re-attempts the in-progress write before the wipe and fails there
+- **AND** every one of those servers SHALL still bind the listener
+
+#### Scenario: An in-progress marker is not mistaken for a completed reset
+
+- **GIVEN** a marker recording an in-progress reset whose model id and input version already equal the compiled-in identity
+- **WHEN** the embedder first loads
+- **THEN** the reset SHALL run rather than short-circuit, so an index still holding pre-change vectors cannot be left mixing embedding spaces
+
+#### Scenario: A corrupt in-progress field errs toward retrying
+
+- **GIVEN** a marker naming the compiled-in model id and input version whose in-progress field is present but is not a boolean (a string, a number, an object, or null)
+- **WHEN** the embedder first loads
+- **THEN** the recorded identity SHALL be reported as not matching and the reset SHALL run
+
+#### Scenario: An owed reset is visible while the index still holds rows
+
+- **GIVEN** a load that could not perform the reset, leaving the index populated with vectors from the previous recipe
+- **WHEN** `memory.doctor` runs
+- **THEN** the report SHALL carry a warning naming the number of rows that may predate the current recipe, even though the embedding backlog reads zero
+- **AND** no such warning SHALL be produced once the reset has committed, nor while the index holds no rows
+
+#### Scenario: Upgrading over a marker from an earlier build resets nothing
+
+- **GIVEN** a populated install whose marker records the compiled-in model id and input version and has no in-progress field
+- **WHEN** the server starts and the embedder first loads on a build that implements the two-phase marker
+- **THEN** the marker SHALL be read as settled, no vector SHALL be removed, and no write to the marker SHALL be attempted
+
+#### Scenario: A model that cannot load does not abort the server
+
+- **WHEN** the embedding model fails to load and the marker is perfectly healthy
+- **THEN** the server SHALL keep serving, the affected operation SHALL degrade to lexical search, the load SHALL be retried, and the boot SHALL NOT abort — the non-fatal treatment applies to the reset AND to the model load
