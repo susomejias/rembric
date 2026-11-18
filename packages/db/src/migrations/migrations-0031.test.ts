@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
-import { buildDoctorReportFactory, EMBEDDING_DIMS, type Embedder } from '@rembric/core';
+import { buildDoctorReportFactory, type Embedder } from '@rembric/core';
 import { embeddingInput } from '@rembric/core';
 import { EmbeddingWorker } from '@rembric/core';
 import { extractEntities } from '@rembric/core';
@@ -38,14 +38,16 @@ import {
   SOURCE_TABLES,
 } from '../test-support/schema-inventory.js';
 
+const DIMS_AT_0031 = 768;
+
 class FakeEmbedder implements Embedder {
   public readonly modelId = 'fake-test-embedder';
 
   embed(text: string): Promise<Float32Array> {
-    const vector = new Float32Array(EMBEDDING_DIMS);
+    const vector = new Float32Array(DIMS_AT_0031);
     let seed = createHash('sha256').update(text).digest();
     let offset = 0;
-    for (let i = 0; i < EMBEDDING_DIMS; i++) {
+    for (let i = 0; i < DIMS_AT_0031; i++) {
       if (offset >= seed.length) {
         seed = createHash('sha256').update(seed).digest();
         offset = 0;
@@ -54,9 +56,9 @@ class FakeEmbedder implements Embedder {
       offset++;
     }
     let norm = 0;
-    for (let i = 0; i < EMBEDDING_DIMS; i++) norm += vector[i]! * vector[i]!;
+    for (let i = 0; i < DIMS_AT_0031; i++) norm += vector[i]! * vector[i]!;
     norm = Math.sqrt(norm) || 1;
-    for (let i = 0; i < EMBEDDING_DIMS; i++) vector[i] = vector[i]! / norm;
+    for (let i = 0; i < DIMS_AT_0031; i++) vector[i] = vector[i]! / norm;
     return Promise.resolve(vector);
   }
 }

@@ -1,4 +1,4 @@
-import { DEFAULT_DECAY } from '@rembric/core';
+import { DEFAULT_DECAY, EMBEDDING_DIMS } from '@rembric/core';
 import { REFUTED_PRIORITY_MS, reviewTtlEntries } from '@rembric/core';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -250,7 +250,7 @@ describe('MemoryRepository — read-path performance (optimize-db-read-path)', (
       const vec = t.handle.raw.prepare(
         `INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, '__global__', 'archived', 'project', ?)`,
       );
-      const embedding = Buffer.from(new Float32Array(768).buffer);
+      const embedding = Buffer.from(new Float32Array(EMBEDDING_DIMS).buffer);
       t.handle.raw.transaction(() => {
         for (let i = 0; i < 10; i++) {
           link.run(`m-${i}`);

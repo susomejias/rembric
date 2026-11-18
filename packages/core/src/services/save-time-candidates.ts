@@ -12,7 +12,7 @@ import { ftsQueryTokens, joinFtsTokens, tokenContainment, tokenSet } from './hyb
 
 export const DISMISSAL_ANCESTRY_CAP = 10;
 
-export const VEC_THRESHOLD = 0.7;
+export const VEC_THRESHOLD = 0.62;
 
 export const LEXICAL_CANDIDATE_FLOOR = 0.6;
 
@@ -27,7 +27,7 @@ export const DRAIN_MAX_PAIR_CHARS = 64_000;
 /** FTS5's bm25 clamps a term's idf to 1e-6 from exactly this share of indexed rows upward. */
 export const COMMON_TERM_DOCUMENT_RATIO = 0.5;
 
-export const CANDIDATE_LOW_BAND_CEILING = 0.75;
+export const CANDIDATE_LOW_BAND_CEILING = 0.65;
 
 export const CANDIDATE_HIGH_BAND_FLOOR = 0.85;
 

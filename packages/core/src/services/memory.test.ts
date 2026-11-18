@@ -6,6 +6,7 @@ import { EntityBackfillWorker } from '@rembric/core';
 import { DomainError } from '@rembric/core';
 import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
+import { EMBEDDING_DIMS } from '@rembric/core';
 
 import {
   createTestDb,
@@ -1131,7 +1132,7 @@ describe('memory.purgeDisconnectedArchived', () => {
     memory.archive(m.id, projectScope(projectId));
 
     // Insert a fake embedding row directly.
-    const fakeEmbedding = Buffer.alloc(768 * 4);
+    const fakeEmbedding = Buffer.alloc(EMBEDDING_DIMS * 4);
     db.handle.raw
       .prepare(
         'INSERT INTO memory_vec (memory_id, partition_key, status, type, embedding) VALUES (?, ?, ?, ?, ?)',

@@ -1,5 +1,6 @@
 import type { AgentSessionsService } from '@rembric/core';
 import type { TokenScope } from '@rembric/core';
+import { CANDIDATE_LOW_BAND_CEILING, EMBEDDING_DIMS, VEC_THRESHOLD } from '@rembric/core';
 import { MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
@@ -25,6 +26,8 @@ import {
   type TestDb,
 } from './test-support/index.js';
 import { logInternalError } from './test-support/test-logger.js';
+
+const LOW_DENSE = (VEC_THRESHOLD + CANDIDATE_LOW_BAND_CEILING) / 2;
 
 let db: TestDb;
 let projects: ProjectsService;
@@ -346,7 +349,7 @@ describe('memory.save and memory.merge — confidence bands', () => {
   }
 
   function vectorAt(cosine: number, axis: number): Buffer {
-    const v = new Float32Array(768);
+    const v = new Float32Array(EMBEDDING_DIMS);
     v[0] = cosine;
     v[axis] = Math.sqrt(1 - cosine * cosine);
     return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
@@ -374,7 +377,7 @@ describe('memory.save and memory.merge — confidence bands', () => {
   const PROBE = 'the job runner listens on a non-default socket';
   const vectors = () =>
     new Map([
-      [LOW, vectorAt(0.72, 2)],
+      [LOW, vectorAt(LOW_DENSE, 2)],
       [HIGH, vectorAt(0.92, 3)],
       [PROBE, vectorAt(1, 1)],
     ]);

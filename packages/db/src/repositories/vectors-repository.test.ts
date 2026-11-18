@@ -1,4 +1,4 @@
-import { deriveTitle } from '@rembric/core';
+import { deriveTitle, EMBEDDING_DIMS } from '@rembric/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -14,7 +14,7 @@ import {
 
 import { createTestDb, type TestDb } from '../test-support/db.js';
 
-const DIMS = 768;
+const DIMS = EMBEDDING_DIMS;
 
 function unit(a: number, b: number): Float32Array {
   const v = new Float32Array(DIMS);

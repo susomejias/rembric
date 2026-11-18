@@ -6,6 +6,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import {
   ABSTENTION_FLOOR,
   AgentSessionsService,
+  EMBEDDING_MODEL_ID,
   EMPTY_POOL_REASON,
   MemoryService,
   ProjectsService,
@@ -3733,7 +3734,7 @@ describe('MCP protocol conformance', () => {
     expect(payload.db.integrity).toMatch(/ok/i);
     expect(typeof payload.db.sizeBytes).toBe('number');
     expect('llm' in payload).toBe(false);
-    expect(payload.embeddings.model).toContain('gte-multilingual-base');
+    expect(payload.embeddings.model).toBe(EMBEDDING_MODEL_ID);
     expect('enabled' in payload.embeddings).toBe(false);
     expect(typeof payload.review.needsReview).toBe('number');
     expect(typeof payload.review.pendingJudgments).toBe('number');

@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveTitle, MemoryService } from '@rembric/core';
 import { ProjectsService } from '@rembric/core';
 import { RelationsService } from '@rembric/core';
+import { EMBEDDING_DIMS } from '@rembric/core';
 import {
   CANDIDATE_POOL_SIZE,
   ENTITY_RARITY_MIN_LINKS,
@@ -560,7 +561,7 @@ describe('findSaveTimeCandidates — lexical floor', () => {
   }
 
   function unitVector(axis: number): Buffer {
-    const v = new Float32Array(768);
+    const v = new Float32Array(EMBEDDING_DIMS);
     v[axis] = 1;
     return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
   }
@@ -1558,7 +1559,7 @@ describe('evaluatePair — the drain re-check of one pending pair', () => {
   const current: EvaluatePairOptions = { vectorIndexCurrent: true };
 
   function vec(axisWeights: [number, number]): Buffer {
-    const v = new Float32Array(768);
+    const v = new Float32Array(EMBEDDING_DIMS);
     const norm = Math.hypot(...axisWeights);
     v[0] = axisWeights[0] / norm;
     v[1] = axisWeights[1] / norm;
@@ -1804,11 +1805,11 @@ describe('evaluatePair — the drain re-check of one pending pair', () => {
 
 describe('evaluatePair agrees with detection over the save-time fixture', () => {
   function bagOfWordsVector(text: string): Buffer {
-    const v = new Float32Array(768);
+    const v = new Float32Array(EMBEDDING_DIMS);
     for (const term of tokenSet(text)) {
       let h = 0x811c9dc5;
       for (let i = 0; i < term.length; i++) h = Math.imul(h ^ term.charCodeAt(i), 0x01000193) >>> 0;
-      v[h % 768]! += 1;
+      v[h % EMBEDDING_DIMS]! += 1;
     }
     const norm = Math.hypot(...v) || 1;
     for (let i = 0; i < v.length; i++) v[i]! /= norm;

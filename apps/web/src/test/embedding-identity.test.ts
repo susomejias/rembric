@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,6 +8,7 @@ import {
   EMBEDDING_MODEL_ID,
   EMBEDDING_MODEL_REVISION,
   EMBEDDING_ONNX_ARTIFACT,
+  EMBEDDING_POOLING,
   EmbeddingWorker,
   MemoryService,
   embeddingOnnxArtifactPath,
@@ -36,26 +37,40 @@ const identitySource = JSON.parse(
 describe('embedding model identity has a single source', () => {
   it('pins the frozen recipe in the shared identity module', () => {
     expect(identitySource).toEqual({
-      modelId: 'onnx-community/gte-multilingual-base',
-      dtype: 'q8',
-      dims: 768,
-      revision: '2edbf5e672aab465f9ed4c154a8b61791c082c69',
-      onnxArtifact: 'onnx/model_quantized.onnx',
+      modelId: 'hindsight-ai/hs-embed-1',
+      dtype: 'fp32',
+      dims: 384,
+      pooling: 'mean',
+      revision: '3164caa4db95a03faac8a327f914f7c8f42d2f98',
+      onnxArtifact: 'onnx/model.onnx',
     });
-    expect(EMBEDDING_MODEL_ID).toBe('onnx-community/gte-multilingual-base');
-    expect(EMBEDDING_DTYPE).toBe('q8');
-    expect(EMBEDDING_DIMS).toBe(768);
-    expect(EMBEDDING_MODEL_REVISION).toBe('2edbf5e672aab465f9ed4c154a8b61791c082c69');
-    expect(EMBEDDING_ONNX_ARTIFACT).toBe('onnx/model_quantized.onnx');
+    expect(EMBEDDING_MODEL_ID).toBe('hindsight-ai/hs-embed-1');
+    expect(EMBEDDING_DTYPE).toBe('fp32');
+    expect(EMBEDDING_POOLING).toBe('mean');
+    expect(EMBEDDING_DIMS).toBe(384);
+    expect(EMBEDDING_MODEL_REVISION).toBe('3164caa4db95a03faac8a327f914f7c8f42d2f98');
+    expect(EMBEDDING_ONNX_ARTIFACT).toBe('onnx/model.onnx');
   });
 
   it('keeps embedder.ts and fetch-model.mjs importing that source, not redefining it', () => {
     expect(embedderSource).toContain("from './model-identity.json'");
-    expect(embedderSource).not.toContain('onnx-community/gte-multilingual-base');
+    expect(embedderSource).not.toContain('hindsight-ai/hs-embed-1');
+    expect(embedderSource).not.toMatch(/pooling: '(cls|mean)'/);
     expect(fetchScript).toContain("from '../src/embeddings/model-identity.json'");
     expect(fetchScript).toContain('identity.modelId');
-    expect(fetchScript).not.toContain('onnx-community/gte-multilingual-base');
-    expect(fetchScript).not.toContain('2edbf5e672aab465f9ed4c154a8b61791c082c69');
+    expect(fetchScript).not.toContain('hindsight-ai/hs-embed-1');
+    expect(fetchScript).toContain('identity.pooling');
+    expect(fetchScript).not.toContain('3164caa4db95a03faac8a327f914f7c8f42d2f98');
+  });
+
+  it('keeps the newest memory_vec definition at the compiled-in dimension', () => {
+    const migrationsDir = join(repoRoot, 'packages/db/src/migrations');
+    const definitions = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .map((f) => readFileSync(join(migrationsDir, f), 'utf8'))
+      .filter((sql) => sql.includes('CREATE VIRTUAL TABLE `memory_vec`'));
+    expect(definitions.at(-1)).toContain(`embedding FLOAT[${EMBEDDING_DIMS}]`);
   });
 
   it('keeps the Dockerfile model-bake gate pointing at the derived artifact path', () => {

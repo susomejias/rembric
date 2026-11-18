@@ -841,11 +841,11 @@ describe('the relevance gates discriminate (no embedder — level is the lexical
     const embedded = new MemoryService(repos, db.handle.db, undefined, (t) => fake.embed(t));
     const weakText = { title: 'Nimbus roster', content: 'nimbus roster of on-call names' }; // 1/7
     const weak = embedded.save({ type: 'project', ...weakText }, projectScope(projectId));
-    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId)); // 7/7
     const worker = new EmbeddingWorker({ repos, embedder: fake });
     while ((await worker.processBatch()).processed > 0) {
-      /* only `weak` is queued: `mem` has no embedQuery */
+      /* drained before `strong` exists, so only `weak` reaches the dense branch */
     }
+    const strong = mem.save({ type: 'project', ...STRONG }, projectScope(projectId)); // 7/7
 
     const q = tokenSet(QUERY);
     expect(relevanceLevel(q, weakText, undefined, EQUAL_WEIGHTS)).toBeCloseTo(1 / 7, 10);

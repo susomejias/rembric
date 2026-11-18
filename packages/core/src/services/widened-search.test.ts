@@ -482,11 +482,16 @@ describe('a widened page ranks by relevance alone (real embedder)', () => {
     }
 
     const query = 'how long is the dunning window before an account is suspended';
-    const wide = (await mem.search({ query }, widened(home, away))).map((m) => m.id);
+    const ungated = { abstentionFloor: null, relativeLevelRatio: null };
+    const wide = (
+      await mem.searchWithAbstention({ query }, widened(home, away), ungated)
+    ).memories.map((m) => m.id);
     expect(wide[0]).toBe(answer.id);
 
     expect(wide.filter((id) => homeRows.some((r) => r.id === id)).length).toBeGreaterThan(0);
-    const narrow = (await mem.search({ query }, projectScope(home))).map((m) => m.id);
+    const narrow = (
+      await mem.searchWithAbstention({ query }, projectScope(home), ungated)
+    ).memories.map((m) => m.id);
     expect(narrow.length).toBeGreaterThan(0);
     expect(narrow).not.toContain(answer.id);
   }, 60_000);

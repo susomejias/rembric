@@ -29,11 +29,21 @@ import {
   undoOp,
   type ConsolidationRunnerOptions,
 } from '@rembric/core';
+import { EMBEDDING_DIMS } from '@rembric/core';
+import {
+  CANDIDATE_HIGH_BAND_FLOOR,
+  CANDIDATE_LOW_BAND_CEILING,
+  VEC_THRESHOLD,
+} from '@rembric/core';
 
 import type * as EmbedderModule from '../embeddings/embedder.js';
 import type * as EntitiesModule from '../services/entities.js';
 import { doctorReport } from '../test-support/doctor.js';
 import { createTestDb, defaultProject, type TestDb } from '../test-support/index.js';
+
+const LOW_DENSE = (VEC_THRESHOLD + CANDIDATE_LOW_BAND_CEILING) / 2;
+const MID_DENSE = (CANDIDATE_LOW_BAND_CEILING + CANDIDATE_HIGH_BAND_FLOOR) / 2;
+const BELOW_DENSE = VEC_THRESHOLD - 0.05;
 
 const control = vi.hoisted(() => ({ extractThrowsOn: null as string | null, embedderLoads: 0 }));
 
@@ -100,7 +110,7 @@ function runner(overrides: Partial<ConsolidationRunnerOptions> = {}): Consolidat
 }
 
 function axis(i: number): Buffer {
-  const v = new Float32Array(768);
+  const v = new Float32Array(EMBEDDING_DIMS);
   v[i] = 1;
   return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
 }
@@ -144,7 +154,7 @@ function drainablePair(opts: { scope?: Scope; targetVector?: Buffer | null } = {
 }
 
 function vectorAt(cosine: number): Buffer {
-  const v = new Float32Array(768);
+  const v = new Float32Array(EMBEDDING_DIMS);
   v[0] = cosine;
   v[1] = Math.sqrt(1 - cosine * cosine);
   return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
@@ -268,7 +278,7 @@ describe('drain — which pairs it orphans', () => {
         new Date(),
       );
     }
-    const p = drainablePair({ targetVector: vectorAt(0.72) });
+    const p = drainablePair({ targetVector: vectorAt(LOW_DENSE) });
     for (const id of [p.sourceId, p.targetId]) {
       repos.entities.linkMemory(
         id,
@@ -323,22 +333,22 @@ describe('drain — which pairs it orphans', () => {
 
 describe('drain — low confidence band', () => {
   it('drains an entity-only pair with a known cosine below the vector threshold', () => {
-    const p = sharedEntityPair(vectorAt(0.65));
+    const p = sharedEntityPair(vectorAt(BELOW_DENSE));
     sweepOnce();
     expect(statusOf(p)).toBe('orphaned');
     expect(opsFor(p)[0]!.reasoning).toMatch(/^orphaned: low confidence band: /);
     expect(lastSummary().drain.drainedRules).toBe(1);
   });
 
-  it('drains a vector-only pair at 0.72', () => {
-    const p = drainablePair({ targetVector: vectorAt(0.72) });
+  it('drains a vector-only pair in the low band', () => {
+    const p = drainablePair({ targetVector: vectorAt(LOW_DENSE) });
     sweepOnce();
     expect(statusOf(p)).toBe('orphaned');
     expect(opsFor(p)[0]!.reasoning).toMatch(/^orphaned: low confidence band: /);
   });
 
-  it('keeps a vector-only pair at 0.76', () => {
-    const p = drainablePair({ targetVector: vectorAt(0.76) });
+  it('keeps a vector-only pair in the middle band', () => {
+    const p = drainablePair({ targetVector: vectorAt(MID_DENSE) });
     sweepOnce();
     expect(statusOf(p)).toBe('pending');
     expect(lastSummary().drain.keptAdmitted).toBe(1);
@@ -353,7 +363,7 @@ describe('drain — low confidence band', () => {
 
   it('keeps a lexically admitted pair whose cosine is in the low band', () => {
     const n = ++seq;
-    const target = remember(`deploy freeze friday kept${n}`, { vector: vectorAt(0.72) });
+    const target = remember(`deploy freeze friday kept${n}`, { vector: vectorAt(LOW_DENSE) });
     const source = remember('deploy freeze friday', { vector: axis(0) });
     const p = pending(source.id, target.id);
     sweepOnce();
@@ -362,7 +372,7 @@ describe('drain — low confidence band', () => {
 
   it('keeps a low-cosine pair whose entity extraction fails', () => {
     const n = ++seq;
-    const target = remember(`tango${n} boom-fail uniform${n}`, { vector: vectorAt(0.65) });
+    const target = remember(`tango${n} boom-fail uniform${n}`, { vector: vectorAt(BELOW_DENSE) });
     const source = remember(`alpha${n} bravo${n} charlie${n}`, { vector: axis(0) });
     const p = pending(source.id, target.id);
     control.extractThrowsOn = 'boom-fail';
@@ -372,7 +382,7 @@ describe('drain — low confidence band', () => {
   });
 
   it('keeps an entity pair in the dense middle band', () => {
-    const p = sharedEntityPair(vectorAt(0.72));
+    const p = sharedEntityPair(vectorAt(LOW_DENSE));
     sweepOnce();
     expect(statusOf(p)).toBe('pending');
   });
