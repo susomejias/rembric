@@ -1,0 +1,110 @@
+## Context
+
+The text-query branch (`packages/core/src/services/hybrid-search.ts`) runs a lexical and a dense retriever, fuses them with RRF, applies a relative relevance filter, multiplies by a recency/confirmation/type boost and truncates. Nothing in that pipeline reads the query against a candidate's text.
+
+The server is a single Node process that already runs one ONNX model in-process (the embedder), on the thread that serves HTTP. The standing constraints are: the server makes no relation or lifecycle decision from a model's output; no external service; and the operator's host budget is 2–3 GB of RAM.
+
+### Evidence
+
+All figures come from scratch scripts run on one developer machine (10 cores, 2 intra-op threads) against a private corpus that is not committed and is not described further here. Relevance was graded 0/1/2 by blind LLM judges over the pooled top 8 of every arm (one judge per query, arm hidden, order shuffled). Pairs a later arm returned that nobody judged count as not relevant, which penalises the cheaper settings. The scripts are not committed; task group 6 reproduces the comparison inside the committed harness.
+
+Quality (nDCG@8 / MRR), instrument: blind-graded pooled relevance.
+
+| Arm                                                   | Current embedder | Replacement embedder |
+| ----------------------------------------------------- | ---------------- | -------------------- |
+| Fused search, no reranker                             | 0.630 / 0.739    | 0.670 / 0.793        |
+| Rerank 20 × 256 tokens, gates off                     | 0.796 / 0.926    | 0.792 / 0.898        |
+| Rerank 10 × 192 tokens, gates off                     | 0.783 / 0.913    | 0.803 / 0.908        |
+| Rerank 10 × 192 tokens, relative filter applied first | 0.742 / 0.907    | 0.751 / 0.907        |
+
+Paired difference of rerank 20 × 256 against no reranker on the current embedder: +0.166, bootstrap 95% CI [+0.091, +0.241]. Rerank 10 × 192 against 20 × 256 on the replacement embedder: +0.010, CI [−0.031, +0.050].
+
+Rerank-only latency per search (p50 / p95), instrument: wall clock around the model calls, batches of 5.
+
+| Window × tokens | Latency      |
+| --------------- | ------------ |
+| 20 × 256        | 268 / 283 ms |
+| 12 × 192        | 115 / 128 ms |
+| 10 × 192        | 97 / 107 ms  |
+| 10 × 128        | 64 / 74 ms   |
+
+The fused search without a reranker took 14 ms at the median end to end on the same corpus.
+
+Worker threads, 10 × 192, replacement embedder in its own worker, instrument: process RSS and wall clock of the slowest of N simultaneous searches.
+
+|                                   | 1 rerank worker         | 2 rerank workers        |
+| --------------------------------- | ----------------------- | ----------------------- |
+| RSS idle → under load             | 1389 → 1744 MB          | 1947 → 2371 MB          |
+| N = 1 / 2 / 4 / 8                 | 94 / 185 / 373 / 771 ms | 95 / 150 / 290 / 597 ms |
+| Main-thread event-loop delay, max | 5 ms                    | 3 ms                    |
+
+In-process on the serving thread, the event loop was blocked for the full duration of each rerank.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- Better ordering for deliberate searches (`memory.search`, `memory.context` relevance) with a bounded, measured latency cost.
+- No stall of the serving thread, and a hard ceiling on what a burst can cost.
+- Stay inside the 2–3 GB host budget with reranking on, and keep a way to run without it.
+
+**Non-Goals:**
+
+- Abstention. The cross-encoder score does not separate answerable from unanswerable queries on that corpus (best score of an answerable query as low as 0.15, of an unanswerable one as high as 0.85). The floor stays as it is.
+- Any model-made decision: relations, supersession, lifecycle and save-time bands are untouched.
+- Moving the embedder off the serving thread. It is cheaper per call and is its own follow-up.
+- Reranking automatic surfaces (per-turn recall, file recall).
+
+## Decisions
+
+### 1. A cross-encoder reorders the fused head; it does not replace fusion
+
+The retrievers still produce the candidates over full text; the model only orders the first rows. Alternatives: (a) replace the hand-made relevance level with the model score everywhere, rejected because the level is also the abstention quantity and the model score fails as one; (b) no reranker, rejected on the measured quality gap.
+
+### 2. Model: `hindsight-ai/hs-rerank-1`, pinned
+
+114M parameters, multilingual, one logit per pair, ships an int8 ONNX export that `@huggingface/transformers` 4.2.0 loads through `AutoModelForSequenceClassification` with no new dependency. Alternatives: base-size multilingual rerankers (roughly 300M–570M parameters), rejected because the cost is one forward pass per candidate and they do not fit the latency or memory budget; English-only MiniLM rerankers, rejected because the corpus and queries mix Spanish and English.
+
+### 3. Window 10, 192 tokens per pair
+
+10 × 192 is indistinguishable from 20 × 256 in quality and costs about a third of the time. Below 128 tokens quality starts to fall. Both are compile-time constants, consistent with how the repository treats retrieval constants; changing either re-runs the evaluation. Alternative: operator-configurable values, rejected for the same reason the other retrieval constants are not configurable: the trade is measured, not a preference.
+
+### 4. Keep the boost; drop the relative filter on this path
+
+Ordering by the model score alone lost the most-recent-decision ordering on the synthetic corpus (MRR 0.900 → 0.875), and recovered above baseline (0.925) once multiplied by the existing boost. Applying the relative filter before reranking scored lower than reranking the unfiltered head on both embedders (0.742 vs 0.783, 0.751 vs 0.803): the filter withholds candidates from a better judge. The floor and the empty-pool verdict still run first, so an abstaining query costs no inference.
+
+### 5. Opt-in per surface
+
+`searchWithAbstention` takes a `rerank` option. `memory.search` and `memory.context`'s ranked pass pass it; `/api/<slug>/memory/recall`, file recall and save-time detection do not. Alternative: rerank everything, rejected because the automatic surfaces fire per turn and in bursts, where a 14 ms search becoming ~110 ms is paid many times for hints the agent did not ask for.
+
+### 6. One worker thread, tokenizing inside it
+
+The worker owns the model and its tokenizer; the serving thread posts `{query, documents}` and awaits scores. Alternatives: (a) in-process, rejected because it blocks the event loop for the whole inference; (b) tokenize on the serving thread and transfer tensors, rejected because it saved about 170 MB per extra worker but stalled the serving thread 125–215 ms under a burst of 8; (c) a pool, rejected because a second worker cost about 600 MB for 22% lower latency at 8 concurrent searches and a fourth was no faster than a third.
+
+### 7. Deadline with fallback to the unreranked response
+
+A single worker serialises requests, so latency grows linearly with simultaneous searches. Each call carries `RERANK_DEADLINE_MS`; on expiry, or when the model is not loaded, the call returns exactly what the unreranked path returns. This bounds the worst case and makes every failure mode of the reranker degrade to today's behaviour. The fallback needs the unreranked result, so the service computes the gated, boosted page from the same fused pool it already has; no second retrieval runs.
+
+### 8. An operator switch, default on
+
+`REMBRIC_RERANK=off` skips loading the model. It exists because the model is the difference between the minimum and the recommended host. Alternative: default off, rejected because the measured gain is the point of the change.
+
+## Risks / Trade-offs
+
+- [Risk] Latency of deliberate searches rises from ~14 ms to ~110 ms, more on slower CPUs than the measurement machine → Mitigation: the deadline caps it; task 6.4 measures on the published image's target architecture before the constants are frozen.
+- [Risk] The reranker demotes related-context memories below ones that match the query literally (the dominant pattern among the queries it lost) → Accepted because it won on far more queries than it lost; a rerank/fusion score blend is an open question, not part of this change.
+- [Risk] A memory whose answering text lies beyond 192 tokens can be misordered → Mitigation: it is still retrieved over its full text and stays in the window; the harness gains long-memory fixtures so the cost is observable.
+- [Risk] The evidence is a few dozen queries with one LLM judge each → Mitigation: the committed harness arm gates the reranked path against the unreranked one in CI.
+- [Trade-off] Resident memory grows by roughly the reranker worker (about 1 GB with its tokenizer) → Accepted because it lands after the embedder swap, which frees about 0.8 GB, and because the switch restores the smaller footprint.
+- [Risk] Next.js standalone output must ship the worker entry file → Mitigation: task 3.5 proves the worker starts from the built standalone bundle, not only under `next dev`.
+- [Trade-off] The relevance-level machinery stays; the code does not get shorter → Accepted because the level remains the abstention quantity and the fallback path.
+
+## Migration Plan
+
+No schema change. Deploy is the new image; the model is baked in. Rollback is the previous image, or `REMBRIC_RERANK=off` without a redeploy.
+
+## Open Questions
+
+- Should the embedder also move to a worker thread? Measured with both in workers, embedding during two concurrent reranks took 32 ms at the median. Deferred to its own change.
+- Would blending the rerank score with the fused rank recover the related-context losses? Not measured.
+- Should `memory.doctor` report reranker state and the fallback count? The counters exist after this change; exposing them is a contract addition to decide separately.
