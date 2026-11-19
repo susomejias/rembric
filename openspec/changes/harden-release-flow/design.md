@@ -19,7 +19,15 @@ The guard exists so a second merge never cancels the first run's tag-minting, wh
 
 The wait reuses `isPublished`, which already requires the exact version and its provenance attestation, polling every 15 seconds for up to 15 minutes. It runs inside `publish-npm`, which no longer blocks other jobs, so the wait costs nothing to the next release.
 
+### D4. Anchor `server` on the repository root, not on `apps/web`
+
+release-please attributes a commit to a component by the paths it touches. Anchored on `apps/web`, a `feat` or `fix` that changed only `packages/core`, `packages/db` or `packages/mcp` released nothing and was left out of the changelog of the release that eventually shipped it: since August, 28 of the 81 `feat`, `fix` and `perf` commits touching the server's packages touched no file under `apps/web`. The root path `.` is release-please's documented way to release on any change, and `exclude-paths` carves out the other component and the directories the image is not built from. The channel does not move: component name, tag prefix, changelog file and the version the server reads are unchanged, and `apps/web/package.json` becomes an `extra-files` carrier, which from the root is an ordinary downward path. Alternatives: a workspace plugin with one component per package, rejected because it is the cascade model this repository retired; leaving the anchor and forcing a publish by hand, rejected because the changelog stays wrong. The action emits a root component's outputs unprefixed, so the Docker publish gate reads `release_created` instead of a per-path key.
+
 ## Risks / Trade-offs
+
+- [Risk] A config key without a matching manifest key re-bootstraps the component at `0.0.0` → both keys move in one commit and a guard test asserts the key sets are equal; a dry run of release-please against the branch is recorded in the pull request.
+- [Risk] The first release after the move lists every releasable commit since the last tag that the old anchor ignored → intended: those commits shipped without a changelog entry.
+- [Trade-off] `exclude-paths` cannot name a single file, so a `feat` or `fix` touching only a root-level file releases the server → rare, and harmless.
 
 - [Risk] `always-update` cannot be exercised before a real release (the owner chose local verification over a sandbox repository) → it is release-please's documented option, verified in its source; the first release with two open PRs is the live check, and the manual path remains available.
 - [Trade-off] Release PR branches are force-rebuilt on every push to `main` → they are release-please's branches; nothing in the repository commits to them.
