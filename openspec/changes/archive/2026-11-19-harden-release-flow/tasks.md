@@ -15,7 +15,7 @@
 - [x] 5.1 Anchor the `server` component on the repository root with `exclude-paths` for `apps/plugin` and the directories the image is not built from; keep `apps/web/CHANGELOG.md` and carry the version in `apps/web/package.json` through `extra-files`; rename the manifest key in the same commit
 - [x] 5.2 Read the root component's unprefixed outputs in `release-please.yml` for the Docker publish gate
 - [x] 5.3 Guard tests in `scripts/release-please-reanchor.test.ts`: the anchor, the carrier, the manifest keys, no excluded directory the Dockerfile copies, the gate's output source; mutation-checked
-- [ ] 5.4 OPERATOR: after the merge, confirm the release PR release-please opens bumps `server` from the current version (not from `0.0.0`) and lists the package-only commits
+- [x] 5.4 OPERATOR: after the merge, confirm the release PR release-please opens bumps `server` from the current version (not from `0.0.0`) and lists the package-only commits — release-please opened #538 bumping `server` 0.32.0 → 0.32.1 with the package-only #536 in its changelog; merging it published `ghcr.io/susomejias/rembric:0.32.1` for amd64 and arm64
 
 ## 4. Verification
 

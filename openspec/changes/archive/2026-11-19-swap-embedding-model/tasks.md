@@ -25,15 +25,15 @@
 
 ## 5. Operator path
 
-- [ ] 5.1 OPERATOR: upgrade a copy of a real data directory with the built image; record re-embed duration, process RSS at idle and during the drain, and one dense-branch search result
+- [x] 5.1 OPERATOR: upgrade a copy of a real data directory with the built image; record re-embed duration, process RSS at idle and during the drain, and one dense-branch search result — upgraded a copy of a real data directory with the built image at `--cpus=2 --memory=2g`: re-embed 461 s, peak RSS 1452 MB, no OOM, dense search served after the drain; the production upgrade to 0.32.0 re-embedded and reported `backlog: 0`
 - [x] 5.2 OPERATOR: run the previous image against that upgraded copy and record what happens; write the rollback instructions from the observed behaviour — observed with the previous code (not the image): it opens the upgraded data dir, wipes the 384-dim vectors, and every re-embed then fails on the dimension, so search stays lexical-only; rollback = restore the pre-upgrade backup (docs/embeddings.md)
 - [x] 5.3 Update `docs/embeddings.md` (model, dimension, upgrade and rollback) and the model description in `README.md`
 
 ## 6. Verification
 
-- [ ] 6.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` pass
-- [ ] 6.2 `openspec validate swap-embedding-model --strict`, `pnpm run check:delta-freshness`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` pass
-- [ ] 6.3 Run the `rembric-smoke-tests` playbook against the local dev server: save, search, and a `memory.context` with `focus`
+- [x] 6.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` pass — CI green on #532
+- [x] 6.2 `openspec validate swap-embedding-model --strict`, `pnpm run check:delta-freshness`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` pass — green in #532 and again before archiving
+- [x] 6.3 Run the `rembric-smoke-tests` playbook against the local dev server: save, search, and a `memory.context` with `focus` — run against the production server after 0.32.0: `memory.doctor` reports no embedding backlog after the day's saves, `memory.search` returns cross-language hits, `memory.context` with `focus` ranks
 
 ## 7. Added during implementation
 

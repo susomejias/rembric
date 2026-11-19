@@ -199,6 +199,8 @@ When `memory.search` is called with a non-empty text `query`, the system SHALL i
 
 After RRF produces the fused, ordered candidate pool for the over-fetched rank window, the system SHALL apply a post-fusion multiplier BEFORE truncating to the top `limit` results: `finalScore(id) = rrfScore(id) * boost(id)`, where `boost(id)` is a compile-time-constant function of the candidate row's `confirmationCount`, time since `last_seen_at`, and `type`, clamped to a fixed range (declared `[0.7, 1.4]`; reachable in practice `[0.9, 1.35]` given the current per-signal weights). Applying the boost before truncation is deliberate: it CAN and is meant to change which rows make the page — a fresh, confirmed memory SHALL be able to outrank a stale unconfirmed one at a close raw RRF score. The clamp bounds the multiplier's magnitude; it does not, and is not meant to, prevent reordering near-ties. This boost applies ONLY to the text-query (fused hybrid-search) branch; the no-query chronological listing path is UNCHANGED and continues to use exact chronological order with no boost applied. The boost multiplier SHALL NOT be exposed as a per-request tunable — it is a fixed constant, matching the existing style of `RANK_CONSTANT` and the rank-window ceiling.
 
+On a call that requests reranking and is eligible for it (see "Text-query search MUST be able to rerank the head of the fused pool with a cross-encoder"), the multiplier's left operand changes for the rows of the rerank window and for nothing else: `finalScore(id) = rerankScore(id) * boost(id)`, where `rerankScore(id)` is the cross-encoder's score for that row against the query, in `[0,1]`. The boost itself, its inputs, its clamp and its position before truncation SHALL be unchanged, because recency, confirmation count and type are not properties a text-pair model can read: measured on real data, ordering by the cross-encoder score alone lost the most-recent-decision ordering the boost provides. A call that does not request reranking, is not eligible for it, or falls back from it SHALL be scored by `rrfScore(id) * boost(id)` exactly as described above.
+
 #### Scenario: A cross-lingual query surfaces a memory stored in another language
 
 - **GIVEN** an `active` memory whose content is in English (e.g. "user prefers black coffee, no sugar")
@@ -246,6 +248,12 @@ After RRF produces the fused, ordered candidate pool for the over-fetched rank w
 - **GIVEN** two `active` memories both present in the fused RRF pool with close raw RRF scores, one confirmed multiple times and recently seen, the other never confirmed and not seen in months
 - **WHEN** `memory.search` applies the post-fusion boost
 - **THEN** the confirmed, recently-seen memory SHALL rank at or above the other, but the reordering SHALL NOT move a memory absent from the fused pool into the returned results (the boost reorders the pool; it does not expand it)
+
+#### Scenario: A reranked call keeps the post-fusion boost
+
+- **GIVEN** two `active` memories in the rerank window with close cross-encoder scores, one confirmed several times and recently seen, the other never confirmed and not seen in months
+- **WHEN** `memory.search` serves the query on the reranked path
+- **THEN** the confirmed, recently-seen memory SHALL rank at or above the other, and the multiplier applied to each SHALL be the same `boost(id)` the unreranked path applies
 
 ### Requirement: Memory title MUST participate in both retrieval branches
 
@@ -318,6 +326,8 @@ The empty-pool verdict is NOT a gate. It SHALL hold whatever the gates' shipped 
 A page shortened by the relative filter SHALL NOT be padded to the requested limit, and SHALL report `abstained: false` — abstention is the floor's verdict or the empty pool's, and a caller MUST be able to tell "nothing relevant exists" from "fewer than `limit` rows were relevant". Because `abstained: false` alone cannot make that second distinction, the branch SHALL additionally report **`gateShortened`** when, and only when, ALL THREE hold: the relative filter removed at least one row from the fused pool, AND the returned page holds fewer rows than the requested limit, AND the requested `offset` still falls inside the fused pool. All three conditions are load-bearing. Without the removal condition, a page short because the pool itself was small would falsely blame the gate. Without the shortness condition, a full page sliced out of a heavily-filtered pool would carry a signal about rows the caller was never going to receive on this page. Without the offset condition, a page the caller emptied by paging past every candidate — one the ungated branch would have returned empty too — would blame the gate for an emptiness it did not cause. Together they answer the one question a short page raises: whether paging further or widening the query could recover anything the gate withheld.
 
 `gateShortened` and the empty-pool abstention SHALL NOT both be reported for the same response, and this SHALL hold by construction rather than by an added check: the relative filter always retains the pool leader, so a non-empty pool yields a non-empty filtered pool, and an empty pool gives the filter nothing to remove.
+
+On a call served by the reranked path (see "Text-query search MUST be able to rerank the head of the fused pool with a cross-encoder") the two gates part ways, and the split is contracted rather than incidental. The **floor** and the **empty-pool verdict** SHALL be evaluated exactly as above, over the whole fused pool, BEFORE any reranking work is done, so an abstaining query costs no inference. The **relative filter** SHALL NOT remove any row from the rerank window, and such a response SHALL NOT report `gateShortened`: the filter exists to drop rows the level judges far below the leader, and on this path a stronger judge of the same question reads those rows next, so filtering first would only withhold candidates from it. Measured on real data, reranking the unfiltered head of the pool scored higher than reranking the filtered one. A call that falls back from the reranked path SHALL have both gates applied as on any unreranked call, and its `gateShortened` SHALL be reported under the three conditions above. The cross-encoder score SHALL NOT be used as an abstention gate: on real data the best score of an answerable query fell below the best score of an unanswerable one, so no threshold over it separates the two.
 
 Each gate is independently enabled or disabled, and the shipped state of each is recorded once, in "Retrieval and lifecycle constants MUST be named and bounded in one place", so that this requirement does not have to be edited whenever a constant moves. While BOTH gates are disabled the branch SHALL perform no gate-related work at all: it SHALL issue the same queries and return the same result ids as if the gates did not exist, and SHALL report no `gateShortened` — a disabled filter removes nothing. While EITHER gate is enabled the branch SHALL compute levels for the whole fused pool, and the cost of doing so SHALL be measured against a stated budget at 1 000, 20 000 and 50 000 memory rows before the enabling change lands.
 
@@ -405,6 +415,19 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 - **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf — neither the pool's text nor any term statistic
 - **AND** no response SHALL report `gateShortened`
 - **AND** a query whose fused pool is empty SHALL still report `abstained: true` with the empty-pool reason
+
+#### Scenario: The relative filter does not thin the rerank window
+
+- **GIVEN** the relative filter is enabled, and a fused pool whose first rows include some below `ratio × leaderLevel`
+- **WHEN** `memory.search` serves the query on the reranked path
+- **THEN** every row of the rerank window SHALL be scored by the cross-encoder, including the rows the filter would have removed
+- **AND** the response SHALL NOT report `gateShortened`
+
+#### Scenario: An abstaining query is not reranked
+
+- **GIVEN** a text query whose fused pool is empty, or whose leader is below an enabled floor
+- **WHEN** `memory.search` is called with reranking requested
+- **THEN** the response SHALL report the same abstention verdict and reason as the unreranked path, and no cross-encoder inference SHALL run
 
 ### Requirement: The relevance level's term statistics MUST come from the search index
 
@@ -1737,7 +1760,7 @@ The dense branch SHALL name its partitions rather than omitting the partition pr
 
 ### Requirement: Embeddings MUST be computed in-process by a model loaded on first use
 
-The embedding model (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`, `normalize: true`) SHALL be loaded in-process on first use — the first `memory.save`, `memory.search` query, or background drain tick that needs a vector — and SHALL NOT be loaded during bootstrap. The server SHALL therefore bind its HTTP listener without loading the model; an idle server that needs no embedding holds no model. The embedder SHALL be loaded at most once per process: every load site SHALL share one memoized load. A model that cannot load SHALL NOT abort the server: the load failure SHALL surface as the documented degradation (the operation that needed the vector proceeds lexically and the drain retries the load on a later tick), it SHALL be logged, and `memory.doctor` SHALL continue to surface the reset-owed warning while the identity is unsettled. The embedding-identity check (`ensureVectorModel`) SHALL run exactly once per process, immediately after the first load resolves and BEFORE that embedder serves its first vector, so a recorded-identity mismatch wipes the stale vectors and settles the marker before any new vector is written. Each newly saved memory SHALL receive its embedding inline before candidate detection runs (ms-scale). The text embedded for each memory SHALL be the concatenation of its `title` and `content` (the same `embeddingInput` recipe at save time and in the background drain), so the curated headline contributes to the stored vector. An inference failure SHALL NOT fail the save: detection degrades to FTS5 for that save and the background drain retries the row. There SHALL be no external embedding endpoint, no API key, and no off switch. The same in-process embedder SHALL also embed the incoming query text on the `memory.search` text-query branch, so the stored vectors back BOTH save-time candidate detection AND interactive search. The `memory_vec` row written for each memory SHALL carry a scope-derived partition key and the memory's `status` and `type`, **derived from the memory row's current values in the same `INSERT` statement**, so that search kNN can filter scope, status, and type inside the index without a window where a concurrent status change (e.g. a topic-key supersede racing an in-flight embed) could leave the vector row's status stale.
+The embedding model (`hindsight-ai/hs-embed-1`, its int8 ONNX export, 384 dims, `pooling: 'mean'`, `normalize: true`, the same input recipe for queries and memories with no prefix) SHALL be loaded in-process on first use — the first `memory.save`, `memory.search` query, or background drain tick that needs a vector — and SHALL NOT be loaded during bootstrap. The server SHALL therefore bind its HTTP listener without loading the model; an idle server that needs no embedding holds no model. The embedder SHALL be loaded at most once per process: every load site SHALL share one memoized load. A model that cannot load SHALL NOT abort the server: the load failure SHALL surface as the documented degradation (the operation that needed the vector proceeds lexically and the drain retries the load on a later tick), it SHALL be logged, and `memory.doctor` SHALL continue to surface the reset-owed warning while the identity is unsettled. The embedding-identity check (`ensureVectorModel`) SHALL run exactly once per process, immediately after the first load resolves and BEFORE that embedder serves its first vector, so a recorded-identity mismatch wipes the stale vectors and settles the marker before any new vector is written. Each newly saved memory SHALL receive its embedding inline before candidate detection runs (ms-scale). The text embedded for each memory SHALL be the concatenation of its `title` and `content` (the same `embeddingInput` recipe at save time and in the background drain), so the curated headline contributes to the stored vector. The embedder SHALL read at most `EMBEDDING_MAX_TOKENS` (1024) tokens of that text and ignore the rest; the cap is part of the recorded embedding identity (`EMBEDDING_INPUT_VERSION`), so changing it re-embeds every memory. Measured, an uncapped input let a long memory hold the process above 8 GB resident while embedding, and capping at 1024 tokens kept it near 1 GB with no measurable loss of retrieval quality. An inference failure SHALL NOT fail the save: detection degrades to FTS5 for that save and the background drain retries the row. There SHALL be no external embedding endpoint, no API key, and no off switch. The same in-process embedder SHALL also embed the incoming query text on the `memory.search` text-query branch, so the stored vectors back BOTH save-time candidate detection AND interactive search. The `memory_vec` row written for each memory SHALL carry a scope-derived partition key and the memory's `status` and `type`, **derived from the memory row's current values in the same `INSERT` statement**, so that search kNN can filter scope, status, and type inside the index without a window where a concurrent status change (e.g. a topic-key supersede racing an in-flight embed) could leave the vector row's status stale.
 
 #### Scenario: Saving a memory
 
@@ -1765,6 +1788,12 @@ The embedding model (gte-multilingual-base, ONNX q8, 768 dims, `pooling: 'cls'`,
 
 - **WHEN** `memory.save(…)` is called and the inline embedding throws
 - **THEN** the save SHALL succeed, candidate detection SHALL operate on FTS5 only for that save, the failure SHALL be logged, and the drain SHALL retry the row
+
+#### Scenario: Text past the input cap does not change the vector
+
+- **GIVEN** a memory whose `title` and `content` together run past `EMBEDDING_MAX_TOKENS` tokens
+- **WHEN** its embedding is computed
+- **THEN** the vector SHALL equal the vector of the same text cut at `EMBEDDING_MAX_TOKENS` tokens
 
 #### Scenario: A search query is embedded on demand
 
@@ -1851,3 +1880,183 @@ A marker written by a build that predates the two-phase scheme carries no in-pro
 
 - **WHEN** the embedding model fails to load and the marker is perfectly healthy
 - **THEN** the server SHALL keep serving, the affected operation SHALL degrade to lexical search, the load SHALL be retried, and the boot SHALL NOT abort — the non-fatal treatment applies to the reset AND to the model load
+
+### Requirement: A change of embedding model MUST rebuild the vector index at the new dimension without touching memory rows
+
+The vector index's column dimension SHALL equal the dimension of the compiled-in embedding model. A change that replaces the model with one of a different dimension SHALL ship a migration that recreates `memory_vec` at the new dimension, and that migration SHALL NOT copy the old vectors: a vector of another model is not comparable to a query vector of the new one at any dimension, so carrying it forward would return wrong neighbours rather than none.
+
+The migration SHALL leave `memory`, `memory_fts` and every other table untouched. `memory_vec` holds derived data only, so emptying it does not violate the append-only memory invariant; the rows it described SHALL be re-embedded by the existing identity reset and background drain, and until a row is re-embedded it SHALL remain findable through the lexical branch.
+
+The compiled-in model SHALL be `hindsight-ai/hs-embed-1` at a pinned revision: 384 dimensions, mean pooling, normalized output, and the same input recipe for queries and memories, with no query or document prefix.
+
+#### Scenario: Upgrading across the model change keeps every memory
+
+- **GIVEN** a data directory written by a server on the previous embedding model
+- **WHEN** the server on the new model starts against it
+- **THEN** every `memory` row SHALL be present and unchanged, `memory_vec` SHALL exist at the new dimension, and no vector of the previous model SHALL remain
+
+#### Scenario: Search works while the re-embed drains
+
+- **GIVEN** an upgraded data directory whose vectors are still being recomputed
+- **WHEN** `memory.search` is called with a text query that lexically matches a memory not yet re-embedded
+- **THEN** that memory SHALL be returned through the lexical branch
+
+#### Scenario: A vector of the wrong dimension is refused
+
+- **WHEN** the embedder returns a vector whose length is not the compiled-in dimension
+- **THEN** the embedding SHALL fail with an error naming both lengths and SHALL NOT be written to `memory_vec`
+
+### Requirement: Every constant calibrated against embedding similarity MUST be re-derived when the embedding model changes
+
+A cosine similarity is a quantity of the model that produced it: two models place the same pair of texts at different distances, so a threshold tuned on one is uncalibrated on another. A change of embedding model SHALL therefore re-derive, from a committed evaluation run on the new model, every constant that reads a cosine similarity or a quantity built from one, and SHALL NOT carry any of them forward by default.
+
+Those constants are the save-time dense admission threshold, the save-time confidence band boundaries, and every enabled relevance gate, whose level takes the dense branch's cosine as one of its two components. A constant whose re-derived value equals its old one SHALL still be accompanied by the run that shows it.
+
+The same change SHALL regenerate the retrieval evaluation baselines against the new model, and its committed floors SHALL NOT be lower than the previous model's on any gated metric at any committed `k`.
+
+#### Scenario: A carried-forward threshold is rejected
+
+- **WHEN** a change replaces the embedding model and leaves a cosine-calibrated constant at its previous value without a committed run on the new model
+- **THEN** the change SHALL be rejected
+
+#### Scenario: The new model does not lower retrieval quality
+
+- **WHEN** the retrieval evaluation runs on the new embedding model
+- **THEN** every gated metric SHALL be at or above the floor committed for the previous model at the same `k`
+
+### Requirement: Text-query search MUST be able to rerank the head of the fused pool with a cross-encoder
+
+The text-query branch SHALL be able to reorder the head of its fused candidate pool with a cross-encoder: a model that reads the query and one candidate together and returns a single relevance score for the pair. Fusion ranks by position in two lists and the relevance level measures term coverage and vector distance; neither reads the query against the candidate's text, and on real data the cross-encoder placed a useful memory first far more often than the fused order did.
+
+The model SHALL be `hindsight-ai/hs-rerank-1` at a pinned revision, run in-process with no network call, and its identity (model id, revision, ONNX artifact) SHALL be declared once and consumed by both the loader and the image build. Its raw output is one logit per pair; `rerankScore` SHALL be the logistic of that logit.
+
+The **rerank window** SHALL hold `RERANK_WINDOW` rows of the fused pool, taken before the relative filter and before the ranking boost from the two retrievers' ranked lists: the dense retriever's first `RERANK_DENSE_SLOTS` rows, then the lexical retriever's rows in order, then the dense retriever's remaining rows, skipping a row already taken, until the window is full or both lists are exhausted. It SHALL NOT be the head of the fused order, and `RERANK_DENSE_SLOTS` SHALL be smaller than `RERANK_WINDOW`, so the lexical retriever's best rows always have a place. Reciprocal Rank Fusion scores a row by the sum of its reciprocal ranks, so a row only one retriever found sits below every row both found: measured, a query in one language whose answer is stored in another was the dense retriever's first row and the fused pool's seventeenth, behind rows that shared only function words with the query, so a window cut from the fused head never showed it to the model. Taking rows from each list directly gives each retriever's best rows a place in the window at the same inference cost. The dense list gets most of the window because a query whose answer is in another language reaches it only through the dense list, and on real data that answer was often not the dense list's first row but its sixth to tenth, behind same-language memories on other topics; the lexical list keeps the rest because a window without it measurably lost same-language answers. Each candidate SHALL be presented to the model as its `title` followed by its `content`, the same recipe the embedder reads, and each query-candidate pair SHALL be truncated to `RERANK_MAX_TOKENS` tokens. The stored memory, its embedding and its lexical index entry SHALL NOT be affected by that truncation: it bounds what the cross-encoder reads to order a row that the retrievers already found over its full text. The response page SHALL then be the window ordered by `rerankScore(id) * boost(id)` and truncated to `limit`.
+
+A call is **eligible** only when all of these hold: it carries a non-empty text query; its `offset` is zero; its `limit` is at most `RERANK_WINDOW`; and neither abstention cause has spoken. Every other call SHALL be served by the unreranked path unchanged. Paging past the window is deliberately not reranked: the window is the only part of the pool the model has read, so a second page cannot be ordered consistently with the first.
+
+`RERANK_WINDOW`, `RERANK_DENSE_SLOTS` and `RERANK_MAX_TOKENS` SHALL be named compile-time constants declared once in the module that owns reranking. None SHALL be operator-configurable or settable per request. Their shipped values SHALL be the ones a committed evaluation run supports, and a change to any of them SHALL re-run that evaluation in the same change, because both trade latency against ordering quality and the trade was measured rather than assumed.
+
+Reranking SHALL NOT widen what a search can return. Every returned row SHALL be a row of the fused pool for the same query, scope and filters, so scope isolation, status and type filters, and cross-project rules hold on the reranked path by construction.
+
+#### Scenario: The cross-encoder reorders the head of the pool
+
+- **GIVEN** a query and a scope where the memory that answers it is fused at rank 4 behind three memories that only share its vocabulary
+- **WHEN** `memory.search` serves the query on the reranked path
+- **THEN** the answering memory SHALL be ordered by its cross-encoder score multiplied by its boost, and SHALL rank above the three when that product is higher
+
+#### Scenario: A row only the dense retriever found reaches the model
+
+- **GIVEN** a query whose answering memory is the dense retriever's first row, shares no term with the query, and sits below `RERANK_WINDOW` in the fused order behind rows the lexical retriever matched
+- **WHEN** `memory.search` serves the query on the reranked path
+- **THEN** the answering memory SHALL be in the rerank window, the window SHALL still hold the lexical retriever's first row, and the window SHALL hold no more than `RERANK_WINDOW` rows
+
+#### Scenario: A row outside the fused pool is never returned
+
+- **GIVEN** a memory in another project, or one excluded by the call's `status` or `type` filter
+- **WHEN** `memory.search` serves a query on the reranked path
+- **THEN** that memory SHALL NOT appear in the response, whatever score the cross-encoder would have given it
+
+#### Scenario: A paged call is not reranked
+
+- **WHEN** `memory.search` is called with a text query and a non-zero `offset`, or with a `limit` above `RERANK_WINDOW`
+- **THEN** the response SHALL be the one the unreranked path returns for that call
+
+#### Scenario: Truncation does not hide a memory from retrieval
+
+- **GIVEN** a memory longer than `RERANK_MAX_TOKENS` whose only matching text lies beyond that length
+- **WHEN** `memory.search` is called with a query matching that text
+- **THEN** the memory SHALL still enter the fused pool through the retrievers, which read its full text
+
+#### Scenario: The rerank constants are not request parameters
+
+- **WHEN** any MCP tool input schema or the environment schema is inspected
+- **THEN** neither `RERANK_WINDOW` nor `RERANK_MAX_TOKENS` SHALL be settable
+
+### Requirement: Reranking MUST be requested by the calling surface, and automatic recall MUST NOT request it
+
+Reranking SHALL be an explicit option of the search service that each calling surface either passes or omits; it SHALL NOT be a default of the service. A cross-encoder run costs tens of milliseconds per call where the fused search costs a few, so it belongs on the surfaces where an agent deliberately asks for the best order, and not on the ones that fire automatically and in bursts.
+
+The surfaces that SHALL request it are `memory.search` and the ranked pass of `memory.context`'s relevance channel. The surfaces that SHALL NOT request it are the per-turn recall endpoint, file-anchored recall, and save-time candidate detection.
+
+Reranking SHALL be on by default. The single operator setting that reaches it SHALL be `REMBRIC_RERANK`: the value `off` SHALL keep the reranker from being created at all (no model loaded, no worker, no boot timing), and every reranked surface SHALL then serve the unreranked order; any other value, or none, SHALL leave reranking on. It exists for hosts shared with other workloads, where the operator may prefer to keep the reranker's memory and CPU for them. Apart from that switch, a reranker that cannot serve a call degrades that call to the unreranked path (see "Reranker inference MUST run off the main thread and MUST be bounded by a deadline").
+
+#### Scenario: An explicit search is reranked
+
+- **WHEN** `memory.search` is called with an eligible text query
+- **THEN** the call SHALL be served by the reranked path
+
+#### Scenario: The per-turn recall endpoint is not reranked
+
+- **WHEN** a client calls the per-turn recall endpoint
+- **THEN** the search behind it SHALL NOT request reranking and no cross-encoder inference SHALL run for that call
+
+#### Scenario: The operator switches reranking off
+
+- **GIVEN** a server started with `REMBRIC_RERANK=off`
+- **WHEN** `memory.search` is called with an eligible text query
+- **THEN** the response SHALL be the unreranked one, and no reranker model SHALL have been loaded
+
+#### Scenario: Only the switch reaches reranking
+
+- **WHEN** every environment read of the server is inspected
+- **THEN** `REMBRIC_RERANK` SHALL be the only one that reaches reranking, and none SHALL change its window, its token cap or its deadline
+
+### Requirement: Reranker inference MUST run off the main thread and MUST be bounded by a deadline
+
+Cross-encoder inference, including tokenization of its input, SHALL run in one dedicated worker thread that owns the reranker model. The thread serving HTTP SHALL NOT run it. Measured in-process, a rerank blocked the event loop for its whole duration, which stalled every other request, and tokenizing on the serving thread reintroduced stalls of over a hundred milliseconds under a burst.
+
+There SHALL be exactly one such worker. Its requests SHALL be served one at a time in arrival order. A pool of several workers SHALL NOT be introduced without a new measurement: a second worker added roughly 600 MB of resident memory for about a fifth less latency at eight concurrent searches, and a fourth was no faster than a third.
+
+Every reranked call SHALL carry a deadline, `RERANK_DEADLINE_MS`, measured from the moment the request is handed to the worker and covering both its time in the queue and its inference. A call whose deadline passes SHALL **fall back**: it SHALL return exactly the response the unreranked path produces for the same call, and its late result SHALL be discarded. The same fallback SHALL apply when the model has not finished loading, failed to load, or the worker has exited. A request whose deadline passed while it waited in the queue SHALL be dropped by the worker without running inference, so a burst cannot build a backlog that makes every later call miss its deadline too. The worker SHALL NOT be terminated while it runs inference: measured, terminating the thread mid-inference aborted the whole process, so stopping it SHALL ask it to exit after its current request. A fallback is not an error: the response SHALL NOT carry an error, and the failure SHALL be logged and counted.
+
+The worker SHALL be started and its model loaded outside any request, so a first reranked call does not pay the model load. A worker that exits SHALL be restarted, with the restarts bounded so a model that cannot load does not respawn in a loop.
+
+Once the model is loaded and no embedding backlog remains, the server SHALL time one full rerank window, and that measurement SHALL calibrate the reranker. When the window cannot finish within `RERANK_DEADLINE_MS`, the reranker SHALL **stand down**: its worker SHALL be asked to exit and every later eligible call SHALL fall back at once, without waiting for a deadline. While it stands down, the server SHALL load it and time a full window again every 15 minutes, and SHALL keep it once a window fits: on a host shared with other workloads a busy moment at boot would otherwise switch reranking off until the next restart. Measured at one vCPU, a full window took 393 ms, so every reranked search waited 300 ms and then served the unreranked order anyway. When the window fits, a call SHALL fall back at once, without being queued, whenever the calls already in flight plus itself, each costing one measured window, could not finish within the deadline: a queued call that would miss its deadline only adds that wait to a search that serves the unreranked order anyway. Before the measurement, calls SHALL be queued as described above. A reranker whose window fits SHALL NOT be re-timed, and there SHALL be no smaller window or token cap chosen by hardware.
+
+#### Scenario: A rerank does not block other requests
+
+- **GIVEN** a reranked search in flight
+- **WHEN** another request arrives on the same server
+- **THEN** it SHALL be served without waiting for the rerank to finish
+
+#### Scenario: A burst falls back instead of queueing without bound
+
+- **GIVEN** more simultaneous eligible searches than the worker can serve within `RERANK_DEADLINE_MS`
+- **WHEN** a queued call's deadline passes
+- **THEN** that call SHALL return the unreranked response for its query, with no error, and SHALL be counted as a fallback
+
+#### Scenario: A CPU too slow for one window stands the reranker down
+
+- **GIVEN** a server whose boot measurement of a full window does not finish within `RERANK_DEADLINE_MS`
+- **WHEN** `memory.search` is called with an eligible text query
+- **THEN** the response SHALL be the unreranked one, returned without waiting for the deadline, and the worker SHALL have been asked to exit
+
+#### Scenario: A stood-down reranker comes back when the CPU frees up
+
+- **GIVEN** a reranker that stood down
+- **WHEN** a later timing of a full window, taken 15 minutes after the previous one, finishes within `RERANK_DEADLINE_MS`
+- **THEN** eligible searches SHALL be reranked again and no further timing SHALL run
+
+#### Scenario: A search that cannot be served in time is not queued
+
+- **GIVEN** a calibrated reranker whose calls already in flight, plus one more, would exceed `RERANK_DEADLINE_MS` at one measured window each
+- **WHEN** another eligible search arrives
+- **THEN** it SHALL return the unreranked response at once, without being handed to the worker, and SHALL be counted as a fallback
+
+#### Scenario: A reranker that cannot load does not fail search
+
+- **GIVEN** reranker artifacts that are missing or corrupt
+- **WHEN** `memory.search` is called with an eligible text query
+- **THEN** the response SHALL be the unreranked one and the load failure SHALL be logged
+
+#### Scenario: An expired request is not run
+
+- **GIVEN** a reranked call whose deadline passes while it is still queued behind another request
+- **WHEN** the worker reaches it
+- **THEN** the worker SHALL reply without running inference, and the call SHALL already have fallen back
+
+#### Scenario: A late result is discarded
+
+- **GIVEN** a call that already fell back at its deadline
+- **WHEN** the worker later finishes that call's inference
+- **THEN** the result SHALL be discarded and SHALL NOT alter any response
