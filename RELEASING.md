@@ -8,8 +8,10 @@ Releases are fully automated. You never tag, bump, or publish by hand.
 
 | Component | Path           | Tag format      | npm package-name  | Bumps when commits touch…                                        |
 | --------- | -------------- | --------------- | ----------------- | ---------------------------------------------------------------- |
-| `server`  | `apps/web/`    | `server-vX.Y.Z` | `@rembric/web`    | anything under `apps/web/`                                       |
+| `server`  | `.` (root)     | `server-vX.Y.Z` | `@rembric/web`    | anything the image is built from: `apps/web/` and `packages/*`   |
 | `plugin`  | `apps/plugin/` | `plugin-vX.Y.Z` | `@rembric/plugin` | anything under `apps/plugin/` — a shared asset or any client dir |
+
+The `server` component is anchored on the repository root because the image is built from `apps/web` and the workspace packages it bundles; anchored on `apps/web` alone, a change that touched only `packages/*` released nothing. Its `exclude-paths` keep out `apps/plugin` and the directories the image is not built from (specs, docs, CI, repository tooling, agent configuration), so a commit touching only those opens no server release. `exclude-paths` matches directories, not single files. Its version is written to the root `package.json` and, as an `extra-files` carrier, to `apps/web/package.json`, which is the one the running server reads; the changelog stays `apps/web/CHANGELOG.md`.
 
 The `plugin` component covers the **whole** `apps/plugin/` tree (it declares no `exclude-paths`), and its single version is shared by all five clients: Claude Code, Codex CLI, Hermes Agent, opencode, and Pi. The component's `extra-files` rewrite every client's version carrier in lock-step:
 

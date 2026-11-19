@@ -6,7 +6,7 @@ The repository SHALL configure `release-please-config.json` in manifest mode wit
 
 The two packages:
 
-- `apps/web` — component `server`, `release-type: node`, `package-name: @rembric/web`, `include-component-in-tag: true`. Tag `server-vX.Y.Z`. Releases only when files under `apps/web/` change. Its release is the trigger for the Docker image publish (see the docker-publish requirement, retained). The component's release identity lives in `apps/web/package.json`; its name and tag prefix are unchanged from when it was anchored on `apps/server`.
+- `.` (the repository root) — component `server`, `release-type: node`, `package-name: @rembric/web`, `include-component-in-tag: true`. Tag `server-vX.Y.Z`. Its release is the trigger for the Docker image publish (see the docker-publish requirement). The server is built from `apps/web` **and** the workspace packages it bundles (`packages/core`, `packages/db`, `packages/mcp`, `packages/config`), and release-please attributes a commit to a component only by the paths it touches: anchored on `apps/web`, a `feat` or `fix` that changed only a package released nothing and never reached the changelog — measured on this repository, about one server change in four. Anchored on the root, every commit counts unless all the files it touches lie under the component's `exclude-paths`. Those SHALL name `apps/plugin` (the other component) and only directories the image is not built from — specifications, documentation, CI and repository tooling, agent configuration; a directory the Dockerfile copies SHALL NOT be excluded. `exclude-paths` matches directories, not single files, so a root-level file cannot be excluded; that is accepted, because a commit touching only such files is rarely a releasable type. The component's changelog stays `apps/web/CHANGELOG.md`, and `apps/web/package.json` is updated as an `extra-files` carrier, a path below the component directory that needs no `..` segment and no leading slash.
 - `apps/plugin` — component `plugin`, `release-type: node`, `package-name: @rembric/plugin`, `include-component-in-tag: true`. It SHALL cover the **entire** `apps/plugin/` tree (shared assets AND all five client dirs) — it SHALL declare **no** `exclude-paths`. Tag `plugin-vX.Y.Z`. Releases only when files under `apps/plugin/` change; a plugin release SHALL NOT rebuild the server image. A plugin release IS the trigger for the `@rembric/pi` npm publish (see the outbound-publication requirement in `supply-chain-hygiene`).
 
 `apps/plugin/mcp-bridge/` — the published stdio↔Streamable-HTTP transport package — is part of that tree and is therefore covered by the same component under the same **no `exclude-paths`** rule: a commit touching only it releases `plugin`, and a plugin release is equally the trigger for the `@rembric/mcp-bridge` npm publish. It is **not** a third package: the config still declares exactly two, and the two-track model (`server` + unified `plugin`) is unchanged by it.
@@ -15,7 +15,7 @@ All five plugin clients SHALL share the single `plugin` version (no per-client i
 
 The transport package SHALL share that same single version, and the `plugin` component's `extra-files` SHALL additionally cover `apps/plugin/mcp-bridge/package.json` and the two manifest pin sites, under the same component-relative constraint (no leading slash, no `..`). The opencode hook and printed snippet are executable carriers checked by invariant rather than release-please text replacement. A pin is a carrier rather than a hand-maintained constant precisely because it names a package released by the same run: a hand-bumped pin can name a version that was never published, and a carrier cannot. The location rule above applies unchanged to a published package that is **not** a client — the attribution mechanism knows nothing about clients, so any package this repository publishes to npm SHALL live inside `apps/plugin/` for the same reason.
 
-The `.release-please-manifest.json` SHALL declare exactly two entries (`apps/web`, `apps/plugin`), and their keys SHALL be exactly the `packages` keys of `release-please-config.json`. Manifest mode matches a package to its version by directory path, so a key present in one and absent from the other would re-bootstrap the component at an implied `0.0.0`. A client being published to npm SHALL NOT make it a component: it is a version carrier of `plugin` and nothing more. Git tags produced by release-please SHALL follow `<component>-vX.Y.Z` — only `server-` and `plugin-`. Legacy `vX.Y.Z` and per-client tags (`claude-code-plugin-v*`, `codex-plugin-v*`, `opencode-plugin-v*`, `hermes-plugin-v*`, `plugin-shared-v*`) remain in history but SHALL NOT be created by future runs.
+The `.release-please-manifest.json` SHALL declare exactly two entries (`.`, `apps/plugin`), and their keys SHALL be exactly the `packages` keys of `release-please-config.json`. Manifest mode matches a package to its version by directory path, so a key present in one and absent from the other would re-bootstrap the component at an implied `0.0.0`. A client being published to npm SHALL NOT make it a component: it is a version carrier of `plugin` and nothing more. Git tags produced by release-please SHALL follow `<component>-vX.Y.Z` — only `server-` and `plugin-`. Legacy `vX.Y.Z` and per-client tags (`claude-code-plugin-v*`, `codex-plugin-v*`, `opencode-plugin-v*`, `hermes-plugin-v*`, `plugin-shared-v*`) remain in history but SHALL NOT be created by future runs.
 
 Neither does being published to npm make the transport a component: like the Pi client, it is a version carrier of `plugin` and nothing more.
 
@@ -27,7 +27,7 @@ The transport package is covered by that same changelog: a change scoped to `app
 
 #### Scenario: A server-only change bumps only server and publishes Docker
 
-- **WHEN** a contributor merges a `feat:`/`fix:` commit touching only files under `apps/web/`
+- **WHEN** a contributor merges a `feat:`/`fix:` commit touching only files under `apps/web/` or the workspace packages the server bundles
 - **THEN** release-please SHALL open a release PR for the `server` component only, and the merged release SHALL tag `server-vX.Y.Z` and publish the Docker image
 - **AND** the `apps/plugin` version SHALL remain unchanged
 - **AND** no npm package SHALL be published
@@ -53,7 +53,7 @@ The transport package is covered by that same changelog: a change scoped to `app
 #### Scenario: The manifest is not extended by an npm-published client
 
 - **WHEN** `.release-please-manifest.json` and `release-please-config.json` are read at HEAD
-- **THEN** the manifest SHALL declare exactly two entries — `apps/web` and `apps/plugin` — and the config exactly two packages with the same keys
+- **THEN** the manifest SHALL declare exactly two entries — `.` and `apps/plugin` — and the config exactly two packages with the same keys
 - **AND** every `extra-files` entry of the `plugin` component SHALL be a component-relative path inside `apps/plugin/` — no leading slash, no `..`
 
 #### Scenario: Concurrent release runs queue instead of cancelling
@@ -80,6 +80,90 @@ The transport package is covered by that same changelog: a change scoped to `app
 
 - **WHEN** any release PR is merged
 - **THEN** release-please SHALL NOT open a cascade or history-rescan release PR for another component (there is no `node-workspace` graph and no per-client component to cascade to)
+
+#### Scenario: A commit touching only a workspace package releases the server
+
+- **GIVEN** a `feat` or `fix` commit on `main` whose files all lie under `packages/core`, `packages/db` or `packages/mcp`
+- **WHEN** release-please runs
+- **THEN** it SHALL open or update the `server` release PR, and that commit SHALL appear in its changelog
+
+#### Scenario: A commit touching only excluded directories releases nothing
+
+- **GIVEN** a `feat` or `fix` commit on `main` whose files all lie under directories named in the `server` component's `exclude-paths`, none of them under `apps/plugin`
+- **WHEN** release-please runs
+- **THEN** it SHALL NOT open a release PR for either component
+
+### Requirement: The repository's release identity MUST be consistent across surfaces
+
+The repo's release identity is **two-component** (`server` + unified `plugin`). The version declared in each component's manifest SHALL match the version release-please last set there, AND the most recent component-prefixed git tag for that component, AND the value reported by the relevant runtime surface:
+
+- `apps/web/package.json::version` ⟷ the most recent `server-vX.Y.Z` git tag ⟷ `GET /healthz` body `version` field ⟷ `ghcr.io/susomejias/rembric:<X.Y.Z>` image tag.
+- `apps/plugin/package.json::version` ⟷ the most recent `plugin-vX.Y.Z` git tag. The single `plugin` component covers the WHOLE `apps/plugin/` tree; **all five client carriers share this one version**, kept in sync by the component's `extra-files`: `.claude-plugin/{package,plugin}.json`, `.codex-plugin/{package,plugin}.json`, `.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `.opencode-plugin/plugin.ts`, and `.pi-plugin/package.json`. The last of these is also the version published to npm as `@rembric/pi`, so the npm registry becomes a **sixth** surface the plugin version must agree with.
+- `mcp-bridge/package.json::version` ⟷ the same `plugin` version, and so SHALL every operational pinned `@rembric/mcp-bridge@<x.y.z>` specifier in the Claude Code and Codex manifests. The opencode hook and printed snippet are executable carriers checked against that version. These transport carriers join the five client carriers under the one version. `@rembric/mcp-bridge` is published to npm as well, so the sixth surface is the registry entry of **both** published packages rather than of `@rembric/pi` alone.
+
+The bridge's pin is a carrier rather than a hand-maintained constant precisely because it names a package released by the same run: a hand-bumped pin can name a version that was never published, and a carrier cannot.
+
+`release-please` SHALL be the single source of truth for bumping these — `.release-please-manifest.json` carries the authoritative versions and each component's updater (plus the `plugin` component's `extra-files`) synchronizes its surfaces. There is **no `node-workspace` cascade**.
+
+The `server` component SHALL be anchored on the repository root (the `.` path), while its name, tag prefix and publish trigger stay unchanged: which commits release the component and the channel it releases on are separate concerns, and only the first moves. The version the running server reports SHALL still be read from `apps/web/package.json` (the shipped app), which release-please updates as an `extra-files` carrier in the same release PR as the root `package.json`, so the two SHALL always hold the same version.
+
+Legacy `vX.Y.Z` tags (pre-restructure) and the frozen per-client tags (`plugin-shared-v*`, `claude-code-plugin-v*`, `codex-plugin-v*`, `opencode-plugin-v*`, `hermes-plugin-v*`) SHALL be retained in git history (`ghcr.io/susomejias/rembric:v0.17.0` MUST remain pullable) but SHALL NOT be created or updated going forward. The unified `plugin-vX.Y.Z` tag line supersedes the per-client lines.
+
+#### Scenario: Server version drift
+
+- **WHEN** any of the server-side surfaces (`apps/web/package.json::version`, the root `package.json::version` and its manifest entry for `.`, `/healthz`, GHCR tag for a given release) disagree for the same release
+- **THEN** the disagreement SHALL be treated as a release-blocking bug; release-please SHALL be the single source of truth for bumping the server in lock-step
+
+#### Scenario: Plugin version drift
+
+- **WHEN** any plugin carrier disagrees with the unified `plugin` version (the `apps/plugin` manifest entry / the most recent `plugin-vX.Y.Z` tag) — e.g. `.hermes-plugin/plugin.yaml::version`, `.claude-plugin/plugin.json::version`, `.pi-plugin/package.json::version`, `mcp-bridge/package.json::version`, or an operational pinned bridge specifier differs
+- **THEN** the disagreement SHALL be treated as a release-blocking bug
+- **AND** release-please (the `plugin` component's updater plus its `extra-files`) SHALL be the only writer to those version fields
+
+#### Scenario: All client carriers move together under the plugin version
+
+- **WHEN** the `plugin` component is bumped (by any commit touching `apps/plugin/`)
+- **THEN** all carriers — `.claude-plugin/{package,plugin}.json`, `.codex-plugin/{package,plugin}.json`, `.opencode-plugin/plugin.ts` comment, `.hermes-plugin/plugin.yaml`, `.pi-plugin/package.json`, `mcp-bridge/package.json`, and the bridge's pinned specifier — SHALL be updated to the same new version in the same release PR
+
+#### Scenario: The bridge's pin names the version that release publishes
+
+- **WHEN** a plugin release cuts version `X.Y.Z`
+- **THEN** every operational bridge specifier SHALL read `@rembric/mcp-bridge@X.Y.Z`
+- **AND** the version published to npm for `@rembric/mcp-bridge` in the same workflow run SHALL be `X.Y.Z`
+
+#### Scenario: The published npm version matches the plugin tag
+
+- **WHEN** `@rembric/pi` or `@rembric/mcp-bridge` is published for a given release
+- **THEN** the published version SHALL equal the `apps/plugin` manifest entry and the `plugin-vX.Y.Z` tag for that release
+- **AND** a mismatch SHALL be treated as a release-blocking bug
+
+#### Scenario: Pre-restructure tag continuity
+
+- **WHEN** an operator pulls `ghcr.io/susomejias/rembric:v0.17.0` after the restructure flip
+- **THEN** the image SHALL remain pullable from GHCR even though release-please no longer cuts `vX.Y.Z` tags; the image is treated as an unmaintained historical artifact tied to the pre-restructure release line
+
+### Requirement: docker-publish MUST run only when the server component releases
+
+The `.github/workflows/release-please.yml` workflow SHALL gate the `publish-docker` job on the `server` component's release — the package anchored on the repository root — being reported by the release-please-action's root-component outputs (`release_created`, which the action emits unprefixed for a component whose path is `.`, or whichever equivalent output key the pinned release-please-action version emits for the root component). When the `server` component is NOT released, `publish-docker` SHALL NOT run, even if other components were released in the same workflow invocation.
+
+This SHALL be expressed as a job-level `if:` condition on a forwarded output (`server_release_created`) whose source is `steps.release.outputs.release_created` — the job-output name is a local alias and MAY stay `server_*`, but its source SHALL be the output the action emits for the component's configured path. A per-path output for a path that is not the component's (`apps/web--release_created` once the component is anchored on the root) is never set, so a gate reading it would skip every publish without failing.
+
+A `workflow_dispatch` manual override SHALL remain available on `docker-publish.yml` for operator recovery (first-time bootstrap, smoke-test publish of a specific tag) — invoked outside the automatic gate.
+
+#### Scenario: Plugin-only release does not publish Docker
+
+- **GIVEN** a release-please PR is merged that bumps only the `claude-code-plugin` and `codex-plugin` components
+- **WHEN** `release-please.yml` runs to completion
+- **THEN** the `publish-docker` job SHALL be skipped (status `skipped`, not `failed`)
+- **AND** no new image SHALL appear at `ghcr.io/susomejias/rembric:*`
+
+#### Scenario: Server release does publish Docker
+
+- **GIVEN** a release-please PR is merged that bumps the `server` component (alone or alongside others)
+- **WHEN** `release-please.yml` runs to completion
+- **THEN** the `publish-docker` job SHALL run with the new server version's tag
+- **AND** a new immutable image SHALL appear at `ghcr.io/susomejias/rembric:<new-version>`
+- **AND** the post-publish smoke test SHALL gate alias promotion (:latest, major, minor) as already specified by development-environment
 
 ## ADDED Requirements
 
