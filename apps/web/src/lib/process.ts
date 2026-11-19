@@ -24,6 +24,7 @@ const ADMIN_TOKEN_MIN_LENGTH = 16;
 const REAP_INTERVAL_MS = 30 * 60_000;
 export const EMBED_TICK_MS = 30_000;
 export const EMBED_DRAIN_DELAY_MS = 1_000;
+const RERANK_TIMING_RETRY_MS = 30_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
 
 const ENTITY_DRAIN_DELAY_MS = 500;
@@ -115,7 +116,10 @@ async function warmEmbedder(services: Services): Promise<void> {
   }
 }
 
-export async function warmReranker(services: Pick<Services, 'reranker'>): Promise<void> {
+export async function warmReranker(
+  services: Pick<Services, 'reranker' | 'hasEmbeddingBacklog'>,
+  retryMs = RERANK_TIMING_RETRY_MS,
+): Promise<void> {
   const started = performance.now();
   const ready = await services.reranker.start();
   const ms = Math.round(performance.now() - started);
@@ -124,20 +128,40 @@ export async function warmReranker(services: Pick<Services, 'reranker'>): Promis
     return;
   }
   console.error(`[process] reranker ready in its worker thread (${ms} ms)`);
+  // A re-embed competes for the same CPU, so timing during it would report a slower machine than this is.
+  if (backlogPending(services)) {
+    console.error('[process] reranker timing deferred until the embedding backlog drains');
+    while (backlogPending(services)) {
+      await new Promise((resolve) => setTimeout(resolve, retryMs).unref?.());
+    }
+  }
   const window = Array.from(
     { length: RERANK_WINDOW },
     (_, i) =>
       `Warm-up ${i}\n\n${'the reranker reads this text to time a full window. '.repeat(24)}`,
   );
   await services.reranker.score('reranker warm-up', window);
-  const timed = performance.now();
-  const scored = await services.reranker.score('reranker warm-up', window);
-  const windowMs = Math.round(performance.now() - timed);
+  const timings: number[] = [];
+  let missed = 0;
+  for (let i = 0; i < 3; i++) {
+    const timed = performance.now();
+    if (!(await services.reranker.score('reranker warm-up', window))) missed++;
+    timings.push(performance.now() - timed);
+  }
+  const median = Math.round([...timings].sort((a, b) => a - b)[1]!);
   console.error(
-    scored
-      ? `[process] reranker full window ${windowMs} ms (deadline ${RERANK_DEADLINE_MS} ms)`
+    missed < 2
+      ? `[process] reranker full window ${median} ms (deadline ${RERANK_DEADLINE_MS} ms)`
       : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking to apply, so searches fall back to the unreranked order`,
   );
+}
+
+function backlogPending(services: Pick<Services, 'hasEmbeddingBacklog'>): boolean {
+  try {
+    return services.hasEmbeddingBacklog();
+  } catch {
+    return false;
+  }
 }
 
 function bootstrapAdminToken(services: Services): void {
