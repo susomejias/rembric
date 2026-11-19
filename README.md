@@ -116,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 
 Pick **Server → install**: it generates `REMBRIC_ADMIN_TOKEN` and, if Docker is present and you confirm, runs `docker compose up -d` for you. Then pick **Plugins** to install the plugin for your agent. Pin a release for reproducibility with `--ref=<tag>` where the backend supports it. Hermes uses its native plugin manager and rejects explicit refs/local sources; [copied-install migration and native ownership](./apps/plugin/.hermes-plugin/README.md#transition-from-a-copied-installation) require explicit operator review.
 
-Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~1 GB of RAM (2 GB recommended; the in-process embedder is why — see [docs/embeddings.md](./docs/embeddings.md)).
+Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker and ~2 GB of RAM (1 GB with `REMBRIC_RERANK=off`; the in-process embedder is why — see [docs/embeddings.md](./docs/embeddings.md)).
 
 MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
 
@@ -236,9 +236,19 @@ All config via environment variables. With Docker, these live in `.env` and are 
 
 ### Hardware requirements
 
-**Minimum 1 GB RAM; 2 GB recommended.** The server embeds its semantic engine in-process — `gte-multilingual-base` (Apache 2.0, ONNX q8, 768 dims), loaded at boot (~1.1 s from the baked image; a broken model fails the boot instead of degrading silently), ~730 MB total process RSS measured under embedding load, ~14 ms per embedding on CPU. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic candidate detection (including cross-language matching) works out of the box on an air-gapped box. Disk: the image carries the model (+~300 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
+**2 GB RAM recommended; 1 GB is enough with `REMBRIC_RERANK=off`.** The server runs its semantic engine in-process: an embedding model (`hs-embed-1`, MIT, int8 ONNX, 384 dims, reads at most 1024 tokens per memory) on the request thread and a cross-encoder reranker (`hs-rerank-1`, MIT) in its own worker thread. Measured in a 3-vCPU, 4 GB Docker VM over a real corpus of a few thousand memories:
 
-The engine is code, not configuration: there is no model selector, no threshold knob, no off switch. The model class is pinned (≤350M params, ≤800 MB RSS); changing it is a breaking architectural change.
+|                                          | Reranking on (default) | `REMBRIC_RERANK=off` |
+| ---------------------------------------- | ---------------------- | -------------------- |
+| Process memory, idle                     | ~1.1 GB                | ~560 MB              |
+| Process memory, under search load        | ~1.3 GB                | ~690 MB              |
+| Peak while re-embedding the whole corpus | ~1.3 GB                | —                    |
+| `memory.search`, one at a time (p50)     | ~180 ms                | ~20 ms               |
+| `memory.save` (p50)                      | ~70 ms                 | ~55 ms               |
+
+Reranking reorders the top 10 candidates of `memory.search` and `memory.context`; a search it cannot finish within 300 ms serves the plain order instead, so slower CPUs lose the reranking rather than wait for it. At boot the server times one full rerank and logs a warning when this CPU cannot meet that deadline. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic search and candidate detection (including cross-language matching) work out of the box on an air-gapped box. Disk: the image carries both models (~380 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
+
+The engine is code, not configuration: there is no model selector and no threshold knob; the only switch is `REMBRIC_RERANK=off`. The model class is pinned (at most two models, ≤350M parameters in total, ≤2.5 GB process memory under load); changing it is a breaking architectural change.
 
 ### Consolidation sweep
 
