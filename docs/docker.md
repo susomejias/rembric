@@ -178,7 +178,7 @@ Not recommended yet. Watchtower would auto-pull `:latest` and recreate the conta
 
 ## Embeddings are in-image
 
-The embedding model (`hs-embed-1`, int8 ONNX) ships inside the image and runs in-process — no Ollama, no API keys, no outbound calls. The container works air-gapped. Budget at least 2 vCPUs and 2 GB RAM, 3–4 GB recommended (below that minimum is unsupported); both models (embedder and reranker) load at boot from image files, and a model that cannot load degrades search instead of failing the boot — see [docs/embeddings.md](./embeddings.md) for the full flow.
+The embedding model (`hs-embed-1`, int8 ONNX) ships inside the image and runs in-process — no Ollama, no API keys, no outbound calls. The container works air-gapped. Budget at least 2 vCPUs and 2 GB RAM, 3–4 GB recommended (below that minimum is unsupported); both models (embedder and reranker) load at boot from image files (`REMBRIC_RERANK=off` skips the reranker on a host shared with other workloads), and a model that cannot load degrades search instead of failing the boot — see [docs/embeddings.md](./embeddings.md) for the full flow.
 
 ## What's in the image (workspace packages)
 

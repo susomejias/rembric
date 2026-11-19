@@ -48,7 +48,7 @@ Reranking SHALL be an explicit option of the search service that each calling su
 
 The surfaces that SHALL request it are `memory.search` and the ranked pass of `memory.context`'s relevance channel. The surfaces that SHALL NOT request it are the per-turn recall endpoint, file-anchored recall, and save-time candidate detection.
 
-Reranking SHALL be part of the engine, as the embedder is: there SHALL be no operator setting or environment variable that turns it off. A reranker that cannot serve a call degrades that call to the unreranked path (see "Reranker inference MUST run off the main thread and MUST be bounded by a deadline"); that fallback is the only way a reranked surface serves the unreranked order.
+Reranking SHALL be on by default. The single operator setting that reaches it SHALL be `REMBRIC_RERANK`: the value `off` SHALL keep the reranker from being created at all (no model loaded, no worker, no boot timing), and every reranked surface SHALL then serve the unreranked order; any other value, or none, SHALL leave reranking on. It exists for hosts shared with other workloads, where the operator may prefer to keep the reranker's memory and CPU for them. Apart from that switch, a reranker that cannot serve a call degrades that call to the unreranked path (see "Reranker inference MUST run off the main thread and MUST be bounded by a deadline").
 
 #### Scenario: An explicit search is reranked
 
@@ -60,10 +60,16 @@ Reranking SHALL be part of the engine, as the embedder is: there SHALL be no ope
 - **WHEN** a client calls the per-turn recall endpoint
 - **THEN** the search behind it SHALL NOT request reranking and no cross-encoder inference SHALL run for that call
 
-#### Scenario: No setting turns reranking off
+#### Scenario: The operator switches reranking off
 
-- **WHEN** the environment schema and every environment read of the server are inspected
-- **THEN** none SHALL disable reranking, change its window, its token cap or its deadline
+- **GIVEN** a server started with `REMBRIC_RERANK=off`
+- **WHEN** `memory.search` is called with an eligible text query
+- **THEN** the response SHALL be the unreranked one, and no reranker model SHALL have been loaded
+
+#### Scenario: Only the switch reaches reranking
+
+- **WHEN** every environment read of the server is inspected
+- **THEN** `REMBRIC_RERANK` SHALL be the only one that reaches reranking, and none SHALL change its window, its token cap or its deadline
 
 ### Requirement: Reranker inference MUST run off the main thread and MUST be bounded by a deadline
 
@@ -75,7 +81,7 @@ Every reranked call SHALL carry a deadline, `RERANK_DEADLINE_MS`, measured from 
 
 The worker SHALL be started and its model loaded outside any request, so a first reranked call does not pay the model load. A worker that exits SHALL be restarted, with the restarts bounded so a model that cannot load does not respawn in a loop.
 
-Once the model is loaded and no embedding backlog remains, the server SHALL time one full rerank window, and that single measurement SHALL calibrate the reranker for the life of the process. When the window cannot finish within `RERANK_DEADLINE_MS`, the reranker SHALL **stand down**: its worker SHALL be asked to exit and every later eligible call SHALL fall back at once, without waiting for a deadline. Measured at one vCPU, a full window took 393 ms, so every reranked search waited 300 ms and then served the unreranked order anyway. When the window fits, a call SHALL fall back at once, without being queued, whenever the calls already in flight plus itself, each costing one measured window, could not finish within the deadline: a queued call that would miss its deadline only adds that wait to a search that serves the unreranked order anyway. Before the measurement, calls SHALL be queued as described above. A process restart SHALL re-measure; there SHALL be no other re-calibration, no operator setting, and no smaller window or token cap chosen by hardware.
+Once the model is loaded and no embedding backlog remains, the server SHALL time one full rerank window, and that measurement SHALL calibrate the reranker. When the window cannot finish within `RERANK_DEADLINE_MS`, the reranker SHALL **stand down**: its worker SHALL be asked to exit and every later eligible call SHALL fall back at once, without waiting for a deadline. While it stands down, the server SHALL load it and time a full window again every 15 minutes, and SHALL keep it once a window fits: on a host shared with other workloads a busy moment at boot would otherwise switch reranking off until the next restart. Measured at one vCPU, a full window took 393 ms, so every reranked search waited 300 ms and then served the unreranked order anyway. When the window fits, a call SHALL fall back at once, without being queued, whenever the calls already in flight plus itself, each costing one measured window, could not finish within the deadline: a queued call that would miss its deadline only adds that wait to a search that serves the unreranked order anyway. Before the measurement, calls SHALL be queued as described above. A reranker whose window fits SHALL NOT be re-timed, and there SHALL be no smaller window or token cap chosen by hardware.
 
 #### Scenario: A rerank does not block other requests
 
@@ -94,6 +100,12 @@ Once the model is loaded and no embedding backlog remains, the server SHALL time
 - **GIVEN** a server whose boot measurement of a full window does not finish within `RERANK_DEADLINE_MS`
 - **WHEN** `memory.search` is called with an eligible text query
 - **THEN** the response SHALL be the unreranked one, returned without waiting for the deadline, and the worker SHALL have been asked to exit
+
+#### Scenario: A stood-down reranker comes back when the CPU frees up
+
+- **GIVEN** a reranker that stood down
+- **WHEN** a later timing of a full window, taken 15 minutes after the previous one, finishes within `RERANK_DEADLINE_MS`
+- **THEN** eligible searches SHALL be reranked again and no further timing SHALL run
 
 #### Scenario: A search that cannot be served in time is not queued
 
