@@ -65,9 +65,9 @@ The retrievers still produce the candidates over full text; the model only order
 
 114M parameters, multilingual, one logit per pair, ships an int8 ONNX export that `@huggingface/transformers` 4.2.0 loads through `AutoModelForSequenceClassification` with no new dependency. Alternatives: base-size multilingual rerankers (roughly 300M–570M parameters), rejected because the cost is one forward pass per candidate and they do not fit the latency or memory budget; English-only MiniLM rerankers, rejected because the corpus and queries mix Spanish and English.
 
-### 3. Window 10, 192 tokens per pair
+### 3. Window 10, 128 tokens per pair
 
-10 × 192 is indistinguishable from 20 × 256 in quality and costs about a third of the time. Below 128 tokens quality starts to fall. Both are compile-time constants, consistent with how the repository treats retrieval constants; changing either re-runs the evaluation. Alternative: operator-configurable values, rejected for the same reason the other retrieval constants are not configurable: the trade is measured, not a preference.
+10 × 192 matched 20 × 256 in quality at about a third of the time on the development machine, but on a 3-vCPU container one full window took 225 ms even with 3 threads (311 ms with 2), close enough to the 300 ms deadline that any second concurrent search fell back. With every pooled pair judged, 10 × 128 scored nDCG@8 0.757 against 0.778 for 10 × 192 (paired difference −0.021, 95% CI [−0.040, −0.004]), still +0.162 above today's search, and took 149 ms on the same container: about 89% of the gain for two thirds of the cost, with room for two concurrent searches inside the deadline. Both are compile-time constants, consistent with how the repository treats retrieval constants; changing either re-runs the evaluation. The worker uses up to 4 intra-op threads. Alternative: operator-configurable values, rejected for the same reason the other retrieval constants are not configurable: the trade is measured, not a preference.
 
 ### 4. Keep the boost; drop the relative filter on this path
 
@@ -93,7 +93,7 @@ A single worker serialises requests, so latency grows linearly with simultaneous
 
 - [Risk] Latency of deliberate searches rises from ~14 ms to ~110 ms, more on slower CPUs than the measurement machine → Mitigation: the deadline caps it; task 6.4 measures on the published image's target architecture before the constants are frozen.
 - [Risk] The reranker demotes related-context memories below ones that match the query literally (the dominant pattern among the queries it lost) → Accepted because it won on far more queries than it lost; a rerank/fusion score blend is an open question, not part of this change.
-- [Risk] A memory whose answering text lies beyond 192 tokens can be misordered → Mitigation: it is still retrieved over its full text and stays in the window; the harness gains long-memory fixtures so the cost is observable.
+- [Risk] A memory whose answering text lies beyond 128 tokens can be misordered → Mitigation: it is still retrieved over its full text and stays in the window; the harness gains long-memory fixtures so the cost is observable.
 - [Risk] The evidence is a few dozen queries with one LLM judge each → Mitigation: the committed harness arm gates the reranked path against the unreranked one in CI.
 - [Trade-off] Resident memory grows by roughly the reranker worker (about 1 GB with its tokenizer) → Accepted because it lands after the embedder swap, which frees about 0.8 GB, and because the switch restores the smaller footprint.
 - [Risk] Next.js standalone output must ship the worker entry file → Mitigation: task 3.5 proves the worker starts from the built standalone bundle, not only under `next dev`.

@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- Add a cross-encoder reranking step to the text-query branch: the first 10 rows of the fused pool, each read as `title + content` truncated to 192 tokens, are scored by `hindsight-ai/hs-rerank-1` and ordered by `rerankScore × boost`. The existing recency/confirmation/type boost stays.
+- Add a cross-encoder reranking step to the text-query branch: the first 10 rows of the fused pool, each read as `title + content` truncated to 128 tokens, are scored by `hindsight-ai/hs-rerank-1` and ordered by `rerankScore × boost`. The existing recency/confirmation/type boost stays.
 - Reranking is requested per calling surface: `memory.search` and the ranked pass of `memory.context` request it; the per-turn recall endpoint, file-anchored recall and save-time candidate detection do not.
 - On the reranked path the relative-level filter no longer thins the rerank window and `gateShortened` is not reported; the abstention floor and the empty-pool verdict are unchanged and run before any inference. The cross-encoder score is not used as an abstention gate.
 - Run reranker inference, tokenization included, in one dedicated worker thread, with a per-call deadline that falls back to the unreranked response. No worker pool.

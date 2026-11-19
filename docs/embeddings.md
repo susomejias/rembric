@@ -132,7 +132,7 @@ memory.search / memory.context ranked pass   (recall hints and file recall: neve
 hybrid search → fused pool (unchanged) → abstention floor / empty pool → abstain? done
    │
    ▼
-first RERANK_WINDOW (10) fused rows, title + content, cut to RERANK_MAX_TOKENS (192)
+first RERANK_WINDOW (10) fused rows, title + content, cut to RERANK_MAX_TOKENS (128)
    │  posted to the rerank worker thread (owns hs-rerank-1 + its tokenizer)
    ▼
 cross-encoder score per row × the usual recency/confirmation/type boost → page

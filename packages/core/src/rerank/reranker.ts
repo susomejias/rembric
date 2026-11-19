@@ -9,9 +9,11 @@ export const RERANK_ONNX_ARTIFACT = identity.onnxArtifact;
 const RERANK_DTYPE = identity.dtype as 'fp32';
 
 export const RERANK_WINDOW = 10;
-export const RERANK_MAX_TOKENS = 192;
+export const RERANK_MAX_TOKENS = 128;
 export const RERANK_DEADLINE_MS = 300;
 const RERANK_BATCH = 5;
+/** Measured on a 3-vCPU container: 3 threads cut a full window from 311 to 225 ms. */
+const RERANK_MAX_THREADS = 4;
 
 export function rerankOnnxArtifactPath(modelsDir: string): string {
   return `${modelsDir}/${RERANK_MODEL_ID}/${RERANK_ONNX_ARTIFACT}`;
@@ -33,7 +35,7 @@ export async function loadRerankScorer(modelsDir: string | null): Promise<Rerank
     ...pinned,
     dtype: RERANK_DTYPE,
     session_options: {
-      intraOpNumThreads: Math.min(2, availableParallelism()),
+      intraOpNumThreads: Math.min(RERANK_MAX_THREADS, availableParallelism()),
       interOpNumThreads: 1,
     },
   });
