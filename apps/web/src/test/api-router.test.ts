@@ -758,6 +758,29 @@ describe('POST /:slug/memory/recall — refusals', () => {
   });
 });
 
+describe('POST /:slug/memory/recall — never reranks', () => {
+  it('serves a match without asking the reranker', async () => {
+    const services = getServices();
+    expect(services.reranker).not.toBeNull();
+    const score = vi.spyOn(services.reranker!, 'score');
+    services.memory.save(
+      { type: 'project', title: 'Scheduler port', content: 'the scheduler listens on port 8781' },
+      projectScope(project.id),
+    );
+    const r = await call(
+      recallPost,
+      request('POST', `/api/${project.slug}/memory/recall`, {
+        token: reader.plaintext,
+        body: { query: 'scheduler port' },
+      }),
+      slugCtx(),
+    );
+    expect(r.status).toBe(200);
+    expect((r.json as { memories: unknown[] }).memories.length).toBeGreaterThan(0);
+    expect(score).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /:slug/sessions/:id/file-recall', () => {
   const SESSION = 'sess-filerecall1';
   const PATH = 'packages/db/src/migrate.ts';

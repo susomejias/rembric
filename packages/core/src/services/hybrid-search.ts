@@ -304,10 +304,12 @@ async function rerankWindow(
       .map((r) => [r.id, memoryText(r.title, r.content)]),
   );
   const rows = window.filter((r) => textById.has(r.id));
-  const scores = await opts.rerank(
-    opts.query,
-    rows.map((r) => textById.get(r.id)!),
-  );
+  const scores = await opts
+    .rerank(
+      opts.query,
+      rows.map((r) => textById.get(r.id)!),
+    )
+    .catch(() => null);
   if (!scores || scores.length !== rows.length) return null;
   const boosted = applyRankingBoost(
     rows.map((r, i) => ({ id: r.id, score: scores[i]! })),

@@ -139,28 +139,18 @@ describe('the reranked path of hybrid search', () => {
     expect(fellBack).toEqual(await search({}));
   });
 
+  it('falls back to the unreranked response when the scorer rejects', async () => {
+    seed(RERANK_WINDOW + 4);
+    const rejected = await search({ rerank: () => Promise.reject(new Error('scorer down')) });
+    expect(rejected).toEqual(await search({}));
+  });
+
   it('keeps the recency and confirmation boost on top of the scores', async () => {
     const [plain, confirmed] = seed(2);
     for (let i = 0; i < 3; i++) mem.confirm(confirmed!.id, projectScope(projectId));
     const slightlyLower: RerankFn = (_q, docs) =>
       Promise.resolve(docs.map((d) => (d.startsWith(`${confirmed!.title}\n`) ? 0.45 : 0.5)));
-    const seen: string[][] = [];
-    const result = await search({
-      rerank: (q, d) => {
-        seen.push([...d]);
-        return slightlyLower(q, d);
-      },
-    });
-    console.log(
-      'DBG',
-      JSON.stringify({
-        plain: plain!.id,
-        confirmed: confirmed!.id,
-        ids: result.ids,
-        seen,
-        counts: [...repos.memory.confirmationCountsByIds([plain!.id, confirmed!.id])],
-      }),
-    );
+    const result = await search({ rerank: slightlyLower });
     expect(result.ids.indexOf(confirmed!.id)).toBeLessThan(result.ids.indexOf(plain!.id));
   });
 });

@@ -21,6 +21,7 @@ const ADMIN_TOKEN_MIN_LENGTH = 16;
 
 const REAP_INTERVAL_MS = 30 * 60_000;
 const EMBED_TICK_MS = 30_000;
+export const EMBED_DRAIN_DELAY_MS = 1_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
 
 const ENTITY_DRAIN_DELAY_MS = 500;
@@ -219,7 +220,9 @@ function startSessionReaper(services: Services): void {
   );
 }
 
-function startEmbeddingDrain(services: Services): void {
+export function startEmbeddingDrain(
+  services: Pick<Services, 'embeddingWorker' | 'hasEmbeddingBacklog'>,
+): void {
   let inFlight = false;
 
   const tick = async (force: boolean): Promise<void> => {
@@ -233,19 +236,26 @@ function startEmbeddingDrain(services: Services): void {
       inFlight = false;
     }
   };
-  const run = (force: boolean): void => {
+  const run = (force: boolean): Promise<void> =>
     tick(force).catch((err) => console.error('[process] embedding worker error', message(err)));
-  };
 
-  const tickTimer = setInterval(() => run(false), EMBED_TICK_MS);
-  const fallbackTimer = setInterval(() => run(true), EMBED_FALLBACK_MS);
-  tickTimer.unref?.();
+  const schedule = (delayMs: number): void => {
+    const timer = setTimeout(() => {
+      void run(false).then(() =>
+        schedule(services.hasEmbeddingBacklog() ? EMBED_DRAIN_DELAY_MS : EMBED_TICK_MS),
+      );
+    }, delayMs);
+    timer.unref?.();
+  };
+  const fallbackTimer = setInterval(() => void run(true), EMBED_FALLBACK_MS);
   fallbackTimer.unref?.();
 
-  run(false);
+  void run(false).then(() =>
+    schedule(services.hasEmbeddingBacklog() ? EMBED_DRAIN_DELAY_MS : EMBED_TICK_MS),
+  );
 
   console.error(
-    `[process] embedder drain started (every ${EMBED_TICK_MS / 1000} s, forced hourly; the model loads on the first pending row)`,
+    `[process] embedder drain started (every ${EMBED_TICK_MS / 1000} s, ${EMBED_DRAIN_DELAY_MS} ms between batches while a backlog drains, forced hourly; the model loads on the first pending row)`,
   );
 }
 

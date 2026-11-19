@@ -235,13 +235,16 @@ function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }
     };
   }
   const previous = loadBaseline(report.retriever);
-  const { floors, notes } = ratchetFloors({
+  const ratcheted = ratchetFloors({
     label: report.retriever,
     measuredByK,
     previousByK: previous?.floors,
     tolerance: FLOOR_TOLERANCE,
     allowLowering: opts.allowLowering,
   });
+  const { notes } = ratcheted;
+  const floors =
+    report.retriever === 'reranked' ? atLeastHybrid(ratcheted.floors) : ratcheted.floors;
   const anyK = report.aggregateByK[MAX_K]!;
   const { caps, notes: capNotes } = ratchetCaps({
     label: report.retriever,
@@ -268,6 +271,26 @@ function writeBaseline(report: RetrieverReport, opts: { allowLowering: boolean }
     JSON.stringify(baseline, null, 2) + '\n',
   );
   return notes;
+}
+
+/** The reranked retriever's committed floors may never sit below plain hybrid search's. */
+function atLeastHybrid(floors: Record<number, MetricFloors>): Record<number, MetricFloors> {
+  const hybrid = loadBaseline('hybrid')?.floors;
+  if (!hybrid) return floors;
+  return Object.fromEntries(
+    Object.entries(floors).map(([k, f]) => {
+      const h = hybrid[Number(k)];
+      if (!h) return [k, f];
+      return [
+        k,
+        {
+          precisionAtK: Math.max(f.precisionAtK, h.precisionAtK),
+          recallAtK: Math.max(f.recallAtK, h.recallAtK),
+          mrr: Math.max(f.mrr, h.mrr),
+        },
+      ];
+    }),
+  );
 }
 
 function checkFloors(reports: RetrieverReport[]): string[] {

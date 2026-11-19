@@ -14,7 +14,7 @@
 - [x] 3.1 Add `rerank-worker.ts` (owns tokenizer and model, serves one request at a time) and `rerank-client.ts` (queue, per-call deadline, late-result discard, bounded restart)
 - [x] 3.2 Test with a fake worker: a call past its deadline resolves to the fallback signal, and its late result changes nothing
 - [x] 3.3 Test with a fake worker: a worker that exits is restarted, and restarts stop after the bound
-- [x] 3.4 Wire the client in `apps/web/src/lib/services.ts`: start and warm the worker outside any request, honour `REMBRIC_RERANK=off` (no worker, no model), document the setting in `.env.example`
+- [ ] 3.4 Wire the client in `apps/web/src/lib/services.ts`: start and warm the worker outside any request, honour `REMBRIC_RERANK=off` (no worker, no model), document the setting in `.env.example` — done except `.env.example`, which this session's permissions block; the switch is documented in README.md instead
 - [ ] 3.5 Prove the worker starts from the built Next.js standalone output: build, start the standalone server, run one eligible `memory.search`, and record the observed log line
 
 ## 4. Search pipeline

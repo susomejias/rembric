@@ -177,6 +177,39 @@ describe('RerankClient', () => {
     expect(await client.start()).toBe(false);
   });
 
+  it('bounds restarts per time window, not for the life of the process', async () => {
+    let clock = 0;
+    const workers: FakeWorker[] = [];
+    const client = new RerankClient({
+      spawn: () => {
+        const w = new FakeWorker();
+        workers.push(w);
+        return w;
+      },
+      log: silent,
+      maxRestarts: 2,
+      now: () => clock,
+    });
+    void client.start();
+    for (let i = 0; i < 5; i++) {
+      workers.at(-1)!.emit('exit', 1);
+      clock += 11 * 60_000;
+    }
+    expect(workers).toHaveLength(6);
+    workers.at(-1)!.reply({ kind: 'ready' });
+    expect(await client.start()).toBe(true);
+  });
+
+  it('reports a worker that keeps exiting as worker-exited, not as a load failure', async () => {
+    const { client, workers } = harness({ maxRestarts: 1 });
+    void client.start();
+    workers[0]!.emit('exit', 1);
+    workers[1]!.emit('exit', 1);
+    expect(await client.score('q', ['a'])).toBeNull();
+    expect(client.stats().fallbacks['worker-exited']).toBeGreaterThan(0);
+    expect(client.stats().fallbacks['load-failed']).toBe(0);
+  });
+
   it('ignores messages from a worker it already replaced', async () => {
     const { client, workers } = harness();
     void client.start();

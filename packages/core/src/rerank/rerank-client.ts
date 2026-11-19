@@ -36,6 +36,7 @@ type State = 'idle' | 'loading' | 'ready' | 'failed';
 type Pending = { resolve: (scores: number[] | null) => void; timer: NodeJS.Timeout };
 
 const LOG_INTERVAL_MS = 60_000;
+const RESTART_WINDOW_MS = 10 * 60_000;
 
 export function spawnRerankWorker(modelsDir: string | null): RerankWorkerHandle {
   return new Worker(new URL('./rerank-worker.js', import.meta.url), { workerData: { modelsDir } });
@@ -45,7 +46,8 @@ export function spawnRerankWorker(modelsDir: string | null): RerankWorkerHandle 
 export class RerankClient {
   private state: State = 'idle';
   private worker: RerankWorkerHandle | null = null;
-  private restarts = 0;
+  private crashes: number[] = [];
+  private failedCause: RerankFallbackCause = 'load-failed';
   private nextId = 0;
   private readonly pending = new Map<number, Pending>();
   private readonly counts: RerankStats = {
@@ -81,7 +83,9 @@ export class RerankClient {
   score(query: string, documents: readonly string[]): Promise<number[] | null> {
     if (documents.length === 0) return Promise.resolve([]);
     if (this.state !== 'ready' || !this.worker) {
-      return Promise.resolve(this.fallback(this.state === 'failed' ? 'load-failed' : 'not-ready'));
+      return Promise.resolve(
+        this.fallback(this.state === 'failed' ? this.failedCause : 'not-ready'),
+      );
     }
     const id = ++this.nextId;
     const worker = this.worker;
@@ -89,6 +93,7 @@ export class RerankClient {
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) resolve(this.fallback('deadline'));
       }, this.deadlineMs);
+      timer.unref?.();
       this.pending.set(id, { resolve, timer });
       worker.postMessage({
         kind: 'score',
@@ -108,6 +113,7 @@ export class RerankClient {
   close(): void {
     const worker = this.worker;
     this.state = 'failed';
+    this.failedCause = 'worker-exited';
     this.worker = null;
     this.settlePending('worker-exited');
     this.settleReady(false);
@@ -131,17 +137,20 @@ export class RerankClient {
       this.worker = null;
       this.settlePending('worker-exited');
       if (this.state === 'failed') return;
-      if (this.restarts >= this.maxRestarts) {
+      const at = this.now();
+      this.crashes = this.crashes.filter((t) => at - t < RESTART_WINDOW_MS);
+      if (this.crashes.length >= this.maxRestarts) {
         this.state = 'failed';
+        this.failedCause = 'worker-exited';
         this.log(
-          `[rerank] worker exited (code ${code}); restart limit reached, reranking stays off`,
+          `[rerank] worker exited (code ${code}); ${this.maxRestarts} restarts in ${RESTART_WINDOW_MS / 60_000} min, reranking stays off`,
         );
         this.settleReady(false);
         return;
       }
-      this.restarts++;
+      this.crashes.push(at);
       this.log(
-        `[rerank] worker exited (code ${code}); restarting (${this.restarts}/${this.maxRestarts})`,
+        `[rerank] worker exited (code ${code}); restarting (${this.crashes.length}/${this.maxRestarts} in ${RESTART_WINDOW_MS / 60_000} min)`,
       );
       this.spawn();
     });
