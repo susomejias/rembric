@@ -113,16 +113,6 @@ function copyBefore(dir: string, prefix: string): void {
   }
 }
 
-function copyThrough(dir: string, prefix: string): void {
-  const all = readdirSync(fullMigrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
-  for (const f of all) {
-    copyFileSync(join(fullMigrationsDir, f), join(dir, f));
-    if (f.startsWith(prefix)) break;
-  }
-}
-
 describe('migration 0014_hybrid_search_vec_rebuild over populated data', () => {
   let dataDir: string;
   let slicedDir: string;
@@ -471,7 +461,7 @@ describe('migration 0015_tidy_consolidation_journal over populated data', () => 
       );
     const before = countAll();
 
-    copyThrough(slicedDir, '0015_');
+    copyBefore(slicedDir, VECTORS_EMPTIED);
     const result = migrate(raw, { migrationsDir: slicedDir, ...SILENT });
     expect(result.applied).toContain('0015_tidy_consolidation_journal.sql');
 
