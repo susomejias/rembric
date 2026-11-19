@@ -145,20 +145,21 @@ The worker starts at boot after the embedder warms; `REMBRIC_RERANK=off` never s
 
 ## Failure modes, summarized
 
-| Failure                            | Behavior                                                                                  |
-| ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| Model missing/corrupt on first use | The calling operation degrades to FTS5, the drain retries the load; the boot never aborts |
-| Single inference error at save     | Save succeeds, FTS-only detection for that save, drain retries                            |
-| Single inference error in drain    | Row skipped, retried next tick                                                            |
-| Model artifact drift at build      | Image build fails (phase-3 validation)                                                    |
-| HF rate limit (429) at build       | Retried with backoff; `hf_token` build secret authenticates                               |
-| Model changed between versions     | Marker mismatch at first load → vectors wiped → drain re-embeds                           |
-| Data dir unwritable at reset       | Boot proceeds, index untouched, reset retried next boot                                   |
-| Reset interrupted after wipe       | Marker stays `pending`, index empty, drain refills; next boot may re-wipe                 |
-| Reset owed but not done            | `memory.doctor` warns; dense results unreliable until a load settles it                   |
-| Reranker missing/corrupt           | Logged once; reranking stays off until restart, searches serve the unreranked order       |
-| Rerank worker crashes              | In-flight searches fall back; restarted up to 3 times, then reranking stays off           |
-| Rerank deadline missed             | That search serves the unreranked order; counted per cause                                |
+| Failure                            | Behavior                                                                                                                                                             |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model missing/corrupt on first use | The calling operation degrades to FTS5, the drain retries the load; the boot never aborts                                                                            |
+| Single inference error at save     | Save succeeds, FTS-only detection for that save, drain retries                                                                                                       |
+| Single inference error in drain    | Row skipped, retried next tick                                                                                                                                       |
+| Model artifact drift at build      | Image build fails (phase-3 validation)                                                                                                                               |
+| HF rate limit (429) at build       | Retried with backoff; `hf_token` build secret authenticates                                                                                                          |
+| Model changed between versions     | Marker mismatch at first load → vectors wiped → drain re-embeds                                                                                                      |
+| Data dir unwritable at reset       | Boot proceeds, index untouched, reset retried next boot                                                                                                              |
+| Reset interrupted after wipe       | Marker stays `pending`, index empty, drain refills; next boot may re-wipe                                                                                            |
+| Reset owed but not done            | `memory.doctor` warns; dense results unreliable until a load settles it                                                                                              |
+| Reranker missing/corrupt           | Logged once; reranking stays off until restart, searches serve the unreranked order                                                                                  |
+| Rerank worker crashes              | In-flight searches fall back; restarted up to 3 times, then reranking stays off                                                                                      |
+| Rerank deadline missed             | That search serves the unreranked order; counted per cause                                                                                                           |
+| Rollback below migration 0040      | Older code opens the data dir, wipes the 384-dim vectors and cannot write its own: semantic search stays lexical-only. Roll back by restoring the pre-upgrade backup |
 
 ## Engine constants (not configuration)
 
