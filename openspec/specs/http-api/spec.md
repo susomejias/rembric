@@ -408,7 +408,7 @@ The Streamable HTTP transport SHALL accept operator-configured `Host` and `Origi
 
 The endpoint SHALL accept a JSON body `{ query: string, limit?: number }`. The `query` field is REQUIRED and SHALL be a non-empty string. The `limit` field, when present, SHALL be clamped to `[1, 5]` (this endpoint feeds a per-turn context-injection budget, not exploratory search); when omitted it SHALL default to 5. The endpoint SHALL resolve scope via the same `authenticate({pathSlug})` helper used by the other `/api/<slug>/*` routes, so the same 401/403/404 error contract (`missing_token`, `token_invalid`, `project_not_found`, `forbidden`, `project_archived`) applies unchanged.
 
-The endpoint SHALL delegate to the same `MemoryService.search()` path used by the MCP `memory.search` tool, with the project scope resolved from the path slug, so ranking (including any hybrid-search boost) is identical to the MCP-facing search. It searches the path-scoped project only; no argument on this endpoint widens the result set past it, and none is accepted. On success the server SHALL respond `200 OK` with body `{ ok: true, memories: [{ id: string, title: string, snippet: string }], formatted: string }`, where `memories` mirrors the ranked `memory.search` results (title + a content snippet capped the same way other context snippets are capped) and `formatted` is a ready-to-inject string of the shape `<memory-context>\n<one line per memory: "- {title}: {snippet}">\n</memory-context>`, or the empty string when `memories` is empty.
+The endpoint SHALL delegate to the same `MemoryService.search()` path used by the MCP `memory.search` tool, with the project scope resolved from the path slug, so the fused ranking (including the hybrid-search boost and the relevance gates) is the one the MCP-facing search computes. It SHALL NOT request cross-encoder reranking: this endpoint fires on every turn and in bursts, where the reranker's per-call inference cost is not affordable, so its order is the unreranked order `memory.search` returns when it falls back. It searches the path-scoped project only; no argument on this endpoint widens the result set past it, and none is accepted. On success the server SHALL respond `200 OK` with body `{ ok: true, memories: [{ id: string, title: string, snippet: string }], formatted: string }`, where `memories` mirrors the ranked `memory.search` results (title + a content snippet capped the same way other context snippets are capped) and `formatted` is a ready-to-inject string of the shape `<memory-context>\n<one line per memory: "- {title}: {snippet}">\n</memory-context>`, or the empty string when `memories` is empty.
 
 This endpoint SHALL NOT be exposed to any client other than the Hermes provider in this revision; it carries no client-identifying restriction at the HTTP layer (any valid token scoped to the slug may call it), but no other client's plugin code calls it yet.
 
@@ -416,7 +416,7 @@ This endpoint SHALL NOT be exposed to any client other than the Hermes provider 
 
 - **GIVEN** a project with several `active` memories, at least one matching the query lexically or semantically
 - **WHEN** a client POSTs `{ "query": "how do we handle auth tokens" }` to `/api/<slug>/memory/recall` with a valid token scoped to that slug
-- **THEN** the response SHALL be `200 OK` with `ok: true`, a `memories` array ordered by the same ranking `memory.search` would produce for that query, and a non-empty `formatted` string when `memories` is non-empty
+- **THEN** the response SHALL be `200 OK` with `ok: true`, a `memories` array ordered by the unreranked ranking `memory.search` produces for that query, and a non-empty `formatted` string when `memories` is non-empty
 
 #### Scenario: No matching memories yields an empty formatted block
 
@@ -444,6 +444,12 @@ This endpoint SHALL NOT be exposed to any client other than the Hermes provider 
 - **GIVEN** memories in the path-scoped project and memories in the default project sharing the query's vocabulary
 - **WHEN** a client POSTs a query to `/api/<slug>/memory/recall`
 - **THEN** every returned memory SHALL belong to the path-scoped project
+
+#### Scenario: The recall endpoint never runs the reranker
+
+- **GIVEN** a server with reranking enabled
+- **WHEN** a client POSTs a query to `/api/<slug>/memory/recall`
+- **THEN** no cross-encoder inference SHALL run for that request, and the order SHALL be the unreranked one
 
 ### Requirement: `POST /api/<slug>/sessions/:id/resume` MUST return a terminal session to `active`
 

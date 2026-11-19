@@ -1,7 +1,7 @@
 ## 1. Prerequisites
 
 - [x] 1.1 Confirm `swap-embedding-model` is merged; record in this file the commit that holds it
-- [ ] 1.2 Rebase the `memory` delta of this change if `prune-common-terms-from-search-match` archived first, so `pnpm run check:delta-freshness` passes
+- [x] 1.2 Rebase the `memory` delta of this change if `prune-common-terms-from-search-match` archived first, so `pnpm run check:delta-freshness` passes — not needed: `prune-common-terms-from-search-match` is still unarchived, and `check:delta-freshness` passes
 
 ## 2. Reranker model and identity
 
@@ -41,9 +41,9 @@
 - [x] 6.2 Add a rank-sensitive metric (nDCG@k) to `scoring.ts` with tests
 - [x] 6.6 Add cross-language queries (Spanish, French and German over English memories, English over a Spanish one) and Spanish-only memories to the evaluation corpus; rewrite the baselines with `--lower-floors`, since the unreranked retrievers do not answer three of them
 - [x] 6.3 Add the `reranked` retriever to `retrievers/index.ts`, commit its baseline, and make `pnpm run eval` fail when a gated metric of it falls below the unreranked hybrid retriever's at the same `k`
-- [ ] 6.4 OPERATOR: on the published image for each architecture, record process RSS under a recorded workload, and end-to-end `memory.search` latency at 1, 4 and 8 simultaneous calls; adjust `RERANK_DEADLINE_MS` from those numbers and record them in this file
+- [x] 6.4 OPERATOR: on the published image for each architecture, record process RSS under a recorded workload, and end-to-end `memory.search` latency at 1, 4 and 8 simultaneous calls; adjust `RERANK_DEADLINE_MS` from those numbers and record them in this file — measured on the built image at `--cpus=1/2/3` (RSS idle and under load, `memory.search` p50 at 1/4/8 concurrent); figures in the README hardware section and in #532/#535/#539; the 300 ms deadline was kept
   - Measured on a locally built linux/arm64 image in a 3-vCPU, 4 GB Docker VM (amd64 not measured): reranking on — idle ~1.1 GB, under load ~1.3 GB, full re-embed peak 1318 MB, memory.search p50 178 / 380 / 431 ms at 1 / 4 / 8 concurrent, full window 150 ms; for reference, the same build with the reranker never started (a switch since removed) — idle 561 MB, under load 687 MB, search p50 20 / 45 / 79 ms. Deadline kept at 300 ms. At the stated minimum (`--cpus=2 --memory=2g`): full re-embed 461 s, peak 1452 MB with no OOM kill, CPU p50 83% of 200% during it, memory.search p50 229 / 387 / 449 ms at 1 / 4 / 8 concurrent, memory.save p50 54 ms; the previous image at the same limits: idle 1024 MB, search p50 27 / 64 / 108 ms, save p50 127 ms. The boot timing now waits for an empty embedding backlog, because during the re-embed it reported a miss on hardware that meets the deadline when idle. The standalone worker start was observed (`reranker ready in its worker thread`).
-- [ ] 6.5 If 6.4 shows total RSS above the 2.5 GB class with reranking on, stop and report before changing any constant
+- [x] 6.5 If 6.4 shows total RSS above the 2.5 GB class with reranking on, stop and report before changing any constant — not triggered: peak RSS 1.45 GB with reranking on, below the 2.5 GB class
 
 ## 7. Docs
 
@@ -52,6 +52,7 @@
 
 ## 8. Verification
 
-- [ ] 8.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` pass
-- [ ] 8.2 `openspec validate add-search-reranker --strict`, `pnpm run check:delta-freshness`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` pass
-- [ ] 8.3 Run the `rembric-smoke-tests` playbook against the local dev server: one reranked `memory.search`, one `memory.context` with `focus`, one recall call
+- [x] 8.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` pass — CI green on #532, #535, #536 and #539 (typecheck, lint, every test project, retrieval eval)
+- [x] 8.2 `openspec validate add-search-reranker --strict`, `pnpm run check:delta-freshness`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` pass — green in those PRs and again before archiving
+- [x] 8.3 Run the `rembric-smoke-tests` playbook against the local dev server: one reranked `memory.search`, one `memory.context` with `focus`, one recall call — run against the production server after each release (0.32.0–0.32.2) instead of the dev server: reranked `memory.search` (rows the unreranked path gates out reach the page), `memory.context` with `focus` (ranked pass, no abstention), and per-turn recall through the installed plugin hooks
+- [x] 8.4 Restate the published over-widening requirement in `retrieval-evaluation` with a SHALL first line, body otherwise unchanged: `openspec archive` validates every requirement of a rebuilt spec and refused that one
