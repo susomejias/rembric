@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.2](https://github.com/susomejias/rembric/compare/server-v0.32.1...server-v0.32.2) (2026-11-19)
+
+
+### Features
+
+* **search:** reserve eight of the ten rerank slots for the dense list ([ac668cf](https://github.com/susomejias/rembric/commit/ac668cf9048bf6648ce1f59c1ea9bfa8d36103d8))
+
 ## [0.32.1](https://github.com/susomejias/rembric/compare/server-v0.32.0...server-v0.32.1) (2026-11-19)
 
 
