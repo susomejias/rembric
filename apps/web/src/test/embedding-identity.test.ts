@@ -12,6 +12,7 @@ import {
   EmbeddingWorker,
   MemoryService,
   embeddingOnnxArtifactPath,
+  rerankOnnxArtifactPath,
   vectorIdentityMatches,
 } from '@rembric/core';
 import { createRepositories } from '@rembric/db';
@@ -58,9 +59,11 @@ describe('embedding model identity has a single source', () => {
     expect(embedderSource).not.toContain('hindsight-ai/hs-embed-1');
     expect(embedderSource).not.toMatch(/pooling: '(cls|mean)'/);
     expect(fetchScript).toContain("from '../src/embeddings/model-identity.json'");
+    expect(fetchScript).toContain("from '../src/rerank/model-identity.json'");
     expect(fetchScript).toContain('identity.modelId');
     expect(fetchScript).not.toContain('hindsight-ai/hs-embed-1');
-    expect(fetchScript).toContain('identity.pooling');
+    expect(fetchScript).toContain('e.maxTokens');
+    expect(fetchScript).not.toContain('hindsight-ai/hs-rerank-1');
     expect(fetchScript).not.toContain('3164caa4db95a03faac8a327f914f7c8f42d2f98');
   });
 
@@ -76,6 +79,7 @@ describe('embedding model identity has a single source', () => {
 
   it('keeps the Dockerfile model-bake gate pointing at the derived artifact path', () => {
     expect(dockerfile).toContain(embeddingOnnxArtifactPath('/models'));
+    expect(dockerfile).toContain(rerankOnnxArtifactPath('/models'));
   });
 });
 

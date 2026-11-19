@@ -15,6 +15,7 @@ function metric(over: Partial<QueryMetrics> & { queryId: string }): QueryMetrics
     precisionAtK: 0.125,
     recallAtK: 1,
     reciprocalRank: 1,
+    ndcg: 1,
     abstained: false,
     widened: false,
     returnedRows: 8,
@@ -64,7 +65,13 @@ describe('the two abstention error axes', () => {
           abstained: true,
         }),
         // Empty gold and returned something -> false positive only.
-        metric({ queryId: 'abs-a', precisionAtK: null, recallAtK: null, reciprocalRank: null }),
+        metric({
+          queryId: 'abs-a',
+          precisionAtK: null,
+          recallAtK: null,
+          reciprocalRank: null,
+          ndcg: null,
+        }),
       ],
       CEILINGS,
       8,
@@ -82,7 +89,15 @@ describe('the two abstention error axes', () => {
 
   it('is null when there is no gold-bearing query to measure', () => {
     const agg = aggregate(
-      [metric({ queryId: 'abs-a', precisionAtK: null, recallAtK: null, reciprocalRank: null })],
+      [
+        metric({
+          queryId: 'abs-a',
+          precisionAtK: null,
+          recallAtK: null,
+          reciprocalRank: null,
+          ndcg: null,
+        }),
+      ],
       CEILINGS,
       8,
     );
@@ -212,5 +227,29 @@ describe('foreignScopeRate', () => {
     );
     expect(declared.foreignScopeRate).toBeNull();
     expect(undeclared.foreignScopeRate).toBe(1);
+  });
+});
+
+describe('nDCG', () => {
+  const outcome = (retrieved: string[], goldIds: string[]) =>
+    scoreQuery({
+      queryId: 'q',
+      type: 'extraction',
+      k: 5,
+      retrieved,
+      retrievedProjectIds: retrieved.map(() => 'p'),
+      scopeProjectId: 'p',
+      widened: false,
+      goldIds,
+      latencyMs: 1,
+      tokensReturned: 0,
+    });
+
+  it('is 1 when every gold row leads, lower when one sinks, and null without gold', () => {
+    expect(outcome(['a', 'b', 'x'], ['a', 'b']).ndcg).toBeCloseTo(1, 10);
+    const sunk = outcome(['x', 'a', 'b'], ['a', 'b']).ndcg!;
+    expect(sunk).toBeCloseTo((1 / Math.log2(3) + 1 / Math.log2(4)) / (1 + 1 / Math.log2(3)), 10);
+    expect(outcome(['x', 'y'], ['a']).ndcg).toBe(0);
+    expect(outcome(['x'], []).ndcg).toBeNull();
   });
 });

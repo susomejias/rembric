@@ -37,6 +37,8 @@ export interface QueryMetrics {
   precisionAtK: number | null;
   recallAtK: number | null;
   reciprocalRank: number | null;
+  /** Binary-gain nDCG@k: rank-sensitive across every gold row, where reciprocal rank sees only the first. */
+  ndcg: number | null;
   abstained: boolean;
   widened: boolean;
   returnedRows: number;
@@ -70,10 +72,19 @@ export function scoreQuery(outcome: QueryOutcome): QueryMetrics {
     reciprocalRank = idx === -1 ? 0 : 1 / (idx + 1);
   }
 
+  let ndcg: number | null = null;
+  if (gold.size > 0) {
+    const dcg = top.reduce((s, id, i) => s + (gold.has(id) ? 1 / Math.log2(i + 2) : 0), 0);
+    let ideal = 0;
+    for (let i = 0; i < Math.min(k, gold.size); i++) ideal += 1 / Math.log2(i + 2);
+    ndcg = dcg / ideal;
+  }
+
   return {
     queryId: outcome.queryId,
     type: outcome.type,
     k,
+    ndcg,
     precisionAtK: gold.size > 0 ? hits / k : null,
     recallAtK: gold.size > 0 ? hits / gold.size : null,
     reciprocalRank,
@@ -97,6 +108,7 @@ export interface AggregateMetrics {
   precisionAtK: number;
   recallAtK: number;
   mrr: number;
+  ndcg: number;
   ceilingPrecisionAtK: number;
   ceilingRecallAtK: number;
   /** Empty-gold queries that returned something. */
@@ -143,6 +155,7 @@ export function aggregate(
     precisionAtK: mean(scored.map((m) => m.precisionAtK!)),
     recallAtK: mean(scored.map((m) => m.recallAtK!)),
     mrr: mean(scored.map((m) => m.reciprocalRank!)),
+    ndcg: mean(scored.map((m) => m.ndcg!)),
     ceilingPrecisionAtK: mean(ceilingsForScored.map((c) => c.precisionAtK)),
     ceilingRecallAtK: mean(ceilingsForScored.map((c) => c.recallAtK)),
     abstentionFalsePositiveRate:

@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
+import { bakedModelsDir, type Embedder, loadEmbedder } from '../../embeddings/embedder.js';
+import { loadRerankScorer, type RerankScorer } from '../../rerank/reranker.js';
 import { type GateLeader } from '../../services/hybrid-search.js';
 
 import { checkAbstentionFlags } from './abstention-flags.js';
@@ -169,9 +170,10 @@ function checkSanity(corpus: IngestedCorpus, reports: RetrieverReport[]): string
 /** Re-ingests + re-evaluates once more and diffs against `reportsA` (the caller's own already-computed pass) — one fresh run, not two. */
 async function checkDeterminism(
   embedder: Embedder,
+  rerank: RerankScorer,
   reportsA: RetrieverReport[],
 ): Promise<string | null> {
-  const runB = await ingestCorpus(CORPUS, embedder);
+  const runB = await ingestCorpus(CORPUS, embedder, { rerank });
   let reportsB: RetrieverReport[];
   try {
     reportsB = await evaluateAll(runB);
@@ -287,6 +289,26 @@ function checkFloors(reports: RetrieverReport[]): string[] {
         capsByK: baseline.caps,
       }),
     );
+  }
+  return failures;
+}
+
+const RERANK_GATED_METRICS = ['precisionAtK', 'recallAtK', 'mrr', 'ndcg'] as const;
+
+/** Reranking that orders worse than not reranking is a regression, whatever its own floors say. */
+function checkRerankedNotWorse(reports: RetrieverReport[]): string[] {
+  const hybrid = reports.find((r) => r.retriever === 'hybrid');
+  const reranked = reports.find((r) => r.retriever === 'reranked');
+  if (!hybrid || !reranked) return ['the reranked-vs-hybrid gate needs both retrievers'];
+  const failures: string[] = [];
+  for (const k of K_VALUES) {
+    for (const metric of RERANK_GATED_METRICS) {
+      const r = reranked.aggregateByK[k]![metric];
+      const h = hybrid.aggregateByK[k]![metric];
+      if (r < h - 1e-9) {
+        failures.push(`reranked ${metric}@${k} ${r.toFixed(3)} is below hybrid's ${h.toFixed(3)}`);
+      }
+    }
   }
   return failures;
 }
@@ -438,11 +460,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log('rembric retrieval eval — loading embedder...');
+  console.log('rembric retrieval eval — loading embedder and reranker...');
   const embedder = await loadEmbedder();
+  const rerank = await loadRerankScorer(bakedModelsDir());
 
   console.log(`ingesting ${CORPUS.length} corpus memories through MemoryService...`);
-  const corpus: Ingested = await ingestCorpus(CORPUS, embedder);
+  const corpus: Ingested = await ingestCorpus(CORPUS, embedder, { rerank });
 
   let failures: string[] = [];
   let reports: RetrieverReport[];
@@ -461,7 +484,7 @@ async function main(): Promise<void> {
   for (const report of reports) {
     const p8 = report.aggregateByK[MAX_K]!;
     console.log(
-      `${report.retriever.padEnd(16)} P@${MAX_K}=${p8.precisionAtK.toFixed(3)} R@${MAX_K}=${p8.recallAtK.toFixed(3)} MRR@${MAX_K}=${p8.mrr.toFixed(3)} tokens=${Math.round(p8.avgTokensReturned)} abstainFP=${p8.abstentionFalsePositiveRate?.toFixed(2) ?? 'n/a'} overAbstain=${p8.overAbstentionRate?.toFixed(2) ?? 'n/a'} foreignScope=${p8.foreignScopeRate?.toFixed(3) ?? 'n/a'} (over ${p8.nForeignScopeRows} rows)`,
+      `${report.retriever.padEnd(16)} P@${MAX_K}=${p8.precisionAtK.toFixed(3)} R@${MAX_K}=${p8.recallAtK.toFixed(3)} MRR@${MAX_K}=${p8.mrr.toFixed(3)} nDCG@${MAX_K}=${p8.ndcg.toFixed(3)} p50=${p8.p50LatencyMs.toFixed(0)}ms p95=${p8.p95LatencyMs.toFixed(0)}ms (end-to-end search) tokens=${Math.round(p8.avgTokensReturned)} abstainFP=${p8.abstentionFalsePositiveRate?.toFixed(2) ?? 'n/a'} overAbstain=${p8.overAbstentionRate?.toFixed(2) ?? 'n/a'} foreignScope=${p8.foreignScopeRate?.toFixed(3) ?? 'n/a'} (over ${p8.nForeignScopeRows} rows)`,
     );
   }
 
@@ -473,9 +496,10 @@ async function main(): Promise<void> {
   }
 
   failures = failures.concat(checkFloors(reports));
+  failures = failures.concat(checkRerankedNotWorse(reports));
 
   if (!skipDeterminism) {
-    const determinismFailure = await checkDeterminism(embedder, reports);
+    const determinismFailure = await checkDeterminism(embedder, rerank, reports);
     if (determinismFailure) failures.push(determinismFailure);
   }
 

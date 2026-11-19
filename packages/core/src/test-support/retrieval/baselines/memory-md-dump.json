@@ -4,12 +4,12 @@
   "discriminatingMetric": "avgTokensReturned vs 'hybrid' at comparable recall — the token cost of the context-dump alternative",
   "ceilings": {
     "5": {
-      "precisionAtK": 0.32,
-      "recallAtK": 0.98125,
+      "precisionAtK": 0.3090909090909091,
+      "recallAtK": 0.9829545454545454,
       "mrr": 1
     },
     "8": {
-      "precisionAtK": 0.21875,
+      "precisionAtK": 0.21022727272727273,
       "recallAtK": 1,
       "mrr": 1
     }
@@ -29,12 +29,12 @@
   "caps": {
     "5": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.05,
+      "overAbstentionRate": 0.045454545454545456,
       "foreignScopeRate": 0
     },
     "8": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.05,
+      "overAbstentionRate": 0.045454545454545456,
       "foreignScopeRate": 0
     }
   }

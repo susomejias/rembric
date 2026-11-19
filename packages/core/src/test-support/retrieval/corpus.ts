@@ -8,6 +8,24 @@ export const PROJECTS = [
 
 export const CORPUS: CorpusItem[] = [
   {
+    id: 'atlas-checkout-outage-postmortem',
+    type: 'project',
+    title: 'Atlas checkout outage postmortem (March)',
+    content:
+      'Timeline: at 09:12 the checkout success rate dropped from 99.6% to 71% and stayed there for forty minutes. The on-call engineer first suspected the payment provider because the error budget dashboard showed elevated timeouts on outbound calls, so the first twenty minutes went into opening a ticket with the provider, comparing their status page, and replaying a sample of failed requests against their sandbox, which all succeeded. The second suspicion was the deploy that went out at 08:55, which changed the invoice PDF renderer; it was rolled back at 09:31 with no effect on the error rate. Traffic was normal for a Tuesday morning, the database CPU stayed under forty percent, and no alert fired on the queue depth. A second engineer then noticed that every failing request had waited exactly five seconds before failing, which pointed away from the provider and towards something local with a fixed timeout. Several follow-ups came out of the review: the runbook now lists local resource exhaustion before third-party outages, the dashboard gained a panel for wait time on pooled resources, and the deploy checklist asks whether a change touches connection settings. Root cause: the connection pool for the checkout service was capped at 5 connections by a config default nobody had overridden, so under the morning peak requests queued for a connection until the five-second acquire timeout expired. Raising the pool to 40 and alerting on acquire wait ended the incident.',
+    project: 'atlas',
+    daysAgo: 60,
+  },
+  {
+    id: 'nimbus-ingest-backpressure-review',
+    type: 'reference',
+    title: 'Nimbus ingestion backpressure design review',
+    content:
+      'Context: the ingestion service reads events from the partner feed, normalises them, and writes batches into the pipeline queue that the scheduler drains. During the spring load test the queue grew without bound once the partner replayed a backlog, and the scheduler fell more than an hour behind. The review compared three options. Dropping events at the edge was rejected because several partners cannot resend, and the contract promises at-least-once delivery. Scaling the scheduler horizontally was rejected for now because the downstream warehouse loader is the real bottleneck and cannot take more parallel writers without lock contention. Rate limiting the partner was rejected because the replay is exactly when partners most need the pipeline to accept data. The group also discussed batching changes, compression of payloads, and moving normalisation off the hot path, and agreed those help throughput but do not bound memory. Decision: the ingestion service applies backpressure by pausing reads from the partner feed whenever the pipeline queue holds more than 50000 pending batches, and resumes reading once the queue falls below 20000, so memory stays bounded and no event is dropped.',
+    project: 'nimbus',
+    daysAgo: 40,
+  },
+  {
     id: 'atlas-orm-choice',
     type: 'project',
     title: 'Atlas uses Drizzle over Prisma for the database layer',

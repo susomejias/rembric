@@ -9,6 +9,9 @@ import {
   type TokenTermFrequency,
 } from '@rembric/db';
 
+import { RERANK_WINDOW } from '../rerank/reranker.js';
+
+import { memoryText } from './memory-text.js';
 import { COMMON_TERM_DOCUMENT_RATIO, pruneCommonTokens } from './save-time-candidates.js';
 
 /** RRF constant (Elastic's `rank_constant`); the common literature default. */
@@ -53,7 +56,11 @@ export interface HybridSearchOpts {
   commonTermRatio?: number | null;
   /** Calibration-sweep sink; supplying it forces the pool text read even with both gates `null`. */
   onGateWindow?: (leader: GateLeader) => void;
+  /** Scores the rerank window; `null` falls back to the unreranked page. */
+  rerank?: RerankFn;
 }
+
+export type RerankFn = (query: string, documents: readonly string[]) => Promise<number[] | null>;
 
 export interface SearchVerdict {
   abstained: boolean;
@@ -112,6 +119,8 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
   const gatesEnabled = abstentionFloor !== null || relativeLevelRatio !== null;
   let gated: { id: string; score: number }[] = fused;
   let gateRemovedRows = false;
+  let leveled: { id: string; score: number; level: number }[] = [];
+  let leaderLevel = 0;
   if (gatesEnabled || opts.onGateWindow) {
     const { scored, documentCount, documentFrequencies } = poolLevels(
       fused,
@@ -119,8 +128,9 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
       opts,
       statistics,
     );
-    const leveled = fused.map((r) => ({ ...r, level: scored.get(r.id)?.level ?? 0 }));
+    leveled = fused.map((r) => ({ ...r, level: scored.get(r.id)?.level ?? 0 }));
     const leader = poolLeader(leveled, scored);
+    leaderLevel = leader.level;
     opts.onGateWindow?.({
       ...leader,
       poolSize: fused.length,
@@ -130,10 +140,14 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
     if (abstentionFloor !== null && leader.level < abstentionFloor) {
       return { ids: [], abstained: true, abstainReason: ABSTAIN_REASON };
     }
-    if (relativeLevelRatio !== null) {
-      gated = applyRelativeLevelFilter(leveled, leader.level, relativeLevelRatio);
-      gateRemovedRows = gated.length < leveled.length;
-    }
+  }
+
+  const reranked = await rerankWindow(opts, fused);
+  if (reranked) return { ids: reranked.slice(0, opts.limit), abstained: false };
+
+  if (relativeLevelRatio !== null) {
+    gated = applyRelativeLevelFilter(leveled, leaderLevel, relativeLevelRatio);
+    gateRemovedRows = gated.length < leveled.length;
   }
 
   const boosted = applyRankingBoost(gated, opts);
@@ -276,6 +290,30 @@ export function applyRelativeLevelFilter<T extends { level: number }>(
 ): T[] {
   const cut = ratio * leaderLevel;
   return ranked.filter((r) => r.level >= cut);
+}
+
+async function rerankWindow(
+  opts: HybridSearchOpts,
+  fused: readonly { id: string }[],
+): Promise<string[] | null> {
+  if (!opts.rerank || opts.offset !== 0 || opts.limit > RERANK_WINDOW) return null;
+  const window = fused.slice(0, RERANK_WINDOW);
+  const textById = new Map(
+    opts.repos.memory
+      .textByIds({ ids: window.map((r) => r.id), scope: opts.scope })
+      .map((r) => [r.id, memoryText(r.title, r.content)]),
+  );
+  const rows = window.filter((r) => textById.has(r.id));
+  const scores = await opts.rerank(
+    opts.query,
+    rows.map((r) => textById.get(r.id)!),
+  );
+  if (!scores || scores.length !== rows.length) return null;
+  const boosted = applyRankingBoost(
+    rows.map((r, i) => ({ id: r.id, score: scores[i]! })),
+    opts,
+  );
+  return boosted.map((r) => r.id);
 }
 
 const BOOST_MIN = 0.7;

@@ -7,6 +7,20 @@ function project(slug: (typeof PROJECTS)[number]['slug']): QueryScopeFixture {
 
 export const QUERIES: QueryItem[] = [
   {
+    id: 'q-atlas-checkout-outage-cause',
+    text: 'what was the root cause of the atlas checkout outage',
+    type: 'extraction',
+    goldStableIds: ['atlas-checkout-outage-postmortem'],
+    scope: project('atlas'),
+  },
+  {
+    id: 'q-nimbus-backpressure-threshold',
+    text: 'at what queue size does nimbus ingestion pause reading from the partner feed',
+    type: 'extraction',
+    goldStableIds: ['nimbus-ingest-backpressure-review'],
+    scope: project('nimbus'),
+  },
+  {
     id: 'q-atlas-orm',
     text: 'what ORM does atlas use for its database layer',
     type: 'extraction',

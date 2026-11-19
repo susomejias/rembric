@@ -2,7 +2,7 @@ import { type SearchScope } from '@rembric/db';
 
 import type { IngestedCorpus, QueryScope, Retriever } from '../types.js';
 
-function searchScopeOf(scope: QueryScope): SearchScope {
+export function searchScopeOf(scope: QueryScope): SearchScope {
   if (scope.projectIds.length < 2) return { kind: 'project', projectId: scope.projectId };
   return {
     kind: 'authorized-projects',

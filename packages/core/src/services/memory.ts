@@ -23,6 +23,7 @@ import {
   type HybridSearchResult,
   RANK_WINDOW_CEILING,
   type SearchVerdict,
+  type RerankFn,
 } from './hybrid-search.js';
 import {
   MERGE_MAX_IDS,
@@ -92,6 +93,11 @@ export type GateOverrides = Pick<
   'abstentionFloor' | 'relativeLevelRatio' | 'onGateWindow' | 'commonTermRatio'
 >;
 
+/** Like `GateOverrides`, kept off `SearchMemoriesInput`: only a calling surface decides to rerank. */
+export interface SearchOptions {
+  rerank?: boolean;
+}
+
 export interface SearchMemoriesInput {
   query?: string;
   type?: MemoryType;
@@ -142,6 +148,7 @@ export class MemoryService {
     private readonly tx: TransactionRunner,
     private readonly now: () => Date = () => new Date(),
     private readonly embedQuery?: (text: string) => Promise<Float32Array>,
+    private readonly rerank?: RerankFn,
   ) {}
 
   save(input: SaveMemoryInput, scope: Scope): Memory {
@@ -389,6 +396,7 @@ export class MemoryService {
     input: SearchMemoriesInput,
     scope: SearchScope,
     gates?: GateOverrides,
+    options: SearchOptions = {},
   ): Promise<
     Omit<HybridSearchResult, 'ids'> & {
       memories: Memory[];
@@ -444,6 +452,7 @@ export class MemoryService {
           limit,
           offset,
           ...gates,
+          rerank: options.rerank ? this.rerank : undefined,
         })
       : undefined;
     const verdict: SearchVerdict = {
