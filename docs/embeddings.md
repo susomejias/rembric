@@ -132,8 +132,8 @@ memory.search / memory.context ranked pass   (recall hints and file recall: neve
 hybrid search → fused pool (unchanged) → abstention floor / empty pool → abstain? done
    │
    ▼
-RERANK_WINDOW (10) rows, interleaved from the dense and lexical lists (dense #1, lexical #1,
-dense #2, …), title + content, cut to RERANK_MAX_TOKENS (128)
+RERANK_WINDOW (10) rows: the dense list's first RERANK_DENSE_SLOTS (8), then the lexical
+list's best, title + content, cut to RERANK_MAX_TOKENS (128)
    │  posted to the rerank worker thread (owns hs-rerank-1 + its tokenizer)
    ▼
 cross-encoder score per row × the usual recency/confirmation/type boost → page

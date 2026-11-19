@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   EMBEDDING_DIMS,
   hybridSearch,
-  interleaveBranches,
+  rerankCandidates,
+  RERANK_DENSE_SLOTS,
   MemoryService,
   ProjectsService,
   RERANK_WINDOW,
@@ -185,6 +186,44 @@ describe('the reranked path of hybrid search', () => {
     expect(result.ids[0]).toBe(target.id);
   });
 
+  it('reaches a dense row ranked below an even split of the window', async () => {
+    const towards = (c: number) => {
+      const v = new Float32Array(EMBEDDING_DIMS);
+      v[0] = c;
+      v[2] = Math.sqrt(1 - c * c);
+      return v;
+    };
+    const far = new Float32Array(EMBEDDING_DIMS);
+    far[1] = 1;
+    const embed = (id: string, vector: Float32Array) =>
+      repos.vectors.insertEmbedding(
+        id,
+        Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
+        partitionKeyFor(projectId),
+      );
+    for (const m of seed(12)) embed(m.id, far);
+    for (let i = 0; i < 6; i++) {
+      const near = mem.save(
+        { type: 'project', title: `Nota cercana ${i}`, content: `otra cosa ${i}` },
+        projectScope(projectId),
+      );
+      embed(near.id, towards(0.99 - i * 0.01));
+    }
+    const target = mem.save(
+      { type: 'project', title: 'Puerto del planificador', content: 'escucha en el 8781' },
+      projectScope(projectId),
+    );
+    embed(target.id, towards(0.92));
+    const embedQuery = () => Promise.resolve(towards(1));
+
+    const rerank = vi.fn<RerankFn>((_q, docs) =>
+      Promise.resolve(docs.map((d) => (d.startsWith('Puerto del planificador') ? 0.9 : 0.1))),
+    );
+    const result = await search({ embedQuery, rerank });
+    expect(rerank.mock.calls[0]![1]).toHaveLength(RERANK_WINDOW);
+    expect(result.ids[0]).toBe(target.id);
+  });
+
   it('keeps the recency and confirmation boost on top of the scores', async () => {
     const [plain, confirmed] = seed(2);
     for (let i = 0; i < 3; i++) mem.confirm(confirmed!.id, projectScope(projectId));
@@ -195,43 +234,29 @@ describe('the reranked path of hybrid search', () => {
   });
 });
 
-describe('interleaveBranches', () => {
-  it('alternates the branches rank by rank and stops at the size', () => {
-    expect(
-      interleaveBranches(
-        [
-          ['a', 'b', 'c'],
-          ['d', 'e', 'f'],
-        ],
-        4,
-      ),
-    ).toEqual(['a', 'd', 'b', 'e']);
-    expect(
-      interleaveBranches(
-        [
-          ['a', 'b', 'c'],
-          ['d', 'e', 'f'],
-        ],
-        3,
-      ),
-    ).toEqual(['a', 'd', 'b']);
+describe('rerankCandidates', () => {
+  it('takes the dense slots first, then the lexical rows, until the window is full', () => {
+    expect(rerankCandidates(['a', 'b', 'c', 'd'], ['x', 'y', 'z'], 5, 3)).toEqual([
+      'a',
+      'b',
+      'c',
+      'x',
+      'y',
+    ]);
   });
 
-  it('keeps a row once, at its first turn', () => {
-    expect(
-      interleaveBranches(
-        [
-          ['a', 'b'],
-          ['a', 'c'],
-        ],
-        3,
-      ),
-    ).toEqual(['a', 'b', 'c']);
+  it('keeps a row once, in the dense slot it reached first', () => {
+    expect(rerankCandidates(['a', 'b'], ['a', 'x', 'y'], 4, 2)).toEqual(['a', 'b', 'x', 'y']);
   });
 
-  it('keeps taking from the longer branch once the shorter one runs out', () => {
-    expect(interleaveBranches([['a'], ['b', 'c', 'd']], 4)).toEqual(['a', 'b', 'c', 'd']);
-    expect(interleaveBranches([[], ['b', 'c']], 4)).toEqual(['b', 'c']);
+  it('fills from whichever list still has rows once the other runs out', () => {
+    expect(rerankCandidates(['a'], ['x', 'y', 'z'], 4, 3)).toEqual(['a', 'x', 'y', 'z']);
+    expect(rerankCandidates(['a', 'b', 'c', 'd'], ['x'], 4, 2)).toEqual(['a', 'b', 'x', 'c']);
+    expect(rerankCandidates([], ['x', 'y'], 4, 3)).toEqual(['x', 'y']);
+  });
+
+  it('leaves the lexical list room in the shipped window', () => {
+    expect(RERANK_DENSE_SLOTS).toBeLessThan(RERANK_WINDOW);
   });
 });
 
