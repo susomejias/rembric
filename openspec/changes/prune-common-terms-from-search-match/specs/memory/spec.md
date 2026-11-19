@@ -96,6 +96,8 @@ A page shortened by the relative filter SHALL NOT be padded to the requested lim
 
 `gateShortened` and the empty-pool abstention SHALL NOT both be reported for the same response, and this SHALL hold by construction rather than by an added check: the relative filter always retains the pool leader, so a non-empty pool yields a non-empty filtered pool, and an empty pool gives the filter nothing to remove.
 
+On a call served by the reranked path (see "Text-query search MUST be able to rerank the head of the fused pool with a cross-encoder") the two gates part ways, and the split is contracted rather than incidental. The **floor** and the **empty-pool verdict** SHALL be evaluated exactly as above, over the whole fused pool, BEFORE any reranking work is done, so an abstaining query costs no inference. The **relative filter** SHALL NOT remove any row from the rerank window, and such a response SHALL NOT report `gateShortened`: the filter exists to drop rows the level judges far below the leader, and on this path a stronger judge of the same question reads those rows next, so filtering first would only withhold candidates from it. Measured on real data, reranking the unfiltered head of the pool scored higher than reranking the filtered one. A call that falls back from the reranked path SHALL have both gates applied as on any unreranked call, and its `gateShortened` SHALL be reported under the three conditions above. The cross-encoder score SHALL NOT be used as an abstention gate: on real data the best score of an answerable query fell below the best score of an unanswerable one, so no threshold over it separates the two.
+
 Each gate is independently enabled or disabled, and the shipped state of each is recorded once, in "Retrieval and lifecycle constants MUST be named and bounded in one place", so that this requirement does not have to be edited whenever a constant moves. While BOTH gates are disabled the branch SHALL perform no gate-related work at all: it SHALL issue the same queries and return the same result ids as if the gates did not exist, and SHALL report no `gateShortened` — a disabled filter removes nothing. While EITHER gate is enabled the branch SHALL compute levels for the whole fused pool, and the cost of doing so SHALL be measured against a stated budget at 1 000, 20 000 and 50 000 memory rows before the enabling change lands.
 
 #### Scenario: A question-shaped query is not carried by its function words
@@ -182,3 +184,17 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 - **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf — neither the pool's text nor any term statistic beyond the single statistics read the lexical branch makes for its own `MATCH` (see "The search lexical `MATCH` MUST omit terms present in at least half of the index")
 - **AND** no response SHALL report `gateShortened`
 - **AND** a query whose fused pool is empty SHALL still report `abstained: true` with the empty-pool reason
+
+#### Scenario: The relative filter does not thin the rerank window
+
+- **GIVEN** the relative filter is enabled, and a fused pool whose first rows include some below `ratio × leaderLevel`
+- **WHEN** `memory.search` serves the query on the reranked path
+- **THEN** every row of the rerank window SHALL be scored by the cross-encoder, including the rows the filter would have removed
+- **AND** the response SHALL NOT report `gateShortened`
+
+#### Scenario: An abstaining query is not reranked
+
+- **GIVEN** a text query whose fused pool is empty, or whose leader is below an enabled floor
+- **WHEN** `memory.search` is called with reranking requested
+- **THEN** the response SHALL report the same abstention verdict and reason as the unreranked path, and no cross-encoder inference SHALL run
+

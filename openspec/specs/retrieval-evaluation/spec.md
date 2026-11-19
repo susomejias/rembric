@@ -287,6 +287,8 @@ A change to the definition of the relevance level SHALL be justified by a sweep 
 
 ### Requirement: The harness MUST be able to FAIL on over-widening, and the proof is a mutation that reddens it
 
+The harness SHALL be able to fail on over-widening, and a committed mutation that reddens it SHALL be the proof.
+
 A green evaluation run has never been evidence of scope isolation, and this was measured rather than suspected: under a mutation dissolving the scope predicate in the memory repository's shared WHERE fragment — total loss of isolation — MRR@8 **rose** and the evaluation stayed green. The rise was 0.828 → 0.859 when first measured, and 0.828 → **0.891** when re-measured on the corpus this change starts from; the direction is the finding and it reproduced on both. A harness whose gated metrics improve when isolation is destroyed cannot be the evidence that a deliberate widening is safe.
 
 The harness SHALL therefore be able to fail on over-widening **before** any widening ships, and the obligation SHALL be discharged by demonstration rather than by construction: a mutation that dissolves scope isolation SHALL make the evaluation **RED**. A change that adds a metric, a query or a fixture without demonstrating that red has not satisfied this requirement.
@@ -318,3 +320,30 @@ The demonstration SHALL be committed as a reproducible artifact naming the mutat
 
 - **WHEN** the cross-project isolation queries are scored for the `grep` control baseline as well as for hybrid search
 - **THEN** at least one of them SHALL discriminate between the two, so the query set does not consist entirely of queries every retriever answers perfectly
+
+### Requirement: The harness MUST evaluate the reranked path as its own retriever
+
+The evaluation harness SHALL run the reranked search path as a retriever of its own, against the identical ingested corpus and query set as the unreranked hybrid retriever, and SHALL commit a baseline for it with the same floors and caps discipline. Without it the reranker's shipped constants would rest on a measurement nobody can re-run, and a regression in ordering would be invisible to CI.
+
+The query set SHALL include queries written in a different language from the memory that answers them, in a scope that also holds memories in the query's language, because that is the case where only the dense retriever can find the answer and the lexical retriever returns unrelated rows. The reranked retriever SHALL answer them; the unreranked hybrid retriever is scored on them as it is, so its committed floors record what it does today rather than what it should do.
+
+The reranked retriever SHALL use the real cross-encoder, not a stand-in, and SHALL be scored with a rank-sensitive metric in addition to the existing ones, because the reranker reorders a pool it does not widen: recall at `k` alone cannot see its effect. Its committed floors SHALL be at or above the unreranked hybrid retriever's on every gated metric at every committed `k`, so a change that makes reranking worse than not reranking fails the gate.
+
+The corpus SHALL contain memories longer than `RERANK_MAX_TOKENS` whose answering text lies beyond that length, so the cost of truncation is observable rather than assumed.
+
+The harness SHALL also report, as a series of its own and never merged with a quality metric, the reranked path's end-to-end latency per query, naming what it timed.
+
+#### Scenario: The reranked retriever is gated against the unreranked one
+
+- **WHEN** the evaluation runs
+- **THEN** it SHALL score the reranked retriever and SHALL fail when any of its gated metrics falls below the unreranked hybrid retriever's at the same `k`
+
+#### Scenario: A change to a rerank constant re-runs the evaluation
+
+- **WHEN** a change alters `RERANK_WINDOW` or `RERANK_MAX_TOKENS`
+- **THEN** the committed reranked baseline SHALL be regenerated in the same change
+
+#### Scenario: Truncation is exercised by the corpus
+
+- **WHEN** the corpus is inspected
+- **THEN** it SHALL contain at least one gold memory whose answering text begins beyond `RERANK_MAX_TOKENS`
