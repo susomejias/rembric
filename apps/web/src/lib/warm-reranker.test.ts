@@ -1,4 +1,4 @@
-import { RERANK_WINDOW } from '@rembric/core';
+import { RERANK_DEADLINE_MS, RERANK_WINDOW } from '@rembric/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { warmReranker } from './process';
@@ -11,12 +11,14 @@ function fake(
     expect(docs).toHaveLength(RERANK_WINDOW);
     return Promise.resolve(scores.length > 0 ? scores.shift()! : null);
   });
+  const calibrate = vi.fn();
   return {
     services: {
-      reranker: { start: () => Promise.resolve(opts.ready ?? true), score } as never,
+      reranker: { start: () => Promise.resolve(opts.ready ?? true), score, calibrate } as never,
       hasEmbeddingBacklog: opts.backlog ?? (() => false),
     },
     score,
+    calibrate,
   };
 }
 
@@ -31,17 +33,20 @@ describe('warmReranker', () => {
 
   it('times a full window after the model is ready', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { services, score } = fake([[0.1], [0.2], [0.2], [0.2]]);
+    const { services, score, calibrate } = fake([[0.1], [0.2], [0.2], [0.2]]);
     await warmReranker(services);
     expect(score).toHaveBeenCalledTimes(4);
     expect(logged(log)).toMatch(/reranker full window \d+ ms \(deadline \d+ ms\)/);
+    expect(calibrate).toHaveBeenCalledOnce();
+    expect(calibrate.mock.calls[0]![0]).toBeLessThan(RERANK_DEADLINE_MS);
   });
 
-  it('warns when most timed windows miss the deadline', async () => {
+  it('stands the reranker down when most timed windows miss the deadline', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { services } = fake([[0.1], null, null, [0.2]]);
+    const { services, calibrate } = fake([[0.1], null, null, [0.2]]);
     await warmReranker(services);
-    expect(logged(log)).toMatch(/missed its \d+ ms deadline.*unreranked order/);
+    expect(calibrate).toHaveBeenCalledWith(Number.POSITIVE_INFINITY);
+    expect(logged(log)).toMatch(/missed its \d+ ms deadline.*stands down/);
   });
 
   it('waits for the embedding backlog to drain before timing', async () => {
@@ -61,8 +66,9 @@ describe('warmReranker', () => {
 
   it('does not time anything when the model failed to load', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { services, score } = fake([], { ready: false });
+    const { services, score, calibrate } = fake([], { ready: false });
     await warmReranker(services);
     expect(score).not.toHaveBeenCalled();
+    expect(calibrate).not.toHaveBeenCalled();
   });
 });
