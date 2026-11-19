@@ -6,7 +6,7 @@ The text-query branch SHALL be able to reorder the head of its fused candidate p
 
 The model SHALL be `hindsight-ai/hs-rerank-1` at a pinned revision, run in-process with no network call, and its identity (model id, revision, ONNX artifact) SHALL be declared once and consumed by both the loader and the image build. Its raw output is one logit per pair; `rerankScore` SHALL be the logistic of that logit.
 
-The **rerank window** SHALL be the first `RERANK_WINDOW` rows of the fused pool, in fused order, taken before the relative filter and before the ranking boost. Each candidate SHALL be presented to the model as its `title` followed by its `content`, the same recipe the embedder reads, and each query-candidate pair SHALL be truncated to `RERANK_MAX_TOKENS` tokens. The stored memory, its embedding and its lexical index entry SHALL NOT be affected by that truncation: it bounds what the cross-encoder reads to order a row that the retrievers already found over its full text. The response page SHALL then be the window ordered by `rerankScore(id) * boost(id)` and truncated to `limit`.
+The **rerank window** SHALL hold `RERANK_WINDOW` rows of the fused pool, taken before the relative filter and before the ranking boost by **interleaving the two retrievers' ranked lists**: the dense retriever's first row, then the lexical retriever's first row, then each one's second row, and so on, skipping a row already taken, until the window is full or both lists are exhausted. It SHALL NOT be the head of the fused order. Reciprocal Rank Fusion scores a row by the sum of its reciprocal ranks, so a row only one retriever found sits below every row both found: measured, a query in one language whose answer is stored in another was the dense retriever's first row and the fused pool's seventeenth, behind rows that shared only function words with the query, so a window cut from the fused head never showed it to the model. Interleaving gives each retriever's best rows a place in the window at the same inference cost. Each candidate SHALL be presented to the model as its `title` followed by its `content`, the same recipe the embedder reads, and each query-candidate pair SHALL be truncated to `RERANK_MAX_TOKENS` tokens. The stored memory, its embedding and its lexical index entry SHALL NOT be affected by that truncation: it bounds what the cross-encoder reads to order a row that the retrievers already found over its full text. The response page SHALL then be the window ordered by `rerankScore(id) * boost(id)` and truncated to `limit`.
 
 A call is **eligible** only when all of these hold: it carries a non-empty text query; its `offset` is zero; its `limit` is at most `RERANK_WINDOW`; and neither abstention cause has spoken. Every other call SHALL be served by the unreranked path unchanged. Paging past the window is deliberately not reranked: the window is the only part of the pool the model has read, so a second page cannot be ordered consistently with the first.
 
@@ -19,6 +19,12 @@ Reranking SHALL NOT widen what a search can return. Every returned row SHALL be 
 - **GIVEN** a query and a scope where the memory that answers it is fused at rank 4 behind three memories that only share its vocabulary
 - **WHEN** `memory.search` serves the query on the reranked path
 - **THEN** the answering memory SHALL be ordered by its cross-encoder score multiplied by its boost, and SHALL rank above the three when that product is higher
+
+#### Scenario: A row only the dense retriever found reaches the model
+
+- **GIVEN** a query whose answering memory is the dense retriever's first row, shares no term with the query, and sits below `RERANK_WINDOW` in the fused order behind rows the lexical retriever matched
+- **WHEN** `memory.search` serves the query on the reranked path
+- **THEN** the answering memory SHALL be in the rerank window, the window SHALL still hold the lexical retriever's first row, and the window SHALL hold no more than `RERANK_WINDOW` rows
 
 #### Scenario: A row outside the fused pool is never returned
 

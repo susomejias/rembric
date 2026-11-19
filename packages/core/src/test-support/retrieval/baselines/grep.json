@@ -4,37 +4,37 @@
   "discriminatingMetric": "recall@k vs 'hybrid' — how far naive substring matching gets alone",
   "ceilings": {
     "5": {
-      "precisionAtK": 0.3090909090909091,
-      "recallAtK": 0.9829545454545454,
+      "precisionAtK": 0.2857142857142857,
+      "recallAtK": 0.9866071428571429,
       "mrr": 1
     },
     "8": {
-      "precisionAtK": 0.21022727272727273,
+      "precisionAtK": 0.19196428571428573,
       "recallAtK": 1,
       "mrr": 1
     }
   },
   "floors": {
     "5": {
-      "precisionAtK": 0.22000000000000003,
-      "recallAtK": 0.7284090909090909,
-      "mrr": 0.7227272727272727
+      "precisionAtK": 0.1785714285714286,
+      "recallAtK": 0.66875,
+      "mrr": 0.6226190476190476
     },
     "8": {
-      "precisionAtK": 0.15625,
-      "recallAtK": 0.85,
-      "mrr": 0.734090909090909
+      "precisionAtK": 0.11517857142857142,
+      "recallAtK": 0.7535714285714286,
+      "mrr": 0.6315476190476191
     }
   },
   "caps": {
     "5": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.045454545454545456,
+      "overAbstentionRate": 0.03571428571428571,
       "foreignScopeRate": 0
     },
     "8": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.045454545454545456,
+      "overAbstentionRate": 0.03571428571428571,
       "foreignScopeRate": 0
     }
   }

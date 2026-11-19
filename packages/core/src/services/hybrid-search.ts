@@ -142,7 +142,7 @@ export async function hybridSearch(opts: HybridSearchOpts): Promise<HybridSearch
     }
   }
 
-  const reranked = await rerankWindow(opts, fused);
+  const reranked = await rerankWindow(opts, [dense.map((d) => d.id), lexicalIds]);
   if (reranked) return { ids: reranked.slice(0, opts.limit), abstained: false };
 
   if (relativeLevelRatio !== null) {
@@ -292,12 +292,32 @@ export function applyRelativeLevelFilter<T extends { level: number }>(
   return ranked.filter((r) => r.level >= cut);
 }
 
+/** Each branch's best rows take turns, so a row only one branch found is not averaged out of the window. */
+export function interleaveBranches(
+  branches: readonly (readonly string[])[],
+  size: number,
+): string[] {
+  const window: string[] = [];
+  const seen = new Set<string>();
+  const depth = Math.max(0, ...branches.map((b) => b.length));
+  for (let i = 0; i < depth; i++) {
+    for (const branch of branches) {
+      const id = branch[i];
+      if (id === undefined || seen.has(id)) continue;
+      if (window.length === size) return window;
+      seen.add(id);
+      window.push(id);
+    }
+  }
+  return window;
+}
+
 async function rerankWindow(
   opts: HybridSearchOpts,
-  fused: readonly { id: string }[],
+  branches: readonly (readonly string[])[],
 ): Promise<string[] | null> {
   if (!opts.rerank || opts.offset !== 0 || opts.limit > RERANK_WINDOW) return null;
-  const window = fused.slice(0, RERANK_WINDOW);
+  const window = interleaveBranches(branches, RERANK_WINDOW).map((id) => ({ id }));
   const textById = new Map(
     opts.repos.memory
       .textByIds({ ids: window.map((r) => r.id), scope: opts.scope })

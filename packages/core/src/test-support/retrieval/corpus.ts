@@ -698,4 +698,130 @@ export const CORPUS: CorpusItem[] = [
     project: 'atlas',
     daysAgo: 294,
   },
+  {
+    id: 'atlas-es-nightly-billing-report',
+    type: 'project',
+    title: 'Los informes de facturación de atlas se generan de madrugada',
+    content:
+      'El informe diario de facturación se genera a las tres de la madrugada para no competir con el tráfico de la mañana; si falla, el equipo de soporte lo relanza a mano desde la consola y avisa en el canal de incidencias.',
+    project: 'atlas',
+    daysAgo: 48,
+  },
+  {
+    id: 'atlas-es-support-console-roles',
+    type: 'project',
+    title: 'Roles de la consola de soporte de atlas',
+    content:
+      'La consola de soporte tiene tres roles: lectura, agente y supervisor. Solo el supervisor puede reembolsar una factura, y cada reembolso queda registrado con el nombre de la persona que lo hizo y el motivo.',
+    project: 'atlas',
+    daysAgo: 120,
+  },
+  {
+    id: 'atlas-es-welcome-email',
+    type: 'project',
+    title: 'Plantilla del correo de bienvenida de atlas',
+    content:
+      'El correo de bienvenida se envía en el idioma del navegador del cliente y la plantilla vive en el repositorio de marketing; para cambiar el texto hay que abrir una PR allí y no en el de la aplicación.',
+    project: 'atlas',
+    daysAgo: 90,
+  },
+  {
+    id: 'atlas-es-csv-export-separator',
+    type: 'project',
+    title: 'La exportación CSV de facturas usa punto y coma',
+    content:
+      'La exportación de facturas a CSV usa punto y coma como separador porque la mayoría de los clientes la abren con una hoja de cálculo configurada en español, donde la coma es el separador decimal.',
+    project: 'atlas',
+    daysAgo: 150,
+  },
+  {
+    id: 'nimbus-es-queue-dashboard',
+    type: 'project',
+    title: 'El panel de métricas de la cola de nimbus',
+    content:
+      'El panel de la cola muestra el número de lotes pendientes, la edad del lote más antiguo y el ritmo de escritura del cargador del almacén; la alerta salta cuando el lote más antiguo supera los quince minutos.',
+    project: 'nimbus',
+    daysAgo: 70,
+  },
+  {
+    id: 'nimbus-es-partner-credentials-rotation',
+    type: 'project',
+    title: 'Rotación de las credenciales de los socios en nimbus',
+    content:
+      'Las credenciales de cada socio se rotan cada noventa días con un script que las guarda en el gestor de secretos; el servicio las recarga sin reiniciarse porque las lee de nuevo en cada conexión.',
+    project: 'nimbus',
+    daysAgo: 110,
+  },
+  {
+    id: 'nimbus-es-normalizer-logs',
+    type: 'project',
+    title: 'Los logs del normalizador de nimbus se guardan siete días',
+    content:
+      'Los logs del normalizador se conservan siete días en el almacenamiento barato y luego se borran; para depurar un evento más antiguo hay que pedir al socio que lo reenvíe.',
+    project: 'nimbus',
+    daysAgo: 65,
+  },
+  {
+    id: 'nimbus-es-topic-naming',
+    type: 'project',
+    title: 'Convención de nombres de los topics de nimbus',
+    content:
+      'Los topics se nombran con el socio, el tipo de evento y la versión del esquema separados por puntos, para que una suscripción con comodín pueda leer todas las versiones de un mismo tipo de evento.',
+    project: 'nimbus',
+    daysAgo: 85,
+  },
+  {
+    id: 'nimbus-es-warehouse-loader-window',
+    type: 'project',
+    title: 'Ventana de carga del almacén de nimbus',
+    content:
+      'El cargador del almacén solo escribe entre las dos y las seis de la mañana para no bloquear las consultas de los analistas; fuera de esa ventana los lotes se quedan en la cola hasta la noche siguiente.',
+    project: 'nimbus',
+    daysAgo: 75,
+  },
+  {
+    id: 'nimbus-es-schema-registry',
+    type: 'project',
+    title: 'Registro de esquemas de los eventos de nimbus',
+    content:
+      'Cada versión del esquema de un evento se registra antes de desplegar el productor, y el registro rechaza un cambio que no sea compatible hacia atrás con la versión anterior del mismo tipo de evento.',
+    project: 'nimbus',
+    daysAgo: 95,
+  },
+  {
+    id: 'nimbus-es-replay-tool',
+    type: 'project',
+    title: 'Herramienta para reprocesar eventos en nimbus',
+    content:
+      'La herramienta de reproceso lee los eventos de un socio entre dos fechas y los vuelve a meter en la cola con una marca para que el normalizador no los cuente dos veces en las métricas del día.',
+    project: 'nimbus',
+    daysAgo: 55,
+  },
+  {
+    id: 'nimbus-es-oncall-handover',
+    type: 'project',
+    title: 'Traspaso de la guardia de nimbus',
+    content:
+      'En el traspaso de la guardia se revisan las alertas abiertas, el estado de la cola y los socios con incidencias; la persona saliente deja una nota en el canal con lo que queda pendiente.',
+    project: 'nimbus',
+    daysAgo: 40,
+  },
+  {
+    id: 'nimbus-es-test-fixtures',
+    type: 'project',
+    title: 'Datos de prueba de los socios en nimbus',
+    content:
+      'Los datos de prueba de cada socio se generan con un script que anonimiza una muestra real de la semana anterior, de modo que los tests de integración usan formas de evento reales sin datos personales.',
+    project: 'nimbus',
+    daysAgo: 130,
+  },
+  {
+    id: 'nimbus-es-cost-review',
+    type: 'project',
+    title: 'Revisión mensual de costes de nimbus',
+    content:
+      'Cada mes se revisa el coste del almacenamiento, de la cola y del almacén de datos; si algún socio genera más de la mitad del coste se habla con él para reducir el volumen o renegociar el contrato.',
+    project: 'nimbus',
+    daysAgo: 100,
+  },
 ];

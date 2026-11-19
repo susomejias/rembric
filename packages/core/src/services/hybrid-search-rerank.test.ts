@@ -1,8 +1,10 @@
-import { createRepositories, projectScope, type Repositories } from '@rembric/db';
+import { createRepositories, partitionKeyFor, projectScope, type Repositories } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  EMBEDDING_DIMS,
   hybridSearch,
+  interleaveBranches,
   MemoryService,
   ProjectsService,
   RERANK_WINDOW,
@@ -53,7 +55,7 @@ describe('the reranked path of hybrid search', () => {
   const reverseScores: RerankFn = (_query, documents) =>
     Promise.resolve(documents.map((_d, i) => (i + 1) / (documents.length + 1)));
 
-  it('scores the first RERANK_WINDOW fused rows, in fused order, and orders the page by score', async () => {
+  it('scores RERANK_WINDOW rows, the head of the only branch that answered, and orders the page by score', async () => {
     seed(RERANK_WINDOW + 4);
     const unreranked = await search({ relativeLevelRatio: null });
     const rerank = vi.fn(reverseScores);
@@ -145,6 +147,44 @@ describe('the reranked path of hybrid search', () => {
     expect(rejected).toEqual(await search({}));
   });
 
+  it("lets the dense branch's best rows into the window when lexical-only rows crowd the fused head", async () => {
+    const axis = (i: number) => {
+      const v = new Float32Array(EMBEDDING_DIMS);
+      v[i] = 1;
+      return v;
+    };
+    const embed = (id: string, vector: Float32Array) =>
+      repos.vectors.insertEmbedding(
+        id,
+        Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
+        partitionKeyFor(projectId),
+      );
+    const crowd = seed(12);
+    for (const m of crowd) embed(m.id, axis(1));
+    const target = mem.save(
+      { type: 'project', title: 'Puerto del planificador', content: 'escucha en el 8781' },
+      projectScope(projectId),
+    );
+    embed(target.id, axis(0));
+    const lexicalOnly = mem.save(
+      { type: 'project', title: 'Scheduler port', content: 'scheduler port scheduler port' },
+      projectScope(projectId),
+    );
+    const embedQuery = () => Promise.resolve(axis(0));
+
+    const fused = await search({ embedQuery, relativeLevelRatio: null, limit: 20 });
+    expect(fused.ids.indexOf(target.id)).toBeGreaterThanOrEqual(RERANK_WINDOW);
+
+    const rerank = vi.fn<RerankFn>((_q, docs) =>
+      Promise.resolve(docs.map((d) => (d.startsWith('Puerto del planificador') ? 0.9 : 0.1))),
+    );
+    const result = await search({ embedQuery, rerank });
+    const window = rerank.mock.calls[0]![1];
+    expect(window).toHaveLength(RERANK_WINDOW);
+    expect(window).toContain(`${lexicalOnly.title}\n\n${lexicalOnly.content}`);
+    expect(result.ids[0]).toBe(target.id);
+  });
+
   it('keeps the recency and confirmation boost on top of the scores', async () => {
     const [plain, confirmed] = seed(2);
     for (let i = 0; i < 3; i++) mem.confirm(confirmed!.id, projectScope(projectId));
@@ -152,6 +192,46 @@ describe('the reranked path of hybrid search', () => {
       Promise.resolve(docs.map((d) => (d.startsWith(`${confirmed!.title}\n`) ? 0.45 : 0.5)));
     const result = await search({ rerank: slightlyLower });
     expect(result.ids.indexOf(confirmed!.id)).toBeLessThan(result.ids.indexOf(plain!.id));
+  });
+});
+
+describe('interleaveBranches', () => {
+  it('alternates the branches rank by rank and stops at the size', () => {
+    expect(
+      interleaveBranches(
+        [
+          ['a', 'b', 'c'],
+          ['d', 'e', 'f'],
+        ],
+        4,
+      ),
+    ).toEqual(['a', 'd', 'b', 'e']);
+    expect(
+      interleaveBranches(
+        [
+          ['a', 'b', 'c'],
+          ['d', 'e', 'f'],
+        ],
+        3,
+      ),
+    ).toEqual(['a', 'd', 'b']);
+  });
+
+  it('keeps a row once, at its first turn', () => {
+    expect(
+      interleaveBranches(
+        [
+          ['a', 'b'],
+          ['a', 'c'],
+        ],
+        3,
+      ),
+    ).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps taking from the longer branch once the shorter one runs out', () => {
+    expect(interleaveBranches([['a'], ['b', 'c', 'd']], 4)).toEqual(['a', 'b', 'c', 'd']);
+    expect(interleaveBranches([[], ['b', 'c']], 4)).toEqual(['b', 'c']);
   });
 });
 

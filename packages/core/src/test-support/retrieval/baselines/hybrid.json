@@ -4,37 +4,37 @@
   "discriminatingMetric": "recall@k vs 'grep' — the corpus's honest-control comparison",
   "ceilings": {
     "5": {
-      "precisionAtK": 0.3090909090909091,
-      "recallAtK": 0.9829545454545454,
+      "precisionAtK": 0.2857142857142857,
+      "recallAtK": 0.9866071428571429,
       "mrr": 1
     },
     "8": {
-      "precisionAtK": 0.21022727272727273,
+      "precisionAtK": 0.19196428571428573,
       "recallAtK": 1,
       "mrr": 1
     }
   },
   "floors": {
     "5": {
-      "precisionAtK": 0.26000000000000006,
-      "recallAtK": 0.90625,
-      "mrr": 0.825
+      "precisionAtK": 0.20000000000000007,
+      "recallAtK": 0.775892857142857,
+      "mrr": 0.7
     },
     "8": {
-      "precisionAtK": 0.16249999999999998,
-      "recallAtK": 0.9249999999999999,
-      "mrr": 0.825
+      "precisionAtK": 0.11964285714285715,
+      "recallAtK": 0.7892857142857143,
+      "mrr": 0.7
     }
   },
   "caps": {
     "5": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.045454545454545456,
+      "overAbstentionRate": 0.03571428571428571,
       "foreignScopeRate": 0
     },
     "8": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.045454545454545456,
+      "overAbstentionRate": 0.03571428571428571,
       "foreignScopeRate": 0
     }
   }

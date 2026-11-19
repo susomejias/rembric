@@ -71,6 +71,8 @@ export interface QueryItem {
   widened?: true;
   /** Marks the small Spanish subset (design.md Open Question 1). */
   bilingual?: boolean;
+  /** The query is in a different language from its gold memory, so only the dense branch can find it. */
+  crossLingual?: true;
 }
 
 /** One retrieval outcome: ids ranked best-first, plus the explicit abstention flag where a retriever has one. */
