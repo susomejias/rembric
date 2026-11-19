@@ -50,8 +50,7 @@ export interface Services {
   sessionAbandonAfterMs: number;
   embeddingWorker: () => Promise<EmbeddingWorker>;
   warmEmbedder: () => Promise<boolean>;
-  /** `null` when the operator turned reranking off with `REMBRIC_RERANK=off`. */
-  reranker: RerankClient | null;
+  reranker: RerankClient;
   hasEmbeddingBacklog: () => boolean;
   entityBackfillWorker: EntityBackfillWorker;
   oauth: OAuthService | null;
@@ -94,17 +93,14 @@ function buildServices(): Services {
       return embedder;
     }));
 
-  const reranker =
-    process.env['REMBRIC_RERANK'] === 'off'
-      ? null
-      : new RerankClient({ spawn: () => spawnRerankWorker(bakedModelsDir()) });
+  const reranker = new RerankClient({ spawn: () => spawnRerankWorker(bakedModelsDir()) });
 
   const memory = new MemoryService(
     repos,
     db.db,
     undefined,
     (text) => getEmbedder().then((embedder) => embedder.embed(embeddingQueryInput(text))),
-    reranker ? (query, documents) => reranker.score(query, documents) : undefined,
+    (query, documents) => reranker.score(query, documents),
   );
 
   let embeddingWorkerPromise: Promise<EmbeddingWorker> | null = null;

@@ -8,7 +8,7 @@
 - Reranking is requested per calling surface: `memory.search` and the ranked pass of `memory.context` request it; the per-turn recall endpoint, file-anchored recall and save-time candidate detection do not.
 - On the reranked path the relative-level filter no longer thins the rerank window and `gateShortened` is not reported; the abstention floor and the empty-pool verdict are unchanged and run before any inference. The cross-encoder score is not used as an abstention gate.
 - Run reranker inference, tokenization included, in one dedicated worker thread, with a per-call deadline that falls back to the unreranked response. No worker pool.
-- One operator setting disables reranking for the whole server (no model loaded).
+- Reranking is part of the engine and always on: no setting turns it off; failures degrade each search to the unreranked order.
 - Bake the reranker model into the Docker image with a pinned identity, and restate the documented hardware requirements from measurement. **BREAKING** (documented contract): the hardware floor rises for servers that keep reranking enabled, and the README's "≤800 MB total process RSS" class is replaced by a measured budget.
 - **BREAKING** (HTTP contract wording): `POST /api/<slug>/memory/recall` no longer promises an order identical to `memory.search`; it returns the unreranked order.
 - Add a reranked retriever to the retrieval evaluation harness, gated against the unreranked one.
@@ -25,7 +25,7 @@ None.
 
 - `memory`: the text-query branch gains an optional cross-encoder rerank of the fused pool's head; the post-fusion multiplier's left operand becomes the rerank score on that path; the relative filter is not applied to the rerank window; reranker inference runs in a worker thread under a deadline.
 - `http-api`: the per-turn recall endpoint returns the unreranked order and never runs the reranker.
-- `open-source-distribution`: the image bundles the reranker model; the README hardware requirement is restated from measurement with a reranking-disabled minimum.
+- `open-source-distribution`: the image bundles the reranker model; the README hardware requirement is restated from measurement on the built image with both models running.
 - `retrieval-evaluation`: the harness evaluates the reranked path as its own retriever with a rank-sensitive metric and a latency series.
 
 ## Impact

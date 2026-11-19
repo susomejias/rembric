@@ -85,9 +85,9 @@ The worker owns the model and its tokenizer; the serving thread posts `{query, d
 
 A single worker serialises requests, so latency grows linearly with simultaneous searches. Each call carries `RERANK_DEADLINE_MS`; on expiry, or when the model is not loaded, the call returns exactly what the unreranked path returns. This bounds the worst case and makes every failure mode of the reranker degrade to today's behaviour. The fallback needs the unreranked result, so the service computes the gated, boosted page from the same fused pool it already has; no second retrieval runs.
 
-### 8. An operator switch, default on
+### 8. No off switch
 
-`REMBRIC_RERANK=off` skips loading the model. It exists because the model is the difference between the minimum and the recommended host. Alternative: default off, rejected because the measured gain is the point of the change.
+Reranking is part of the engine, like the embedder, and cannot be turned off. An earlier draft shipped `REMBRIC_RERANK=off` to save about 0.5 GB on small hosts; the owner removed it because a switch makes the feature optional and the measured gain is the point of the change. Failure handling does not need a switch: a model that cannot load, a crashed worker or a CPU too slow for the deadline already degrade each search to the unreranked order, and boot logs a warning when a full window misses the deadline. Alternatives: default-off (rejected for the same reason) and default-on with an opt-out (rejected by the owner).
 
 ## Risks / Trade-offs
 
@@ -95,13 +95,13 @@ A single worker serialises requests, so latency grows linearly with simultaneous
 - [Risk] The reranker demotes related-context memories below ones that match the query literally (the dominant pattern among the queries it lost) → Accepted because it won on far more queries than it lost; a rerank/fusion score blend is an open question, not part of this change.
 - [Risk] A memory whose answering text lies beyond 128 tokens can be misordered → Mitigation: it is still retrieved over its full text and stays in the window; the harness gains long-memory fixtures so the cost is observable.
 - [Risk] The evidence is a few dozen queries with one LLM judge each → Mitigation: the committed harness arm gates the reranked path against the unreranked one in CI.
-- [Trade-off] Resident memory grows by roughly the reranker worker (about 1 GB with its tokenizer) → Accepted because it lands after the embedder swap, which frees about 0.8 GB, and because the switch restores the smaller footprint.
+- [Trade-off] Resident memory grows by roughly the reranker worker (about 1 GB with its tokenizer) → Accepted because it lands after the embedder swap, which frees about 0.8 GB; measured on the built image, the process stays near 1.3 GB under load.
 - [Risk] Next.js standalone output must ship the worker entry file → Mitigation: task 3.5 proves the worker starts from the built standalone bundle, not only under `next dev`.
 - [Trade-off] The relevance-level machinery stays; the code does not get shorter → Accepted because the level remains the abstention quantity and the fallback path.
 
 ## Migration Plan
 
-No schema change. Deploy is the new image; the model is baked in. Rollback is the previous image, or `REMBRIC_RERANK=off` without a redeploy.
+No schema change. Deploy is the new image; the model is baked in. Rollback is the previous image.
 
 ## Open Questions
 

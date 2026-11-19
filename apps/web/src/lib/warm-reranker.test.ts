@@ -29,7 +29,7 @@ describe('warmReranker', () => {
     const { reranker } = fake([[0.1], null]);
     await warmReranker({ reranker });
     expect(log.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(
-      /missed its \d+ ms deadline.*REMBRIC_RERANK=off/,
+      /missed its \d+ ms deadline.*unreranked order/,
     );
   });
 

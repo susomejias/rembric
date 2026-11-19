@@ -141,7 +141,7 @@ cross-encoder score per row × the usual recency/confirmation/type boost → pag
      → the unreranked page, no error, logged once a minute per cause
 ```
 
-The worker starts at boot after the embedder warms; `REMBRIC_RERANK=off` never starts it. The relative relevance filter does not thin the rerank window (the cross-encoder reads those rows instead), so a reranked page never reports `gateShortened`. A request whose deadline passed while queued is dropped by the worker before it runs, so a burst cannot build a backlog. One worker only: a second one measured about 600 MB more for about a fifth less latency at eight concurrent searches.
+The worker starts at boot after the embedder warms and is always on; there is no switch to turn reranking off. The relative relevance filter does not thin the rerank window (the cross-encoder reads those rows instead), so a reranked page never reports `gateShortened`. A request whose deadline passed while queued is dropped by the worker before it runs, so a burst cannot build a backlog. One worker only: a second one measured about 600 MB more for about a fifth less latency at eight concurrent searches.
 
 ## Failure modes, summarized
 
