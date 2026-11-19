@@ -8,6 +8,7 @@ export {
 } from './consolidation/operations.js';
 export * from './embeddings/embedder.js';
 export * from './embeddings/state.js';
+export * from './rerank/index.js';
 export * from './server-context/request-context.js';
 export * from './server-context/tool-call-context.js';
 export * from './services/index.js';

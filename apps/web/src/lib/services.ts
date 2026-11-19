@@ -11,8 +11,11 @@ import {
   PromptsService,
   RelationsService,
   RepositoryBindingsService,
+  RerankClient,
+  spawnRerankWorker,
   TokensService,
   UsageCounters,
+  bakedModelsDir,
   embedderModelIsBaked,
   embeddingQueryInput,
   ensureVectorModel,
@@ -47,6 +50,8 @@ export interface Services {
   sessionAbandonAfterMs: number;
   embeddingWorker: () => Promise<EmbeddingWorker>;
   warmEmbedder: () => Promise<boolean>;
+  /** `null` when the operator turned reranking off with `REMBRIC_RERANK=off`. */
+  reranker: RerankClient | null;
   hasEmbeddingBacklog: () => boolean;
   entityBackfillWorker: EntityBackfillWorker;
   oauth: OAuthService | null;
@@ -89,8 +94,17 @@ function buildServices(): Services {
       return embedder;
     }));
 
-  const memory = new MemoryService(repos, db.db, undefined, (text) =>
-    getEmbedder().then((embedder) => embedder.embed(embeddingQueryInput(text))),
+  const reranker =
+    process.env['REMBRIC_RERANK'] === 'off'
+      ? null
+      : new RerankClient({ spawn: () => spawnRerankWorker(bakedModelsDir()) });
+
+  const memory = new MemoryService(
+    repos,
+    db.db,
+    undefined,
+    (text) => getEmbedder().then((embedder) => embedder.embed(embeddingQueryInput(text))),
+    reranker ? (query, documents) => reranker.score(query, documents) : undefined,
   );
 
   let embeddingWorkerPromise: Promise<EmbeddingWorker> | null = null;
@@ -166,6 +180,7 @@ function buildServices(): Services {
     }),
     embeddingWorker,
     warmEmbedder,
+    reranker,
     hasEmbeddingBacklog: () => repos.vectors.findMissingEmbeddings(1).length > 0,
     entityBackfillWorker,
     oauth: buildOAuthService(repos),

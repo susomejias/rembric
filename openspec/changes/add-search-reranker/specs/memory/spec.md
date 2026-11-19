@@ -72,7 +72,7 @@ Cross-encoder inference, including tokenization of its input, SHALL run in one d
 
 There SHALL be exactly one such worker. Its requests SHALL be served one at a time in arrival order. A pool of several workers SHALL NOT be introduced without a new measurement: a second worker added roughly 600 MB of resident memory for about a fifth less latency at eight concurrent searches, and a fourth was no faster than a third.
 
-Every reranked call SHALL carry a deadline, `RERANK_DEADLINE_MS`, measured from the moment the request is handed to the worker and covering both its time in the queue and its inference. A call whose deadline passes SHALL **fall back**: it SHALL return exactly the response the unreranked path produces for the same call, and its late result SHALL be discarded. The same fallback SHALL apply when the model has not finished loading, failed to load, or the worker has exited. A fallback is not an error: the response SHALL NOT carry an error, and the failure SHALL be logged and counted.
+Every reranked call SHALL carry a deadline, `RERANK_DEADLINE_MS`, measured from the moment the request is handed to the worker and covering both its time in the queue and its inference. A call whose deadline passes SHALL **fall back**: it SHALL return exactly the response the unreranked path produces for the same call, and its late result SHALL be discarded. The same fallback SHALL apply when the model has not finished loading, failed to load, or the worker has exited. A request whose deadline passed while it waited in the queue SHALL be dropped by the worker without running inference, so a burst cannot build a backlog that makes every later call miss its deadline too. The worker SHALL NOT be terminated while it runs inference: measured, terminating the thread mid-inference aborted the whole process, so stopping it SHALL ask it to exit after its current request. A fallback is not an error: the response SHALL NOT carry an error, and the failure SHALL be logged and counted.
 
 The worker SHALL be started and its model loaded outside any request, so a first reranked call does not pay the model load. A worker that exits SHALL be restarted, with the restarts bounded so a model that cannot load does not respawn in a loop.
 
@@ -93,6 +93,12 @@ The worker SHALL be started and its model loaded outside any request, so a first
 - **GIVEN** reranker artifacts that are missing or corrupt
 - **WHEN** `memory.search` is called with an eligible text query
 - **THEN** the response SHALL be the unreranked one and the load failure SHALL be logged
+
+#### Scenario: An expired request is not run
+
+- **GIVEN** a reranked call whose deadline passes while it is still queued behind another request
+- **WHEN** the worker reaches it
+- **THEN** the worker SHALL reply without running inference, and the call SHALL already have fallen back
 
 #### Scenario: A late result is discarded
 

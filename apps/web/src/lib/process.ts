@@ -74,7 +74,7 @@ export function startProcess(): void {
   startEmbeddingDrain(services);
   startEntityBackfill(services);
   void closeArchivedProjectJudgments(services);
-  void warmEmbedder(services);
+  void warmEmbedder(services).then(() => warmReranker(services));
 }
 
 export async function closeArchivedProjectJudgments(
@@ -110,6 +110,21 @@ async function warmEmbedder(services: Services): Promise<void> {
   } catch (err) {
     console.error('[process] embedder warmup failed', message(err));
   }
+}
+
+export async function warmReranker(services: Pick<Services, 'reranker'>): Promise<void> {
+  if (!services.reranker) {
+    console.error('[process] reranking disabled (REMBRIC_RERANK=off)');
+    return;
+  }
+  const started = performance.now();
+  const ready = await services.reranker.start();
+  const ms = Math.round(performance.now() - started);
+  console.error(
+    ready
+      ? `[process] reranker ready in its worker thread (${ms} ms)`
+      : '[process] reranker unavailable; searches serve the unreranked order',
+  );
 }
 
 function bootstrapAdminToken(services: Services): void {

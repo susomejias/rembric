@@ -1,0 +1,6 @@
+{
+  "modelId": "hindsight-ai/hs-rerank-1",
+  "dtype": "fp32",
+  "revision": "927f5be31280298a51cf29af8a29cb111ed812c5",
+  "onnxArtifact": "onnx/model.onnx"
+}

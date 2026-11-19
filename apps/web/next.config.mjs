@@ -50,6 +50,9 @@ const nextConfig = {
       // copy until this include puts it there. The runner only ever
       // `readdirSync`es the directory, so the flat `*.sql` is its own contract.
       '../../packages/db/dist/migrations/*.sql',
+      // The reranker runs in a worker thread started from `new URL('./rerank-worker.js',
+      // import.meta.url)`: a file loaded by path at runtime, which tracing never sees.
+      '../../packages/core/dist/rerank/*.{js,json}',
       // `onnxruntime-node` finds its addon through a computed `require`
       // (`../bin/napi-v6/${process.platform}/${process.arch}/…`), which tracing
       // *does* follow — it specialises both expressions — so the binding `.node`

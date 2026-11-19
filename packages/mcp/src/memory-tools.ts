@@ -845,7 +845,7 @@ async function handleSearch(
 
   try {
     const { memories, abstained, abstainReason, gateShortened, viaEntity, entityIndexDraining } =
-      await deps.memory.searchWithAbstention(input, searchScope);
+      await deps.memory.searchWithAbstention(input, searchScope, undefined, { rerank: true });
     const entitiesByMemory = deps.repos
       ? deps.repos.entities.findEntitiesForMemories(memories.map((m) => m.id))
       : new Map<string, { kind: string; value: string }[]>();
@@ -1293,6 +1293,8 @@ async function handleContext(
       const pass = await deps.memory.searchWithAbstention(
         { query: focusText, limit: RELEVANCE_LIMIT },
         scope,
+        undefined,
+        { rerank: true },
       );
       rankedPass = {
         abstained: pass.abstained,

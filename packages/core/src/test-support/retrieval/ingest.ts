@@ -2,6 +2,7 @@ import { createRepositories, projectScope, type Repositories, type Scope } from 
 
 import { type Embedder, embeddingQueryInput } from '../../embeddings/embedder.js';
 import { EmbeddingWorker } from '../../services/embedding-worker.js';
+import type { RerankFn } from '../../services/hybrid-search.js';
 import { MemoryService, type SaveMemoryInput } from '../../services/memory.js';
 import { ProjectsService } from '../../services/projects.js';
 import { RelationsService } from '../../services/relations.js';
@@ -56,7 +57,7 @@ async function saveThroughCuration(
 export async function ingestCorpus(
   items: CorpusItem[],
   embedder: Embedder,
-  opts: CandidateSeams = {},
+  { rerank, ...opts }: CandidateSeams & { rerank?: RerankFn } = {},
 ): Promise<Ingested> {
   const { handle, dataDir, cleanup } = createTestDb();
   const repos = createRepositories(handle.db);
@@ -72,7 +73,7 @@ export async function ingestCorpus(
   const embedText = (text: string): Promise<Float32Array> =>
     embedder.embed(embeddingQueryInput(text));
 
-  const memory = new MemoryService(repos, handle.db, clock.now, embedText);
+  const memory = new MemoryService(repos, handle.db, clock.now, embedText, rerank);
   const relations = new RelationsService(repos, handle.db);
   const embeddingWorker = new EmbeddingWorker({ repos, embedder });
 

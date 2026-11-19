@@ -281,6 +281,14 @@ Applied to every bearer-authenticated surface (`/mcp`, `/api`, `/healthz`, `/adm
 | -------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SESSION_ABANDON_AFTER_MS` | `86400000` | At server startup, sessions with `status='active'` whose `started_at` is older than this are flipped to `abandoned`. Default 24h; floor 1min, ceiling 30 days. |
 
+### Reranking
+
+| Variable         | Default | Description                                                                                                                                                                                              |
+| ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REMBRIC_RERANK` | on      | `off` skips loading the cross-encoder: `memory.search` and `memory.context` serve the plain hybrid order and the server needs only the embedder's memory. Any other value, or unset, keeps reranking on. |
+
+`memory.search` and the relevance channel of `memory.context` reorder their top 10 candidates with an in-process cross-encoder (`hs-rerank-1`) running in its own worker thread. A call the worker cannot answer within 300 ms, or any reranker failure, serves the unreranked order instead of an error. Per-turn recall hints and file recall never rerank. See [`docs/embeddings.md`](docs/embeddings.md#5-reranking-memorysearch-and-memorycontext).
+
 ### Candidate detection (save-time judgment)
 
 Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
@@ -542,7 +550,7 @@ It deliberately does **not** contribute a stream to the hybrid RRF fusion: in it
    │  └──────────────────────────────▲──────────────────────────────────┘  │
    │  ┌──────────────────────────────┴──────────────────────────────────┐  │
    │  │  In-process background work (no external services)              │  │
-   │  │   embedder: gte-multilingual-base, ONNX q8, loaded at boot       │  │
+   │  │   embedder: hs-embed-1, int8 ONNX, 384 dims, loaded on first use │  │
    │  │   embedding drain worker      → fills memory_vec                 │  │
    │  │   entity backfill worker      → fills entities/memory_entities   │  │
    │  │   deterministic sweep: decay · deadline · stale drain (no LLM)   │  │

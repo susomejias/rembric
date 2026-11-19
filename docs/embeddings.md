@@ -1,6 +1,6 @@
 # Embeddings architecture
 
-The semantic engine is in-process and part of the binary: `gte-multilingual-base` (Apache 2.0), ONNX q8, 768 dims, cls pooling, normalized output, pinned revision. No external services, no API keys, no runtime downloads, no configuration — the engine is code. Four flows cover everything.
+The semantic engine is in-process and part of the binary: `hindsight-ai/hs-embed-1` (MIT), int8 ONNX, 384 dims, mean pooling, normalized output, the same input for queries and memories with no prefix, pinned revision. No external services, no API keys, no runtime downloads, no configuration — the engine is code. Four flows cover everything.
 
 ## 1. Image build (once, at `docker build`)
 
@@ -17,7 +17,7 @@ packages/core/scripts/fetch-model.mjs
    │           hf_token build secret authenticates on rate-limited CI)
    ├─ phase 2  flatten to the local-model layout transformers.js
    │           resolves offline:
-   │           /models/onnx-community/gte-multilingual-base/{config,tokenizer,onnx/…}
+   │           /models/hindsight-ai/hs-embed-1/{config,tokenizer,onnx/…}
    └─ phase 3  fresh process, networking DISABLED:
                load the flattened files + embed a fixed trio
                → assert dims + similarity bounds
@@ -123,6 +123,26 @@ identifiers (paths, function names, commands); vec catches paraphrase and
 cross-language matches (an ES save finds its EN duplicates with zero
 lexical overlap). A pair missed by one is routinely caught by the other.
 
+## 5. Reranking (`memory.search` and `memory.context`)
+
+```
+memory.search / memory.context ranked pass   (recall hints and file recall: never)
+   │
+   ▼
+hybrid search → fused pool (unchanged) → abstention floor / empty pool → abstain? done
+   │
+   ▼
+first RERANK_WINDOW (10) fused rows, title + content, cut to RERANK_MAX_TOKENS (192)
+   │  posted to the rerank worker thread (owns hs-rerank-1 + its tokenizer)
+   ▼
+cross-encoder score per row × the usual recency/confirmation/type boost → page
+   │
+   ✗ deadline (300 ms, queue wait included) / model not loaded / worker exited
+     → the unreranked page, no error, logged once a minute per cause
+```
+
+The worker starts at boot after the embedder warms; `REMBRIC_RERANK=off` never starts it. The relative relevance filter does not thin the rerank window (the cross-encoder reads those rows instead), so a reranked page never reports `gateShortened`. A request whose deadline passed while queued is dropped by the worker before it runs, so a burst cannot build a backlog. One worker only: a second one measured about 600 MB more for about a fifth less latency at eight concurrent searches.
+
 ## Failure modes, summarized
 
 | Failure                            | Behavior                                                                                  |
@@ -136,18 +156,21 @@ lexical overlap). A pair missed by one is routinely caught by the other.
 | Data dir unwritable at reset       | Boot proceeds, index untouched, reset retried next boot                                   |
 | Reset interrupted after wipe       | Marker stays `pending`, index empty, drain refills; next boot may re-wipe                 |
 | Reset owed but not done            | `memory.doctor` warns; dense results unreliable until a load settles it                   |
+| Reranker missing/corrupt           | Logged once; reranking stays off until restart, searches serve the unreranked order       |
+| Rerank worker crashes              | In-flight searches fall back; restarted up to 3 times, then reranking stays off           |
+| Rerank deadline missed             | That search serves the unreranked order; counted per cause                                |
 
 ## Engine constants (not configuration)
 
 | Constant                     | Value                                                           | Lives in                                             |
 | ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
-| Model + revision             | `onnx-community/gte-multilingual-base@2edbf5e`                  | `packages/core/src/embeddings/model-identity.json`   |
-| Quantization / dims          | q8 / 768 (matches `memory_vec FLOAT[768]`)                      | `packages/core/src/embeddings/model-identity.json`   |
-| `VEC_THRESHOLD`              | 0.70 (calibrated 2026-06-05; telemetry on every drain)          | `packages/core/src/services/save-time-candidates.ts` |
+| Model + revision             | `hindsight-ai/hs-embed-1@3164caa`                               | `packages/core/src/embeddings/model-identity.json`   |
+| Quantization / dims          | int8 / 384 (matches `memory_vec FLOAT[384]`, migration 0040)    | `packages/core/src/embeddings/model-identity.json`   |
+| `VEC_THRESHOLD`              | 0.62 (re-derived for hs-embed-1 on the save-time fixture)       | `packages/core/src/services/save-time-candidates.ts` |
 | `LEXICAL_CANDIDATE_FLOOR`    | 0.60 (save-time sweep, `pnpm run eval:save-time`)               | `packages/core/src/services/save-time-candidates.ts` |
 | `COMMON_TERM_DOCUMENT_RATIO` | 0.5 (where FTS5's bm25 stops weighting a term; save and search) | `packages/core/src/services/save-time-candidates.ts` |
-| `CANDIDATE_LOW_BAND_CEILING` | 0.75 (per-band verdict rates, issue #467)                       | `packages/core/src/services/save-time-candidates.ts` |
-| `CANDIDATE_HIGH_BAND_FLOOR`  | 0.85 (per-band verdict rates, issue #467)                       | `packages/core/src/services/save-time-candidates.ts` |
+| `CANDIDATE_LOW_BAND_CEILING` | 0.65 (just below the lowest labelled contradiction, hs-embed-1) | `packages/core/src/services/save-time-candidates.ts` |
+| `CANDIDATE_HIGH_BAND_FLOOR`  | 0.85 (re-measured on hs-embed-1: separates duplicates)          | `packages/core/src/services/save-time-candidates.ts` |
 
 The lexical pass never thresholds raw bm25: bm25 is unbounded and depends on
 corpus size, so no fixed floor over it is stable. bm25 only orders the pool
