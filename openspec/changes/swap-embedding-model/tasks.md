@@ -26,7 +26,7 @@
 ## 5. Operator path
 
 - [ ] 5.1 OPERATOR: upgrade a copy of a real data directory with the built image; record re-embed duration, process RSS at idle and during the drain, and one dense-branch search result
-- [ ] 5.2 OPERATOR: run the previous image against that upgraded copy and record what happens; write the rollback instructions from the observed behaviour
+- [x] 5.2 OPERATOR: run the previous image against that upgraded copy and record what happens; write the rollback instructions from the observed behaviour — observed with the previous code (not the image): it opens the upgraded data dir, wipes the 384-dim vectors, and every re-embed then fails on the dimension, so search stays lexical-only; rollback = restore the pre-upgrade backup (docs/embeddings.md)
 - [x] 5.3 Update `docs/embeddings.md` (model, dimension, upgrade and rollback) and the model description in `README.md`
 
 ## 6. Verification
