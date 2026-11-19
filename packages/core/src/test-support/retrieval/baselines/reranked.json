@@ -4,37 +4,37 @@
   "discriminatingMetric": "mrr and ndcg vs 'hybrid' — it reorders the same pool, so recall cannot show its effect",
   "ceilings": {
     "5": {
-      "precisionAtK": 0.3090909090909091,
-      "recallAtK": 0.9829545454545454,
+      "precisionAtK": 0.2857142857142857,
+      "recallAtK": 0.9866071428571429,
       "mrr": 1
     },
     "8": {
-      "precisionAtK": 0.21022727272727273,
+      "precisionAtK": 0.19196428571428573,
       "recallAtK": 1,
       "mrr": 1
     }
   },
   "floors": {
     "5": {
-      "precisionAtK": 0.26000000000000006,
-      "recallAtK": 0.9329545454545454,
-      "mrr": 0.8818181818181817
+      "precisionAtK": 0.2357142857142857,
+      "recallAtK": 0.9366071428571429,
+      "mrr": 0.8964285714285714
     },
     "8": {
-      "precisionAtK": 0.16249999999999998,
+      "precisionAtK": 0.1419642857142857,
       "recallAtK": 0.95,
-      "mrr": 0.8818181818181817
+      "mrr": 0.8964285714285714
     }
   },
   "caps": {
     "5": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.045454545454545456,
+      "overAbstentionRate": 0.03571428571428571,
       "foreignScopeRate": 0
     },
     "8": {
       "abstentionFalsePositiveRate": 1,
-      "overAbstentionRate": 0.045454545454545456,
+      "overAbstentionRate": 0.03571428571428571,
       "foreignScopeRate": 0
     }
   }

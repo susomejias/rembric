@@ -4,6 +4,8 @@
 
 The evaluation harness SHALL run the reranked search path as a retriever of its own, against the identical ingested corpus and query set as the unreranked hybrid retriever, and SHALL commit a baseline for it with the same floors and caps discipline. Without it the reranker's shipped constants would rest on a measurement nobody can re-run, and a regression in ordering would be invisible to CI.
 
+The query set SHALL include queries written in a different language from the memory that answers them, in a scope that also holds memories in the query's language, because that is the case where only the dense retriever can find the answer and the lexical retriever returns unrelated rows. The reranked retriever SHALL answer them; the unreranked hybrid retriever is scored on them as it is, so its committed floors record what it does today rather than what it should do.
+
 The reranked retriever SHALL use the real cross-encoder, not a stand-in, and SHALL be scored with a rank-sensitive metric in addition to the existing ones, because the reranker reorders a pool it does not widen: recall at `k` alone cannot see its effect. Its committed floors SHALL be at or above the unreranked hybrid retriever's on every gated metric at every committed `k`, so a change that makes reranking worse than not reranking fails the gate.
 
 The corpus SHALL contain memories longer than `RERANK_MAX_TOKENS` whose answering text lies beyond that length, so the cost of truncation is observable rather than assumed.
