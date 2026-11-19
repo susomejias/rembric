@@ -116,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 
 Pick **Server → install**: it generates `REMBRIC_ADMIN_TOKEN` and, if Docker is present and you confirm, runs `docker compose up -d` for you. Then pick **Plugins** to install the plugin for your agent. Pin a release for reproducibility with `--ref=<tag>` where the backend supports it. Hermes uses its native plugin manager and rejects explicit refs/local sources; [copied-install migration and native ownership](./apps/plugin/.hermes-plugin/README.md#transition-from-a-copied-installation) require explicit operator review.
 
-Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker, 2 vCPUs and 2 GB of RAM (the in-process embedder and reranker are why — see [docs/embeddings.md](./docs/embeddings.md)).
+Docker is the canonical distribution: the image bundles Node 22, the native modules (`better-sqlite3`, `sqlite-vec`, `onnxruntime-node`) and the embedding model, pre-built for `linux/amd64` and `linux/arm64` — the only requirement on your host is Docker with at least 2 vCPUs and 2 GB of RAM, 3–4 GB recommended (the in-process embedder and reranker are why — see [docs/embeddings.md](./docs/embeddings.md)).
 
 MCP at `http://<host>:8787/mcp`, dashboard at `http://<host>:8787/dashboard` (replace `<host>` with `127.0.0.1` if running on the same host as your agent, or the LAN/Tailscale hostname of the box hosting Rembric otherwise).
 
@@ -236,7 +236,7 @@ All config via environment variables. With Docker, these live in `.env` and are 
 
 ### Hardware requirements
 
-**Minimum 2 vCPU and 2 GB RAM.** The server runs its semantic engine in-process: an embedding model (`hs-embed-1`, MIT, int8 ONNX, 384 dims, reads at most 1024 tokens per memory) on the request thread and a cross-encoder reranker (`hs-rerank-1`, MIT) in its own worker thread. Both are part of the engine and always on. Measured on that minimum (Docker limited to `--cpus=2 --memory=2g`) over a real corpus of a few thousand memories:
+**Minimum 2 vCPU and 2 GB RAM; 3–4 GB recommended.** Below that minimum Rembric is not supported: it may start, but slow or failing searches and saves are the expected result, not a bug. The server runs its semantic engine in-process: an embedding model (`hs-embed-1`, MIT, int8 ONNX, 384 dims, reads at most 1024 tokens per memory) on the request thread and a cross-encoder reranker (`hs-rerank-1`, MIT) in its own worker thread. Both are part of the engine and always on. Measured on that minimum (Docker limited to `--cpus=2 --memory=2g`) over a real corpus of a few thousand memories:
 
 | Measurement                              | Value                             |
 | ---------------------------------------- | --------------------------------- |
@@ -246,7 +246,7 @@ All config via environment variables. With Docker, these live in `.env` and are 
 | `memory.search` p50, 1 / 4 / 8 at once   | ~230 / ~390 / ~450 ms             |
 | `memory.save` p50                        | ~55 ms                            |
 
-The 2 GB are for Rembric itself: on a VPS with 2 GB in total the operating system takes its own share, so pick a larger plan there. Fewer than 2 vCPUs is not a measured configuration. Reranking reorders the top 10 candidates of `memory.search` and `memory.context`; a search it cannot finish within 300 ms serves the plain order instead, so slower CPUs lose the reranking rather than wait for it. Once the embedding backlog is empty, the server times a full rerank and logs a warning when this CPU cannot meet that deadline. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic search and candidate detection (including cross-language matching) work out of the box on an air-gapped box. Disk: the image carries both models (~380 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
+The 2 GB minimum is for Rembric itself; the operating system and anything else on the host need their own share, which is why 3–4 GB is the recommendation. Reranking reorders the top 10 candidates of `memory.search` and `memory.context`; a search it cannot finish within 300 ms serves the plain order instead, so slower CPUs lose the reranking rather than wait for it. Once the embedding backlog is empty, the server times a full rerank and logs a warning when this CPU cannot meet that deadline. That requirement buys the entire trade: **no external services, no API keys, no network calls** — semantic search and candidate detection (including cross-language matching) work out of the box on an air-gapped box. Disk: the image carries both models (~380 MB). The full pipeline is diagrammed in [docs/embeddings.md](./docs/embeddings.md).
 
 The engine is code, not configuration: there is no model selector, no threshold knob and no off switch. The model class is pinned (at most two models, ≤350M parameters in total, ≤2.5 GB process memory under load); changing it is a breaking architectural change.
 
