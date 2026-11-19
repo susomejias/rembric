@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.32.0](https://github.com/susomejias/rembric/compare/server-v0.31.5...server-v0.32.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **search:** REMBRIC_RERANK=off no longer disables reranking; the server needs about 2 GB of RAM.
+* **embeddings:** persisted vectors are dropped and recomputed on first boot; dense recall is lexical-only for a row until it is re-embedded.
+
+### Features
+
+* **embeddings:** switch the embedding model to hs-embed-1 (384 dims) ([1629540](https://github.com/susomejias/rembric/commit/16295409db435b05c35e5d0a0055ae7ce96d9556))
+* **search:** make reranking part of the engine with no off switch ([06c88fa](https://github.com/susomejias/rembric/commit/06c88fab52cb60a02adf7d7656b7c68a70109c4d))
+* **search:** re-time a stood-down reranker and restore REMBRIC_RERANK=off ([7435abf](https://github.com/susomejias/rembric/commit/7435abf1744eb05dc44c5e8ca04c6f2b937567f4)), closes [#534](https://github.com/susomejias/rembric/issues/534)
+* **search:** rerank memory.search and memory.context with a cross-encoder ([4c699a5](https://github.com/susomejias/rembric/commit/4c699a51d04eabdf4d671c87ecaf25871180e2a8))
+* **search:** stand the reranker down when the CPU cannot meet its deadline ([e5691dc](https://github.com/susomejias/rembric/commit/e5691dc22d14bdd2cf405be49242139f1203bff3)), closes [#534](https://github.com/susomejias/rembric/issues/534)
+
+
+### Bug Fixes
+
+* **embeddings:** cap embedder input at 1024 tokens ([b66afa1](https://github.com/susomejias/rembric/commit/b66afa14f244d99872229c9e17e8f03fe999f1d2))
+* **embeddings:** cap the re-embed drain at half the CPU time ([599f2b8](https://github.com/susomejias/rembric/commit/599f2b87844a20b9507321d0a83b71a3d854d5da))
+* **search:** harden the rerank path and drain re-embeds faster ([161514c](https://github.com/susomejias/rembric/commit/161514c17de61ac76ee49c73c7348f1c0aff2735))
+
+
+### Performance
+
+* **search:** read 128 tokens per rerank pair and use up to 4 threads ([e4c9ca4](https://github.com/susomejias/rembric/commit/e4c9ca46da0510809a0c7ccd8b80692a8ff31b65))
+
+
+### Documentation
+
+* require 2 vCPU and 2 GB, measured at that limit; time the reranker once the re-embed is done ([79e3071](https://github.com/susomejias/rembric/commit/79e30714131a5e12d4026f9cd1829dc6cb0d526c))
+
 ## [0.31.5](https://github.com/susomejias/rembric/compare/server-v0.31.4...server-v0.31.5) (2026-11-17)
 
 
