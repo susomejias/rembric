@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/susomejias/rembric/compare/server-v0.32.0...server-v0.32.1) (2026-11-19)
+
+
+### Features
+
+* **search:** build the rerank window by interleaving the two retrievers ([3d2beea](https://github.com/susomejias/rembric/commit/3d2beea9a962a5694b84777c8699aa2985a2833c))
+
 ## [0.32.0](https://github.com/susomejias/rembric/compare/server-v0.31.5...server-v0.32.0) (2026-11-19)
 
 
