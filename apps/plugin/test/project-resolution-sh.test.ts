@@ -420,7 +420,7 @@ describe('outcomes of POST /api/repositories/resolve', () => {
       '/api/shop/sessions',
       '/api/shop/sessions/sess-1/resume',
     ]);
-    expect(out.stdout).toContain('rembric: If this is a continuation');
+    expect(out.stdout).toContain('rembric: If Rembric memory tools are deferred');
     expect(out.stdout).not.toContain('not bound');
   });
 
@@ -428,7 +428,7 @@ describe('outcomes of POST /api/repositories/resolve', () => {
     resolveReply = bound('shop');
     const out = await start(twoRoot.dir);
     expect(out.stdout).toBe(
-      'rembric: If this is a continuation of recent work, call memory.context before responding.\n',
+      'rembric: If Rembric memory tools are deferred, load them via tool search before calling them.\n',
     );
   });
 
@@ -505,7 +505,7 @@ describe('outcomes of POST /api/repositories/resolve', () => {
       };
       expect(json.systemMessage).toContain('bound to shop');
       expect(json.hookSpecificOutput.additionalContext).toContain(
-        'rembric: If this is a continuation of recent work',
+        'rembric: If Rembric memory tools are deferred',
       );
     } finally {
       rmSync(join(twoRoot.dir, '.rembric'));
@@ -655,11 +655,11 @@ describe('once per session: the first outcome is cached and reused', () => {
 });
 
 describe('regression pins: outside git nothing changes', () => {
-  it('no .rembric and no env: no request at all, no resolve, only the continuation nudge', async () => {
+  it('no .rembric and no env: no request at all, no resolve, only the deferred-tools hint', async () => {
     const out = await start(notGit);
     expect(requests).toEqual([]);
     expect(out.stdout).toBe(
-      'rembric: If this is a continuation of recent work, call memory.context before responding.\n',
+      'rembric: If Rembric memory tools are deferred, load them via tool search before calling them.\n',
     );
     expect(out.stderr).toBe('');
   });
@@ -668,7 +668,7 @@ describe('regression pins: outside git nothing changes', () => {
     const out = await start(notGit, { GIT_DIR: join(twoRoot.dir, '.git') });
     expect(requests).toEqual([]);
     expect(out.stdout).toBe(
-      'rembric: If this is a continuation of recent work, call memory.context before responding.\n',
+      'rembric: If Rembric memory tools are deferred, load them via tool search before calling them.\n',
     );
   });
 
@@ -735,7 +735,7 @@ describe('git unavailable', () => {
     const out = await start(notGit, { PATH: noGitBin });
     expect(requests).toEqual([]);
     expect(out.stdout).toBe(
-      'rembric: If this is a continuation of recent work, call memory.context before responding.\n',
+      'rembric: If Rembric memory tools are deferred, load them via tool search before calling them.\n',
     );
   });
 });
