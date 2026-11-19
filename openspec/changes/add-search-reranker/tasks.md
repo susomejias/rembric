@@ -27,6 +27,7 @@
 - [x] 4.3 Add one test proving a call without the option returns exactly the ids it returned before this change, for every existing branch the change touches (text query with gates, entity branch, no-query listing)
 - [x] 4.4 Mutation check each new condition with `node scripts/mutate.mjs` (eligibility on offset, eligibility on limit, gate split, fallback) and confirm the test naming it goes red
 - [x] 4.5 Build the rerank window by interleaving the dense and lexical ranked lists instead of cutting the fused head, so a row only the dense retriever found reaches the model; test with a dense-only target crowded out of the fused head, and unit-test the interleaving (alternation, repeats, a short branch, the size bound)
+- [x] 4.6 Reserve `RERANK_DENSE_SLOTS` (8) of the window for the dense list, the rest for the lexical list, after measuring 5/5, 6/4, 7/3, 8/2, 9/1 and 10/0 on a private production corpus; test a dense row ranked below an even split reaching the window, and unit-test `rerankCandidates`
 
 ## 5. Calling surfaces
 

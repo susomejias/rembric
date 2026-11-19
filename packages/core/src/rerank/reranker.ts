@@ -9,6 +9,8 @@ export const RERANK_ONNX_ARTIFACT = identity.onnxArtifact;
 const RERANK_DTYPE = identity.dtype as 'fp32';
 
 export const RERANK_WINDOW = 10;
+/** Window rows reserved for the dense list; the rest go to the lexical list. */
+export const RERANK_DENSE_SLOTS = 8;
 export const RERANK_MAX_TOKENS = 128;
 export const RERANK_DEADLINE_MS = 300;
 const RERANK_BATCH = 5;
