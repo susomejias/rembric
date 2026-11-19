@@ -48,7 +48,7 @@ Reranking SHALL be an explicit option of the search service that each calling su
 
 The surfaces that SHALL request it are `memory.search` and the ranked pass of `memory.context`'s relevance channel. The surfaces that SHALL NOT request it are the per-turn recall endpoint, file-anchored recall, and save-time candidate detection.
 
-An operator SHALL be able to disable reranking for the whole server with one environment setting. With it disabled, no reranker model SHALL be loaded, every surface SHALL be served by the unreranked path, and the server's memory footprint SHALL be that of the embedding model alone.
+Reranking SHALL be part of the engine, as the embedder is: there SHALL be no operator setting or environment variable that turns it off. A reranker that cannot serve a call degrades that call to the unreranked path (see "Reranker inference MUST run off the main thread and MUST be bounded by a deadline"); that fallback is the only way a reranked surface serves the unreranked order.
 
 #### Scenario: An explicit search is reranked
 
@@ -60,11 +60,10 @@ An operator SHALL be able to disable reranking for the whole server with one env
 - **WHEN** a client calls the per-turn recall endpoint
 - **THEN** the search behind it SHALL NOT request reranking and no cross-encoder inference SHALL run for that call
 
-#### Scenario: Reranking is disabled by the operator
+#### Scenario: No setting turns reranking off
 
-- **GIVEN** the operator has disabled reranking
-- **WHEN** the server boots and serves `memory.search`
-- **THEN** the reranker model SHALL NOT be loaded and the response SHALL be the unreranked one
+- **WHEN** the environment schema and every environment read of the server are inspected
+- **THEN** none SHALL disable reranking, change its window, its token cap or its deadline
 
 ### Requirement: Reranker inference MUST run off the main thread and MUST be bounded by a deadline
 

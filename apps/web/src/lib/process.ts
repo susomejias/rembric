@@ -116,10 +116,6 @@ async function warmEmbedder(services: Services): Promise<void> {
 }
 
 export async function warmReranker(services: Pick<Services, 'reranker'>): Promise<void> {
-  if (!services.reranker) {
-    console.error('[process] reranking disabled (REMBRIC_RERANK=off)');
-    return;
-  }
   const started = performance.now();
   const ready = await services.reranker.start();
   const ms = Math.round(performance.now() - started);
@@ -140,7 +136,7 @@ export async function warmReranker(services: Pick<Services, 'reranker'>): Promis
   console.error(
     scored
       ? `[process] reranker full window ${windowMs} ms (deadline ${RERANK_DEADLINE_MS} ms)`
-      : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking to apply, so searches fall back to the unreranked order; set REMBRIC_RERANK=off to free its memory`,
+      : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking to apply, so searches fall back to the unreranked order`,
   );
 }
 

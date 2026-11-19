@@ -14,7 +14,7 @@
 - [x] 3.1 Add `rerank-worker.ts` (owns tokenizer and model, serves one request at a time) and `rerank-client.ts` (queue, per-call deadline, late-result discard, bounded restart)
 - [x] 3.2 Test with a fake worker: a call past its deadline resolves to the fallback signal, and its late result changes nothing
 - [x] 3.3 Test with a fake worker: a worker that exits is restarted, and restarts stop after the bound
-- [ ] 3.4 Wire the client in `apps/web/src/lib/services.ts`: start and warm the worker outside any request, honour `REMBRIC_RERANK=off` (no worker, no model), document the setting in `.env.example` — done except `.env.example`, which this session's permissions block; the switch is documented in README.md instead
+- [x] 3.4 Wire the client in `apps/web/src/lib/services.ts`: start and warm the worker outside any request, with no setting that turns reranking off (owner decision, 2026-11-19)
 - [x] 3.5 Prove the worker starts from the built Next.js standalone output: build, start the standalone server, run one eligible `memory.search`, and record the observed log line
 
 ## 4. Search pipeline
@@ -35,13 +35,13 @@
 - [x] 6.1 Add long-memory corpus items whose answering text begins beyond `RERANK_MAX_TOKENS`, with queries for them
 - [x] 6.2 Add a rank-sensitive metric (nDCG@k) to `scoring.ts` with tests
 - [x] 6.3 Add the `reranked` retriever to `retrievers/index.ts`, commit its baseline, and make `pnpm run eval` fail when a gated metric of it falls below the unreranked hybrid retriever's at the same `k`
-- [ ] 6.4 OPERATOR: on the published image for each architecture, record process RSS with reranking on and off under a recorded workload, and end-to-end `memory.search` latency at 1, 4 and 8 simultaneous calls; adjust `RERANK_DEADLINE_MS` from those numbers and record them in this file
-  - Measured on a locally built linux/arm64 image in a 3-vCPU, 4 GB Docker VM (amd64 not measured): reranking on — idle ~1.1 GB, under load ~1.3 GB, full re-embed peak 1318 MB, memory.search p50 178 / 380 / 431 ms at 1 / 4 / 8 concurrent, full window 150 ms; REMBRIC_RERANK=off — idle 561 MB, under load 687 MB, search p50 20 / 45 / 79 ms. Deadline kept at 300 ms. The standalone worker start was observed (`reranker ready in its worker thread`).
+- [ ] 6.4 OPERATOR: on the published image for each architecture, record process RSS under a recorded workload, and end-to-end `memory.search` latency at 1, 4 and 8 simultaneous calls; adjust `RERANK_DEADLINE_MS` from those numbers and record them in this file
+  - Measured on a locally built linux/arm64 image in a 3-vCPU, 4 GB Docker VM (amd64 not measured): reranking on — idle ~1.1 GB, under load ~1.3 GB, full re-embed peak 1318 MB, memory.search p50 178 / 380 / 431 ms at 1 / 4 / 8 concurrent, full window 150 ms; for reference, the same build with the reranker never started (a switch since removed) — idle 561 MB, under load 687 MB, search p50 20 / 45 / 79 ms. Deadline kept at 300 ms. The standalone worker start was observed (`reranker ready in its worker thread`).
 - [ ] 6.5 If 6.4 shows total RSS above the 2.5 GB class with reranking on, stop and report before changing any constant
 
 ## 7. Docs
 
-- [x] 7.1 Update `README.md` hardware section with the measured minimum (reranking off) and recommendation (reranking on) from 6.4
+- [x] 7.1 Update `README.md` hardware section with the measured recommendation from 6.4
 - [x] 7.2 Update `docs/embeddings.md` with the rerank flow, the worker, the deadline fallback and the switch
 
 ## 8. Verification
