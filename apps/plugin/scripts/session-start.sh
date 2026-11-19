@@ -13,8 +13,9 @@
 # 3. POSTs `/api/<slug>/sessions {id, cwd, agent}` to create or upsert the row.
 # 4. POSTs `/api/<slug>/sessions/<id>/resume`, which returns an ended or
 #    abandoned row to `active` and is a no-op on one that is already active.
-# 5. Emits a nudge so the agent reloads memory.context if relevant, or the
-#    notice for an unbound, ambiguous, unresolvable or conflicting repository.
+# 5. Emits the deferred-tools hint (prompt-search.sh owns the turn-1 recall
+#    line), plus the notice for an unbound, ambiguous, unresolvable or
+#    conflicting repository.
 #
 # Failure modes (missing slug, server unreachable, malformed input) all
 # fall through to a skip — the host session continues.
@@ -54,7 +55,7 @@ if [ -n "$SESSION_ID" ] && [ -n "$SLUG" ]; then
   rembric_post "/api/${SLUG}/sessions/${SESSION_ID}/resume" '{}'
 fi
 
-NUDGE='rembric: If this is a continuation of recent work, call memory.context before responding.'
+NUDGE='rembric: If Rembric memory tools are deferred, load them via tool search before calling them.'
 NOTICE="$(rembric_session_project_notice "$SESSION_ID")"
 NOTICE="${NOTICE%$'\n'}"
 if [ -z "$NOTICE" ]; then
