@@ -42,6 +42,7 @@ const UUID_SESSION_ID = '0189d5f2-6c3a-7b4e-9f21-8c7d6e5a4b30';
 const promptNudgeSh = join(here, '..', 'scripts', 'prompt-nudge.sh');
 const promptSearchSh = join(here, '..', 'scripts', 'prompt-search.sh');
 const postCompactSh = join(here, '..', 'scripts', 'post-compact.sh');
+const sessionStartSh = join(here, '..', 'scripts', 'session-start.sh');
 const hermesInit = join(here, '..', '.hermes-plugin', '__init__.py');
 const pluginCoreMjs = join(here, '..', 'bin', 'rembric-plugin-core.mjs');
 
@@ -256,10 +257,46 @@ describe('the shared JS/TS core: nudgesForTurn order and no-cadence contract', (
   });
 });
 
+describe('session-start.sh line (Claude Code + Codex CLI)', () => {
+  function runSessionStart(cwd: string, agent: string): string {
+    return execFileSync('bash', [sessionStartSh, agent], {
+      input: JSON.stringify({ session_id: 's-sessionstart-fixture', cwd }),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        TMPDIR: cwd,
+        REMBRIC_SERVER_URL: '',
+        REMBRIC_API_TOKEN: '',
+        REMBRIC_PROJECT_SLUG: '',
+      },
+    }).trimEnd();
+  }
+
+  it('emits the exact fixture text for both hosts', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rembric-sessionstart-'));
+    try {
+      expect(runSessionStart(cwd, 'claude-code')).toBe(fixtures.sessionStart);
+      expect(runSessionStart(cwd, 'codex-cli')).toBe(fixtures.sessionStart);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the turn-1 recall instruction to prompt-search.sh instead of competing with it', () => {
+    expect(fixtures.sessionStart).not.toContain('memory.context');
+    expect(fixtures.sessionStart).toContain('deferred');
+    expect(fixtures.sessionStart).toContain('tool search');
+  });
+});
+
 describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
   function isolatedEnv(cwd: string): NodeJS.ProcessEnv {
     return { ...process.env, TMPDIR: cwd, REMBRIC_SERVER_URL: '', REMBRIC_API_TOKEN: '' };
   }
+
+  it('still points a compacted session at memory.context for missing detail', () => {
+    expect(fixtures.postCompact).toContain('Missing detail? memory.context or memory.search.');
+  });
 
   function runPostCompact(cwd: string): string {
     return execFileSync('bash', [postCompactSh], {

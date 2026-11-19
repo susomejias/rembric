@@ -113,7 +113,7 @@ describe('session-start.sh ensures then resumes', { retry: 2 }, () => {
     });
     expect(JSON.parse(requests[1]!.body)).toEqual({});
     expect(requests[1]!.method).toBe('POST');
-    expect(out).toContain('rembric: If this is a continuation');
+    expect(out).toContain('rembric: If Rembric memory tools are deferred');
   });
 
   it.each([['startup'], ['resume'], ['clear'], ['fork'], ['compact']])(
@@ -159,7 +159,7 @@ describe('session-start.sh ensures then resumes', { retry: 2 }, () => {
     );
 
     expect(paths()).toEqual(['/api/demo/sessions', '/api/demo/sessions/sess-abc/resume']);
-    expect(stdout).toContain('rembric: If this is a continuation');
+    expect(stdout).toContain('rembric: If Rembric memory tools are deferred');
     const diagnostics = stderr.trim().split('\n').filter(Boolean);
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain('/api/demo/sessions/sess-abc/resume');

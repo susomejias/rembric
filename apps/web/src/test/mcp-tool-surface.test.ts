@@ -53,6 +53,8 @@ const CHANGED_DESCRIPTIONS: Record<string, string> = {
   'memory.session_resume': 'Resuming binds nothing to this connection',
   'project.current': 'Report the project active in this session (slug, projectId, source).',
   'memory.capture_passive': 'counted in `skipped`',
+  'memory.context':
+    'A host hook asking you to call it with `focus` on the first turn is not speculative',
 };
 
 function canonicalJson(value: unknown): string {
@@ -203,6 +205,17 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
       expect(description).toContain(mustContain);
       expect(description).not.toMatch(/roots|project\.use|suggestedSlugs/);
     }
+  });
+
+  it('memory.context separates a hook-requested focused call from a speculative load', async () => {
+    const tool = (await liveTools()).find((t) => t.name === 'memory.context');
+    const description = tool?.description ?? '';
+    expect(description.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    expect(description).toContain('do not load it speculatively on every session start');
+    expect(description).toContain('make that call before responding');
+    expect(description).toContain(
+      'Speculative means a call with no `focus` that no hook requested',
+    );
   });
 
   it('adds project.bind_repository with a strict slug-only input and write annotations', async () => {
