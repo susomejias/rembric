@@ -10,7 +10,7 @@
   "recall": "rembric: User intent: recall. Call memory.search with the user keywords before responding.",
   "resumedReadCore": "Resumed session: read memory.session_get_batch({ ids: [sessionId] }) / sessions[0] in full before writing memory.session_summary.",
   "resumedRead": "rembric: Resumed session: read memory.session_get_batch({ ids: [sessionId] }) / sessions[0] in full before writing memory.session_summary.",
-  "sessionStart": "rembric: If this is a continuation of recent work, call memory.context before responding.",
+  "sessionStart": "rembric: If Rembric memory tools are deferred, load them via tool search before calling them.",
   "sessionOpeningCore": "New session — before you finish this turn, call memory.session_summary with a title and a single `## Goal` section describing what this session is for; the other five canonical headings are intentionally left out.",
   "sessionOpening": "rembric: New session — before you finish this turn, call memory.session_summary with a title and a single `## Goal` section describing what this session is for; the other five canonical headings are intentionally left out."
 }
