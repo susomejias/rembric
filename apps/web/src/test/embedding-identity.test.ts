@@ -41,6 +41,7 @@ describe('embedding model identity has a single source', () => {
       dtype: 'fp32',
       dims: 384,
       pooling: 'mean',
+      maxTokens: 1024,
       revision: '3164caa4db95a03faac8a327f914f7c8f42d2f98',
       onnxArtifact: 'onnx/model.onnx',
     });
