@@ -96,6 +96,55 @@ describe('RerankClient', () => {
     expect(await second).toBeNull();
   });
 
+  it('stands down when a full window cannot meet the deadline, freeing the worker', async () => {
+    const { client, workers } = harness({ deadlineMs: 300 });
+    const ready = client.start();
+    workers[0]!.reply({ kind: 'ready' });
+    await ready;
+
+    client.calibrate(300);
+    expect(workers[0]!.shutdown).toBe(true);
+    expect(await client.score('q', ['a'])).toBeNull();
+    expect(workers[0]!.requests).toHaveLength(0);
+    expect(client.stats().fallbacks['too-slow']).toBe(1);
+    expect(await client.start()).toBe(false);
+  });
+
+  it('serves a search unreranked at once when the queue ahead cannot clear before the deadline', async () => {
+    const { client, workers } = harness({ deadlineMs: 300 });
+    const ready = client.start();
+    workers[0]!.reply({ kind: 'ready' });
+    await ready;
+
+    client.calibrate(140);
+    const first = client.score('q', ['a']);
+    const second = client.score('q', ['b']);
+    expect(await client.score('q', ['c'])).toBeNull();
+    expect(workers[0]!.requests.map((r) => r.documents[0])).toEqual(['a', 'b']);
+    expect(client.stats().fallbacks.busy).toBe(1);
+
+    const [a, b] = workers[0]!.requests;
+    workers[0]!.reply({ kind: 'scores', id: a!.id, scores: [0.1] });
+    workers[0]!.reply({ kind: 'scores', id: b!.id, scores: [0.2] });
+    expect(await first).toEqual([0.1]);
+    expect(await second).toEqual([0.2]);
+    const third = client.score('q', ['d']);
+    expect(workers[0]!.requests).toHaveLength(3);
+    workers[0]!.reply({ kind: 'scores', id: workers[0]!.requests[2]!.id, scores: [0.3] });
+    expect(await third).toEqual([0.3]);
+  });
+
+  it('queues every search until it has been calibrated', async () => {
+    const { client, workers } = harness({ deadlineMs: 300 });
+    const ready = client.start();
+    workers[0]!.reply({ kind: 'ready' });
+    await ready;
+    for (let i = 0; i < 5; i++) void client.score('q', [`${i}`]);
+    expect(workers[0]!.requests).toHaveLength(5);
+    expect(client.stats().fallbacks.busy).toBe(0);
+    client.close();
+  });
+
   it('stays off after the model fails to load, and does not respawn', async () => {
     const { client, workers } = harness();
     const ready = client.start();

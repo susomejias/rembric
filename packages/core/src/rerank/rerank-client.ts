@@ -16,6 +16,8 @@ export const RERANK_FALLBACK_CAUSES = [
   'deadline',
   'inference-failed',
   'worker-exited',
+  'too-slow',
+  'busy',
 ] as const;
 export type RerankFallbackCause = (typeof RERANK_FALLBACK_CAUSES)[number];
 
@@ -49,6 +51,7 @@ export class RerankClient {
   private crashes: number[] = [];
   private failedCause: RerankFallbackCause = 'load-failed';
   private nextId = 0;
+  private windowMs: number | null = null;
   private readonly pending = new Map<number, Pending>();
   private readonly counts: RerankStats = {
     reranked: 0,
@@ -87,6 +90,9 @@ export class RerankClient {
         this.fallback(this.state === 'failed' ? this.failedCause : 'not-ready'),
       );
     }
+    if (this.windowMs !== null && (this.pending.size + 1) * this.windowMs > this.deadlineMs) {
+      return Promise.resolve(this.fallback('busy'));
+    }
     const id = ++this.nextId;
     const worker = this.worker;
     return new Promise((resolve) => {
@@ -109,13 +115,23 @@ export class RerankClient {
     return { reranked: this.counts.reranked, fallbacks: { ...this.counts.fallbacks } };
   }
 
-  /** Lets the worker finish the inference it is running and exit: terminating mid-inference aborts the process. */
+  /** `windowMs` is the measured time of a full window: one that cannot meet the deadline stands the reranker down, otherwise it bounds how many searches may queue. */
+  calibrate(windowMs: number): void {
+    if (windowMs < this.deadlineMs) this.windowMs = windowMs;
+    else this.stop('too-slow');
+  }
+
   close(): void {
+    this.stop('worker-exited');
+  }
+
+  /** Lets the worker finish the inference it is running and exit: terminating mid-inference aborts the process. */
+  private stop(cause: RerankFallbackCause): void {
     const worker = this.worker;
     this.state = 'failed';
-    this.failedCause = 'worker-exited';
+    this.failedCause = cause;
     this.worker = null;
-    this.settlePending('worker-exited');
+    this.settlePending(cause);
     this.settleReady(false);
     worker?.postMessage({ kind: 'shutdown' });
   }

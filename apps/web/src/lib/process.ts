@@ -149,10 +149,12 @@ export async function warmReranker(
     timings.push(performance.now() - timed);
   }
   const median = Math.round([...timings].sort((a, b) => a - b)[1]!);
+  const fits = missed < 2;
+  services.reranker.calibrate(fits ? median : Number.POSITIVE_INFINITY);
   console.error(
-    missed < 2
+    fits
       ? `[process] reranker full window ${median} ms (deadline ${RERANK_DEADLINE_MS} ms)`
-      : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking to apply, so searches fall back to the unreranked order`,
+      : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking, so it stands down and searches serve the unreranked order without waiting`,
   );
 }
 

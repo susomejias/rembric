@@ -75,6 +75,8 @@ Every reranked call SHALL carry a deadline, `RERANK_DEADLINE_MS`, measured from 
 
 The worker SHALL be started and its model loaded outside any request, so a first reranked call does not pay the model load. A worker that exits SHALL be restarted, with the restarts bounded so a model that cannot load does not respawn in a loop.
 
+Once the model is loaded and no embedding backlog remains, the server SHALL time one full rerank window, and that single measurement SHALL calibrate the reranker for the life of the process. When the window cannot finish within `RERANK_DEADLINE_MS`, the reranker SHALL **stand down**: its worker SHALL be asked to exit and every later eligible call SHALL fall back at once, without waiting for a deadline. Measured at one vCPU, a full window took 393 ms, so every reranked search waited 300 ms and then served the unreranked order anyway. When the window fits, a call SHALL fall back at once, without being queued, whenever the calls already in flight plus itself, each costing one measured window, could not finish within the deadline: a queued call that would miss its deadline only adds that wait to a search that serves the unreranked order anyway. Before the measurement, calls SHALL be queued as described above. A process restart SHALL re-measure; there SHALL be no other re-calibration, no operator setting, and no smaller window or token cap chosen by hardware.
+
 #### Scenario: A rerank does not block other requests
 
 - **GIVEN** a reranked search in flight
@@ -86,6 +88,18 @@ The worker SHALL be started and its model loaded outside any request, so a first
 - **GIVEN** more simultaneous eligible searches than the worker can serve within `RERANK_DEADLINE_MS`
 - **WHEN** a queued call's deadline passes
 - **THEN** that call SHALL return the unreranked response for its query, with no error, and SHALL be counted as a fallback
+
+#### Scenario: A CPU too slow for one window stands the reranker down
+
+- **GIVEN** a server whose boot measurement of a full window does not finish within `RERANK_DEADLINE_MS`
+- **WHEN** `memory.search` is called with an eligible text query
+- **THEN** the response SHALL be the unreranked one, returned without waiting for the deadline, and the worker SHALL have been asked to exit
+
+#### Scenario: A search that cannot be served in time is not queued
+
+- **GIVEN** a calibrated reranker whose calls already in flight, plus one more, would exceed `RERANK_DEADLINE_MS` at one measured window each
+- **WHEN** another eligible search arrives
+- **THEN** it SHALL return the unreranked response at once, without being handed to the worker, and SHALL be counted as a fallback
 
 #### Scenario: A reranker that cannot load does not fail search
 

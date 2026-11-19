@@ -16,6 +16,7 @@
 - [x] 3.3 Test with a fake worker: a worker that exits is restarted, and restarts stop after the bound
 - [x] 3.4 Wire the client in `apps/web/src/lib/services.ts`: start and warm the worker outside any request, with no setting that turns reranking off (owner decision, 2026-11-19)
 - [x] 3.5 Prove the worker starts from the built Next.js standalone output: build, start the standalone server, run one eligible `memory.search`, and record the observed log line
+- [x] 3.6 Calibrate from the boot timing of one full window: a window that misses the deadline stands the reranker down (worker exits, later calls fall back at once); otherwise a call that could not clear the in-flight queue within the deadline falls back without being queued. Test both with a fake worker, and that nothing is refused before calibration (owner decision, 2026-11-19: no hardware-picked window or token cap)
 
 ## 4. Search pipeline
 
