@@ -5,6 +5,8 @@ import {
   ensureEntityExtractor,
   entityMarkerPath,
   reconcileArchivedProjectJudgments,
+  RERANK_DEADLINE_MS,
+  RERANK_WINDOW,
 } from '@rembric/core';
 import {
   assertDataLossGuard,
@@ -121,10 +123,24 @@ export async function warmReranker(services: Pick<Services, 'reranker'>): Promis
   const started = performance.now();
   const ready = await services.reranker.start();
   const ms = Math.round(performance.now() - started);
+  if (!ready) {
+    console.error('[process] reranker unavailable; searches serve the unreranked order');
+    return;
+  }
+  console.error(`[process] reranker ready in its worker thread (${ms} ms)`);
+  const window = Array.from(
+    { length: RERANK_WINDOW },
+    (_, i) =>
+      `Warm-up ${i}\n\n${'the reranker reads this text to time a full window. '.repeat(24)}`,
+  );
+  await services.reranker.score('reranker warm-up', window);
+  const timed = performance.now();
+  const scored = await services.reranker.score('reranker warm-up', window);
+  const windowMs = Math.round(performance.now() - timed);
   console.error(
-    ready
-      ? `[process] reranker ready in its worker thread (${ms} ms)`
-      : '[process] reranker unavailable; searches serve the unreranked order',
+    scored
+      ? `[process] reranker full window ${windowMs} ms (deadline ${RERANK_DEADLINE_MS} ms)`
+      : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking to apply, so searches fall back to the unreranked order; set REMBRIC_RERANK=off to free its memory`,
   );
 }
 
