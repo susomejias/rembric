@@ -22,7 +22,7 @@ import { getServices } from './services';
 const ADMIN_TOKEN_MIN_LENGTH = 16;
 
 const REAP_INTERVAL_MS = 30 * 60_000;
-const EMBED_TICK_MS = 30_000;
+export const EMBED_TICK_MS = 30_000;
 export const EMBED_DRAIN_DELAY_MS = 1_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
 
@@ -234,6 +234,7 @@ function startSessionReaper(services: Services): void {
 
 export function startEmbeddingDrain(
   services: Pick<Services, 'embeddingWorker' | 'hasEmbeddingBacklog'>,
+  now: () => number = () => performance.now(),
 ): void {
   let inFlight = false;
 
@@ -251,23 +252,31 @@ export function startEmbeddingDrain(
   const run = (force: boolean): Promise<void> =>
     tick(force).catch((err) => console.error('[process] embedding worker error', message(err)));
 
+  // Rest at least as long as the batch took, so a re-embed never holds the CPU more than half the time.
+  const nextDelay = (batchMs: number): number => {
+    try {
+      return services.hasEmbeddingBacklog()
+        ? Math.max(EMBED_DRAIN_DELAY_MS, batchMs)
+        : EMBED_TICK_MS;
+    } catch {
+      return EMBED_TICK_MS;
+    }
+  };
+  const runThenSchedule = (): void => {
+    const started = now();
+    void run(false).then(() => schedule(nextDelay(now() - started)));
+  };
   const schedule = (delayMs: number): void => {
-    const timer = setTimeout(() => {
-      void run(false).then(() =>
-        schedule(services.hasEmbeddingBacklog() ? EMBED_DRAIN_DELAY_MS : EMBED_TICK_MS),
-      );
-    }, delayMs);
+    const timer = setTimeout(runThenSchedule, delayMs);
     timer.unref?.();
   };
   const fallbackTimer = setInterval(() => void run(true), EMBED_FALLBACK_MS);
   fallbackTimer.unref?.();
 
-  void run(false).then(() =>
-    schedule(services.hasEmbeddingBacklog() ? EMBED_DRAIN_DELAY_MS : EMBED_TICK_MS),
-  );
+  runThenSchedule();
 
   console.error(
-    `[process] embedder drain started (every ${EMBED_TICK_MS / 1000} s, ${EMBED_DRAIN_DELAY_MS} ms between batches while a backlog drains, forced hourly; the model loads on the first pending row)`,
+    `[process] embedder drain started (every ${EMBED_TICK_MS / 1000} s; while a backlog drains, one batch per ${EMBED_DRAIN_DELAY_MS} ms at most and never more than half the time; forced hourly; the model loads on the first pending row)`,
   );
 }
 
