@@ -52,6 +52,7 @@ export class RerankClient {
   private failedCause: RerankFallbackCause = 'load-failed';
   private nextId = 0;
   private windowMs: number | null = null;
+  private standingDown = false;
   private readonly pending = new Map<number, Pending>();
   private readonly counts: RerankStats = {
     reranked: 0,
@@ -87,7 +88,9 @@ export class RerankClient {
     if (documents.length === 0) return Promise.resolve([]);
     if (this.state !== 'ready' || !this.worker) {
       return Promise.resolve(
-        this.fallback(this.state === 'failed' ? this.failedCause : 'not-ready'),
+        this.fallback(
+          this.state === 'failed' ? this.failedCause : this.standingDown ? 'too-slow' : 'not-ready',
+        ),
       );
     }
     if (this.windowMs !== null && (this.pending.size + 1) * this.windowMs > this.deadlineMs) {
@@ -115,20 +118,21 @@ export class RerankClient {
     return { reranked: this.counts.reranked, fallbacks: { ...this.counts.fallbacks } };
   }
 
-  /** `windowMs` is the measured time of a full window: one that cannot meet the deadline stands the reranker down, otherwise it bounds how many searches may queue. */
+  /** `windowMs` is the measured time of a full window: one that cannot meet the deadline stands the reranker down until `start` is called again, otherwise it bounds how many searches may queue. */
   calibrate(windowMs: number): void {
-    if (windowMs < this.deadlineMs) this.windowMs = windowMs;
-    else this.stop('too-slow');
+    this.standingDown = !(windowMs < this.deadlineMs);
+    if (this.standingDown) this.stop('too-slow', 'idle');
+    else this.windowMs = windowMs;
   }
 
   close(): void {
-    this.stop('worker-exited');
+    this.stop('worker-exited', 'failed');
   }
 
   /** Lets the worker finish the inference it is running and exit: terminating mid-inference aborts the process. */
-  private stop(cause: RerankFallbackCause): void {
+  private stop(cause: RerankFallbackCause, next: 'idle' | 'failed'): void {
     const worker = this.worker;
-    this.state = 'failed';
+    this.state = next;
     this.failedCause = cause;
     this.worker = null;
     this.settlePending(cause);

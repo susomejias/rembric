@@ -107,7 +107,37 @@ describe('RerankClient', () => {
     expect(await client.score('q', ['a'])).toBeNull();
     expect(workers[0]!.requests).toHaveLength(0);
     expect(client.stats().fallbacks['too-slow']).toBe(1);
+  });
+
+  it('can be started again after standing down, and serves once it is calibrated to fit', async () => {
+    const { client, workers } = harness({ deadlineMs: 300 });
+    const first = client.start();
+    workers[0]!.reply({ kind: 'ready' });
+    await first;
+    client.calibrate(400);
+
+    const again = client.start();
+    expect(workers).toHaveLength(2);
+    expect(await client.score('q', ['a'])).toBeNull();
+    expect(client.stats().fallbacks['too-slow']).toBe(1);
+    workers[1]!.reply({ kind: 'ready' });
+    expect(await again).toBe(true);
+
+    client.calibrate(100);
+    const scored = client.score('q', ['b']);
+    workers[1]!.reply({ kind: 'scores', id: workers[1]!.requests[0]!.id, scores: [0.4] });
+    expect(await scored).toEqual([0.4]);
+  });
+
+  it('stays closed: close wins over a later start', async () => {
+    const { client, workers } = harness();
+    const ready = client.start();
+    workers[0]!.reply({ kind: 'ready' });
+    await ready;
+    client.calibrate(Number.POSITIVE_INFINITY);
+    client.close();
     expect(await client.start()).toBe(false);
+    expect(workers).toHaveLength(1);
   });
 
   it('serves a search unreranked at once when the queue ahead cannot clear before the deadline', async () => {

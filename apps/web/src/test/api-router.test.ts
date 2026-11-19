@@ -761,7 +761,8 @@ describe('POST /:slug/memory/recall — refusals', () => {
 describe('POST /:slug/memory/recall — never reranks', () => {
   it('serves a match without asking the reranker', async () => {
     const services = getServices();
-    const score = vi.spyOn(services.reranker, 'score');
+    expect(services.reranker).not.toBeNull();
+    const score = vi.spyOn(services.reranker!, 'score');
     services.memory.save(
       { type: 'project', title: 'Scheduler port', content: 'the scheduler listens on port 8781' },
       projectScope(project.id),

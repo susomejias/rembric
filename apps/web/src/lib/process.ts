@@ -7,6 +7,7 @@ import {
   reconcileArchivedProjectJudgments,
   RERANK_DEADLINE_MS,
   RERANK_WINDOW,
+  type RerankClient,
 } from '@rembric/core';
 import {
   assertDataLossGuard,
@@ -25,6 +26,7 @@ const REAP_INTERVAL_MS = 30 * 60_000;
 export const EMBED_TICK_MS = 30_000;
 export const EMBED_DRAIN_DELAY_MS = 1_000;
 const RERANK_TIMING_RETRY_MS = 30_000;
+const RERANK_STAND_DOWN_RETRY_MS = 15 * 60_000;
 const EMBED_FALLBACK_MS = 60 * 60_000;
 
 const ENTITY_DRAIN_DELAY_MS = 500;
@@ -119,43 +121,68 @@ async function warmEmbedder(services: Services): Promise<void> {
 export async function warmReranker(
   services: Pick<Services, 'reranker' | 'hasEmbeddingBacklog'>,
   retryMs = RERANK_TIMING_RETRY_MS,
+  standDownRetryMs = RERANK_STAND_DOWN_RETRY_MS,
 ): Promise<void> {
-  const started = performance.now();
-  const ready = await services.reranker.start();
-  const ms = Math.round(performance.now() - started);
-  if (!ready) {
-    console.error('[process] reranker unavailable; searches serve the unreranked order');
+  const reranker = services.reranker;
+  if (!reranker) {
+    console.error('[process] reranking disabled (REMBRIC_RERANK=off)');
     return;
   }
-  console.error(`[process] reranker ready in its worker thread (${ms} ms)`);
-  // A re-embed competes for the same CPU, so timing during it would report a slower machine than this is.
-  if (backlogPending(services)) {
-    console.error('[process] reranker timing deferred until the embedding backlog drains');
-    while (backlogPending(services)) {
-      await new Promise((resolve) => setTimeout(resolve, retryMs).unref?.());
+  for (let attempt = 0; ; attempt++) {
+    const started = performance.now();
+    const ready = await reranker.start();
+    const ms = Math.round(performance.now() - started);
+    if (!ready) {
+      if (attempt === 0) {
+        console.error('[process] reranker unavailable; searches serve the unreranked order');
+      }
+      return;
     }
+    if (attempt === 0) console.error(`[process] reranker ready in its worker thread (${ms} ms)`);
+    // A re-embed competes for the same CPU, so timing during it would report a slower machine than this is.
+    if (backlogPending(services)) {
+      console.error('[process] reranker timing deferred until the embedding backlog drains');
+      while (backlogPending(services)) {
+        await sleep(retryMs);
+      }
+    }
+    const median = await timeFullWindow(reranker);
+    reranker.calibrate(median ?? Number.POSITIVE_INFINITY);
+    if (median !== null) {
+      console.error(
+        `[process] reranker full window ${median} ms (deadline ${RERANK_DEADLINE_MS} ms)`,
+      );
+      return;
+    }
+    if (attempt === 0) {
+      console.error(
+        `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking right now, so it stands down and searches serve the unreranked order without waiting; it re-times every ${standDownRetryMs / 60_000} min`,
+      );
+    }
+    await sleep(standDownRetryMs);
   }
+}
+
+/** Median of three full windows, or `null` when most of them missed the deadline. */
+async function timeFullWindow(reranker: RerankClient): Promise<number | null> {
   const window = Array.from(
     { length: RERANK_WINDOW },
     (_, i) =>
       `Warm-up ${i}\n\n${'the reranker reads this text to time a full window. '.repeat(24)}`,
   );
-  await services.reranker.score('reranker warm-up', window);
+  await reranker.score('reranker warm-up', window);
   const timings: number[] = [];
   let missed = 0;
   for (let i = 0; i < 3; i++) {
     const timed = performance.now();
-    if (!(await services.reranker.score('reranker warm-up', window))) missed++;
+    if (!(await reranker.score('reranker warm-up', window))) missed++;
     timings.push(performance.now() - timed);
   }
-  const median = Math.round([...timings].sort((a, b) => a - b)[1]!);
-  const fits = missed < 2;
-  services.reranker.calibrate(fits ? median : Number.POSITIVE_INFINITY);
-  console.error(
-    fits
-      ? `[process] reranker full window ${median} ms (deadline ${RERANK_DEADLINE_MS} ms)`
-      : `[process] reranker full window missed its ${RERANK_DEADLINE_MS} ms deadline: this CPU is too slow for reranking, so it stands down and searches serve the unreranked order without waiting`,
-  );
+  return missed < 2 ? Math.round([...timings].sort((a, b) => a - b)[1]!) : null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
 
 function backlogPending(services: Pick<Services, 'hasEmbeddingBacklog'>): boolean {

@@ -22,7 +22,7 @@ describe('rerank constants are not configuration', () => {
     }
   });
 
-  it('no environment variable reaches reranking', () => {
+  it('the environment reaches reranking only through the REMBRIC_RERANK switch', () => {
     const files = ['apps/web/src', 'packages/core/src', 'packages/mcp/src'].flatMap((d) =>
       sources(join(root, d)),
     );
@@ -31,6 +31,6 @@ describe('rerank constants are not configuration', () => {
         (m) => m[1],
       ),
     );
-    expect(envReads).toEqual([]);
+    expect(new Set(envReads)).toEqual(new Set(['REMBRIC_RERANK']));
   });
 });
