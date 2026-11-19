@@ -273,6 +273,19 @@ describe('MCP initialize instructions', () => {
     }
   });
 
+  it('treats a host hook asking for recall as a reason to call, not a speculative load', () => {
+    for (const ctx of [
+      { requestedSlug: null },
+      { requestedSlug: null, unbound: true },
+      { requestedSlug: 'x'.repeat(64) },
+    ]) {
+      const line = buildInstructions(ctx)
+        .split('\n')
+        .find((value) => value.startsWith('RECALL:'));
+      expect(line).toContain('if you lack prior detail or a host hook asks');
+    }
+  });
+
   it('keeps recall on-demand rather than unconditional at session start', () => {
     const variants = [
       buildInstructions({ requestedSlug: null }),

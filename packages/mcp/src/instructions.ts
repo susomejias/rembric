@@ -7,8 +7,8 @@ export interface InstructionsContext {
   unbound?: boolean;
 }
 
-const BASE = `Rembric is this project's long-term memory: only what you write to it outlives this conversation. Run this loop yourself; host reminders may help, never wait for them.
-RECALL: memory.context/memory.search for new-area/diagnosis/recall if you lack prior detail.
+const BASE = `Rembric is this project's memory: only what you write to it outlives this conversation. Run this loop yourself; host reminders help, never wait for them.
+RECALL: memory.context/memory.search for new-area/diagnosis/recall if you lack prior detail or a host hook asks.
 SAVE: fix/decision/discovery/config/pattern/preference/failed approach(why,file)→memory.save(title≤100,content,tags) as soon as it is settled, not at the end: one fact per memory, written so a later session can act on it without this chat. A session summary never replaces it. topic_key? updates an evolving fact; candidates[]→memory.judge_batch({judgments:[…]}).
 Tags required, normally 1–5 useful reusable lowercase ASCII kebab-case: dashboard/sqlite/bug-fix.
 Pass known sessionId; never guess.

@@ -916,11 +916,11 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
     def system_prompt_block(self) -> str:
         # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
         return (
-            "Rembric is this project's long-term memory: only what you write to "
+            "Rembric is this project's memory: only what you write to "
             "it outlives this conversation. Run this loop yourself; host "
-            "reminders may help, never wait for them.\n"
+            "reminders help, never wait for them.\n"
             "RECALL: memory.context/memory.search for new-area/diagnosis/recall "
-            "if you lack prior detail.\n"
+            "if you lack prior detail or a host hook asks.\n"
             "SAVE: fix/decision/discovery/config/pattern/preference/failed "
             "approach(why,file)→"
             "memory.save(title≤100,content,tags) as soon as it is settled, not "
