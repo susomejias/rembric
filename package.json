@@ -44,7 +44,7 @@
     "lint-staged": "^17.3.0",
     "prettier": "^3.8.4",
     "turbo": "^2.10.13",
-    "typescript-eslint": "^8.61.1"
+    "typescript-eslint": "^8.73.0"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs}": [
