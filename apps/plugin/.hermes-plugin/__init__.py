@@ -178,6 +178,12 @@ _POST_COMPACT_HINT = (
     "3. Missing detail? memory.context or memory.search.\n"
     "4. Then continue.</memory-hint>"
 )
+_POST_COMPACT_HINT_TEMPLATE = _POST_COMPACT_HINT.replace(
+    "ids: [sessionId]", 'ids: ["{{SESSION_ID}}"]'
+).replace(
+    "memory.session_summary({title, summary})",
+    "memory.session_summary({sessionId, title, summary})",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -861,7 +867,11 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         post_compact_due = self._post_compact_pending
         if post_compact_due:
             self._post_compact_pending = False
-            hints.append(_POST_COMPACT_HINT)
+            hints.append(
+                _POST_COMPACT_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id)
+                if session_id
+                else _POST_COMPACT_HINT
+            )
             hint_tags.append("post_compact")
 
         opening_due = (

@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 from _loader import fresh_plugin
 
+_MARKER = "Resumed from a compaction"
+
 
 class _FakeJsonResponse:
     def __init__(self, body: dict, status: int = 200) -> None:
@@ -50,6 +52,35 @@ class PostCompactDirectiveTest(unittest.TestCase):
     def _provider(self):
         return self.mod.RembricMemoryProvider()
 
+    def _rendered(self, session_id: str) -> str:
+        return self.mod._POST_COMPACT_HINT_TEMPLATE.replace("{{SESSION_ID}}", session_id)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_names_the_literal_session_id_in_the_read_and_the_write(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": True})
+        provider = self._provider()
+        provider.initialize("01XYZ", cwd=str(self.tmp / "cwd"))
+        provider.on_pre_compress([{"role": "user", "content": "hello"}])
+        provider.on_turn_start(2, None)
+        out = provider.prefetch("q", session_id="01XYZ")
+        self.assertIn('memory.session_get_batch({ ids: ["01XYZ"] })', out)
+        self.assertIn("memory.session_summary({sessionId, title, summary})", out)
+        self.assertNotIn("{{SESSION_ID}}", out)
+
+    @patch("rembric_hermes_plugin.urlopen")
+    def test_falls_back_to_the_symbolic_block_without_a_session_id(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _FakeJsonResponse({"ok": True, "created": True})
+        provider = self._provider()
+        provider.on_pre_compress([{"role": "user", "content": "hello"}])
+        provider.on_turn_start(2, None)
+        out = provider.prefetch("q")
+        self.assertIn(self.mod._POST_COMPACT_HINT, out)
+        self.assertNotIn('ids: [""]', out)
+
     @patch("rembric_hermes_plugin.urlopen")
     def test_not_armed_by_a_low_remaining_tokens_estimate_alone(
         self, mock_urlopen: MagicMock
@@ -60,7 +91,7 @@ class PostCompactDirectiveTest(unittest.TestCase):
 
         provider.on_turn_start(1, None, remaining_tokens=100)
         out = provider.prefetch("q", session_id="01XYZ")
-        self.assertNotIn(self.mod._POST_COMPACT_HINT, out)
+        self.assertNotIn(_MARKER, out)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_armed_by_on_pre_compress_and_emitted_exactly_once(
@@ -72,18 +103,18 @@ class PostCompactDirectiveTest(unittest.TestCase):
 
         provider.on_turn_start(1, None)
         out1 = provider.prefetch("q", session_id="01XYZ")
-        self.assertNotIn(self.mod._POST_COMPACT_HINT, out1)
+        self.assertNotIn(_MARKER, out1)
 
         ret = provider.on_pre_compress([{"role": "user", "content": "hello"}])
         self.assertEqual(ret, "")
 
         provider.on_turn_start(2, None)
         out2 = provider.prefetch("q", session_id="01XYZ")
-        self.assertIn(self.mod._POST_COMPACT_HINT, out2)
+        self.assertIn(self._rendered("01XYZ"), out2)
 
         provider.on_turn_start(3, None)
         out3 = provider.prefetch("q", session_id="01XYZ")
-        self.assertNotIn(self.mod._POST_COMPACT_HINT, out3)
+        self.assertNotIn(_MARKER, out3)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_on_pre_compress_still_returns_the_empty_string(
@@ -106,7 +137,7 @@ class PostCompactDirectiveTest(unittest.TestCase):
         provider.on_pre_compress([{"role": "user", "content": "hello"}])
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01XYZ")
-        self.assertIn(self.mod._POST_COMPACT_HINT, out)
+        self.assertIn(self._rendered("01XYZ"), out)
         self.assertNotIn(self.mod._RESUMED_READ_HINT, out)
 
     @patch("rembric_hermes_plugin.urlopen")
@@ -119,7 +150,7 @@ class PostCompactDirectiveTest(unittest.TestCase):
 
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01XYZ")
-        self.assertNotIn(self.mod._POST_COMPACT_HINT, out)
+        self.assertNotIn(_MARKER, out)
 
     @patch("rembric_hermes_plugin.urlopen")
     def test_cleared_by_session_switch(self, mock_urlopen: MagicMock) -> None:
@@ -131,7 +162,7 @@ class PostCompactDirectiveTest(unittest.TestCase):
 
         provider.on_turn_start(1, None)
         out = provider.prefetch("q", session_id="01SECOND")
-        self.assertNotIn(self.mod._POST_COMPACT_HINT, out)
+        self.assertNotIn(_MARKER, out)
 
 
 if __name__ == "__main__":

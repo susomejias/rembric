@@ -40,6 +40,19 @@ export const POST_COMPACT_NUDGE_CORE =
   '   - summary: ≤10000 chars. Use exactly these six Markdown level-2 headings, in this order, each on its own line (never one flat paragraph):\n## Goal\n## Accomplished\n## Decisions+why\n## Verified+how\n## Unfinished+why\n## Files\n' +
   '3. Missing detail? memory.context or memory.search.\n' +
   '4. Then continue.';
+export const POST_COMPACT_NUDGE_CORE_TEMPLATE = POST_COMPACT_NUDGE_CORE.replace(
+  'ids: [sessionId]',
+  'ids: ["{{SESSION_ID}}"]',
+).replace(
+  'memory.session_summary({title, summary})',
+  'memory.session_summary({sessionId, title, summary})',
+);
+
+export function renderPostCompactNudgeCore(sessionId) {
+  return sessionId
+    ? POST_COMPACT_NUDGE_CORE_TEMPLATE.replace('{{SESSION_ID}}', () => sessionId)
+    : POST_COMPACT_NUDGE_CORE;
+}
 
 const DOTTED_TOOL_NAME = /\b(memory|project)\.([a-z][a-z0-9_]*)/g;
 

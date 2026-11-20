@@ -13,6 +13,8 @@ export declare const RESUMED_READ_NUDGE: string;
 export declare const SESSION_OPENING_NUDGE_CORE: string;
 export declare const SESSION_OPENING_NUDGE: string;
 export declare const POST_COMPACT_NUDGE_CORE: string;
+export declare const POST_COMPACT_NUDGE_CORE_TEMPLATE: string;
+export declare function renderPostCompactNudgeCore(sessionId: string | undefined): string;
 
 export declare function diag(line: string): void;
 export declare function extractCommandPaths(command: string): string[];
