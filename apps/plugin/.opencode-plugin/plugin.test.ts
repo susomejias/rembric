@@ -21,7 +21,7 @@ const expectedBridgeSpecifier = `@rembric/mcp-bridge@${pluginVersion}`;
 
 const nudgeFixtures = JSON.parse(
   readFileSync(join(here, '..', 'test', 'nudge-fixtures.json'), 'utf8'),
-) as { save: string; summary: string; postCompactCore: string };
+) as { save: string; summary: string; postCompactCore: string; postCompactCoreTemplate: string };
 
 function spyOnStderr(sink: string[]) {
   return vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
@@ -279,11 +279,13 @@ describe('RembricPlugin handlers', () => {
     for (const phrase of bannedWindowFraming) expect(text).not.toContain(phrase);
   });
 
-  it('experimental.session.compacting pushes the shared fixture text byte-identical, with only the slug sentence added', async () => {
+  it('experimental.session.compacting pushes the shared fixture text byte-identical, rendered with the session id, with only the slug sentence added', async () => {
     const handlers = await RembricPlugin({ directory: dir } as never);
     const out: { context: string[] } = { context: [] };
     await handlers['experimental.session.compacting']!({ sessionID: 's1' } as never, out as never);
-    expect(out.context[0]).toBe(`${nudgeFixtures.postCompactCore}Use project: 'demo'. `);
+    expect(out.context[0]).toBe(
+      `${nudgeFixtures.postCompactCoreTemplate.replace('{{SESSION_ID}}', 's1')}Use project: 'demo'. `,
+    );
   });
 
   it('experimental.session.compacting fires without sessionID: still pushes the string, makes no HTTP request', async () => {
@@ -291,14 +293,14 @@ describe('RembricPlugin handlers', () => {
     const out: { context: string[] } = { context: [] };
     await handlers['experimental.session.compacting']!({} as never, out as never);
     expect(out.context).toHaveLength(1);
-    expect(out.context[0]).toContain('memory.session_get_batch');
+    expect(out.context[0]).toBe(`${nudgeFixtures.postCompactCore}Use project: 'demo'. `);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('plugin.ts declares no copy of the post-compaction protocol text', () => {
     const src = readFileSync(join(here, 'plugin.ts'), 'utf8');
     expect(src).not.toContain('This session resumes from a compaction');
-    expect(src).toContain('POST_COMPACT_NUDGE_CORE');
+    expect(src).toContain('renderPostCompactNudgeCore');
   });
 
   it('chat.message appends recall nudge when user text matches recall regex', async () => {

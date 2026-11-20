@@ -12,6 +12,8 @@ import {
   SESSION_OPENING_NUDGE,
   SESSION_OPENING_NUDGE_CORE,
   POST_COMPACT_NUDGE_CORE,
+  POST_COMPACT_NUDGE_CORE_TEMPLATE,
+  renderPostCompactNudgeCore,
   SESSION_ID_NUDGE_TEMPLATE,
 } from '../bin/rembric-plugin-core.mjs';
 
@@ -23,6 +25,8 @@ const fixtures = JSON.parse(readFileSync(join(here, 'nudge-fixtures.json'), 'utf
   firstPromptRelevance: string;
   postCompact: string;
   postCompactCore: string;
+  postCompactTemplate: string;
+  postCompactCoreTemplate: string;
   recall: string;
   resumedReadCore: string;
   resumedRead: string;
@@ -70,7 +74,8 @@ function pythonHintConstant(
     | '_RELEVANCE_HINT'
     | '_RESUMED_READ_HINT'
     | '_SESSION_OPENING_HINT'
-    | '_POST_COMPACT_HINT',
+    | '_POST_COMPACT_HINT'
+    | '_POST_COMPACT_HINT_TEMPLATE',
 ): string {
   const program = [
     'import importlib.util, sys',
@@ -261,18 +266,32 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
     return { ...process.env, TMPDIR: cwd, REMBRIC_SERVER_URL: '', REMBRIC_API_TOKEN: '' };
   }
 
-  function runPostCompact(cwd: string): string {
+  function runPostCompact(cwd: string, sessionId?: string): string {
     return execFileSync('bash', [postCompactSh], {
-      input: JSON.stringify({ session_id: 's-postcompact-fixture', cwd }),
+      input: JSON.stringify(sessionId === undefined ? { cwd } : { session_id: sessionId, cwd }),
       encoding: 'utf8',
       env: isolatedEnv(cwd),
     }).trimEnd();
   }
 
-  it('emits the exact fixture text', () => {
+  it('emits the template rendered with the literal session id from hook stdin', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rembric-postcompact-'));
     try {
-      expect(runPostCompact(cwd)).toBe(fixtures.postCompact);
+      expect(runPostCompact(cwd, UUID_SESSION_ID)).toBe(
+        fixtures.postCompactTemplate.replace('{{SESSION_ID}}', UUID_SESSION_ID),
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the symbolic fixture text when hook stdin carries no session id', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rembric-postcompact-'));
+    try {
+      const out = runPostCompact(cwd);
+      expect(out).toBe(fixtures.postCompact);
+      expect(out).not.toContain('{{SESSION_ID}}');
+      expect(out).not.toContain('ids: [""]');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -310,6 +329,57 @@ describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
   it('stays within its byte budget (≤700 bytes / 175 tokens)', () => {
     expect(bytes(fixtures.postCompact)).toBeLessThanOrEqual(700);
   });
+
+  it('stays within the same budget rendered with a 36-character session id', () => {
+    expect(
+      bytes(fixtures.postCompactTemplate.replace('{{SESSION_ID}}', UUID_SESSION_ID)),
+    ).toBeLessThanOrEqual(700);
+  });
+});
+
+describe('postCompactTemplate carries the literal session id', () => {
+  it('names the id in the read and points the write at the same sessionId', () => {
+    expect(fixtures.postCompactTemplate).toContain(
+      'memory.session_get_batch({ ids: ["{{SESSION_ID}}"] })',
+    );
+    expect(fixtures.postCompactTemplate).toContain(
+      'memory.session_summary({sessionId, title, summary})',
+    );
+  });
+
+  it('differs from the symbolic fallback only in those two calls', () => {
+    expect(
+      fixtures.postCompactTemplate
+        .replace('ids: ["{{SESSION_ID}}"]', 'ids: [sessionId]')
+        .replace('({sessionId, title, summary})', '({title, summary})'),
+    ).toBe(fixtures.postCompact);
+  });
+
+  it('the core template is the template minus its rembric: prefix', () => {
+    expect(fixtures.postCompactCoreTemplate).toBe(
+      fixtures.postCompactTemplate.replace(/^rembric: /, ''),
+    );
+  });
+
+  it('the shared JS/TS core template matches the fixture exactly', () => {
+    expect(POST_COMPACT_NUDGE_CORE_TEMPLATE).toBe(fixtures.postCompactCoreTemplate);
+  });
+
+  it('the shared JS/TS renderer interpolates a known id and falls back without one', () => {
+    expect(renderPostCompactNudgeCore(UUID_SESSION_ID)).toBe(
+      fixtures.postCompactCoreTemplate.replace('{{SESSION_ID}}', UUID_SESSION_ID),
+    );
+    expect(renderPostCompactNudgeCore('')).toBe(fixtures.postCompactCore);
+    expect(renderPostCompactNudgeCore(undefined)).toBe(fixtures.postCompactCore);
+  });
+
+  it.runIf(hasPython3)(
+    "Python's _POST_COMPACT_HINT_TEMPLATE wraps the exact shared core template in <memory-hint> tags",
+    () => {
+      const hint = pythonHintConstant('_POST_COMPACT_HINT_TEMPLATE');
+      expect(hint).toBe(`<memory-hint>${fixtures.postCompactCoreTemplate}</memory-hint>`);
+    },
+  );
 });
 
 describe('postCompactCore fixture lock-step across the shared JS/TS core and Python (opencode-plugin)', () => {

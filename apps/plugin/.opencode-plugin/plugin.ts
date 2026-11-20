@@ -12,7 +12,7 @@ import {
   createSessionProtocol,
   diag,
   extractCommandPaths,
-  POST_COMPACT_NUDGE_CORE,
+  renderPostCompactNudgeCore,
 } from '../bin/rembric-plugin-core.mjs';
 import { resolveProject } from '../mcp-bridge/rembric-project.mjs';
 
@@ -299,7 +299,9 @@ export const RembricPlugin: Plugin = async (ctx) => {
         await core.ensureSession(input.sessionID);
       }
 
-      output.context.push(POST_COMPACT_NUDGE_CORE + (slug ? `Use project: '${slug}'. ` : ''));
+      output.context.push(
+        renderPostCompactNudgeCore(input.sessionID) + (slug ? `Use project: '${slug}'. ` : ''),
+      );
     },
   };
 };

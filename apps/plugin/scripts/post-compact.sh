@@ -34,7 +34,7 @@ fi
 # The server releases its file-recall state on that resume; the local claims go too.
 rembric_file_recall_reset "$SESSION_ID"
 
-cat <<'PROTOCOL'
+BLOCK="$(cat <<'PROTOCOL'
 rembric: Resumed from a compaction. BEFORE continuing:
 1. Call memory.session_get_batch({ ids: [sessionId] }) and read sessions[0] in full.
 2. Call memory.session_summary({title, summary}) with the CURRENT COMPLETE state: sent `##` sections REPLACE their stored counterpart; omitted ones STAY.
@@ -49,5 +49,16 @@ rembric: Resumed from a compaction. BEFORE continuing:
 3. Missing detail? memory.context or memory.search.
 4. Then continue.
 PROTOCOL
+)"
+
+if [ -n "$SESSION_ID" ]; then
+  READ_SYMBOLIC='ids: [sessionId]'
+  READ_LITERAL="ids: [\"${SESSION_ID}\"]"
+  WRITE_SYMBOLIC='memory.session_summary({title, summary})'
+  WRITE_NAMED='memory.session_summary({sessionId, title, summary})'
+  BLOCK="${BLOCK/"$READ_SYMBOLIC"/$READ_LITERAL}"
+  BLOCK="${BLOCK/"$WRITE_SYMBOLIC"/$WRITE_NAMED}"
+fi
+printf '%s\n' "$BLOCK"
 
 exit 0

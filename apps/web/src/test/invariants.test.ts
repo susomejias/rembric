@@ -1660,7 +1660,7 @@ describe('the post-compaction protocol text has one source', () => {
 
   it('the enumeration above is complete', () => {
     const found = execSync(
-      `git -C ${repoRoot} grep -l -e 'Resumed from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -- apps/ packages/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
+      `git -C ${repoRoot} grep -l -e 'Resumed from a compaction' -e 'POST_COMPACT_NUDGE_CORE' -e 'renderPostCompactNudgeCore' -- apps/ packages/ ':!*.test.*' ':!*/tests/*' ':!*.d.mts' ':!apps/plugin/test/nudge-fixtures.json' || true`,
       { encoding: 'utf8' },
     )
       .split('\n')
