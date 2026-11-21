@@ -1222,9 +1222,6 @@ rembric_scan_offset_set() {
   printf '%s' "$bytes" >"${dir}/${safe_id}" 2>/dev/null || true
 }
 
-# Host bindings: `<pid>.json` in this directory maps a host process (pid + start
-# token) to its live session so the MCP bridge can declare it. The layout is
-# pinned for every language by apps/plugin/test/host-binding-layout.json.
 _rembric_host_binding_dir() {
   case "${OSTYPE:-}" in msys* | cygwin* | win32*) return 0 ;; esac
   [ -z "${HOME:-}" ] && return 0
@@ -1247,8 +1244,6 @@ rembric_host_start_token() {
   printf '%s' "${out% }"
 }
 
-# The nearest ancestor of this hook that is not a shell: hooks run as
-# shell-form commands, so a shell may sit between the host and the script.
 rembric_host_pid() {
   local pid="${1:-$PPID}" out ppid comm i=0
   while [ "$i" -lt 8 ]; do
@@ -1271,15 +1266,24 @@ rembric_host_pid() {
   return 0
 }
 
+_rembric_host_binding_stale() {
+  local pid="${1:-}" start="${2:-}" err current
+  if ! err="$(LC_ALL=C kill -0 "$pid" 2>&1)"; then
+    case "$err" in *"No such process"*) return 0 ;; esac
+  fi
+  current="$(rembric_host_start_token "$pid")"
+  [ -n "$current" ] && [ "$current" != "$start" ]
+}
+
 _rembric_host_binding_prune() {
-  local dir="${1:-}" file pid start
+  local dir="${1:-}" keep="${2:-}" file pid start
   for file in "$dir"/*.json; do
     [ -f "$file" ] || continue
     pid="${file##*/}"
     pid="${pid%.json}"
-    case "$pid" in '' | *[!0-9]*) continue ;; esac
+    case "$pid" in '' | *[!0-9]* | "$keep") continue ;; esac
     start="$(sed -n 's/.*"start"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" 2>/dev/null | head -n1)"
-    [ "$(rembric_host_start_token "$pid")" = "$start" ] || rm -f "$file" 2>/dev/null || true
+    if _rembric_host_binding_stale "$pid" "$start"; then rm -f "$file" 2>/dev/null || true; fi
   done
   return 0
 }
@@ -1296,15 +1300,13 @@ rembric_host_binding_publish() {
   tmp="$(mktemp "${dir}/.tmp.XXXXXX" 2>/dev/null)" || return 0
   if printf '{"pid":%s,"start":"%s","sessionId":"%s"}' "$pid" "$start" "$session_id" >"$tmp" 2>/dev/null &&
     mv -f "$tmp" "${dir}/${pid}.json" 2>/dev/null; then
-    _rembric_host_binding_prune "$dir"
+    _rembric_host_binding_prune "$dir" "$pid"
   else
     rm -f "$tmp" 2>/dev/null || true
   fi
   return 0
 }
 
-# Removes the host's binding only while it still names the ending session; it is
-# taken aside first so a newer session's publish that lands meanwhile survives.
 rembric_host_binding_remove() {
   local session_id="${1:-}" dir pid file taken
   [ -z "$session_id" ] && return 0

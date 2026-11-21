@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
@@ -125,7 +126,6 @@ _FILE_RECALL_SIBLINGS_MAX = 64
 _FILE_TOOLS = {"read_file", "write_file", "patch"}
 _RESOLVE_TIMEOUT_SEC: float = 3
 _FINGERPRINT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
-# The session-id pattern of POST /api/<slug>/sessions; host bindings carry no other.
 _HOST_SESSION_ID_RE = re.compile(r"[A-Za-z0-9_-]{8,128}")
 _HOST_PS_TIMEOUT_SEC = 2.0
 _REMOTES_MAX = 8
@@ -623,9 +623,6 @@ def _resolve_project(
     return None, notice, _no_project_label(fingerprint, cause, answer)
 
 
-# Host bindings: <home>/.cache/rembric/host-sessions/<pid>.json maps this process
-# (pid + start token) to its live session so the MCP bridge it spawns can declare
-# it. The layout is pinned for every language by ../test/host-binding-layout.json.
 def _host_binding_dir(create: bool) -> Path | None:
     if os.name != "posix":
         return None
@@ -689,10 +686,9 @@ def _publish_host_binding(session_id: str) -> None:
         return
 
 
-def _remove_host_binding(session_id: str | None) -> None:
-    # Taken aside first so a newer session's publish that lands meanwhile survives.
+def _remove_host_binding(session_id: str | None, *, any_session: bool = False) -> None:
     try:
-        if not session_id:
+        if not session_id and not any_session:
             return
         directory = _host_binding_dir(create=False)
         if directory is None:
@@ -707,12 +703,33 @@ def _remove_host_binding(session_id: str | None) -> None:
             current = json.loads(taken.read_text(encoding="utf-8")).get("sessionId")
         except Exception:  # noqa: BLE001
             current = None
-        if current != session_id:
+        if current != session_id and not any_session:
             try:
                 os.link(taken, path)
             except OSError:
                 pass
         taken.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        return
+
+
+_LIVE_HOST_SESSIONS: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
+_LIVE_HOST_SESSIONS_LOCK = threading.Lock()
+
+
+def _track_host_session(provider: Any, session_id: str | None) -> None:
+    try:
+        with _LIVE_HOST_SESSIONS_LOCK:
+            previous = _LIVE_HOST_SESSIONS.pop(provider, None)
+            if session_id:
+                _LIVE_HOST_SESSIONS[provider] = session_id
+            live = set(_LIVE_HOST_SESSIONS.values())
+            if len(live) == 1:
+                _publish_host_binding(next(iter(live)))
+            elif live:
+                _remove_host_binding(None, any_session=True)
+            else:
+                _remove_host_binding(previous)
     except Exception:  # noqa: BLE001
         return
 
@@ -832,8 +849,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         # every later lifecycle HTTP call must skip too, not just this POST.
         agent_context = kwargs.get("agent_context", "primary")
         self._suppressed = agent_context in _NON_PRIMARY_AGENT_CONTEXTS
-        if not self._suppressed:
-            _publish_host_binding(session_id)
+        _track_host_session(self, None if self._suppressed else session_id)
         if not self._slug:
             reason = f" ({no_project})" if no_project else ""
             _stderr(
@@ -1187,8 +1203,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             f"messages_count={len(messages) if messages else 0} "
             f"initialized={self._initialized} slug={self._slug!r}"
         )
-        if not self._suppressed:
-            _remove_host_binding(self._session_id)
+        _track_host_session(self, None)
         if (
             not self._initialized
             or not self._slug
@@ -1292,8 +1307,9 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._forget_session_state(old_id)
             self._reset_turn_state()
         self._session_id = new_session_id
+        if not self._suppressed:
+            _track_host_session(self, new_session_id or None)
         if new_session_id and not self._suppressed:
-            _publish_host_binding(new_session_id)
             self._ensure_session(new_session_id, self._cwd or os.getcwd())
 
     def on_memory_write(
@@ -1370,8 +1386,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
 
     def shutdown(self, **kwargs: Any) -> None:
         del kwargs
-        if not self._suppressed:
-            _remove_host_binding(self._session_id)
+        _track_host_session(self, None)
 
 
 # Mirrors stripPrivateTags in .opencode-plugin/plugin.ts and
