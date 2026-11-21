@@ -36,8 +36,11 @@ afterAll(() => {
   rmSync(neutralHome, { recursive: true, force: true });
 });
 
-async function startBridge(env: Record<string, string | undefined>) {
-  const child = spawn(process.execPath, [bridge], {
+async function startBridge(
+  env: Record<string, string | undefined>,
+  launch: { command: string; args: string[] } = { command: process.execPath, args: [bridge] },
+) {
+  const child = spawn(launch.command, launch.args, {
     cwd: neutralDir,
     env: { ...process.env, PWD: neutralDir, HOME: neutralHome, ...env },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -918,13 +921,21 @@ describe('host-declared session header', () => {
     return { server, base: await listen(server), requests };
   }
 
-  async function exchange(home: string, base: string, publishBetween?: () => void) {
-    const client = await startBridge({
-      REMBRIC_SERVER_URL: base,
-      REMBRIC_API_TOKEN: 'secret-token',
-      REMBRIC_PROJECT_SLUG: 'demo',
-      HOME: home,
-    });
+  async function exchange(
+    home: string,
+    base: string,
+    publishBetween?: () => void,
+    launch?: { command: string; args: string[] },
+  ) {
+    const client = await startBridge(
+      {
+        REMBRIC_SERVER_URL: base,
+        REMBRIC_API_TOKEN: 'secret-token',
+        REMBRIC_PROJECT_SLUG: 'demo',
+        HOME: home,
+      },
+      launch,
+    );
     client.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
     await client.nextLine();
     client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
@@ -974,7 +985,7 @@ describe('host-declared session header', () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it('omits the header when no ancestor is bound, or the binding names another process start', async () => {
+  it('omits the header when its host is not bound, or the binding names another process start', async () => {
     const home = scratchHome();
     const { server, base, requests } = await recordingServer();
     await exchange(home, base);
@@ -987,6 +998,38 @@ describe('host-declared session header', () => {
     });
     await exchange(home, base);
     expect(requests).toHaveLength(8);
+    expect(requests.every((request) => request.session === undefined)).toBe(true);
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+  it('skips a shell launcher between itself and its host', async () => {
+    const home = scratchHome();
+    publishHostBinding({ pid: process.pid, sessionId: 'host-session-1', home });
+    const { server, base, requests } = await recordingServer();
+    await exchange(home, base, undefined, {
+      command: '/bin/sh',
+      args: ['-c', '"$0" "$1"; exit $?', process.execPath, bridge],
+    });
+    expect(requests).toHaveLength(4);
+    expect(requests.every((request) => request.session === 'host-session-1')).toBe(true);
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('omits the header when its own host is unbound, even though an outer host is bound', async () => {
+    const home = scratchHome();
+    publishHostBinding({ pid: process.pid, sessionId: 'host-session-1', home });
+    const { server, base, requests } = await recordingServer();
+    await exchange(home, base, undefined, {
+      command: process.execPath,
+      args: [
+        '-e',
+        "const c = require('node:child_process').spawn(process.argv[1], [process.argv[2]], { stdio: 'inherit' }); c.on('exit', (code) => process.exit(code ?? 1));",
+        process.execPath,
+        bridge,
+      ],
+    });
+    expect(requests).toHaveLength(4);
     expect(requests.every((request) => request.session === undefined)).toBe(true);
     server.close();
     rmSync(home, { recursive: true, force: true });

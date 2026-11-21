@@ -9,5 +9,6 @@
   "startCommand": ["ps", "-o", "lstart=", "-p", "{pid}"],
   "startLocale": "C",
   "nonHostCommands": ["sh", "bash", "zsh", "dash", "ksh", "fish", "env"],
+  "launcherCommands": ["npm", "npx"],
   "maxAncestors": 8
 }

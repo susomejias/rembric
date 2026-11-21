@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 export const HOST_SESSION_HEADER = 'X-Rembric-Session';
 export const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
@@ -12,6 +12,11 @@ export const HOST_BINDING_FILE_MODE = 0o600;
 export const HOST_BINDING_KEYS = ['pid', 'start', 'sessionId'];
 export const START_LOCALE = 'C';
 export const MAX_ANCESTORS = 8;
+export const NON_HOST_COMMANDS = ['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'env'];
+export const LAUNCHER_COMMANDS = ['npm', 'npx'];
+
+const LAUNCHER_NAMES = new Set([...NON_HOST_COMMANDS, ...LAUNCHER_COMMANDS]);
+const NPM_LAUNCHER_ARGS = [/^(\S*\/)?np[mx](\s|$)/, /^(\S*\/)?node\s+(\S*\/)?np[mx]-cli\.js(\s|$)/];
 
 const PS_TIMEOUT_MS = 2000;
 
@@ -45,6 +50,18 @@ function parentPid(pid, run) {
   return Number.isInteger(parent) && parent > 0 ? parent : null;
 }
 
+function psField(pid, field, run) {
+  const output = run(['-o', `${field}=`, '-p', String(pid)]);
+  return typeof output === 'string' ? output.trim() : '';
+}
+
+export function isLauncher({ comm = '', args = '' }) {
+  const name = basename(comm.trim()).replace(/^-/, '');
+  if (LAUNCHER_NAMES.has(name)) return true;
+  const line = args.trim();
+  return NPM_LAUNCHER_ARGS.some((pattern) => pattern.test(line));
+}
+
 export function ancestorChain({
   ppid = process.ppid,
   run = runPs,
@@ -54,8 +71,12 @@ export function ancestorChain({
   const chain = [];
   let pid = ppid;
   for (let visited = 0; visited < MAX_ANCESTORS && pid > 1; visited += 1) {
-    const start = processStartToken(pid, { run });
-    if (start) chain.push({ pid, start });
+    const entry = { comm: psField(pid, 'comm', run), args: psField(pid, 'args', run) };
+    if (!isLauncher(entry)) {
+      chain.push({ pid, start: processStartToken(pid, { run }), launcher: false });
+      break;
+    }
+    chain.push({ pid, launcher: true });
     const parent = parentPid(pid, run);
     if (parent === null || parent === pid) break;
     pid = parent;
@@ -83,18 +104,17 @@ function readBinding(pid, home) {
 export function lookupHostSession(chain, { home, platform = process.platform } = {}) {
   if (platform === 'win32') return null;
   try {
-    const root = home ?? homedir();
-    for (const { pid, start } of chain) {
-      const binding = readBinding(pid, root);
-      if (
-        binding &&
-        binding.pid === pid &&
-        binding.start === start &&
-        typeof binding.sessionId === 'string' &&
-        SESSION_ID_RE.test(binding.sessionId)
-      ) {
-        return binding.sessionId;
-      }
+    const host = chain.find((entry) => !entry.launcher);
+    if (!host || typeof host.start !== 'string') return null;
+    const binding = readBinding(host.pid, home ?? homedir());
+    if (
+      binding &&
+      binding.pid === host.pid &&
+      binding.start === host.start &&
+      typeof binding.sessionId === 'string' &&
+      SESSION_ID_RE.test(binding.sessionId)
+    ) {
+      return binding.sessionId;
     }
   } catch {
     return null;
