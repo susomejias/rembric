@@ -65,6 +65,7 @@ class HostBindingTest(unittest.TestCase):
         (bin_dir / "ps").chmod(0o755)
         self.ps_log = self.tmp / "ps-log"
         self.ps_log.write_text("")
+        self.held: list = []
         saved = dict(os.environ)
         self.addCleanup(lambda: (os.environ.clear(), os.environ.update(saved)))
         self.mod = fresh_plugin(
@@ -95,9 +96,10 @@ class HostBindingTest(unittest.TestCase):
             json.dumps({"pid": os.getpid(), "start": _START, "sessionId": session_id})
         )
 
-    def _provider(self, **kwargs):
+    def _provider(self, session_id: str = _SESSION, **kwargs):
         provider = self.mod.RembricMemoryProvider()
-        provider.initialize(_SESSION, cwd=str(self.tmp / "cwd"), **kwargs)
+        provider.initialize(session_id, cwd=str(self.tmp / "cwd"), **kwargs)
+        self.held.append(provider)
         return provider
 
     def _listing(self) -> list[str]:
@@ -171,6 +173,46 @@ class HostBindingTest(unittest.TestCase):
         self._write("hermes-session-other")
         provider.shutdown()
         self.assertTrue(self._file().exists())
+
+    def _session(self) -> str | None:
+        return json.loads(self._file().read_text())["sessionId"] if self._file().exists() else None
+
+    def test_two_concurrent_sessions_in_one_process_publish_no_binding(self) -> None:
+        self._provider()
+        self.assertEqual(self._session(), _SESSION)
+        self._provider("hermes-session-0002")
+        self.assertEqual(self._listing(), [])
+
+    def test_a_switch_while_another_session_is_live_publishes_nothing(self) -> None:
+        first = self._provider()
+        self._provider("hermes-session-0002")
+        first.on_session_switch("hermes-session-0003", parent_session_id=_SESSION, reset=True)
+        self.assertEqual(self._listing(), [])
+
+    def test_back_to_one_live_session_republishes_it(self) -> None:
+        self._provider()
+        self._provider("hermes-session-0002").on_session_end([])
+        self.assertEqual(self._session(), _SESSION)
+        third = self._provider("hermes-session-0003")
+        self.assertEqual(self._listing(), [])
+        third.shutdown()
+        self.assertEqual(self._session(), _SESSION)
+
+    def test_the_same_session_in_two_providers_is_one_live_session(self) -> None:
+        self._provider()
+        self._provider(_SESSION)
+        self.assertEqual(self._session(), _SESSION)
+
+    def test_a_subagent_beside_the_primary_keeps_its_binding(self) -> None:
+        self._provider()
+        self._provider("hermes-subagent-01", agent_context="subagent")
+        self.assertEqual(self._session(), _SESSION)
+
+    def test_a_provider_dropped_without_shutdown_stops_counting(self) -> None:
+        first = self._provider()
+        self.mod.RembricMemoryProvider().initialize("hermes-session-0002", cwd=str(self.tmp / "cwd"))
+        first.on_session_switch("hermes-session-0003", parent_session_id=_SESSION, reset=True)
+        self.assertEqual(self._session(), "hermes-session-0003")
 
     def test_unwritable_home_never_raises(self) -> None:
         self.home.chmod(0o500)

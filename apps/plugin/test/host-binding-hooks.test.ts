@@ -1,4 +1,5 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -79,6 +80,20 @@ let home: string;
 let bin: string;
 let table: string;
 let psLog: string;
+let children: ChildProcess[];
+
+function liveProcess(): number {
+  const child = spawn('sleep', ['60'], { stdio: 'ignore' });
+  children.push(child);
+  return child.pid!;
+}
+
+async function deadPid(): Promise<number> {
+  const child = spawn('true', { stdio: 'ignore' });
+  const pid = child.pid!;
+  await new Promise((resolve) => child.on('exit', resolve));
+  return pid;
+}
 
 type Proc = { pid: number; ppid: number; comm: string; start?: string };
 
@@ -111,9 +126,11 @@ beforeEach(() => {
   writeFileSync(join(bin, 'ps'), FAKE_PS, { mode: 0o755 });
   writeFileSync(psLog, '');
   writeTable(shellThenHost());
+  children = [];
 });
 
 afterEach(() => {
+  for (const child of children) child.kill('SIGKILL');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -287,18 +304,43 @@ describe('SessionStart publishes the host binding', () => {
   });
 
   it('prunes bindings whose process is gone or restarted and keeps live ones', async () => {
+    const live = liveProcess();
+    const restarted = liveProcess();
+    const gone = await deadPid();
     writeTable([
       ...shellThenHost(),
-      { pid: 72001, ppid: 1, comm: 'claude' },
-      { pid: 72002, ppid: 1, comm: 'claude', start: 'Fri Nov 20 8:00:00 2026' },
+      { pid: live, ppid: 1, comm: 'claude' },
+      { pid: restarted, ppid: 1, comm: 'claude', start: 'Fri Nov 20 8:00:00 2026' },
     ]);
-    writeBinding(72001, 'sess-live-000001');
-    writeBinding(72002, 'sess-restarted-01');
-    writeBinding(72003, 'sess-gone-000001');
+    writeBinding(live, 'sess-live-000001');
+    writeBinding(restarted, 'sess-restarted-01');
+    writeBinding(gone, 'sess-gone-000001');
 
     await runHook('session-start.sh', { session_id: SESSION, source: 'startup' }, ['claude-code']);
 
-    expect(readdirSync(bindingDir()).sort()).toEqual([`${HOST_PID}.json`, '72001.json']);
+    expect(readdirSync(bindingDir()).sort()).toEqual([`${HOST_PID}.json`, `${live}.json`].sort());
+  });
+
+  it('keeps a live process’s binding when ps fails for it or prints nothing', async () => {
+    const failing = liveProcess();
+    const blank = liveProcess();
+    writeTable([...shellThenHost(), { pid: blank, ppid: 1, comm: 'claude', start: '   ' }]);
+    writeBinding(failing, 'sess-transient-01');
+    writeBinding(blank, 'sess-transient-02');
+
+    await runHook('session-start.sh', { session_id: SESSION, source: 'startup' }, ['claude-code']);
+
+    expect(readdirSync(bindingDir()).sort()).toEqual(
+      [`${HOST_PID}.json`, `${failing}.json`, `${blank}.json`].sort(),
+    );
+  });
+
+  it('keeps the binding of a process it may not signal when ps fails for it', async () => {
+    writeBinding(1, 'sess-unsignalable');
+
+    await runHook('session-start.sh', { session_id: SESSION, source: 'startup' }, ['claude-code']);
+
+    expect(readdirSync(bindingDir()).sort()).toEqual([`${HOST_PID}.json`, '1.json'].sort());
   });
 });
 

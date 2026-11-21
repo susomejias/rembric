@@ -16,9 +16,16 @@ The published bridge knows no session. The client's lifecycle code, which does, 
 
 **When.** A client SHALL publish whenever its host starts or switches to a session: every `SessionStart` source for the hooks (startup, resume, clear, fork, compact), and every session start or change for an in-process plugin. A publish replaces the previous binding of the same process.
 
+**One live session per binding.** A binding names the one session its process serves. A process that serves more than one session at the same time through one bridge (a Hermes gateway, `hermes-agent-plugin`) SHALL publish no binding while it does, and SHALL remove the one it published. Sending no header falls back to the explicit `sessionId` or the sole active session, while a shared binding would attribute one session's writes to another.
+
 **Removal.** When a session ends, the client SHALL remove its process's binding only while that binding's `sessionId` equals the ending session, so a newer session that already published (a `/clear`) is not undone. The binding SHALL be taken aside (renamed) before it is compared, and put back with a non-clobbering link when it names another session, so a publish landing during the removal survives.
 
-**Pruning.** A publisher MAY delete other bindings in the directory whose process no longer exists or whose current start token differs from the stored `start`. The bash publisher does so after every publish. Readers never delete.
+**Pruning.** A publisher MAY delete other bindings in the directory, never its own, when their process definitely no longer exists or has restarted:
+
+- the process no longer exists when signalling it (`kill -0 <pid>`) fails with "no such process". A refusal for lack of permission does not prove it gone;
+- it has restarted when `ps` prints a non-empty start token that differs from the stored `start`.
+
+A `ps` that fails or prints nothing for a process that still exists SHALL keep the binding, because a transient failure must never drop a live host's binding. The bash publisher prunes after every publish. Readers never delete.
 
 **Platform.** On Windows (`win32`, and bash under MSYS or Cygwin) nobody publishes.
 
@@ -74,3 +81,22 @@ The published bridge knows no session. The client's lifecycle code, which does, 
 - **GIVEN** bindings for a live process with a matching start, a live process whose start differs, and a process that no longer exists
 - **WHEN** the bash publisher publishes for its host
 - **THEN** only the host's binding and the live, matching one SHALL remain
+
+#### Scenario: A transient ps failure keeps a live binding
+
+- **GIVEN** bindings for two live processes, one for which `ps -o lstart=` fails and one for which it prints only whitespace
+- **WHEN** the bash publisher publishes for its host
+- **THEN** both bindings SHALL remain
+
+#### Scenario: A process the publisher may not signal is not pruned on a ps failure
+
+- **GIVEN** a binding for a live process that `kill -0` refuses with a permission error, and for which `ps -o lstart=` fails
+- **WHEN** the bash publisher publishes for its host
+- **THEN** that binding SHALL remain
+
+#### Scenario: A process serving two sessions at once publishes no binding
+
+- **GIVEN** a process whose binding names session `A`
+- **WHEN** it starts serving session `B` while `A` is still live
+- **THEN** its binding SHALL no longer exist
+- **AND** when `B` ends, its binding SHALL name `A` again
