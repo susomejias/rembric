@@ -67,6 +67,26 @@ function startSession(agent = 'a') {
   return agentSessions.start({ tokenId: adminToken.id, projectId: defaultProjectId, agent });
 }
 
+function backdate(id: string, minutesAgo: number) {
+  const past = Date.now() - minutesAgo * 60_000;
+  db.handle.raw
+    .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
+    .run(past, past, id);
+}
+
+function rowsForPair() {
+  return db.handle.db
+    .select()
+    .from(agentSessionsTable)
+    .where(
+      and(
+        eq(agentSessionsTable.tokenId, adminToken.id),
+        eq(agentSessionsTable.projectId, defaultProjectId),
+      ),
+    )
+    .all();
+}
+
 describe('memory.session_start — reuse vs. mint under (tokenId, projectId) ambiguity', () => {
   it('reuses the sole existing active session for the pair', async () => {
     const existing = startSession();
@@ -117,26 +137,6 @@ describe('memory.session_start — reuse vs. mint under (tokenId, projectId) amb
     expect(out.reused).toBe(false);
     expect(out.agent).toBe('pi');
   });
-
-  function backdate(id: string, minutesAgo: number) {
-    const past = Date.now() - minutesAgo * 60_000;
-    db.handle.raw
-      .prepare('UPDATE sessions SET started_at = ?, last_activity_at = ? WHERE id = ?')
-      .run(past, past, id);
-  }
-
-  function rowsForPair() {
-    return db.handle.db
-      .select()
-      .from(agentSessionsTable)
-      .where(
-        and(
-          eq(agentSessionsTable.tokenId, adminToken.id),
-          eq(agentSessionsTable.projectId, defaultProjectId),
-        ),
-      )
-      .all();
-  }
 
   it('adopts the sole active row even when it is idle past TRANSPORT_STALENESS_MS (no first ghost)', async () => {
     const s = startSession('pi');
@@ -264,6 +264,87 @@ describe('memory.session_start({project}) asserts the connection project', () =>
       await runWithContext(makeContext(), () => handlers.sessionStart({})),
     );
     expect(out.projectId).toBe(defaultProjectId);
+  });
+});
+
+describe('memory.session_summary and memory.session_end without a sessionId under ambiguity', () => {
+  const ambiguityMessage =
+    'more than one session is active for this token and project; pass your sessionId explicitly. memory.session_start cannot resolve this: it would open another session';
+
+  type Lifecycle = 'sessionSummary' | 'sessionEnd';
+  const withoutId: Record<Lifecycle, () => Promise<unknown>> = {
+    sessionSummary: () => handlers.sessionSummary({ summary: '## Goal\nunattributed', title: 't' }),
+    sessionEnd: () => handlers.sessionEnd({}),
+  };
+
+  for (const tool of ['sessionSummary', 'sessionEnd'] as const) {
+    it(`${tool}: two fresh active sessions are refused as session_ambiguous and no row changes`, async () => {
+      startSession('a');
+      startSession('b');
+      const before = rowsForPair();
+
+      const r = await runWithContext(makeContext(), withoutId[tool]);
+      expect((r as McpTextResponse).isError).toBe(true);
+      expect(parseText<{ ok: boolean; code: string; message: string }>(r)).toEqual({
+        ok: false,
+        code: 'session_ambiguous',
+        message: ambiguityMessage,
+      });
+      expect(rowsForPair()).toEqual(before);
+    });
+
+    it(`${tool}: two active sessions idle past the window are also session_ambiguous`, async () => {
+      const a = startSession('a');
+      const b = startSession('b');
+      backdate(a.id, 90);
+      backdate(b.id, 120);
+      const before = rowsForPair();
+
+      const r = await runWithContext(makeContext(), withoutId[tool]);
+      expect(parseText<{ code: string }>(r).code).toBe('session_ambiguous');
+      expect(rowsForPair()).toEqual(before);
+    });
+
+    it(`${tool}: one fresh and one idle session still resolves to the fresh one`, async () => {
+      const idle = startSession('idle');
+      backdate(idle.id, 90);
+      const fresh = startSession('fresh');
+
+      const r = await runWithContext(makeContext(), withoutId[tool]);
+      expect((r as McpTextResponse).isError).toBeUndefined();
+      expect(parseText<{ sessionId: string }>(r).sessionId).toBe(fresh.id);
+    });
+
+    it(`${tool}: no active session keeps session_not_found and its message`, async () => {
+      const r = await runWithContext(makeContext(), withoutId[tool]);
+      expect(parseText<{ code: string; message: string }>(r)).toEqual({
+        ok: false,
+        code: 'session_not_found',
+        message: 'no active session on this MCP transport and no sessionId was provided',
+      });
+    });
+
+    it(`${tool}: a sole active session idle past the window keeps session_not_found`, async () => {
+      const s = startSession('idle');
+      backdate(s.id, 90);
+
+      const r = await runWithContext(makeContext(), withoutId[tool]);
+      expect(parseText<{ code: string }>(r).code).toBe('session_not_found');
+    });
+  }
+
+  it('an explicit sessionId still writes under ambiguity', async () => {
+    const mine = startSession('mine');
+    startSession('other');
+
+    const r = await runWithContext(makeContext(), () =>
+      handlers.sessionSummary({ sessionId: mine.id, summary: '## Goal\nmine', title: 't' }),
+    );
+    expect(parseText<{ sessionId: string; applied: boolean }>(r)).toMatchObject({
+      sessionId: mine.id,
+      applied: true,
+    });
+    expect(agentSessions.getById(mine.id)?.summary).toBe('## Goal\nmine');
   });
 });
 
@@ -491,7 +572,7 @@ describe('memory.session_resume', () => {
     const unnamed = await runWithContext(ctx, () =>
       handlers.sessionSummary({ summary: 'unnamed', title: 'unnamed' }),
     );
-    expect(parseText<{ code?: string }>(unnamed).code).toBe('session_not_found');
+    expect(parseText<{ code?: string }>(unnamed).code).toBe('session_ambiguous');
     const named = await runWithContext(ctx, () =>
       handlers.sessionSummary({ sessionId: s.id, summary: 'named', title: 'named' }),
     );

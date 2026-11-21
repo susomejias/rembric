@@ -48,11 +48,15 @@ interface Tool {
   annotations?: Record<string, unknown>;
 }
 
+const AMBIGUITY_CLAUSE =
+  'without it, two or more active sessions refuse the call with session_ambiguous: pass it then, never memory.session_start';
+
 const CHANGED_DESCRIPTIONS: Record<string, string> = {
   'memory.session_start': "project? (slug; must name this connection's project, else scope_locked)",
   'memory.session_resume': 'Resuming binds nothing to this connection',
   'project.current': 'Report the project active in this session (slug, projectId, source).',
   'memory.capture_passive': 'counted in `skipped`',
+  'memory.session_end': AMBIGUITY_CLAUSE,
 };
 
 function canonicalJson(value: unknown): string {

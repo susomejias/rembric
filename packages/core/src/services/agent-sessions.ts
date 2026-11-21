@@ -91,6 +91,11 @@ function assertTitleValid(callsite: string, title: string | undefined): void {
   assertNoNul(callsite, 'title', title);
 }
 
+export type TransportResolution =
+  | { kind: 'sole'; session: AgentSession }
+  | { kind: 'none' }
+  | { kind: 'ambiguous' };
+
 export interface StartSessionInput {
   tokenId: string;
   projectId: string | null;
@@ -454,6 +459,15 @@ export class AgentSessionsService {
         activeSinceMs,
       ) ?? null
     );
+  }
+
+  resolveForTransport(input: { tokenId: string; projectId: string | null }): TransportResolution {
+    const activeSinceMs = this.now().getTime() - TRANSPORT_STALENESS_MS;
+    const repo = this.repos.agentSessions;
+    const fresh = repo.findActiveCandidates(input.tokenId, input.projectId, activeSinceMs);
+    if (fresh.length === 1) return { kind: 'sole', session: fresh[0]! };
+    const live = repo.findActiveCandidates(input.tokenId, input.projectId, null);
+    return live.length > 1 ? { kind: 'ambiguous' } : { kind: 'none' };
   }
 
   findSoleActiveForReuse(input: {
