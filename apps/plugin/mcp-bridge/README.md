@@ -28,14 +28,19 @@ credentials. A slug the server does not know is refused with
 `project_not_found`; create the project from the dashboard.
 
 Every request also carries `X-Rembric-Session` when the host has declared its
-session. At startup the bridge records its ancestor processes (parent upwards,
-at most 8, each with its start time from `ps -o lstart=` under `LC_ALL=C`). On
-each request it reads `<home>/.cache/rembric/host-sessions/<pid>.json` for those
-ancestors, nearest first, and sends the `sessionId` of the first file whose
-`pid` and `start` match. Reading per request is what makes a new session after
+session. At startup the bridge finds its host once: the nearest ancestor (parent
+upwards, at most 8 hops) that is not a launcher, with its start time from
+`ps -o lstart=` under `LC_ALL=C`. Launchers are shells and `env` (`sh`, `bash`,
+`zsh`, `dash`, `ksh`, `fish`, `env`) and npm (`npm`, `npx`, `npm exec …`,
+`node …/npm-cli.js`, `node …/npx-cli.js`). On each request it reads only
+`<home>/.cache/rembric/host-sessions/<host pid>.json` and sends its `sessionId`
+when `pid` and `start` match. It never looks past its host: a host that
+publishes no binding (opencode, which injects `sessionId` per call instead) gets
+no header even when an outer host, such as the Claude Code terminal it was
+started from, has one. Reading per request is what makes a new session after
 `/clear` take effect without restarting the bridge. The host's lifecycle code
-publishes those files (the Claude Code and Codex hooks, the opencode and Hermes
-plugins); the bridge never writes or deletes them. No matching file, or
+publishes those files (the Claude Code and Codex hooks, the Hermes plugin); the
+bridge never writes or deletes them. No matching file, no host within 8 hops, or
 Windows, means no header, and the server falls back to its own attribution.
 
 The bridge forwards MCP frames without creating a second client handshake. It
