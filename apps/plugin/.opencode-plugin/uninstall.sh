@@ -9,7 +9,7 @@ REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 REMBRIC_DIR="${HOME}/.config/rembric"
 PLUGIN_DEST="${HOME}/.config/opencode/plugins/rembric.ts"
 # Must stay in step with install.sh's list, which is what put these on disk.
-SHARED_LIBS='rembric-dotenv.mjs rembric-project.mjs rembric-host-binding.mjs rembric-plugin-core.mjs'
+SHARED_LIBS='rembric-dotenv.mjs rembric-project.mjs rembric-plugin-core.mjs'
 
 removed=''
 absent=''

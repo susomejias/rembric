@@ -6,7 +6,7 @@ This plugin shares the same HTTP API and MCP bridge as the Claude Code, Codex CL
 
 **Scope**: the plugin handles session lifecycle and compaction signals via the `event` dispatcher (`session.created`, `session.deleted`, `session.compacted`, `server.instance.disposed`), accumulates transcripts via `chat.message` and `message.updated`, flushes summaries on `session.idle` (per-turn debounced) and `session.compacted` (compaction milestone), and injects post-compaction guidance via `experimental.session.compacting`. The `chat.message` handler also appends a recall nudge to `output.parts` when the user prompt matches the cross-client recall regex (`remember|recall|acuérdate|qué hicimos|what did we do`), for paridad with the Claude Code / Codex CLI `UserPromptSubmit` hook.
 
-**Session declaration**: whenever the active root session changes (never a subagent's), the plugin publishes `~/.cache/rembric/host-sessions/<pid>.json` for its own process: `{"pid", "start", "sessionId"}`, where `start` is the process start time from `ps -o lstart=` under `LC_ALL=C`. The MCP bridge is a descendant of opencode, finds that file through its ancestors, and sends the id as `X-Rembric-Session` on every request, so the server attributes writes to this session even with several opencode instances open in one project. The file is removed when that session is deleted or the plugin is disposed, only while it still names that session. Nothing is published on Windows. Both 1.x and 2.x publish.
+**Session attribution**: one opencode process can run several root sessions at once (`opencode serve`, the web UI) through one shared MCP bridge, so the plugin attributes each call rather than the process. A `tool.execute.before` hook (1.x) or `ctx.tool.hook('execute.before')` (2.x) sets `sessionId` on every Rembric tool that declares it for attribution (`memory.save`, `memory.confirm_batch`, `memory.merge`, `memory.save_prompt`, `memory.capture_passive`, `memory.session_summary`, `memory.session_end`) to the root session that issued the call, resolving a subagent through its parents, and replaces any id the model passed. Other tools, `memory.session_resume` and the `memory.search_prompts` filter are never touched, and a call whose root session the plugin has not registered is left as it is. The plugin publishes no host binding.
 
 ## opencode 1.x and 2.x
 
@@ -120,8 +120,7 @@ Removes the plugin and shared module files. It does **not** touch `opencode.json
 
 ```
 ~/.config/opencode/plugins/rembric.ts        ← session lifecycle + post-compact reminder (JS)
-~/.config/rembric/bin/rembric-{dotenv,project,host-binding,plugin-core}.mjs ← shared modules
-~/.cache/rembric/host-sessions/<pid>.json    ← session declaration, removed at dispose
+~/.config/rembric/bin/rembric-{dotenv,project,plugin-core}.mjs ← shared modules
 ~/.config/opencode/opencode.json             ← MCP block (user-edited)
 <repo>/.rembric                              ← optional explicit slug (user-created)
 ```

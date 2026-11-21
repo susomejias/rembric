@@ -1054,10 +1054,9 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     );
   });
 
-  it('the host binding lives in one module that the bridge, opencode and Pi import', () => {
+  it('the host binding lives in one module that the bridge and Pi import, and opencode does not', () => {
     const importers = [
       { rel: MCP_BRIDGE_MJS, from: /from\s+['"]\.\/rembric-host-binding\.mjs['"]/ },
-      { rel: OPENCODE_PLUGIN_TS, from: /from\s+['"][^'"]*rembric-host-binding\.mjs['"]/ },
       { rel: PI_INDEX_TS, from: /from\s+['"][^'"]*rembric-host-binding\.mjs['"]/ },
     ];
     for (const { rel, from } of importers) {
@@ -1066,6 +1065,10 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
         `${rel} must import the host binding from rembric-host-binding.mjs`,
       ).toBe(true);
     }
+    expect(
+      /rembric-host-binding\.mjs/.test(readFileSync(join(repoRoot, OPENCODE_PLUGIN_TS), 'utf8')),
+      `${OPENCODE_PLUGIN_TS} attributes each tool call and must not publish a process-wide host binding`,
+    ).toBe(false);
     const bindingOwned = [
       { what: 'the start-token ps format', pattern: /lstart=/ },
       { what: 'the binding directory', pattern: /host-sessions/ },
