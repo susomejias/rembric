@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Db } from '../client.js';
 import {
@@ -9,6 +9,10 @@ import {
   type NewConsolidationOp,
   type NewConsolidationRun,
 } from '../schema/consolidation.js';
+
+function notMaintenanceKind(kind: string): SQL {
+  return sql`NOT (${consolidationRuns.scope} = 'maintenance' AND coalesce(CASE WHEN json_valid(${consolidationRuns.summary}) THEN json_extract(${consolidationRuns.summary}, '$.kind') = ${kind} END, 0))`;
+}
 
 export class ConsolidationRepository {
   constructor(private readonly db: Db) {}
@@ -147,18 +151,24 @@ export class ConsolidationRepository {
     this.db.update(consolidationOps).set({ revertedAt }).where(eq(consolidationOps.id, opId)).run();
   }
 
-  adminListRuns(limit: number, offset: number): ConsolidationRun[] {
+  /** `hiddenKind` leaves out `maintenance` runs whose JSON summary names that `kind`. */
+  adminListRuns(limit: number, offset: number, hiddenKind?: string): ConsolidationRun[] {
     return this.db
       .select()
       .from(consolidationRuns)
+      .where(hiddenKind === undefined ? undefined : notMaintenanceKind(hiddenKind))
       .orderBy(desc(consolidationRuns.startedAt))
       .limit(limit)
       .offset(offset)
       .all();
   }
 
-  adminCountRuns(): number {
-    const row = this.db.select({ value: count() }).from(consolidationRuns).get();
+  adminCountRuns(hiddenKind?: string): number {
+    const row = this.db
+      .select({ value: count() })
+      .from(consolidationRuns)
+      .where(hiddenKind === undefined ? undefined : notMaintenanceKind(hiddenKind))
+      .get();
     return row?.value ?? 0;
   }
 

@@ -53,3 +53,52 @@ describe('ConsolidationRepository drain reads', () => {
     expect(repo.listRevertedOrphanPromoteCreatedIds()).toEqual(['J1']);
   });
 });
+
+describe('ConsolidationRepository hidden run kind', () => {
+  let t: TestDb;
+  let repo: ConsolidationRepository;
+
+  beforeEach(() => {
+    t = createTestDb();
+    repo = new ConsolidationRepository(t.handle.db);
+    const runs: [string, string, string | null][] = [
+      ['sweep', 'global', '{"archives":0,"orphaned":0}'],
+      ['retirement', 'maintenance', '{"kind":"retirement_orphan","orphaned":1}'],
+      ['session-purge', 'maintenance', '{"kind":"session_purge","deleted":2}'],
+      ['archive', 'maintenance', '{"kind":"project_archive_orphan","orphaned":1}'],
+      ['malformed', 'maintenance', '{not json'],
+      ['no-summary', 'maintenance', null],
+      ['retirement-kind-elsewhere', 'global', '{"kind":"retirement_orphan","orphaned":1}'],
+    ];
+    runs.forEach(([id, scope, summary], i) =>
+      repo.insertRun({ id, scope, startedAt: new Date(1_000 + i), summary }),
+    );
+  });
+
+  afterEach(() => t.cleanup());
+
+  it('leaves out only maintenance runs of the hidden kind from the list and the count', () => {
+    expect(repo.adminListRuns(50, 0, 'retirement_orphan').map((r) => r.id)).toEqual([
+      'retirement-kind-elsewhere',
+      'no-summary',
+      'malformed',
+      'archive',
+      'session-purge',
+      'sweep',
+    ]);
+    expect(repo.adminCountRuns('retirement_orphan')).toBe(6);
+  });
+
+  it('control: without a hidden kind every run is listed and counted', () => {
+    expect(repo.adminListRuns(50, 0).map((r) => r.id)).toHaveLength(7);
+    expect(repo.adminListRuns(50, 0)[5]?.id).toBe('retirement');
+    expect(repo.adminCountRuns()).toBe(7);
+  });
+
+  it('pages the filtered list by offset over the remaining runs', () => {
+    expect(repo.adminListRuns(2, 4, 'retirement_orphan').map((r) => r.id)).toEqual([
+      'session-purge',
+      'sweep',
+    ]);
+  });
+});

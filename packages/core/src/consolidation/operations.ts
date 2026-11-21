@@ -18,6 +18,7 @@ export type ConsolidationDeps = Pick<Repositories, 'memory' | 'relations' | 'con
 export type UndoDeps = ConsolidationDeps & Pick<Repositories, 'projects'>;
 
 export const RETIREMENT_ORPHAN_REASON = 'endpoint retired at retirement';
+export const RETIREMENT_RUN_KIND = 'retirement_orphan';
 
 export type RetirementCause =
   | 'topic_key revision'
@@ -53,7 +54,7 @@ export function orphanPendingOnRetirement(
       startedAt: input.at,
       finishedAt: input.at,
       scope: 'maintenance',
-      summary: JSON.stringify({ kind: 'retirement_orphan', orphaned: rows.length }),
+      summary: JSON.stringify({ kind: RETIREMENT_RUN_KIND, orphaned: rows.length }),
     });
   }
   const retired = new Set(input.retiredIds);
