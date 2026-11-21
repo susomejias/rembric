@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -124,6 +125,9 @@ _FILE_RECALL_SIBLINGS_MAX = 64
 _FILE_TOOLS = {"read_file", "write_file", "patch"}
 _RESOLVE_TIMEOUT_SEC: float = 3
 _FINGERPRINT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+# The session-id pattern of POST /api/<slug>/sessions; host bindings carry no other.
+_HOST_SESSION_ID_RE = re.compile(r"[A-Za-z0-9_-]{8,128}")
+_HOST_PS_TIMEOUT_SEC = 2.0
 _REMOTES_MAX = 8
 _REMOTE_MAX_CHARS = 512
 _ROOT_NAME_MAX_CHARS = 255
@@ -619,6 +623,100 @@ def _resolve_project(
     return None, notice, _no_project_label(fingerprint, cause, answer)
 
 
+# Host bindings: <home>/.cache/rembric/host-sessions/<pid>.json maps this process
+# (pid + start token) to its live session so the MCP bridge it spawns can declare
+# it. The layout is pinned for every language by ../test/host-binding-layout.json.
+def _host_binding_dir(create: bool) -> Path | None:
+    if os.name != "posix":
+        return None
+    home = os.path.expanduser("~")
+    if not os.path.isabs(home) or not os.path.isdir(home):
+        return None
+    directory = Path(home, ".cache", "rembric", "host-sessions")
+    if create and not directory.is_dir():
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            directory.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+    if not directory.is_dir() or directory.stat().st_uid != os.getuid():
+        return None
+    return directory
+
+
+def _host_start_token(pid: int) -> str:
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=_HOST_PS_TIMEOUT_SEC,
+            env={**os.environ, "LC_ALL": "C"},
+            check=False,
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+    if result.returncode != 0:
+        return ""
+    return " ".join(result.stdout.split())
+
+
+def _publish_host_binding(session_id: str) -> None:
+    try:
+        if not isinstance(session_id, str) or not _HOST_SESSION_ID_RE.fullmatch(session_id):
+            return
+        pid = os.getpid()
+        start = _host_start_token(pid)
+        if not start:
+            return
+        directory = _host_binding_dir(create=True)
+        if directory is None:
+            return
+        fd, tmp = tempfile.mkstemp(prefix=".tmp.", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {"pid": pid, "start": start, "sessionId": session_id},
+                        separators=(",", ":"),
+                    )
+                )
+            os.replace(tmp, directory / f"{pid}.json")
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _remove_host_binding(session_id: str | None) -> None:
+    # Taken aside first so a newer session's publish that lands meanwhile survives.
+    try:
+        if not session_id:
+            return
+        directory = _host_binding_dir(create=False)
+        if directory is None:
+            return
+        path = directory / f"{os.getpid()}.json"
+        taken = directory / f".removing.{os.getpid()}"
+        try:
+            os.replace(path, taken)
+        except OSError:
+            return
+        try:
+            current = json.loads(taken.read_text(encoding="utf-8")).get("sessionId")
+        except Exception:  # noqa: BLE001
+            current = None
+        if current != session_id:
+            try:
+                os.link(taken, path)
+            except OSError:
+                pass
+        taken.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        return
+
+
 # ---------------------------------------------------------------------------
 # Provider
 # ---------------------------------------------------------------------------
@@ -734,6 +832,8 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         # every later lifecycle HTTP call must skip too, not just this POST.
         agent_context = kwargs.get("agent_context", "primary")
         self._suppressed = agent_context in _NON_PRIMARY_AGENT_CONTEXTS
+        if not self._suppressed:
+            _publish_host_binding(session_id)
         if not self._slug:
             reason = f" ({no_project})" if no_project else ""
             _stderr(
@@ -1087,6 +1187,8 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             f"messages_count={len(messages) if messages else 0} "
             f"initialized={self._initialized} slug={self._slug!r}"
         )
+        if not self._suppressed:
+            _remove_host_binding(self._session_id)
         if (
             not self._initialized
             or not self._slug
@@ -1191,6 +1293,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             self._reset_turn_state()
         self._session_id = new_session_id
         if new_session_id and not self._suppressed:
+            _publish_host_binding(new_session_id)
             self._ensure_session(new_session_id, self._cwd or os.getcwd())
 
     def on_memory_write(
@@ -1266,7 +1369,9 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             return None
 
     def shutdown(self, **kwargs: Any) -> None:
-        return None
+        del kwargs
+        if not self._suppressed:
+            _remove_host_binding(self._session_id)
 
 
 # Mirrors stripPrivateTags in .opencode-plugin/plugin.ts and

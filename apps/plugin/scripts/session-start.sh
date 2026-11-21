@@ -7,7 +7,8 @@
 #     hooks.json       → "claude-code"
 #     hooks.codex.json → "codex-cli"
 #
-# 1. Reads `session_id` and `cwd` from hook stdin JSON.
+# 1. Reads `session_id` and `cwd` from hook stdin JSON and publishes the host
+#    binding (rembric_host_binding_publish) for every source.
 # 2. Resolves the session's project once (rembric_session_project): the nearest
 #    `.rembric`, then REMBRIC_PROJECT_SLUG, then the repository fingerprint.
 # 3. POSTs `/api/<slug>/sessions {id, cwd, agent}` to create or upsert the row.
@@ -32,6 +33,7 @@ if [ ! -t 0 ]; then
   INPUT="$(cat)"
 fi
 SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
+rembric_host_binding_publish "$SESSION_ID"
 CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"
 

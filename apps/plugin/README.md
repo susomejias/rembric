@@ -198,6 +198,10 @@ is uploaded as `Connect with [REDACTED] and check the row count.`
 
 The proactive-save protocol travels via the MCP `initialize.instructions` (~1 400 chars, paid once per connection by every client) — it does not show up in the plugin's per-turn budget.
 
+## Concurrent sessions in one repository
+
+Every `SessionStart`, whatever its source, records the host process's current session in `~/.cache/rembric/host-sessions/<pid>.json`, and `SessionEnd` removes that file only while it still names the ending session. The bridge reads it on every request and sends the session in the `X-Rembric-Session` header, so two sessions in one repository each keep their own writes, and a `/clear` takes effect without restarting the bridge. opencode and Hermes write the same file from their in-process plugins; Pi sends the header itself. Where no file exists (Windows, an older plugin), attribution works as before. See [Concurrent sessions in one repository](../../docs/agents.md#concurrent-sessions-in-one-repository).
+
 ## Bridge runtime
 
 - **Requires Node 18+** on PATH. Claude Code already needs Node, so this is normally satisfied.

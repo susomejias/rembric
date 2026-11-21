@@ -214,6 +214,7 @@ function runHook(
           REMBRIC_API_TOKEN: 'test-token',
           REMBRIC_POST_MAX_TIME: '5',
           TMPDIR: tmp,
+          HOME: tmp,
           ...env,
         },
       },

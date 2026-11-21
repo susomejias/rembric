@@ -241,6 +241,7 @@ describe('the resumed-process read line (bash: session-start.sh + prompt-nudge.s
         REMBRIC_API_TOKEN: 'test-token',
         REMBRIC_POST_MAX_TIME: '30',
         TMPDIR: tmpdirEnv,
+        HOME: tmpdirEnv,
       },
     });
     child.child.stdin?.end(JSON.stringify({ session_id: sessionId, cwd, source: 'startup' }));

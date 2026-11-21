@@ -115,6 +115,8 @@ The provider implements four lifecycle methods that map onto Rembric's HTTP sess
 - `on_session_switch(new_id, ...)` → `POST /api/<slug>/sessions/<cached id>/end` when the id actually changed, then the same ensure-and-resume pair for the new id.
 - `on_session_end(messages)` → `POST /api/<slug>/sessions/<id>/end`.
 
+**Declaring the session to the bridge.** `initialize` and `on_session_switch` also write `~/.cache/rembric/host-sessions/<pid>.json` for the Hermes process, naming the current session. The MCP bridge Hermes spawns reads it and sends the session on every request, so two Hermes sessions in one repository each keep their own writes. `on_session_end` and `shutdown` remove the file only while it still names the session being closed. Sub-agent contexts write nothing, and a failure never reaches Hermes.
+
 The resume runs once per session id per process, always straight after that id's first ensure. It revives a row a previous Hermes process left `ended` (or the stale sweep left `abandoned`) so a session resumed from the CLI keeps attaching memories to its own row instead of writing them with a null `session_id`; on a row that is already active the server treats it as a no-op. A failed ensure suppresses it.
 
 `system_prompt_block()` returns the unified Rembric nudge — the same SAVE/RECALL/SUMMARIZE text the server hands MCP clients via the `initialize.instructions` block. Hermes does not consume that MCP block and exposes no per-turn hook, so this method is its only nudging surface; the text is kept byte-identical to the server's `buildInstructions()` BASE.
