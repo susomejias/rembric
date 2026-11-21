@@ -1,6 +1,7 @@
 import {
   NotUndoableError,
   PurgedRowMissingError,
+  RETIREMENT_RUN_KIND,
   TERMINAL_OP_TYPES,
   type UndoRunResult,
   type UndoResult,
@@ -157,14 +158,16 @@ export default async function ConsolidationPage({
   const offset = page * PAGE_SIZE;
   const purgedSessions = singleParam(params['purged-sessions']);
   const undone = singleParam(params['undone']);
+  const showMaintenance = singleParam(params['show-maintenance']) === '1';
+  const hiddenKind = showMaintenance ? undefined : RETIREMENT_RUN_KIND;
 
   const { repos } = getServices();
   const nowMs = Date.now();
 
-  const runsRaw = repos.consolidation.adminListRuns(PAGE_SIZE + 1, offset);
+  const runsRaw = repos.consolidation.adminListRuns(PAGE_SIZE + 1, offset, hiddenKind);
   const hasMore = runsRaw.length > PAGE_SIZE;
   const runs = runsRaw.slice(0, PAGE_SIZE);
-  const total = repos.consolidation.adminCountRuns();
+  const total = repos.consolidation.adminCountRuns(hiddenKind);
 
   const lastRun = repos.consolidation.adminListRuns(1, 0).at(0) ?? null;
   const lastRunOps = lastRun ? repos.consolidation.adminListOps(lastRun.id) : [];
@@ -290,7 +293,23 @@ export default async function ConsolidationPage({
       </div>
 
       <div className="mt-8">
-        <SectionBar name="Pipeline" meta={`${runs.length} OF ${total}`} />
+        <SectionBar
+          name="Pipeline"
+          meta={`${runs.length} OF ${total}`}
+          more={
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={
+                  showMaintenance
+                    ? '/dashboard/consolidation'
+                    : '/dashboard/consolidation?show-maintenance=1'
+                }
+              >
+                {showMaintenance ? 'Hide maintenance runs' : 'Show maintenance runs'}
+              </Link>
+            </Button>
+          }
+        />
       </div>
       {runs.length === 0 ? (
         <TableEmpty>NO CONSOLIDATION RUN HAS BEEN RECORDED YET</TableEmpty>
@@ -354,7 +373,7 @@ export default async function ConsolidationPage({
           total={total}
           totalLabel={`${total} RUNS`}
           path="/dashboard/consolidation"
-          query={{}}
+          query={showMaintenance ? { 'show-maintenance': '1' } : {}}
         />
       ) : null}
 

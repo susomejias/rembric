@@ -40,10 +40,22 @@ async function renderRunDetail(id: string): Promise<string> {
   return renderToHtml(await page({ params: Promise.resolve({ id }) }));
 }
 
-async function renderConsolidation(): Promise<string> {
+async function renderConsolidation(query: Record<string, string> = {}): Promise<string> {
   const page = (await import('../../app/dashboard/consolidation/page')).default;
-  return renderToHtml(await page({ searchParams: Promise.resolve({}) }));
+  return renderToHtml(await page({ searchParams: Promise.resolve(query) }));
 }
+
+function insertMaintenanceRun(id: string, kind: string, startedAtMs: number): void {
+  createRepositories(t.handle.db).consolidation.insertRun({
+    id,
+    startedAt: new Date(startedAtMs),
+    finishedAt: new Date(startedAtMs),
+    scope: 'maintenance',
+    summary: JSON.stringify({ kind, orphaned: 1 }),
+  });
+}
+
+const runHref = (id: string): string => `href="/dashboard/consolidation/${id}"`;
 
 describe('consolidation detail composition', () => {
   it('keeps summary and operations primary, with undo attached only to actionable operations', async () => {
@@ -228,5 +240,81 @@ describe('consolidation list page slice', () => {
     const html = await renderConsolidation();
     expect(html).toContain(`${PAGE_SIZE} OF ${SEEDED + 2}`);
     expect(html).not.toContain(`${PAGE_SIZE + 1} OF`);
+  });
+});
+
+describe('consolidation list hides retirement runs by default', () => {
+  beforeEach(() => insertMaintenanceRun('RUN-RETIREMENT', 'retirement_orphan', 3_000));
+
+  it('leaves retirement runs out of the default list and its count, and links the toggle', async () => {
+    const html = await renderConsolidation();
+    expect(html).toContain(runHref('RUN-STRUCTURED'));
+    expect(html).toContain(runHref('RUN-MALFORMED'));
+    expect(html).not.toContain(runHref('RUN-RETIREMENT'));
+    expect(html).toContain('2 OF 2');
+    expect(html).toMatch(
+      /href="\/dashboard\/consolidation\?show-maintenance=1"[^>]*>Show maintenance runs</,
+    );
+    const otherValue = await renderConsolidation({ 'show-maintenance': '0' });
+    expect(otherValue).not.toContain(runHref('RUN-RETIREMENT'));
+    expect(otherValue).toContain('Show maintenance runs');
+  });
+
+  it('lists retirement runs when show-maintenance=1 is in the query, with a link back', async () => {
+    const html = await renderConsolidation({ 'show-maintenance': '1' });
+    expect(html).toContain(runHref('RUN-RETIREMENT'));
+    expect(html).toContain(runHref('RUN-STRUCTURED'));
+    expect(html).toContain('3 OF 3');
+    expect(html).toMatch(/href="\/dashboard\/consolidation"[^>]*>Hide maintenance runs</);
+    expect(html).not.toContain('Show maintenance runs');
+  });
+
+  it('keeps the retirement run detail and its op undo unchanged', async () => {
+    createRepositories(t.handle.db).consolidation.insertOp({
+      id: 'OP-RETIREMENT',
+      runId: 'RUN-RETIREMENT',
+      opType: 'orphan_promote',
+      affectedIds: ['MEM-A', 'MEM-B'],
+      createdId: 'JUDGMENT-1',
+      reasoning: 'endpoint retired at retirement: source superseded by topic_key revision',
+      appliedAt: new Date(3_000),
+    });
+    const html = await renderRunDetail('RUN-RETIREMENT');
+    expect(html).toContain('name="opId" value="OP-RETIREMENT"');
+    expect(html).toContain('name="runId" value="RUN-RETIREMENT"');
+  });
+
+  it('carries show-maintenance=1 in the pager links while it is set', async () => {
+    const repos = createRepositories(t.handle.db);
+    for (let i = 0; i < SEEDED; i++) {
+      repos.consolidation.insertRun({
+        id: `RUN${i}`,
+        startedAt: new Date(10_000 + i),
+        scope: 'global',
+      });
+    }
+    const shown = await renderConsolidation({ 'show-maintenance': '1' });
+    expect(shown).toContain('href="/dashboard/consolidation?show-maintenance=1&amp;page=1"');
+    expect(shown).toContain(`${PAGE_SIZE} OF ${SEEDED + 3}`);
+    const hidden = await renderConsolidation();
+    expect(hidden).toContain('href="/dashboard/consolidation?page=1"');
+    expect(hidden).toContain(`${PAGE_SIZE} OF ${SEEDED + 2}`);
+    const secondPage = await renderConsolidation({ 'show-maintenance': '1', page: '1' });
+    expect(secondPage).toContain('href="/dashboard/consolidation?show-maintenance=1"');
+    expect(secondPage).toContain(runHref('RUN-RETIREMENT'));
+  });
+
+  it('control: other maintenance runs stay listed by default', async () => {
+    const kinds = [
+      'session_purge',
+      'archived_memory_purge',
+      'project_archive_orphan',
+      'agent_memory_archive',
+    ];
+    kinds.forEach((kind, i) => insertMaintenanceRun(`RUN-${kind}`, kind, 4_000 + i));
+    const html = await renderConsolidation();
+    for (const kind of kinds) expect(html).toContain(runHref(`RUN-${kind}`));
+    expect(html).toContain(`${kinds.length + 2} OF ${kinds.length + 2}`);
+    expect(html).not.toContain(runHref('RUN-RETIREMENT'));
   });
 });

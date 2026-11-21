@@ -12,6 +12,7 @@ export {
   PROJECT_ARCHIVE_RUN_KIND,
   restoreProjectArchiveOrphanings,
   RETIREMENT_ORPHAN_REASON,
+  RETIREMENT_RUN_KIND,
   undoOp,
   undoRun,
 } from './operations.js';
