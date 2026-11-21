@@ -7,7 +7,6 @@ import { z } from 'zod';
 
 import {
   assertAuthorized,
-  assertExplicitSessionOwned,
   requireScope,
   resolveEffectiveScope,
   resolveSessionId,
@@ -100,8 +99,6 @@ async function handleSavePrompt(
   const promptProjectId = scope.projectId;
   let sessionId: string | null;
   try {
-    if (args.sessionId)
-      assertExplicitSessionOwned(deps.agentSessions, args.sessionId, promptProjectId);
     sessionId = resolveSessionId(deps, args.sessionId, promptProjectId);
   } catch (err) {
     return errToMcp(err, deps.logInternalError);

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import {
   assertAuthorized,
   assertExplicitSessionOwned,
+  honouredDeclaredSession,
   requireScope,
   resolveEffectiveScope,
   unresolvableSlug,
@@ -201,6 +202,7 @@ async function handleSessionStart(
   }
 
   let session: AgentSession | null =
+    honouredDeclaredSession(deps.agentSessions, projectId) ??
     deps.agentSessions.findActiveForTransport({ tokenId: ctx.token.id, projectId }) ??
     deps.agentSessions.findSoleActiveForReuse({ tokenId: ctx.token.id, projectId });
   let reused = false;
@@ -244,6 +246,8 @@ function resolveLifecycleTarget(
   explicit: string | undefined,
   projectId: string | null,
 ): { sessionId: string } | { refusal: ReturnType<typeof mcpError> } {
+  const declared = honouredDeclaredSession(deps.agentSessions, projectId);
+  if (declared) return { sessionId: declared.id };
   if (explicit) return { sessionId: explicit };
   const match = deps.agentSessions.resolveForTransport({
     tokenId: getRequestContext().token.id,

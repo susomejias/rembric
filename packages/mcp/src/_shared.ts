@@ -4,7 +4,13 @@ import { DomainError } from '@rembric/core';
 import { sliceWithoutSplittingSurrogatePair } from '@rembric/core';
 import { isAuthorized, isProjectSetScope, pinnedProjectId } from '@rembric/core';
 import { getRequestContext, type RequestContext, type TokenScope } from '@rembric/core';
-import { projectScope, type Memory, type Scope, type SearchScope } from '@rembric/db';
+import {
+  projectScope,
+  type AgentSession,
+  type Memory,
+  type Scope,
+  type SearchScope,
+} from '@rembric/db';
 
 export interface ScopeResolutionDeps {
   projects: ProjectsService;
@@ -194,23 +200,41 @@ export async function requireScope(
   return scope;
 }
 
+export function honouredDeclaredSession(
+  agentSessions: AgentSessionsService,
+  projectId: string | null,
+): AgentSession | undefined {
+  const ctx = getRequestContext();
+  if (ctx.declaredSessionId === undefined) return undefined;
+  const row = agentSessions.getById(ctx.declaredSessionId);
+  if (!row || row.tokenId !== ctx.token.id || row.projectId !== projectId) return undefined;
+  if (row.status !== 'active' || row.deletedAt) return undefined;
+  return row;
+}
+
 export function resolveSessionId(
   deps: { agentSessions: AgentSessionsService },
   explicit: string | undefined,
   projectId: string | null,
-  opts: { touch?: boolean } = {},
 ): string | null {
-  const touch = opts.touch ?? true;
-  if (explicit) {
-    if (touch) deps.agentSessions.touchActivity(explicit);
-    return explicit;
-  }
-  const active = deps.agentSessions.findActiveForTransport({
-    tokenId: getRequestContext().token.id,
-    projectId,
-  });
-  if (active && touch) deps.agentSessions.touchActivity(active.id);
-  return active?.id ?? null;
+  const id =
+    honouredDeclaredSession(deps.agentSessions, projectId)?.id ??
+    ownedExplicit(deps.agentSessions, explicit, projectId) ??
+    deps.agentSessions.findActiveForTransport({ tokenId: getRequestContext().token.id, projectId })
+      ?.id;
+  if (id === undefined) return null;
+  deps.agentSessions.touchActivity(id);
+  return id;
+}
+
+function ownedExplicit(
+  agentSessions: AgentSessionsService,
+  explicit: string | undefined,
+  projectId: string | null,
+): string | undefined {
+  if (!explicit) return undefined;
+  assertExplicitSessionOwned(agentSessions, explicit, projectId);
+  return explicit;
 }
 
 export function assertExplicitSessionOwned(
