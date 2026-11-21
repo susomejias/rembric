@@ -350,7 +350,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     'memory.session_end',
     {
       description:
-        'End the active session without writing a summary. Prefer memory.session_summary unless the session is being abandoned. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active). Returns: { ok: true, sessionId, endedAt, applied: true } on an active row or { ok: true, sessionId, endedAt, applied: false } if the row was already terminal and the call was a no-op.',
+        'End the active session without writing a summary. Prefer memory.session_summary unless the session is being abandoned. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active; without it, two or more active sessions refuse the call with session_ambiguous: pass it then, never memory.session_start). Returns: { ok: true, sessionId, endedAt, applied: true } on an active row or { ok: true, sessionId, endedAt, applied: false } if the row was already terminal and the call was a no-op.',
       inputSchema: sessionEndSchema,
       outputSchema: sessionEndOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('End session'),

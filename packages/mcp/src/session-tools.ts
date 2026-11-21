@@ -9,7 +9,6 @@ import {
   assertExplicitSessionOwned,
   requireScope,
   resolveEffectiveScope,
-  resolveSessionId,
   unresolvableSlug,
   unresolvableSlugError,
 } from './_shared.js';
@@ -240,6 +239,33 @@ async function handleSessionStart(
   });
 }
 
+function resolveLifecycleTarget(
+  deps: SessionToolDeps,
+  explicit: string | undefined,
+  projectId: string | null,
+): { sessionId: string } | { refusal: ReturnType<typeof mcpError> } {
+  if (explicit) return { sessionId: explicit };
+  const match = deps.agentSessions.resolveForTransport({
+    tokenId: getRequestContext().token.id,
+    projectId,
+  });
+  if (match.kind === 'sole') return { sessionId: match.session.id };
+  if (match.kind === 'ambiguous') {
+    return {
+      refusal: mcpError(
+        'session_ambiguous',
+        'more than one session is active for this token and project; pass your sessionId explicitly. memory.session_start cannot resolve this: it would open another session',
+      ),
+    };
+  }
+  return {
+    refusal: mcpError(
+      'session_not_found',
+      'no active session on this MCP transport and no sessionId was provided',
+    ),
+  };
+}
+
 async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: string }) {
   const ctx = getRequestContext();
   let scope: Scope;
@@ -248,13 +274,9 @@ async function handleSessionEnd(deps: SessionToolDeps, args: { sessionId?: strin
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-  const sessionId = resolveSessionId(deps, args.sessionId, scope.projectId, { touch: false });
-  if (!sessionId) {
-    return mcpError(
-      'session_not_found',
-      'no active session on this MCP transport and no sessionId was provided',
-    );
-  }
+  const target = resolveLifecycleTarget(deps, args.sessionId, scope.projectId);
+  if ('refusal' in target) return target.refusal;
+  const { sessionId } = target;
   const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {
@@ -278,13 +300,9 @@ async function handleSessionSummary(
   } catch (err) {
     return errToMcp(err, deps.logInternalError);
   }
-  const sessionId = resolveSessionId(deps, args.sessionId, scope.projectId, { touch: false });
-  if (!sessionId) {
-    return mcpError(
-      'session_not_found',
-      'no active session on this MCP transport and no sessionId was provided',
-    );
-  }
+  const target = resolveLifecycleTarget(deps, args.sessionId, scope.projectId);
+  if ('refusal' in target) return target.refusal;
+  const { sessionId } = target;
   const blocked = rejectIfDeleted(deps, sessionId, ctx.token.id, scope.projectId);
   if (blocked) return blocked;
   try {

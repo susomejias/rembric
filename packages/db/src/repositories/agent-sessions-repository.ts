@@ -94,6 +94,10 @@ function sessionHasContentSql(
   );
 }
 
+function soleRow(rows: AgentSession[]): AgentSession | undefined {
+  return rows.length === 1 ? rows[0] : undefined;
+}
+
 export class AgentSessionsRepository {
   constructor(private readonly db: Db) {}
 
@@ -122,43 +126,39 @@ export class AgentSessionsRepository {
       .get();
   }
 
+  findActiveCandidates(
+    tokenId: string,
+    projectId: string | null,
+    activeSinceMs: number | null,
+  ): AgentSession[] {
+    const conditions = [
+      eq(agentSessions.tokenId, tokenId),
+      eq(agentSessions.status, 'active'),
+      isNull(agentSessions.deletedAt),
+      projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
+    ];
+    if (activeSinceMs !== null) {
+      conditions.push(sql`${EFFECTIVE_LAST_ACTIVITY} >= ${activeSinceMs}`);
+    }
+    // No ORDER BY: callers only distinguish zero, one and more than one row.
+    return this.db
+      .select()
+      .from(agentSessions)
+      .where(and(...conditions))
+      .limit(2)
+      .all();
+  }
+
   findActiveForTransport(
     tokenId: string,
     projectId: string | null,
     activeSinceMs: number,
   ): AgentSession | undefined {
-    const conditions = [
-      eq(agentSessions.tokenId, tokenId),
-      eq(agentSessions.status, 'active'),
-      isNull(agentSessions.deletedAt),
-      projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
-      sql`${EFFECTIVE_LAST_ACTIVITY} >= ${activeSinceMs}`,
-    ];
-    // No ORDER BY: "sole match or nothing" makes it unobservable.
-    const rows = this.db
-      .select()
-      .from(agentSessions)
-      .where(and(...conditions))
-      .limit(2)
-      .all();
-    return rows.length === 1 ? rows[0] : undefined;
+    return soleRow(this.findActiveCandidates(tokenId, projectId, activeSinceMs));
   }
 
   findSoleActiveForReuse(tokenId: string, projectId: string | null): AgentSession | undefined {
-    const conditions = [
-      eq(agentSessions.tokenId, tokenId),
-      eq(agentSessions.status, 'active'),
-      isNull(agentSessions.deletedAt),
-      projectId === null ? isNull(agentSessions.projectId) : eq(agentSessions.projectId, projectId),
-    ];
-    // No ORDER BY: "sole match or nothing" makes it unobservable.
-    const rows = this.db
-      .select()
-      .from(agentSessions)
-      .where(and(...conditions))
-      .limit(2)
-      .all();
-    return rows.length === 1 ? rows[0] : undefined;
+    return soleRow(this.findActiveCandidates(tokenId, projectId, null));
   }
 
   /** Bump `last_activity_at` — called by every write that resolves to this session. */
