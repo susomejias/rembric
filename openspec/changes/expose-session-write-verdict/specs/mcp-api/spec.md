@@ -30,7 +30,14 @@ The tool's description SHALL additionally tell the model not to repeat the call 
 
 `memory.session_resume` SHALL NOT bind the resumed session to the connection, on the transition path or on the already-`active` no-op path, and SHALL NOT set a project: resume names a session, and the project is whatever the connection already resolved. A later write reaches the resumed session through an explicit `sessionId`, or through the sole-active-session lookup when the resumed session is the only `active` one for the caller's `(token, project)`. `memory.session_end` has no binding to clear.
 
-Session resolution is unchanged for the other three tools and SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an explicit `sessionId`, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The second source SHALL continue to consider only `active` rows, so an agent that supplies no explicit id SHALL receive `session_not_found` rather than having its write attached to a closed session picked by recency.
+Session resolution is unchanged for the other three tools and SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an explicit `sessionId`, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The second source SHALL continue to consider only `active` rows, so an agent that supplies no explicit id SHALL receive a refusal rather than having its write attached to a closed session picked by recency.
+
+When `memory.session_summary` or `memory.session_end` is called without `sessionId` and no session resolves, the refusal SHALL say why, because the remedy differs and a wrong remedy misfiles the write permanently. The tool SHALL classify through `AgentSessionsService.resolveForTransport` (see the `sessions` capability, "Transport resolution MUST distinguish absence from ambiguity") and SHALL refuse with:
+
+- `session_ambiguous` when two or more `active`, non-deleted rows exist for the caller's `(token_id, project_id)`, with or without the staleness window, and no single row is inside the window. Its message SHALL be exactly `more than one session is active for this token and project; pass your sessionId explicitly. memory.session_start cannot resolve this: it would open another session`. It SHALL NOT name, count or otherwise reveal the candidate rows, and SHALL NOT write, insert or touch any row.
+- `session_not_found` with its existing message `no active session on this MCP transport and no sessionId was provided` in every other unresolved case, including a sole `active` row idle past the window (which `memory.session_start` adopts) and no `active` row at all.
+
+`session_not_found` SHALL NOT be returned for the ambiguity case. The defect this closes: the server instructions route `session_not_found` to `memory.session_start`, which under ambiguity mints a row with `agent: 'unknown'`, and the retried summary then lands on that row, permanently, since sessions are append-only and `agent` is immutable. The `memory.session_end` description SHALL name `session_ambiguous` and say that the remedy is the caller's own `sessionId`, never `memory.session_start`. The `memory.session_summary` description is exempt because it has no room under `DESCRIPTION_MAX_LENGTH`; for that tool the refusal message carries the remedy.
 
 #### Scenario: `memory.session_start` opens a new session
 
@@ -237,3 +244,28 @@ Session resolution is unchanged for the other three tools and SHALL remain statu
 - **THEN** the description's `Returns:` enumeration SHALL name every field its `outputSchema` marks required, including `previousStatus` and `previousEndedAt`
 - **AND** the description SHALL state that `previousEndedAt` is not retained on the row after the call
 - **AND** the CI test that compares each description against its `outputSchema`'s required list SHALL cover this tool
+
+#### Scenario: `memory.session_summary` without `sessionId` under two active sessions is refused as `session_ambiguous`
+
+- **GIVEN** two `active`, non-deleted rows exist for the caller's `(token_id, project_id)`, both inside the staleness window
+- **WHEN** the agent calls `memory.session_summary({ summary, title })` with no `sessionId`
+- **THEN** the call SHALL be refused with code `session_ambiguous` and the exact message above
+- **AND** no `sessions` row SHALL be inserted or modified, which is the control that the refusal happened before any write
+
+#### Scenario: Two active rows idle past the window are still `session_ambiguous`
+
+- **GIVEN** two `active`, non-deleted rows for the caller's `(token_id, project_id)`, both idle past the staleness window
+- **WHEN** the agent calls `memory.session_summary` or `memory.session_end` with no `sessionId`
+- **THEN** the call SHALL be refused with `session_ambiguous`, because `memory.session_start` would mint here too
+
+#### Scenario: A sole idle row and no row keep `session_not_found`
+
+- **GIVEN** either no `active` row, or exactly one `active` row idle past the staleness window, for the caller's `(token_id, project_id)`
+- **WHEN** the agent calls `memory.session_summary` or `memory.session_end` with no `sessionId`
+- **THEN** the call SHALL be refused with `session_not_found` and its existing message
+
+#### Scenario: `memory.session_end` without `sessionId` under ambiguity ends nothing
+
+- **GIVEN** two `active` rows for the caller's `(token_id, project_id)`
+- **WHEN** the agent calls `memory.session_end({})`
+- **THEN** the call SHALL be refused with `session_ambiguous` and both rows SHALL remain `active`
