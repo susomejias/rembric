@@ -43,13 +43,14 @@ import { z } from 'zod';
 
 import {
   assertAuthorized,
-  assertExplicitSessionOwned,
   boundAnnotationReasons,
   clamp,
   type EffectiveScope,
+  honouredDeclaredSession,
   requireScope,
   resolveEffectiveScope,
   resolveSearchScope,
+  resolveSessionId,
   searchedProjectSlugs,
   serializeMemory,
   snippet,
@@ -655,25 +656,8 @@ function resolveActiveSessionId(
   projectId: string | null,
   explicit?: string,
 ): string | null {
-  if (explicit) {
-    if (deps.agentSessions) {
-      assertExplicitSessionOwned(deps.agentSessions, explicit, projectId);
-      deps.agentSessions.touchActivity(explicit);
-    }
-    return explicit;
-  }
-  const ctx = getRequestContext();
-  if (deps.agentSessions) {
-    const row = deps.agentSessions.findActiveForTransport({
-      tokenId: ctx.token.id,
-      projectId,
-    });
-    if (row) {
-      deps.agentSessions.touchActivity(row.id);
-      return row.id;
-    }
-  }
-  return null;
+  if (!deps.agentSessions) return explicit ?? null;
+  return resolveSessionId({ agentSessions: deps.agentSessions }, explicit, projectId);
 }
 
 export type { RelatedMemoryView, SaveTimeCandidateView } from '@rembric/core';
@@ -1181,10 +1165,12 @@ function deriveFocusSeed(
   if (project) parts.push(project.displayName ?? project.slug);
 
   if (deps.agentSessions) {
-    const session = deps.agentSessions.findActiveForTransport({
-      tokenId: getRequestContext().token.id,
-      projectId,
-    });
+    const session =
+      honouredDeclaredSession(deps.agentSessions, projectId) ??
+      deps.agentSessions.findActiveForTransport({
+        tokenId: getRequestContext().token.id,
+        projectId,
+      });
     if (session?.title) parts.push(session.title);
   }
 

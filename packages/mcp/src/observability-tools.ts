@@ -15,7 +15,6 @@ import { z } from 'zod';
 
 import {
   assertAuthorized,
-  assertExplicitSessionOwned,
   requireScope,
   resolveEffectiveScope,
   resolveSessionId,
@@ -130,11 +129,7 @@ async function handleCapturePassive(
       {
         text: args.text,
         tags: args.tags,
-        resolveSessionId: () => {
-          if (args.sessionId)
-            assertExplicitSessionOwned(deps.agentSessions, args.sessionId, scope.projectId);
-          return resolveSessionId(deps, args.sessionId, scope.projectId);
-        },
+        resolveSessionId: () => resolveSessionId(deps, args.sessionId, scope.projectId),
         source: { tokenName: ctx.token.name, agent: 'passive' },
       },
       scope,

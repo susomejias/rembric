@@ -121,7 +121,7 @@ export interface EnsureSessionResult {
   created: boolean;
 }
 
-const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+export const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const TITLE_MAX_LENGTH = 100;
 
 export interface EndSessionInput {

@@ -7,7 +7,12 @@ import {
   type AuthInfo,
   type OAuthTokenVerifier,
 } from '@modelcontextprotocol/server';
-import type { RequestContext, ResolvedToken, TokenScope } from '@rembric/core';
+import {
+  SESSION_ID_RE,
+  type RequestContext,
+  type ResolvedToken,
+  type TokenScope,
+} from '@rembric/core';
 import { type Token } from '@rembric/db';
 
 import type { Services } from './services';
@@ -41,6 +46,13 @@ export function readRepoFingerprintHeader(headers: Headers): RepoFingerprintHead
   return { ok: true, repository: { fingerprint: value === 'unavailable' ? null : value } };
 }
 
+export const DECLARED_SESSION_HEADER = 'x-rembric-session';
+
+export function readDeclaredSessionHeader(headers: Headers): string | undefined {
+  const value = headers.get(DECLARED_SESSION_HEADER);
+  return value !== null && SESSION_ID_RE.test(value) ? value : undefined;
+}
+
 export type McpAuthOutcome =
   | { ok: true; authInfo: AuthInfo; requestContext: RequestContext }
   | { ok: false; response: Response };
@@ -51,8 +63,9 @@ export async function verifyMcpBearerToken(input: {
   identity: string;
   services: Services;
   repository?: RequestContext['repository'];
+  declaredSessionId?: string;
 }): Promise<McpAuthOutcome> {
-  const { authorization, slug, identity, services, repository } = input;
+  const { authorization, slug, identity, services, repository, declaredSessionId } = input;
   const lockout = services.authLockout;
 
   const locked = lockout.check(identity);
@@ -104,6 +117,7 @@ export async function verifyMcpBearerToken(input: {
         project,
         requestedSlug: slug,
         ...(repository === undefined ? {} : { repository }),
+        ...(declaredSessionId === undefined ? {} : { declaredSessionId }),
       };
       return {
         token,

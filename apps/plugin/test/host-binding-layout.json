@@ -1,0 +1,13 @@
+{
+  "header": "X-Rembric-Session",
+  "sessionIdPattern": "^[A-Za-z0-9_-]{8,128}$",
+  "dir": [".cache", "rembric", "host-sessions"],
+  "dirMode": "0700",
+  "file": "{pid}.json",
+  "fileMode": "0600",
+  "keys": ["pid", "start", "sessionId"],
+  "startCommand": ["ps", "-o", "lstart=", "-p", "{pid}"],
+  "startLocale": "C",
+  "nonHostCommands": ["sh", "bash", "zsh", "dash", "ksh", "fish", "env"],
+  "maxAncestors": 8
+}

@@ -927,6 +927,92 @@ describe('MCP HTTP transport and auth hardening (in-process route handler)', () 
     expect(await validNonAdmin.text()).toBe(await invalid.text());
   });
 
+  describe('declared session header', () => {
+    const layout = JSON.parse(
+      readFileSync(
+        join(
+          dirname(fileURLToPath(import.meta.url)),
+          '..',
+          '..',
+          '..',
+          'plugin',
+          'test',
+          'host-binding-layout.json',
+        ),
+        'utf8',
+      ),
+    ) as { header: string };
+    const SAVE = { type: 'project', title: 'declared', content: 'declared body', tags: ['ds'] };
+    let token: string;
+    let tokenId: string;
+
+    beforeAll(() => {
+      const created = services.tokens.create({ name: 'declared-writer', scope: '*' });
+      token = created.plaintext;
+      tokenId = created.token.id;
+    });
+
+    function start(): string {
+      return services.agentSessions.start({
+        tokenId,
+        projectId: services.projects.getDefault().id,
+        agent: 'declared-test',
+      }).id;
+    }
+
+    async function save(
+      args: Record<string, unknown>,
+      headers: Record<string, string> = {},
+    ): Promise<{ status: number; sessionId: unknown }> {
+      const res = await POST(
+        mcpRequestForToken(
+          token,
+          {
+            jsonrpc: '2.0',
+            id: 9,
+            method: 'tools/call',
+            params: { name: 'memory.save', arguments: { ...SAVE, ...args } },
+          },
+          headers,
+        ),
+        ctx,
+      );
+      if (res.status !== 200) return { status: res.status, sessionId: undefined };
+      const result = (await rpcResult(res)) as { content: { text: string }[] };
+      const id = (JSON.parse(result.content[0]?.text ?? '{}') as { id: string }).id;
+      const row = services.db.raw
+        .prepare('SELECT session_id AS v FROM memory WHERE id = ?')
+        .get(id) as { v: string | null };
+      return { status: 200, sessionId: row.v };
+    }
+
+    it('attributes a write to the declared session over the model argument and the ambiguity', async () => {
+      const declared = start();
+      const other = start();
+      expect(await save({})).toEqual({ status: 200, sessionId: null });
+      expect(await save({ sessionId: other }, { [layout.header]: declared })).toEqual({
+        status: 200,
+        sessionId: declared,
+      });
+    });
+
+    it.each(['short', 'A'.repeat(129), 'has space id', ''])(
+      'ignores malformed %j without refusing the request',
+      async (value) => {
+        const declared = start();
+        const explicit = start();
+        expect(await save({ sessionId: explicit }, { [layout.header]: value })).toEqual({
+          status: 200,
+          sessionId: explicit,
+        });
+        expect(await save({ sessionId: explicit }, { [layout.header]: declared })).toEqual({
+          status: 200,
+          sessionId: declared,
+        });
+      },
+    );
+  });
+
   describe('repository fingerprint header and unbound mode', () => {
     const FP = 'c3'.repeat(20);
     const FP_SHA256 = 'd4'.repeat(32);
