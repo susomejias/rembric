@@ -4,6 +4,30 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.45.0](https://github.com/susomejias/rembric/compare/plugin-v0.44.2...plugin-v0.45.0) (2026-11-21)
+
+
+### Features
+
+* **mcp:** honour a host-declared session on every MCP request ([3690340](https://github.com/susomejias/rembric/commit/3690340cec6965952720bf9c5b7022898d65618d))
+* **plugin:** declare the host session from the bridge, opencode and Pi ([5e41796](https://github.com/susomejias/rembric/commit/5e41796774221dabe607918b5bff87f66a66f37f))
+* **plugin:** publish the host binding from Claude Code, Codex and Hermes ([ecba003](https://github.com/susomejias/rembric/commit/ecba0031ffefa15a93a98de3dbcb489544eaaac9))
+
+
+### Bug Fixes
+
+* **mcp:** treat a hook-requested focused first-turn recall as expected ([9f36038](https://github.com/susomejias/rembric/commit/9f360384061563c5ca9d64d66d124cf154d90e30))
+* **plugin:** attribute each opencode tool call instead of publishing a binding ([7ff8f72](https://github.com/susomejias/rembric/commit/7ff8f72fcb48bd9c8be262fefffd230905432032))
+* **plugin:** name the session in the post-compaction block ([40fbdd8](https://github.com/susomejias/rembric/commit/40fbdd87886b12a72c87bafe8b3977bbf20a7224))
+* **plugin:** one live session per binding; prune only dead hosts ([1d57058](https://github.com/susomejias/rembric/commit/1d570586b8d8892e269014ce044a444b6268479a))
+* **plugin:** replace the SessionStart recall line with a deferred-tools hint ([270eef9](https://github.com/susomejias/rembric/commit/270eef987d86d615e6e3f735605c9a552ada3bb7))
+* **plugin:** the bridge reads only its own host's binding ([69402c1](https://github.com/susomejias/rembric/commit/69402c12f68da43d594bd13d020d6bfd5f10851e))
+
+
+### Documentation
+
+* **plugin:** note that the post-compaction nudge names the session id ([5459b24](https://github.com/susomejias/rembric/commit/5459b241c51a31bce7ac3d4a0bf0f0c96b871ebc))
+
 ## [0.44.2](https://github.com/susomejias/rembric/compare/plugin-v0.44.1...plugin-v0.44.2) (2026-11-16)
 
 
