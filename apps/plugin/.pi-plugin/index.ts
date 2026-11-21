@@ -9,6 +9,7 @@ import {
   extractCommandPaths,
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
+import { HOST_SESSION_HEADER } from '../mcp-bridge/rembric-host-binding.mjs';
 import { FINGERPRINT_HEADER, resolveProject } from '../mcp-bridge/rembric-project.mjs';
 
 type JsonSchema = Record<string, unknown>;
@@ -111,7 +112,7 @@ function createMcpClient(endpoint: string, apiToken: string, fingerprint: string
   let nextId = 1;
   let serverInstructions: string | null = null;
 
-  function headers(): Record<string, string> {
+  function headers(declaredSession: string | null = null): Record<string, string> {
     const out: Record<string, string> = {
       Authorization: `Bearer ${apiToken}`,
       'Content-Type': 'application/json',
@@ -120,6 +121,7 @@ function createMcpClient(endpoint: string, apiToken: string, fingerprint: string
     };
     if (mcpSessionId) out['mcp-session-id'] = mcpSessionId;
     if (fingerprint) out[FINGERPRINT_HEADER] = fingerprint;
+    if (declaredSession) out[HOST_SESSION_HEADER] = declaredSession;
     return out;
   }
 
@@ -149,11 +151,12 @@ function createMcpClient(endpoint: string, apiToken: string, fingerprint: string
     method: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
+    declaredSession: string | null = null,
   ): Promise<Record<string, unknown>> {
     const id = nextId++;
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: headers(),
+      headers: headers(declaredSession),
       body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
       signal,
     });
@@ -213,8 +216,9 @@ function createMcpClient(endpoint: string, apiToken: string, fingerprint: string
       name: string,
       args: Record<string, unknown>,
       signal?: AbortSignal,
+      declaredSession: string | null = null,
     ): Promise<{ text: string; isError: boolean }> {
-      const result = await send('tools/call', { name, arguments: args }, signal);
+      const result = await send('tools/call', { name, arguments: args }, signal, declaredSession);
       const content = (result.content as ToolContent[] | undefined) ?? [];
       const text = content
         .filter((part) => part.type === 'text')
@@ -314,13 +318,18 @@ export default function rembric(pi: ExtensionApi): void {
   const trackForced = process.env.REMBRIC_TRACK_SESSION === '1';
   const pendingFileRecall = new Map<string, Promise<string[]>>();
 
+  function registeredHostSessionId(ctx: ExtensionContext | undefined): string | null {
+    if (!core || !ctx) return null;
+    const hostSessionId = ctx.sessionManager.getSessionId();
+    return core.isRegistered(hostSessionId) ? hostSessionId : null;
+  }
+
   function withHostSessionId(
     params: Record<string, unknown>,
-    ctx: ExtensionContext | undefined,
+    hostSessionId: string | null,
   ): Record<string, unknown> {
-    if (params.sessionId !== undefined || !core || !ctx) return params;
-    const hostSessionId = ctx.sessionManager.getSessionId();
-    return core.isRegistered(hostSessionId) ? { ...params, sessionId: hostSessionId } : params;
+    if (params.sessionId !== undefined || !hostSessionId) return params;
+    return { ...params, sessionId: hostSessionId };
   }
 
   async function discoverTools(client: McpClient, ctx: ExtensionContext): Promise<void> {
@@ -336,10 +345,12 @@ export default function rembric(pi: ExtensionApi): void {
           parameters: renameToolsInDescriptions(tool.inputSchema) as JsonSchema,
           execute: async (_toolCallId, params, signal, _onUpdate, toolCtx) => {
             const args = (params ?? {}) as Record<string, unknown>;
+            const hostSessionId = registeredHostSessionId(toolCtx);
             const { text, isError } = await client.callTool(
               tool.name,
-              attachesSession ? withHostSessionId(args, toolCtx) : args,
+              attachesSession ? withHostSessionId(args, hostSessionId) : args,
               signal,
+              hostSessionId,
             );
             if (isError) throw new Error(text);
             return { content: [{ type: 'text', text }], details: undefined };

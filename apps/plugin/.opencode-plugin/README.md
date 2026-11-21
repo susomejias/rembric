@@ -6,6 +6,8 @@ This plugin shares the same HTTP API and MCP bridge as the Claude Code, Codex CL
 
 **Scope**: the plugin handles session lifecycle and compaction signals via the `event` dispatcher (`session.created`, `session.deleted`, `session.compacted`, `server.instance.disposed`), accumulates transcripts via `chat.message` and `message.updated`, flushes summaries on `session.idle` (per-turn debounced) and `session.compacted` (compaction milestone), and injects post-compaction guidance via `experimental.session.compacting`. The `chat.message` handler also appends a recall nudge to `output.parts` when the user prompt matches the cross-client recall regex (`remember|recall|acuérdate|qué hicimos|what did we do`), for paridad with the Claude Code / Codex CLI `UserPromptSubmit` hook.
 
+**Session declaration**: whenever the active root session changes (never a subagent's), the plugin publishes `~/.cache/rembric/host-sessions/<pid>.json` for its own process: `{"pid", "start", "sessionId"}`, where `start` is the process start time from `ps -o lstart=` under `LC_ALL=C`. The MCP bridge is a descendant of opencode, finds that file through its ancestors, and sends the id as `X-Rembric-Session` on every request, so the server attributes writes to this session even with several opencode instances open in one project. The file is removed when that session is deleted or the plugin is disposed, only while it still names that session. Nothing is published on Windows. Both 1.x and 2.x publish.
+
 ## opencode 1.x and 2.x
 
 The module carries two entry points and they serve different opencode majors.
@@ -118,7 +120,8 @@ Removes the plugin and shared module files. It does **not** touch `opencode.json
 
 ```
 ~/.config/opencode/plugins/rembric.ts        ← session lifecycle + post-compact reminder (JS)
-~/.config/rembric/bin/rembric-{dotenv,project,plugin-core}.mjs ← shared modules
+~/.config/rembric/bin/rembric-{dotenv,project,host-binding,plugin-core}.mjs ← shared modules
+~/.cache/rembric/host-sessions/<pid>.json    ← session declaration, removed at dispose
 ~/.config/opencode/opencode.json             ← MCP block (user-edited)
 <repo>/.rembric                              ← optional explicit slug (user-created)
 ```
