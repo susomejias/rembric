@@ -19,5 +19,5 @@
 ## 4. Verification
 
 - [x] 4.1 Mutation checks with `scripts/mutate.mjs`: the window-free ambiguity branch (forced off, forced on), the sole branch and the explicit-id branch are each caught. A separate fresh-rows ambiguity branch survived as redundant and was removed.
-- [ ] 4.2 `pnpm run lint`, `pnpm run typecheck`, `pnpm test`
-- [ ] 4.3 JSON-RPC probe against a local dev server: control and treatment
+- [x] 4.2 `pnpm run typecheck` and `pnpm test` green (pre-push on PR #551); eslint and prettier clean on the touched files
+- [x] 4.3 JSON-RPC over HTTP against a local dev server (declare-host-session e2e, scenario S5): with two active sessions and no declared session, `memory.session_summary` and `memory.session_end` without `sessionId` answered `session_ambiguous`
