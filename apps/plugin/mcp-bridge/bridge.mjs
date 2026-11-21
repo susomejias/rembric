@@ -1,3 +1,4 @@
+import { ancestorChain, HOST_SESSION_HEADER, lookupHostSession } from './rembric-host-binding.mjs';
 import { buildEndpoint, FINGERPRINT_HEADER, resolveProject } from './rembric-project.mjs';
 import { projectDirectorySource, resolveProjectDirectory } from './slug.mjs';
 
@@ -117,6 +118,7 @@ export async function runBridge({
     })
     .catch(() => {});
 
+  const ancestors = ancestorChain();
   let sessionId = null;
   let negotiatedProtocolVersion = DEFAULT_PROTOCOL_VERSION;
   let initializationReady = Promise.resolve();
@@ -134,6 +136,8 @@ export async function runBridge({
     };
     if (sessionId && !isInitialize) headers['mcp-session-id'] = sessionId;
     if (project.header) headers[FINGERPRINT_HEADER] = project.header;
+    const declaredSession = lookupHostSession(ancestors);
+    if (declaredSession) headers[HOST_SESSION_HEADER] = declaredSession;
     return headers;
   }
 

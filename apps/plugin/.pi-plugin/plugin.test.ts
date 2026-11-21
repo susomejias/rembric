@@ -1652,8 +1652,13 @@ describe('missing configuration disables the extension', () => {
 describe('session identity on every session-attaching tool call', () => {
   type SentCall = { name: string; arguments: Record<string, unknown> };
 
-  function spyToolCalls(): { calls: SentCall[]; restore: () => void } {
+  function spyToolCalls(): {
+    calls: SentCall[];
+    declared: Array<string | undefined>;
+    restore: () => void;
+  } {
     const calls: SentCall[] = [];
+    const declared: Array<string | undefined> = [];
     const realFetch = globalThis.fetch;
     const spy = vi
       .spyOn(globalThis, 'fetch')
@@ -1668,11 +1673,12 @@ describe('session identity on every session-attaching tool call', () => {
               name: parsed.params?.name ?? '',
               arguments: parsed.params?.arguments ?? {},
             });
+            declared.push(new Headers(init.headers).get('x-rembric-session') ?? undefined);
           }
         }
         return realFetch(input, init);
       });
-    return { calls, restore: () => spy.mockRestore() };
+    return { calls, declared, restore: () => spy.mockRestore() };
   }
 
   async function seedActiveRow(id: string): Promise<void> {
@@ -1693,7 +1699,7 @@ describe('session identity on every session-attaching tool call', () => {
     const harness = await startedHarness(sessionId);
     await seedActiveRow('pi-identity-host-neighbour');
 
-    const { calls, restore } = spyToolCalls();
+    const { calls, declared, restore } = spyToolCalls();
     let save: { refused: boolean; text: string };
     let rowsBefore: number;
     let rowsAfter: number;
@@ -1714,18 +1720,19 @@ describe('session identity on every session-attaching tool call', () => {
     expect(save.refused).toBe(false);
     expect(calls.map((call) => call.name)).toEqual(['memory.save']);
     expect(calls[0].arguments.sessionId).toBe(sessionId);
+    expect(declared).toEqual([sessionId]);
     expect(repos.memory.unsafeGetById(savedId(save.text))?.sessionId).toBe(sessionId);
     expect(rowsAfter).toBe(rowsBefore);
   });
 
-  it('a model-supplied sessionId is forwarded unchanged', async () => {
+  it('a model-supplied sessionId is forwarded unchanged, and the declared host session wins', async () => {
     const sessionId = 'pi-identity-model-host';
     const chosen = 'pi-identity-model-choice';
     const harness = await startedHarness(sessionId);
     await harness.fire('before_agent_start', { prompt: 'the model names a session' });
     await seedActiveRow(chosen);
 
-    const { calls, restore } = spyToolCalls();
+    const { calls, declared, restore } = spyToolCalls();
     let save: { refused: boolean; text: string };
     try {
       save = await callThroughExtension(
@@ -1739,7 +1746,8 @@ describe('session identity on every session-attaching tool call', () => {
 
     expect(save.refused).toBe(false);
     expect(calls[0].arguments.sessionId).toBe(chosen);
-    expect(repos.memory.unsafeGetById(savedId(save.text))?.sessionId).toBe(chosen);
+    expect(declared).toEqual([sessionId]);
+    expect(repos.memory.unsafeGetById(savedId(save.text))?.sessionId).toBe(sessionId);
   });
 
   it('a tool that declares no sessionId is forwarded untouched', async () => {
@@ -1749,7 +1757,7 @@ describe('session identity on every session-attaching tool call', () => {
     const properties = (search.parameters.properties ?? {}) as Record<string, unknown>;
     expect(Object.keys(properties)).not.toContain('sessionId');
 
-    const { calls, restore } = spyToolCalls();
+    const { calls, declared, restore } = spyToolCalls();
     let result: { refused: boolean; text: string };
     try {
       result = await callThroughExtension(search, { query: 'identity' }, harness.ctx);
@@ -1759,12 +1767,13 @@ describe('session identity on every session-attaching tool call', () => {
 
     expect(result.refused).toBe(false);
     expect(calls).toEqual([{ name: 'memory.search', arguments: { query: 'identity' } }]);
+    expect(declared).toEqual(['pi-identity-no-declaration']);
   });
 
   it('nothing is added before the host row exists, and nothing is refused or notified', async () => {
     const harness = await startedHarness('pi-identity-before-ensure');
 
-    const { calls, restore } = spyToolCalls();
+    const { calls, declared, restore } = spyToolCalls();
     let save: { refused: boolean; text: string };
     try {
       save = await callThroughExtension(
@@ -1778,13 +1787,14 @@ describe('session identity on every session-attaching tool call', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].arguments).not.toHaveProperty('sessionId');
+    expect(declared).toEqual([undefined]);
     expect(save.refused).toBe(false);
     expect(harness.notifications).toEqual([]);
   });
 
   it('a suppressed sub-agent session adds nothing', async () => {
     vi.stubEnv('REMBRIC_SUBAGENT', '1');
-    const { calls, restore } = spyToolCalls();
+    const { calls, declared, restore } = spyToolCalls();
     let save: { refused: boolean; text: string };
     try {
       const harness = await startedHarness('pi-identity-subagent');
@@ -1801,6 +1811,7 @@ describe('session identity on every session-attaching tool call', () => {
 
     expect(calls.map((call) => call.name)).toEqual(['memory.save']);
     expect(calls[0].arguments).not.toHaveProperty('sessionId');
+    expect(declared).toEqual([undefined]);
     expect(save.refused).toBe(false);
     expect(sessions.getById('pi-identity-subagent')).toBeUndefined();
   });

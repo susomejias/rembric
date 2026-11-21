@@ -17,6 +17,7 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:c
 
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
+import { processStartToken, publishHostBinding } from './rembric-host-binding.mjs';
 import { buildEndpoint, resolveSlug } from './rembric-project.mjs';
 import { projectDirectorySource, resolveProjectDirectory } from './slug.mjs';
 
@@ -28,12 +29,17 @@ const children: ChildProcessWithoutNullStreams[] = [];
 
 // The test runner's PWD is this repository; a bridge started there would resolve its .rembric.
 const neutralDir = realpathSync(mkdtempSync(join(tmpdir(), 'mcp-bridge-neutral-')));
-afterAll(() => rmSync(neutralDir, { recursive: true, force: true }));
+// The bridge reads host bindings under its home; the real one may hold an ancestor's binding.
+const neutralHome = realpathSync(mkdtempSync(join(tmpdir(), 'mcp-bridge-home-')));
+afterAll(() => {
+  rmSync(neutralDir, { recursive: true, force: true });
+  rmSync(neutralHome, { recursive: true, force: true });
+});
 
 async function startBridge(env: Record<string, string | undefined>) {
   const child = spawn(process.execPath, [bridge], {
     cwd: neutralDir,
-    env: { ...process.env, PWD: neutralDir, ...env },
+    env: { ...process.env, PWD: neutralDir, HOME: neutralHome, ...env },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   children.push(child);
@@ -84,7 +90,7 @@ async function startBridge(env: Record<string, string | undefined>) {
 async function runBridgeProcess(env: Record<string, string | undefined>) {
   const child = spawn(process.execPath, [bridge], {
     cwd: neutralDir,
-    env: { ...process.env, PWD: neutralDir, ...env },
+    env: { ...process.env, PWD: neutralDir, HOME: neutralHome, ...env },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let stderr = '';
@@ -878,6 +884,112 @@ describe('stdio to HTTP transport', () => {
     client.send({ jsonrpc: '2.0', method: 'notifications/cancelled' });
     const [code] = (await once(client.child, 'exit')) as [number | null, string | null];
     expect(code).not.toBe(0);
+  });
+});
+
+describe('host-declared session header', () => {
+  async function recordingServer() {
+    const requests: { method: string; id: number | undefined; session: string | undefined }[] = [];
+    const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      if (request.url === '/healthz') {
+        response.statusCode = 404;
+        response.end();
+        return;
+      }
+      const message = JSON.parse(Buffer.concat(chunks).toString()) as {
+        id?: number;
+        method: string;
+      };
+      requests.push({
+        method: message.method,
+        id: message.id,
+        session: request.headers['x-rembric-session'] as string | undefined,
+      });
+      if (message.id === undefined) {
+        response.statusCode = 202;
+        response.end();
+        return;
+      }
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+    });
+    return { server, base: await listen(server), requests };
+  }
+
+  async function exchange(home: string, base: string, publishBetween?: () => void) {
+    const client = await startBridge({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+      REMBRIC_PROJECT_SLUG: 'demo',
+      HOME: home,
+    });
+    client.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    await client.nextLine();
+    client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    client.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'a' } });
+    await client.nextLine();
+    publishBetween?.();
+    client.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'b' } });
+    await client.nextLine();
+    client.child.stdin.end();
+    await once(client.child, 'exit');
+  }
+
+  function scratchHome() {
+    return realpathSync(mkdtempSync(join(tmpdir(), 'mcp-bridge-host-')));
+  }
+
+  it('sends the binding of its parent process on every request, initialize included', async () => {
+    const home = scratchHome();
+    expect(publishHostBinding({ pid: process.pid, sessionId: 'host-session-1', home })).toBe(true);
+    const { server, base, requests } = await recordingServer();
+    await exchange(home, base);
+    expect(requests.map((request) => request.method).sort()).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/call',
+      'tools/call',
+    ]);
+    expect(requests.map((request) => request.session)).toEqual(Array(4).fill('host-session-1'));
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('picks up a re-published binding on the next request without restarting', async () => {
+    const home = scratchHome();
+    publishHostBinding({ pid: process.pid, sessionId: 'host-session-1', home });
+    const { server, base, requests } = await recordingServer();
+    await exchange(home, base, () =>
+      publishHostBinding({ pid: process.pid, sessionId: 'host-session-2', home }),
+    );
+    const byId = (id: number) => requests.find((request) => request.id === id)?.session;
+    expect([byId(1), byId(2), byId(3)]).toEqual([
+      'host-session-1',
+      'host-session-1',
+      'host-session-2',
+    ]);
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('omits the header when no ancestor is bound, or the binding names another process start', async () => {
+    const home = scratchHome();
+    const { server, base, requests } = await recordingServer();
+    await exchange(home, base);
+    expect(processStartToken(process.pid)).not.toBeNull();
+    publishHostBinding({
+      pid: process.pid,
+      sessionId: 'host-session-1',
+      start: 'Thu Jan 1 00:00:00 1970',
+      home,
+    });
+    await exchange(home, base);
+    expect(requests).toHaveLength(8);
+    expect(requests.every((request) => request.session === undefined)).toBe(true);
+    server.close();
+    rmSync(home, { recursive: true, force: true });
   });
 });
 

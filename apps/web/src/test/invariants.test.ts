@@ -835,6 +835,7 @@ const OPENCODE_PLUGIN_TS = 'apps/plugin/.opencode-plugin/plugin.ts';
 const REMBRIC_DOTENV_MJS = 'apps/plugin/mcp-bridge/rembric-dotenv.mjs';
 const MCP_BRIDGE_MJS = 'apps/plugin/mcp-bridge/bridge.mjs';
 const REMBRIC_PROJECT_MJS = 'apps/plugin/mcp-bridge/rembric-project.mjs';
+const REMBRIC_HOST_BINDING_MJS = 'apps/plugin/mcp-bridge/rembric-host-binding.mjs';
 const PI_INDEX_TS = 'apps/plugin/.pi-plugin/index.ts';
 const REMBRIC_PLUGIN_CORE_MJS = 'apps/plugin/bin/rembric-plugin-core.mjs';
 
@@ -886,6 +887,31 @@ const SHARED_JS_HELPERS: Array<{ symbol: string; definition: RegExp; canonical: 
     definition: /\bconst\s+RESUMED_READ_NUDGE\s*=/,
     canonical: REMBRIC_PLUGIN_CORE_MJS,
   },
+  {
+    symbol: 'HOST_SESSION_HEADER',
+    definition: /\bHOST_SESSION_HEADER\s*=/,
+    canonical: REMBRIC_HOST_BINDING_MJS,
+  },
+  {
+    symbol: 'processStartToken',
+    definition: /\bfunction\s+processStartToken\b/,
+    canonical: REMBRIC_HOST_BINDING_MJS,
+  },
+  {
+    symbol: 'publishHostBinding',
+    definition: /\bfunction\s+publishHostBinding\b/,
+    canonical: REMBRIC_HOST_BINDING_MJS,
+  },
+  {
+    symbol: 'removeHostBinding',
+    definition: /\bfunction\s+removeHostBinding\b/,
+    canonical: REMBRIC_HOST_BINDING_MJS,
+  },
+  {
+    symbol: 'lookupHostSession',
+    definition: /\bfunction\s+lookupHostSession\b/,
+    canonical: REMBRIC_HOST_BINDING_MJS,
+  },
 ];
 
 const PLUGIN_JS_PATHSPECS = [
@@ -901,7 +927,7 @@ const PLUGIN_JS_PATHSPECS = [
 
 describe('the JS/TS plugin clients share one implementation of each protocol helper', () => {
   const scanned = execSync(
-    `git -C ${repoRoot} grep -l -E '.' -- ${PLUGIN_JS_PATHSPECS.map((p) => `'${p}'`).join(' ')} || true`,
+    `git -C ${repoRoot} grep --untracked -l -E '.' -- ${PLUGIN_JS_PATHSPECS.map((p) => `'${p}'`).join(' ')} || true`,
     { encoding: 'utf8' },
   )
     .split('\n')
@@ -1026,6 +1052,42 @@ describe('the JS/TS plugin clients share one implementation of each protocol hel
     expect(offenders, `move these into ${REMBRIC_PROJECT_MJS}: ${offenders.join(', ')}`).toEqual(
       [],
     );
+  });
+
+  it('the host binding lives in one module that the bridge, opencode and Pi import', () => {
+    const importers = [
+      { rel: MCP_BRIDGE_MJS, from: /from\s+['"]\.\/rembric-host-binding\.mjs['"]/ },
+      { rel: OPENCODE_PLUGIN_TS, from: /from\s+['"][^'"]*rembric-host-binding\.mjs['"]/ },
+      { rel: PI_INDEX_TS, from: /from\s+['"][^'"]*rembric-host-binding\.mjs['"]/ },
+    ];
+    for (const { rel, from } of importers) {
+      expect(
+        from.test(readFileSync(join(repoRoot, rel), 'utf8')),
+        `${rel} must import the host binding from rembric-host-binding.mjs`,
+      ).toBe(true);
+    }
+    const bindingOwned = [
+      { what: 'the start-token ps format', pattern: /lstart=/ },
+      { what: 'the binding directory', pattern: /host-sessions/ },
+      { what: 'the declared-session header literal', pattern: /X-Rembric-Session/i },
+    ];
+    const binding = readFileSync(join(repoRoot, REMBRIC_HOST_BINDING_MJS), 'utf8');
+    for (const { what, pattern } of bindingOwned) {
+      expect(pattern.test(binding), `${REMBRIC_HOST_BINDING_MJS} no longer contains ${what}`).toBe(
+        true,
+      );
+    }
+    const offenders: string[] = [];
+    for (const rel of scanned.filter((f) => f !== REMBRIC_HOST_BINDING_MJS)) {
+      const source = readFileSync(join(repoRoot, rel), 'utf8');
+      for (const { what, pattern } of bindingOwned) {
+        if (pattern.test(source)) offenders.push(`${rel} contains ${what}`);
+      }
+    }
+    expect(
+      offenders,
+      `move these into ${REMBRIC_HOST_BINDING_MJS}: ${offenders.join(', ')}`,
+    ).toEqual([]);
   });
 
   it('every JS/TS client imports the protocol core instead of reimplementing it', () => {

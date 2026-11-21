@@ -14,6 +14,7 @@ const expected = [
   'cli.mjs',
   'package.json',
   'rembric-dotenv.mjs',
+  'rembric-host-binding.mjs',
   'rembric-project.mjs',
   'slug.mjs',
 ];

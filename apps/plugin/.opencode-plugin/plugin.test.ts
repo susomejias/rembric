@@ -4,14 +4,44 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { parseDotenv, readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
+import {
+  hostBindingPath,
+  processStartToken,
+  publishHostBinding,
+} from '../mcp-bridge/rembric-host-binding.mjs';
 import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
 import RembricPluginV2Default, { RembricPlugin } from './plugin.js';
 
 // A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
 for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
+
+// The plugin publishes host bindings under the OS home; keep them out of the real one.
+const originalHome = process.env.HOME;
+const scratchHome = mkdtempSync(join(tmpdir(), 'rembric-opencode-home-'));
+process.env.HOME = scratchHome;
+afterAll(() => {
+  process.env.HOME = originalHome;
+  rmSync(scratchHome, { recursive: true, force: true });
+});
+
+function boundSession(): unknown {
+  try {
+    return (
+      JSON.parse(readFileSync(hostBindingPath(process.pid, scratchHome), 'utf8')) as {
+        sessionId?: unknown;
+      }
+    ).sessionId;
+  } catch {
+    return null;
+  }
+}
+
+function clearBinding(): void {
+  rmSync(hostBindingPath(process.pid, scratchHome), { force: true });
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginVersion = (
@@ -1500,6 +1530,100 @@ describe('RembricPlugin without credentials', () => {
   }
 });
 
+describe('host session binding (opencode 1.x)', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-binding-'));
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 200 })) as never;
+    clearBinding();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+    vi.restoreAllMocks();
+    clearBinding();
+  });
+
+  const created = (id: string, extra: Record<string, unknown> = {}) => ({
+    event: { type: 'session.created', properties: { info: { id, ...extra } } },
+  });
+
+  it('publishes the root session for its own process with its start token, never a subagent', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('ses_root_aaaa') as never);
+    expect(
+      JSON.parse(readFileSync(hostBindingPath(process.pid, scratchHome), 'utf8')) as unknown,
+    ).toEqual({
+      pid: process.pid,
+      start: processStartToken(process.pid),
+      sessionId: 'ses_root_aaaa',
+    });
+
+    await handlers.event!(created('ses_child_bbbb', { parentID: 'ses_root_aaaa' }) as never);
+    await handlers['chat.message']!(
+      { sessionID: 'ses_child_bbbb' } as never,
+      { parts: [{ type: 'text', text: 'child turn' }], message: {} } as never,
+    );
+    await handlers['experimental.session.compacting']!(
+      { sessionID: 'ses_child_bbbb' } as never,
+      { context: [] } as never,
+    );
+    expect(boundSession()).toBe('ses_root_aaaa');
+  });
+
+  it('re-publishes when the active root session changes', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('ses_root_aaaa') as never);
+    await handlers['chat.message']!(
+      { sessionID: 'ses_root_cccc' } as never,
+      { parts: [{ type: 'text', text: 'switched' }], message: {} } as never,
+    );
+    expect(boundSession()).toBe('ses_root_cccc');
+    await handlers['experimental.session.compacting']!(
+      { sessionID: 'ses_root_hhhh' } as never,
+      { context: [] } as never,
+    );
+    expect(boundSession()).toBe('ses_root_hhhh');
+  });
+
+  it('removes the binding on dispose and on deletion only while it names that session', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('ses_root_aaaa') as never);
+    await handlers.event!({
+      event: { type: 'session.deleted', properties: { info: { id: 'ses_other_dddd' } } },
+    } as never);
+    expect(boundSession()).toBe('ses_root_aaaa');
+    await handlers.event!({
+      event: { type: 'session.deleted', properties: { info: { id: 'ses_root_aaaa' } } },
+    } as never);
+    expect(boundSession()).toBeNull();
+
+    await handlers.event!(created('ses_root_eeee') as never);
+    publishHostBinding({ pid: process.pid, sessionId: 'ses_foreign_ffff' });
+    await handlers.event!({ event: { type: 'server.instance.disposed' } } as never);
+    expect(boundSession()).toBe('ses_foreign_ffff');
+
+    clearBinding();
+    const second = await RembricPlugin({ directory: dir } as never);
+    await second.event!(created('ses_root_gggg') as never);
+    await second.event!({ event: { type: 'server.instance.disposed' } } as never);
+    expect(boundSession()).toBeNull();
+  });
+
+  it('publishes nothing while the plugin is disabled', async () => {
+    delete process.env.REMBRIC_API_TOKEN;
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    await handlers.event!(created('ses_root_aaaa') as never);
+    expect(boundSession()).toBeNull();
+  });
+});
+
 describe('RembricPluginV2 (opencode 2.x)', () => {
   let dir: string;
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -1682,6 +1806,48 @@ describe('RembricPluginV2 (opencode 2.x)', () => {
     expect(hooks.size).toBe(0);
     expect(toolHooks.size).toBe(0);
     expect(cleanup).toBeUndefined();
+  });
+
+  it('publishes the root session for its own process and removes it at dispose', async () => {
+    clearBinding();
+    const { context, hooks, stream } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    stream.push({ type: 'session.created', data: { sessionID: 'ses_v2_root_a' } });
+    stream.push({
+      type: 'session.created',
+      data: { sessionID: 'ses_v2_child_b', parentID: 'ses_v2_root_a' },
+    });
+    await settle();
+    expect(boundSession()).toBe('ses_v2_root_a');
+
+    await handler(
+      hooks,
+      'prompt',
+    )({ sessionID: 'ses_v2_root_c', prompt: { text: 'other session' } } as never);
+    expect(boundSession()).toBe('ses_v2_root_c');
+
+    stream.end();
+    await cleanup?.();
+    expect(boundSession()).toBeNull();
+  });
+
+  it('removes the binding when its own session is deleted, not another one', async () => {
+    clearBinding();
+    const { context, stream } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+
+    stream.push({ type: 'session.created', data: { sessionID: 'ses_v2_root_d' } });
+    stream.push({ type: 'session.deleted', data: { sessionID: 'ses_v2_other_e' } });
+    await settle();
+    expect(boundSession()).toBe('ses_v2_root_d');
+
+    stream.push({ type: 'session.deleted', data: { sessionID: 'ses_v2_root_d' } });
+    await settle();
+    expect(boundSession()).toBeNull();
+
+    stream.end();
+    await cleanup?.();
   });
 
   describe('file-anchored recall', () => {

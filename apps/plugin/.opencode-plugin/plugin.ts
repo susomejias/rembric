@@ -14,6 +14,7 @@ import {
   extractCommandPaths,
   renderPostCompactNudgeCore,
 } from '../bin/rembric-plugin-core.mjs';
+import { publishHostBinding, removeHostBinding } from '../mcp-bridge/rembric-host-binding.mjs';
 import { resolveProject } from '../mcp-bridge/rembric-project.mjs';
 
 type EventInput = {
@@ -121,6 +122,24 @@ async function sessionProtocol(directory: string) {
   return { core, slug };
 }
 
+type SessionCore = Awaited<ReturnType<typeof sessionProtocol>>['core'];
+
+// The bridge is this process's descendant, so it finds the root session through this binding.
+function hostSessionBinding(core: SessionCore) {
+  let bound: string | null = null;
+  return {
+    bind(sessionId: string | undefined): void {
+      if (core.disabled || !sessionId || core.isSubAgent(sessionId) || bound === sessionId) return;
+      if (publishHostBinding({ sessionId })) bound = sessionId;
+    },
+    unbind(sessionId?: string): void {
+      if (!bound || (sessionId !== undefined && sessionId !== bound)) return;
+      removeHostBinding({ sessionId: bound });
+      bound = null;
+    },
+  };
+}
+
 function inboxSubagentReport(text: string): string {
   const wrapper = /^<subagent\b[\s\S]*?>\n([\s\S]*)\n<\/subagent>\s*$/.exec(text);
   const body = wrapper ? wrapper[1]! : text;
@@ -130,6 +149,7 @@ function inboxSubagentReport(text: string): string {
 
 export const RembricPlugin: Plugin = async (ctx) => {
   const { core, slug } = await sessionProtocol(ctx.directory);
+  const binding = hostSessionBinding(core);
 
   const assistantMessageIds = new Set<string>();
   const assistantParts = new Map<string, Map<string, string>>();
@@ -180,6 +200,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
           return;
         }
         await core.ensureSession(sessionId);
+        binding.bind(sessionId);
       }
 
       if (event.type === 'session.deleted') {
@@ -188,10 +209,12 @@ export const RembricPlugin: Plugin = async (ctx) => {
         if (!sessionId) return;
         reportedThisTurn.delete(sessionId);
         forgetMessageState(core.forgetSession(sessionId));
+        binding.unbind(sessionId);
       }
 
       if (event.type === 'server.instance.disposed') {
         core.flushAllFireAndForget();
+        binding.unbind();
       }
 
       if (event.type === 'session.compacted') {
@@ -263,6 +286,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
       // Covers a session resumed without a fresh session.created event.
       await core.ensureSession(input.sessionID);
+      binding.bind(input.sessionID);
 
       const fromParts = output.parts
         .filter((p) => p.type === 'text')
@@ -297,6 +321,7 @@ export const RembricPlugin: Plugin = async (ctx) => {
     'experimental.session.compacting': async (input, output) => {
       if (input.sessionID) {
         await core.ensureSession(input.sessionID);
+        binding.bind(input.sessionID);
       }
 
       output.context.push(
@@ -420,6 +445,7 @@ const RembricPluginV2: V2Plugin = {
       return;
     }
 
+    const binding = hostSessionBinding(core);
     const injected = new Map<string, string>();
     const lastPrompt = new Map<string, string>();
     const reported = new Set<string>();
@@ -472,6 +498,7 @@ const RembricPluginV2: V2Plugin = {
       core.beginTurn(sessionID);
       // Covers a session resumed without a fresh session.created event.
       await core.ensureSession(sessionID);
+      binding.bind(sessionID);
 
       const text = input.prompt.text ?? '';
       if (text) {
@@ -545,6 +572,7 @@ const RembricPluginV2: V2Plugin = {
             }
             if (!(await belongsHere(sessionID))) continue;
             await core.ensureSession(sessionID);
+            binding.bind(sessionID);
             continue;
           }
 
@@ -559,6 +587,7 @@ const RembricPluginV2: V2Plugin = {
             for (const entry of core.forgetSession(sessionID) ?? []) {
               if (entry?.id) assistantText.delete(entry.id);
             }
+            binding.unbind(sessionID);
             continue;
           }
 
@@ -634,6 +663,7 @@ const RembricPluginV2: V2Plugin = {
       closed.value = true;
       controller.abort();
       core.flushAllFireAndForget();
+      binding.unbind();
       injected.clear();
       lastPrompt.clear();
       reported.clear();

@@ -27,6 +27,17 @@ with one diagnostic naming the remedy. Remote URLs are sent without
 credentials. A slug the server does not know is refused with
 `project_not_found`; create the project from the dashboard.
 
+Every request also carries `X-Rembric-Session` when the host has declared its
+session. At startup the bridge records its ancestor processes (parent upwards,
+at most 8, each with its start time from `ps -o lstart=` under `LC_ALL=C`). On
+each request it reads `<home>/.cache/rembric/host-sessions/<pid>.json` for those
+ancestors, nearest first, and sends the `sessionId` of the first file whose
+`pid` and `start` match. Reading per request is what makes a new session after
+`/clear` take effect without restarting the bridge. The host's lifecycle code
+publishes those files (the Claude Code and Codex hooks, the opencode and Hermes
+plugins); the bridge never writes or deletes them. No matching file, or
+Windows, means no header, and the server falls back to its own attribution.
+
 The bridge forwards MCP frames without creating a second client handshake. It
 uses the path `/mcp/<slug>` when a valid slug is found, otherwise `/mcp`. Plain
 HTTP and HTTPS are both accepted. HTTP errors reach the host unchanged; the
