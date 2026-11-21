@@ -263,7 +263,13 @@ describe('the shared JS/TS core: nudgesForTurn order and no-cadence contract', (
 
 describe('post-compact.sh PROTOCOL block (Claude Code + Codex CLI)', () => {
   function isolatedEnv(cwd: string): NodeJS.ProcessEnv {
-    return { ...process.env, TMPDIR: cwd, REMBRIC_SERVER_URL: '', REMBRIC_API_TOKEN: '' };
+    return {
+      ...process.env,
+      TMPDIR: cwd,
+      HOME: cwd,
+      REMBRIC_SERVER_URL: '',
+      REMBRIC_API_TOKEN: '',
+    };
   }
 
   function runPostCompact(cwd: string, sessionId?: string): string {

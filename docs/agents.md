@@ -669,6 +669,16 @@ Long-running agents compact their context. To survive that, two tools fire at sp
 
 The proactive-save protocol embedded in `initialize.instructions` already tells agents to do this. If your client ignores the field, paste the equivalent into the client's rules file (`AGENTS.md`, `.cursor/rules/`, `.windsurfrules`, `.github/copilot-instructions.md`, `~/.gemini/system.md`, etc.).
 
+## Concurrent sessions in one repository
+
+With two terminals on one repository and one token, the server alone cannot tell the sessions apart: a write that names no session lands with none, and `memory.session_summary` is refused with `session_ambiguous`. The bundled clients therefore declare their session on every MCP request, in the `X-Rembric-Session` header, and each write attaches to the session of the client that sent it.
+
+- **Claude Code and Codex CLI.** The `SessionStart` hook, on every source (startup, resume, clear, compact), writes `~/.cache/rembric/host-sessions/<pid>.json` for the host process. `SessionEnd` removes it only while it still names the ending session, so a `/clear` keeps the new session's file. The bridge reads the file on every request, so a `/clear` takes effect without restarting it.
+- **opencode and Hermes Agent.** The in-process plugin writes the same file for its own process.
+- **Pi** sends the header from its own MCP client.
+
+The server honours a declared session only when it is an active session of the request's token in the connection's project, and otherwise ignores the header without an error. An honoured declaration wins over a `sessionId` the model passes. Without one (on Windows, with an older plugin, or from any other MCP client) attribution works as before, including the `session_ambiguous` refusal.
+
 ## Private content redaction (`<private>` tags)
 
 All five bundled plugins (Claude Code, Codex CLI, Hermes Agent, opencode, Pi) redact `<private>…</private>` spans to `[REDACTED]` in every transcript-derived upload — session summaries, pre/post-compact snapshots, and derived titles — **before the payload leaves the client**. Matching is case-insensitive and spans newlines; each span closes at the first `</private>`, and an unclosed `<private>` redacts through end-of-text (fail closed). The server never sees the marked content and does not strip the tags itself, so clients connecting without a bundled plugin do not get this redaction.

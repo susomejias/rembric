@@ -118,6 +118,7 @@ describe('file-recall.sh', () => {
         env: {
           ...process.env,
           TMPDIR: scratch,
+          HOME: scratch,
           REMBRIC_SERVER_URL: baseUrl,
           REMBRIC_API_TOKEN: 'tok',
           ...env,

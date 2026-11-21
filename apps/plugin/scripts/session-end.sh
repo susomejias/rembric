@@ -45,6 +45,7 @@ if [ ! -t 0 ]; then
   INPUT="$(cat)"
 fi
 SESSION_ID="$(rembric_session_id_from_stdin_json "$INPUT")"
+rembric_host_binding_remove "$SESSION_ID"
 CWD="$(rembric_cwd_from_stdin_json "$INPUT")"
 TRANSCRIPT_PATH="$(rembric_transcript_path_from_stdin_json "$INPUT")"
 [ -z "$CWD" ] && CWD="$PWD"

@@ -35,6 +35,9 @@
 #   - rembric_stdin_string_field <in> <key> [jq] → one string field of hook stdin
 #   - rembric_subagent_report <agent> <stdin> → forwards a subagent's report
 #                                       to /sessions/<id>/learnings
+#   - rembric_host_binding_publish/_remove <id> → writes, or removes while it
+#                                       still names <id>, the host process's
+#                                       ~/.cache/rembric/host-sessions/<pid>.json
 #
 # Every function exits 0 on failure (at most a one-line stderr diagnostic) so
 # a plugin-side problem NEVER aborts the host agent.
@@ -1217,4 +1220,105 @@ rembric_scan_offset_set() {
   local dir="${TMPDIR:-/tmp}/rembric-scan"
   mkdir -p "$dir" 2>/dev/null || true
   printf '%s' "$bytes" >"${dir}/${safe_id}" 2>/dev/null || true
+}
+
+# Host bindings: `<pid>.json` in this directory maps a host process (pid + start
+# token) to its live session so the MCP bridge can declare it. The layout is
+# pinned for every language by apps/plugin/test/host-binding-layout.json.
+_rembric_host_binding_dir() {
+  case "${OSTYPE:-}" in msys* | cygwin* | win32*) return 0 ;; esac
+  [ -z "${HOME:-}" ] && return 0
+  local dir="${HOME}/.cache/rembric/host-sessions"
+  if [ "${1:-}" = create ] && [ ! -d "$dir" ]; then
+    mkdir -p "${HOME}/.cache/rembric" 2>/dev/null || true
+    mkdir -m 700 "$dir" 2>/dev/null || true
+  fi
+  if [ -d "$dir" ] && [ -O "$dir" ]; then printf '%s' "$dir"; fi
+  return 0
+}
+
+rembric_host_start_token() {
+  local pid="${1:-}" out
+  case "$pid" in '' | *[!0-9]*) return 0 ;; esac
+  out="$(LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null)" || return 0
+  out="${out//[[:space:]]/ }"
+  while [ "${out#*  }" != "$out" ]; do out="${out//  / }"; done
+  out="${out# }"
+  printf '%s' "${out% }"
+}
+
+# The nearest ancestor of this hook that is not a shell: hooks run as
+# shell-form commands, so a shell may sit between the host and the script.
+rembric_host_pid() {
+  local pid="${1:-$PPID}" out ppid comm i=0
+  while [ "$i" -lt 8 ]; do
+    case "$pid" in '' | 0 | 1 | *[!0-9]*) return 0 ;; esac
+    out="$(LC_ALL=C ps -o ppid=,comm= -p "$pid" 2>/dev/null)" || return 0
+    read -r ppid comm <<<"$out"
+    comm="${comm%"${comm##*[![:space:]]}"}"
+    comm="${comm##*/}"
+    [ -z "$comm" ] && return 0
+    case " sh bash zsh dash ksh fish env " in
+    *" ${comm} "*) ;;
+    *)
+      printf '%s' "$pid"
+      return 0
+      ;;
+    esac
+    pid="$ppid"
+    i=$((i + 1))
+  done
+  return 0
+}
+
+_rembric_host_binding_prune() {
+  local dir="${1:-}" file pid start
+  for file in "$dir"/*.json; do
+    [ -f "$file" ] || continue
+    pid="${file##*/}"
+    pid="${pid%.json}"
+    case "$pid" in '' | *[!0-9]*) continue ;; esac
+    start="$(sed -n 's/.*"start"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" 2>/dev/null | head -n1)"
+    [ "$(rembric_host_start_token "$pid")" = "$start" ] || rm -f "$file" 2>/dev/null || true
+  done
+  return 0
+}
+
+rembric_host_binding_publish() {
+  local session_id="${1:-}" re='^[A-Za-z0-9_-]{8,128}$' pid start dir tmp
+  [[ "$session_id" =~ $re ]] || return 0
+  pid="$(rembric_host_pid)"
+  [ -z "$pid" ] && return 0
+  start="$(rembric_host_start_token "$pid")"
+  [ -z "$start" ] && return 0
+  dir="$(_rembric_host_binding_dir create)"
+  [ -z "$dir" ] && return 0
+  tmp="$(mktemp "${dir}/.tmp.XXXXXX" 2>/dev/null)" || return 0
+  if printf '{"pid":%s,"start":"%s","sessionId":"%s"}' "$pid" "$start" "$session_id" >"$tmp" 2>/dev/null &&
+    mv -f "$tmp" "${dir}/${pid}.json" 2>/dev/null; then
+    _rembric_host_binding_prune "$dir"
+  else
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+  return 0
+}
+
+# Removes the host's binding only while it still names the ending session; it is
+# taken aside first so a newer session's publish that lands meanwhile survives.
+rembric_host_binding_remove() {
+  local session_id="${1:-}" dir pid file taken
+  [ -z "$session_id" ] && return 0
+  dir="$(_rembric_host_binding_dir)"
+  [ -z "$dir" ] && return 0
+  pid="$(rembric_host_pid)"
+  [ -z "$pid" ] && return 0
+  file="${dir}/${pid}.json"
+  [ -f "$file" ] || return 0
+  taken="${dir}/.removing.$$"
+  mv -f "$file" "$taken" 2>/dev/null || return 0
+  if [ "$(rembric_session_id_from_stdin_json "$(cat "$taken" 2>/dev/null)")" != "$session_id" ]; then
+    ln "$taken" "$file" 2>/dev/null || true
+  fi
+  rm -f "$taken" 2>/dev/null || true
+  return 0
 }

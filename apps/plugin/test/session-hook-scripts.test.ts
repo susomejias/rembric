@@ -79,6 +79,7 @@ async function runFull(
       REMBRIC_API_TOKEN: 'test-token',
       REMBRIC_POST_MAX_TIME: '30',
       TMPDIR: dir,
+      HOME: dir,
     },
   });
   child.child.stdin?.end(stdin);

@@ -11,6 +11,7 @@ hooks:
   - prefetch
   - queue_prefetch
   - sync_turn
+  - shutdown
 requires_env:
   - name: REMBRIC_SERVER_URL
     description: >-
