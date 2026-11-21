@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.32.3](https://github.com/susomejias/rembric/compare/server-v0.32.2...server-v0.32.3) (2026-11-21)
+
+
+### Features
+
+* **mcp:** honour a host-declared session on every MCP request ([3690340](https://github.com/susomejias/rembric/commit/3690340cec6965952720bf9c5b7022898d65618d))
+* **plugin:** declare the host session from the bridge, opencode and Pi ([5e41796](https://github.com/susomejias/rembric/commit/5e41796774221dabe607918b5bff87f66a66f37f))
+
+
+### Bug Fixes
+
+* **mcp:** refuse session ambiguity as session_ambiguous, not session_not_found ([aeebd00](https://github.com/susomejias/rembric/commit/aeebd00bb8ffda420fc495ca8369ddcceafee0be)), closes [#548](https://github.com/susomejias/rembric/issues/548)
+* **mcp:** treat a hook-requested focused first-turn recall as expected ([9f36038](https://github.com/susomejias/rembric/commit/9f360384061563c5ca9d64d66d124cf154d90e30))
+* **plugin:** attribute each opencode tool call instead of publishing a binding ([7ff8f72](https://github.com/susomejias/rembric/commit/7ff8f72fcb48bd9c8be262fefffd230905432032))
+* **plugin:** name the session in the post-compaction block ([40fbdd8](https://github.com/susomejias/rembric/commit/40fbdd87886b12a72c87bafe8b3977bbf20a7224))
+
 ## [0.32.2](https://github.com/susomejias/rembric/compare/server-v0.32.1...server-v0.32.2) (2026-11-19)
 
 
