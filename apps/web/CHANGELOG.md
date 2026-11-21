@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.3](https://github.com/susomejias/rembric/compare/server-v0.32.2...server-v0.32.3) (2026-11-21)
+
+
+### Bug Fixes
+
+* **plugin:** name the session in the post-compaction block ([40fbdd8](https://github.com/susomejias/rembric/commit/40fbdd87886b12a72c87bafe8b3977bbf20a7224))
+
 ## [0.32.2](https://github.com/susomejias/rembric/compare/server-v0.32.1...server-v0.32.2) (2026-11-19)
 
 
