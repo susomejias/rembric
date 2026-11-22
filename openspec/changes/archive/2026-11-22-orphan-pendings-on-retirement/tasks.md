@@ -51,6 +51,6 @@
 
 ## 9. Archive-time coordination
 
-- [ ] 9.1 **ARCHIVE-TIME:** archive this change after `add-save-time-lexical-floor` and `drain-stale-save-time-pendings`
-- [ ] 9.2 **ARCHIVE-TIME:** archive `add-memory-merge` before this change (design D11)
-- [ ] 9.3 **ARCHIVE-TIME:** once `add-memory-merge` is published, add to this change a MODIFIED delta of "The MCP server MUST expose `memory.merge` with a preview-then-confirm contract" that replaces "Pending judgments touching an original are left as they are", then re-run task 8.3
+- [x] 9.1 **ARCHIVE-TIME:** archive this change after `add-save-time-lexical-floor` and `drain-stale-save-time-pendings`
+- [x] 9.2 **ARCHIVE-TIME:** archive `add-memory-merge` before this change (design D11)
+- [x] 9.3 **ARCHIVE-TIME:** once `add-memory-merge` is published, add to this change a MODIFIED delta of "The MCP server MUST expose `memory.merge` with a preview-then-confirm contract" that replaces "Pending judgments touching an original are left as they are", then re-run task 8.3
