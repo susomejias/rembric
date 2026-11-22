@@ -1050,7 +1050,7 @@ describe('MCP protocol conformance', () => {
       ]),
     );
     expect(names).not.toContain('project.use');
-    expect(names).toHaveLength(26);
+    expect(names).toHaveLength(27);
     await client.close();
   });
 
@@ -1249,6 +1249,52 @@ describe('MCP protocol conformance', () => {
     expect(desc).toMatch(/revers|undo/i);
     expect(desc).toMatch(/dashboard/i);
 
+    await client.close();
+  });
+
+  it('memory.pin description steers against autonomous pinning', async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const desc = tools.find((t) => t.name === 'memory.pin')?.description ?? '';
+
+    expect(desc).toMatch(/ONLY when the user explicitly asks/);
+    expect(desc).toMatch(/never on your own judgement/i);
+    expect(desc).toMatch(/housekeeping/i);
+    expect(desc).toMatch(/memory\.context/);
+    expect(desc).toMatch(/pin_limit_reached/);
+    expect(desc).toMatch(/does not suspend review/i);
+    expect(desc).toMatch(/dashboard/i);
+
+    await client.close();
+  });
+
+  it('memory.pin and the pinned context section conform over the wire', async () => {
+    const client = await connect();
+    const id = services.memory.save(
+      { type: 'feedback', title: 'wire pin rule', content: 'always run the wrapper' },
+      projectScope(defaultProject(services.db).id),
+    ).id;
+
+    const pinned = (await client.callTool({
+      name: 'memory.pin',
+      arguments: { id, pinned: true },
+    })) as ToolResult;
+    expect(pinned.isError).toBeFalsy();
+    expect(pinned.structuredContent).toMatchObject({ id, pinned: true, changed: true });
+
+    const context = (await client.callTool({
+      name: 'memory.context',
+      arguments: {},
+    })) as ToolResult;
+    expect(context.isError).toBeFalsy();
+    const body = context.structuredContent as { pinnedMemories: { id: string }[] };
+    expect(body.pinnedMemories.map((p) => p.id)).toContain(id);
+
+    const unpinned = (await client.callTool({
+      name: 'memory.pin',
+      arguments: { id, pinned: false },
+    })) as ToolResult;
+    expect(unpinned.structuredContent).toMatchObject({ pinned: false, changed: true });
     await client.close();
   });
 
@@ -1757,13 +1803,13 @@ describe('MCP protocol conformance', () => {
     });
 
     it.each([
-      ['memory.context', 1705],
+      ['memory.context', 1834],
       ['memory.search_prompts', 428],
       ['memory.session_start', 1142],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
       ['memory.save', 1891],
-      ['memory.stats', 242],
+      ['memory.stats', 283],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
       expect(desc, `${name} missing from tools/list`).toBeDefined();
@@ -2080,6 +2126,7 @@ describe('MCP protocol conformance', () => {
         'needsReviewTotal',
         'pendingJudgments',
         'pendingJudgmentsTotal',
+        'pinnedMemories',
         'recentMemories',
         'recentPrompts',
         'recentSessions',
@@ -2161,6 +2208,7 @@ describe('MCP protocol conformance', () => {
       'memory.save',
       'memory.confirm_batch',
       'memory.archive',
+      'memory.pin',
       'memory.merge',
       'memory.capture_passive',
       'memory.save_prompt',

@@ -4,7 +4,7 @@
 
 The server SHALL register an MCP tool `memory.pin` that pins or unpins a single memory. The tool SHALL accept `{ id: string, pinned: boolean }` (validated by zod, strict; `id` non-empty, `pinned` required) and SHALL NOT accept a `scope` argument. It SHALL resolve the effective scope through `resolveEffectiveScope`, require write authorization, and delegate to `MemoryService.setPinned` (see the `memory` capability, "An active memory MAY be pinned, with pin state derived from an append-only journal"), so pinning is confined to the connection's one project.
 
-A successful call SHALL return `{ ok: true, id, pinned, changed, pinnedCount, pinnedMax }`, where `pinned` is the derived state after the call, `changed` is false when the call appended nothing, `pinnedCount` is the project's pinned count after the call and `pinnedMax` is `PIN_MAX_PER_PROJECT`. A cross-scope or unknown `id` SHALL return `not_found`; a non-`active` memory SHALL return `conflict`; pinning past `PIN_MAX_PER_PROJECT` SHALL return the error code `pin_limit_reached` whose structured details carry `limit` and `pinned: [{ id, title }]` naming every current pin, so the agent can ask the user which one to unpin. The tool SHALL carry `readOnlyHint: false`, `idempotentHint: true` (a repeated call appends nothing), `destructiveHint: false` and `openWorldHint: false`.
+A successful call SHALL return `{ ok: true, id, pinned, changed, pinnedCount, pinnedMax }`, where `pinned` is the derived state after the call, `changed` is false when the call appended nothing, `pinnedCount` is the project's pinned count after the call and `pinnedMax` is `PIN_MAX_PER_PROJECT`. A cross-scope or unknown `id` SHALL return `not_found`; a non-`active` memory SHALL return `conflict`; pinning past `PIN_MAX_PER_PROJECT` SHALL return the error code `pin_limit_reached` whose error payload carries `limit` and `pinned: [{ id, title }]` naming every current pin, so the agent can ask the user which one to unpin. The tool SHALL carry `readOnlyHint: false`, `idempotentHint: true` (a repeated call appends nothing), `destructiveHint: false` and `openWorldHint: false`.
 
 #### Scenario: Pinning an active memory in scope
 
@@ -23,7 +23,7 @@ A successful call SHALL return `{ ok: true, id, pinned, changed, pinnedCount, pi
 
 - **GIVEN** a project holding `PIN_MAX_PER_PROJECT` pinned memories
 - **WHEN** a client calls `memory.pin` with `{ id, pinned: true }` for another active memory of that project
-- **THEN** the call SHALL fail with code `pin_limit_reached` and its details SHALL list the id and title of every current pin
+- **THEN** the call SHALL fail with code `pin_limit_reached` and its payload's `pinned[]` SHALL list the id and title of every current pin
 
 #### Scenario: Pinning a memory of another project is not found
 

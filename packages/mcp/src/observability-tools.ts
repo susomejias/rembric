@@ -68,6 +68,7 @@ export const statsOutput = {
   /** Queue-depth signals, both scoped to this call's context. */
   needsReviewTotal: z.number(),
   pendingJudgmentsTotal: z.number(),
+  pinnedTotal: z.number(),
 };
 
 export const capturePassiveOutput = {
@@ -180,5 +181,6 @@ async function handleStats(deps: ObservabilityToolDeps) {
     sessionsByStatus,
     needsReviewTotal,
     pendingJudgmentsTotal,
+    pinnedTotal: deps.memory.countPinned(scope),
   });
 }
