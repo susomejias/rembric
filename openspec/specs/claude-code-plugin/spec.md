@@ -648,8 +648,8 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge.
 - When a valid slug is resolved, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": "<session_id>", "cwd": "<cwd>", "agent": "claude-code"}`. The server-side handler writes the placeholder title.
 - Immediately afterwards, and only when the ensure was attempted, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. On a fresh row that is a documented no-op; on a row a previous run ended or the sweep abandoned, it is what returns the conversation's memories to it.
-- The script SHALL emit the generic nudge `rembric: If this is a continuation of recent work, call memory.context before responding.` to stdout.
-- Output cap: ≤30 tokens (measured 22.25 — 89 bytes newline-exclusive, the convention pinned below; the one budget in this capability that held as originally written).
+- The script SHALL emit the deferred-tools hint `rembric: If Rembric memory tools are deferred, load them via tool search before calling them.` to stdout, and on the notice path SHALL append the same line to `additionalContext` whenever a slug resolved. It SHALL NOT emit a `memory.context` instruction: the session's first prompt receives the focused recall instruction from `prompt-search.sh` (see "The first prompt of a session MUST receive a relevance instruction"), and a second, conditional recall line here competed with it — when the two disagreed the model took the one that let it skip the call. The hint names the load step that hosts which defer MCP tools (Claude Code loads them through a tool-search step) require before the tool can be called, and is phrased conditionally and without a host-specific tool name so that a host which does not defer tools, or a plain MCP install whose tool names differ from the plugin's, can ignore it.
+- Output cap: ≤30 tokens (measured 23.25 — 93 bytes newline-exclusive, the convention pinned below).
 
 #### SessionStart (matcher: compact)
 
@@ -760,7 +760,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - **THEN** the script SHALL POST to `${REMBRIC_SERVER_URL}/api/foo/sessions` with body `{"id": "claude-sess-abc12345", "cwd": "/home/u/foo", "agent": "claude-code"}`
 - **AND** SHALL then POST `${REMBRIC_SERVER_URL}/api/foo/sessions/claude-sess-abc12345/resume` with body `{}`, which succeeds as a no-op reporting `previousStatus: 'active'`
 - **AND** the server SHALL insert a row with `title = 'foo · 22:14 UTC'`, `title_final = false`
-- **AND** the script SHALL still emit the `rembric: If this is a continuation...` nudge on stdout
+- **AND** the script SHALL still emit the `rembric: If Rembric memory tools are deferred...` hint on stdout, and no `memory.context` instruction
 
 #### Scenario: A resumed Claude Code session returns its row to active
 
@@ -835,6 +835,14 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - **WHEN** Claude Code consumes the plugin from the marketplace
 - **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
 - **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop, SubagentStop}` carrying exactly twelve handler entries, with NO `PostToolUse` entry
+
+#### Scenario: SessionStart leaves turn-1 recall to the first-prompt hook
+
+- **GIVEN** a new session whose project resolves
+- **WHEN** `session-start.sh` runs for `claude-code` or for `codex-cli`
+- **THEN** its stdout SHALL be exactly the deferred-tools hint, byte-identical to the `sessionStart` entry of `apps/plugin/test/nudge-fixtures.json`
+- **AND** it SHALL NOT contain `memory.context`
+- **AND** the first prompt of the same session SHALL still receive the focused relevance line from `prompt-search.sh`
 
 ### Requirement: `subagent-report.sh` SHALL forward a finished subagent's report, silently and without blocking
 

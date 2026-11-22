@@ -1,8 +1,8 @@
 ## MODIFIED Requirements
 
-### Requirement: The plugin SHALL ship seven hook event types across ten handler entries at `apps/plugin/hooks/hooks.json`
+### Requirement: The plugin SHALL ship eight hook event types across twelve handler entries at `apps/plugin/hooks/hooks.json`
 
-The plugin's hook catalog SHALL declare exactly seven event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear|fork`, one for `compact`), `UserPromptSubmit` (THREE entries, NONE carrying a `matcher` key — the recall/first-prompt entry, the per-turn line emitter, and the prompt-time recall-hints emitter), `PreToolUse` (ONE entry, matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash` — the file-anchored recall hook), `SessionEnd`, `PreCompact`, `PostCompact`, and `Stop` (ONE entry — the synchronous end-of-turn report). That is **ten handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` entry in the `proactive-save-nudges` change, and the firing decision moved off the client entirely in `server-gated-session-nudges`).
+The plugin's hook catalog SHALL declare exactly eight event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear|fork`, one for `compact`), `UserPromptSubmit` (THREE entries, NONE carrying a `matcher` key — the recall/first-prompt entry, the per-turn line emitter, and the prompt-time recall-hints emitter), `PreToolUse` (TWO entries — matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash` for the file-anchored recall hook, and matcher `SubagentHandback` for the subagent report forwarder), `SessionEnd`, `PreCompact`, `PostCompact`, `Stop` (ONE entry — the synchronous end-of-turn report), and `SubagentStop` (ONE entry — the subagent report forwarder). That is **twelve handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` entry in the `proactive-save-nudges` change, and the firing decision moved off the client entirely in `server-gated-session-nudges`). The subagent report forwarder does not reopen that: on Claude Code v2.1.271+ the report a `SubagentHandback` call delivers is its `tool_input.message`, which `PreToolUse` receives exactly as `PostToolUse` would (`code.claude.com/docs/en/hooks`, "which a `PreToolUse` or `PostToolUse` hook matched on `SubagentHandback` receives as `tool_input.message`").
 
 Both counts SHALL be asserted as an exact set, not a containment check: a `toContain`-style assertion cannot catch a spec or manifest that wrongly claims an event type is _absent_, which is the defect class this requirement replaces. The handler count is stated separately from the event-type count because Codex's per-hook trust prompt counts handlers while its documentation counts event types (see `codex-distribution`).
 
@@ -10,7 +10,7 @@ The first matcher group SHALL include `fork`, and its omission was a defect rath
 
 Both `SessionStart` groups SHALL follow their `/sessions` ensure with one `POST /api/<slug>/sessions/<session_id>/resume`, unconditionally and without inspecting `source`. That rule is uniform across all five clients and is specified once in `plugin-session-protocol`'s lifecycle mapping; this capability records only that both of this client's ensure sites honour it.
 
-`PreCompact` and `PostCompact` snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` entries emit plain-stdout lines. The `PreToolUse` entry emits only `hookSpecificOutput.additionalContext` JSON, or nothing. Full behavioural detail lives in the per-hook subsections below and in the `plugin-session-protocol` capability's lifecycle mapping, which is the authoritative table of which hook POSTs what.
+`PreCompact` and `PostCompact` snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` entries emit plain-stdout lines. The file-recall `PreToolUse` entry emits only `hookSpecificOutput.additionalContext` JSON, or nothing. The two subagent report entries emit nothing at all. Full behavioural detail lives in the per-hook subsections below and in the `plugin-session-protocol` capability's lifecycle mapping, which is the authoritative table of which hook POSTs what.
 
 **`Stop` now carries exactly one entry, and it is model-silent.** The historical reason a `Stop` hook was once removed was a semantic bug, not a structural prohibition: Claude Code's `Stop` fires once per assistant turn, not at session end, and the prior hook posted to `/end`, transitioning the session on turn one. Neither the entry required here nor any of its predecessors since posts to `/end`.
 
@@ -24,7 +24,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Matcher: `startup|resume|clear|fork`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh claude-code`.
 - The script SHALL read `session_id`, `cwd`, and `source` from hook stdin. It SHALL NOT branch on `source`: all four matched values register a row, and `fork` carries a new session id, so registration is the correct response to every one of them.
-- The script SHALL resolve the session's project with `rembric_session_project <session_id> <cwd>` from `_api.sh`, which runs the `repository-binding` cascade once per session and caches the outcome; this is the session's first resolution.
+- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge.
 - When a valid slug is resolved, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": "<session_id>", "cwd": "<cwd>", "agent": "claude-code"}`. The server-side handler writes the placeholder title.
 - Immediately afterwards, and only when the ensure was attempted, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. On a fresh row that is a documented no-op; on a row a previous run ended or the sweep abandoned, it is what returns the conversation's memories to it.
 - The script SHALL emit the deferred-tools hint `rembric: If Rembric memory tools are deferred, load them via tool search before calling them.` to stdout, and on the notice path SHALL append the same line to `additionalContext` whenever a slug resolved. It SHALL NOT emit a `memory.context` instruction: the session's first prompt receives the focused recall instruction from `prompt-search.sh` (see "The first prompt of a session MUST receive a relevance instruction"), and a second, conditional recall line here competed with it — when the two disagreed the model took the one that let it skip the call. The hint names the load step that hosts which defer MCP tools (Claude Code loads them through a tool-search step) require before the tool can be called, and is phrased conditionally and without a host-specific tool name so that a host which does not defer tools, or a plain MCP install whose tool names differ from the plugin's, can ignore it.
@@ -35,7 +35,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`.
 - Matcher: `compact`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.sh claude-code`.
-- The script SHALL read `session_id` and `cwd` from hook stdin and SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session.
+- The script SHALL read `session_id` and `cwd` from hook stdin (slug resolution piggybacks on `.rembric` as elsewhere).
 - When both `session_id` and a valid slug resolve, the script SHALL re-POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` as an idempotent session-row ensure, and SHALL then POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. The pair is what covers the case where the stale sweep abandoned the row between the pre-compact moment and the resume; the ensure alone never could, because the ensure path returns a terminal row untouched (`http-api`). This hook is NOT stdout-only.
 - The script SHALL emit an imperative instruction block to stdout, prefixed `rembric:` so Codex's `looks_like_json` heuristic does not flag it. Its content and its ≤700-byte cap are governed by `plugin-session-protocol`'s post-compaction requirement, which this change rewords for the section-wise merge; the reworded block SHALL be re-measured in the same commit.
 - Output cap: ≤175 tokens. `plugin-session-protocol` asserts the same number and the two SHALL be changed together.
@@ -74,7 +74,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh claude-code`. The agent-name argument SHALL be passed explicitly rather than left to the script's default, because Codex CLI wires the same single script with `codex-cli` to select its own transcript parser (`codex-distribution`), and a bare invocation on one client against an argument on the other is the shape that lets the two drift.
 - The script SHALL read `session_id`, `cwd`, `transcript_path`, and `reason` from hook stdin.
-- The script SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session.
+- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG`.
 - When both resolve, the script SHALL read `transcript_path` if the file exists and build the fallback body, PREFERRING the deterministic fact extraction over the raw transcript format and falling through to the format when the extractor is unavailable or yields nothing (`sessions`, "A session that ends without a curated summary MUST still leave grounded, checkable facts"). It SHALL extract a title from the first non-empty assistant message (truncated to 100 chars) and POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/end` with body `{"summary": "<body>", "title": "<derived>", "final": false}`.
 - When `transcript_path` is missing/unreadable/empty, the script SHALL POST `/end {}` (degraded mode — transition without summary).
 - The script SHALL discard the response, SHALL emit no stdout (`SessionEnd` is not stdout-injected), and SHALL exit `0` on any error.
@@ -104,12 +104,25 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - The script SHALL emit NO stdout under any circumstance — no `hookSpecificOutput`, no plain text, no `decision`. Output cap: 0 tokens to model. This is a strict tightening: the entry this one replaces was the single row in the on-invoke table with no fixed cap.
 - The script SHALL run on every `Stop` that is not a continuation, and SHALL exit `0` on any error, identically to every other hook script's fail-safe discipline.
 
-#### Scenario: The manifest declares seven event types and ten handlers
+#### PreToolUse (subagent report, matcher: SubagentHandback)
+
+- Type: `command`. Matcher: `SubagentHandback`. The entry SHALL declare `"async": true`, so the hook can never delay, block or deny the hand-back: the host documents that a denied `SubagentHandback` makes the subagent retry up to three times.
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/subagent-report.sh claude-code` with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` taken from the plugin options.
+- Behaviour is specified by this capability's subagent-report requirement. Output cap: 0 tokens to model.
+
+#### SubagentStop
+
+- Type: `command`. Matcher: NONE. The entry SHALL declare `"async": true`.
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/subagent-report.sh claude-code` with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` taken from the plugin options — the same script as the `SubagentHandback` entry.
+- Behaviour is specified by this capability's subagent-report requirement. Output cap: 0 tokens to model.
+
+#### Scenario: The manifest declares eight event types and twelve handlers
 
 - **WHEN** `apps/plugin/hooks/hooks.json` is loaded
-- **THEN** its event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop}`
-- **AND** it SHALL carry exactly ten handler entries, with NO `PostToolUse` entry
-- **AND** `PreToolUse` SHALL declare exactly one entry, with matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, invoking `file-recall.sh claude-code`, carrying no `async` key
+- **THEN** its event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop, SubagentStop}`
+- **AND** it SHALL carry exactly twelve handler entries, with NO `PostToolUse` entry
+- **AND** `PreToolUse` SHALL declare exactly two entries: one with matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, invoking `file-recall.sh claude-code`, carrying no `async` key; and one with matcher `SubagentHandback`, invoking `subagent-report.sh claude-code`, with `"async": true`
+- **AND** `SubagentStop` SHALL declare exactly one entry, with no `matcher` key, invoking `subagent-report.sh claude-code`, with `"async": true`
 - **AND** `Stop` SHALL declare exactly one entry, invoking `stop-report.sh`, carrying no `async` key
 - **AND** both counts SHALL be asserted as exact sets rather than containment
 
@@ -200,7 +213,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 
 - **WHEN** Claude Code consumes the plugin from the marketplace
 - **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
-- **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop}` carrying exactly ten handler entries, with NO `PostToolUse` entry
+- **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop, SubagentStop}` carrying exactly twelve handler entries, with NO `PostToolUse` entry
 
 #### Scenario: SessionStart leaves turn-1 recall to the first-prompt hook
 
