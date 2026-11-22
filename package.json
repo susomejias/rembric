@@ -7,7 +7,7 @@
   "author": "rembric contributors",
   "private": true,
   "engines": {
-    "node": ">=22.13"
+    "node": ">=26"
   },
   "packageManager": "pnpm@11.1.2",
   "scripts": {

@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repo. Specs in `openspec/specs/` are th
 
 | Need             | Command / path                                                               |
 | ---------------- | ---------------------------------------------------------------------------- |
-| Install          | `pnpm install` (run `corepack enable` first)                                 |
+| Install          | `pnpm install` (Node 26; corepack setup in `CONTRIBUTING.md`)                |
 | Typecheck / lint | `pnpm run typecheck` · `pnpm run lint`                                       |
 | Tests            | `pnpm test` (single file: `pnpm vitest run path/to/file.test.ts`)            |
 | Dev server       | `pnpm run dev` (Next.js dev server in `apps/web`; `docs/docker.md`)          |

@@ -24,7 +24,7 @@
 # pre-created here owned by the runtime user — a named volume is initialised
 # from the image, which is what lets uid 10001 open the file at all.
 
-FROM node:22-bookworm-slim AS base
+FROM node:26-trixie-slim AS base
 
 # build-essential + python3 are the native-module toolchain: better-sqlite3
 # builds from source when no prebuilt matches the platform/ABI.
@@ -32,7 +32,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@11.1.2 --activate
+# Node >= 25 ships without corepack. It is installed at an exact version with its own scripts
+# off, and then resolves pnpm from package.json's `packageManager`, the only pnpm pin.
+RUN npm i -g --ignore-scripts corepack@0.36.0 && corepack enable
 
 WORKDIR /app
 
@@ -223,7 +225,7 @@ RUN mkdir -p /empty-data
 # Distroless keeps glibc (so the prebuilt onnxruntime-node / better-sqlite3 /
 # sqlite-vec binaries work unchanged) while dropping the shell + apt userland.
 # No shell means: numeric USER (no useradd), exec-form HEALTHCHECK.
-FROM gcr.io/distroless/nodejs22-debian12 AS runner
+FROM gcr.io/distroless/nodejs26-debian13 AS runner
 
 LABEL rembric.stage=runtime
 
