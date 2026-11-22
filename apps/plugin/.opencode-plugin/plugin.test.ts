@@ -41,10 +41,7 @@ afterEach(() => {
 });
 
 const here = dirname(fileURLToPath(import.meta.url));
-const pluginVersion = (
-  JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version: string }
-).version;
-const expectedBridgeSpecifier = `@rembric/mcp-bridge@${pluginVersion}`;
+const installedBridge = join(scratchHome, '.config', 'rembric', 'bin', 'cli.mjs');
 
 const nudgeFixtures = JSON.parse(
   readFileSync(join(here, '..', 'test', 'nudge-fixtures.json'), 'utf8'),
@@ -184,6 +181,8 @@ describe('RembricPlugin config hook', () => {
   let dir: string;
 
   beforeEach(() => {
+    mkdirSync(dirname(installedBridge), { recursive: true });
+    writeFileSync(installedBridge, '');
     dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-config-'));
     writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\\n');
     process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
@@ -191,6 +190,7 @@ describe('RembricPlugin config hook', () => {
   });
 
   afterEach(() => {
+    rmSync(join(scratchHome, '.config'), { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
     delete process.env.REMBRIC_SERVER_URL;
     delete process.env.REMBRIC_API_TOKEN;
@@ -213,7 +213,7 @@ describe('RembricPlugin config hook', () => {
 
     handlers.config!(config);
 
-    expect(config.mcp.rembric.command).toEqual(['npx', '-y', expectedBridgeSpecifier]);
+    expect(config.mcp.rembric.command).toEqual(['node', installedBridge]);
     expect(config.mcp.rembric.environment).toEqual({
       REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}',
     });
@@ -234,7 +234,7 @@ describe('RembricPlugin config hook', () => {
       mcp: {
         rembric: {
           type: 'local',
-          command: ['npx', '-y', expectedBridgeSpecifier],
+          command: ['node', installedBridge],
           environment: {
             REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}',
             REMBRIC_API_TOKEN: '{env:REMBRIC_API_TOKEN}',
@@ -245,6 +245,90 @@ describe('RembricPlugin config hook', () => {
       },
       theme: 'dark',
     });
+  });
+});
+
+describe('RembricPlugin config hook with the bridge present or absent', () => {
+  let dir: string;
+  const npxEntry = () => ({
+    type: 'local',
+    command: ['npx', '-y', '@rembric/mcp-bridge@0.45.1'],
+    environment: { REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}' },
+    enabled: true,
+  });
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rembric-plugin-config-'));
+    writeFileSync(join(dir, '.rembric'), 'PROJECT_SLUG=demo\n');
+    process.env.REMBRIC_SERVER_URL = 'http://localhost:9999';
+    process.env.REMBRIC_API_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    rmSync(join(scratchHome, '.config'), { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.REMBRIC_SERVER_URL;
+    delete process.env.REMBRIC_API_TOKEN;
+  });
+
+  it('replaces an npx entry in memory once the installer has placed the bridge', async () => {
+    mkdirSync(dirname(installedBridge), { recursive: true });
+    writeFileSync(installedBridge, '');
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const config = { mcp: { rembric: npxEntry() } };
+
+    handlers.config!(config);
+
+    expect(config.mcp.rembric.command).toEqual(['node', installedBridge]);
+    expect(config.mcp.rembric.environment).toEqual({
+      REMBRIC_SERVER_URL: '{env:REMBRIC_SERVER_URL}',
+    });
+  });
+
+  it('leaves a working npx entry untouched and logs one hint when the bridge is absent', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const config = { mcp: { rembric: npxEntry() } };
+    const lines: string[] = [];
+    const spy = spyOnStderr(lines);
+
+    try {
+      handlers.config!(config);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(config.mcp.rembric).toEqual(npxEntry());
+    const hints = lines.filter((line) => line.includes(installedBridge));
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain('re-run the Rembric installer');
+  });
+
+  it('creates no entry when the bridge is absent and none is configured', async () => {
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const config: { mcp?: Record<string, unknown>; theme: string } = { theme: 'dark' };
+    const spy = spyOnStderr([]);
+
+    try {
+      handlers.config!(config);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(config.mcp?.['rembric']).toBeUndefined();
+    expect(config.theme).toBe('dark');
+  });
+
+  it('never spawns a package or names a bridge version', async () => {
+    mkdirSync(dirname(installedBridge), { recursive: true });
+    writeFileSync(installedBridge, '');
+    const handlers = await RembricPlugin({ directory: dir } as never);
+    const config = { mcp: {} as Record<string, { command: string[] }> };
+
+    handlers.config!(config);
+
+    const command = config.mcp['rembric']?.command ?? [];
+    expect(command[0]).toBe('node');
+    expect(command.join(' ')).not.toMatch(/npx|@rembric\/mcp-bridge/);
   });
 });
 
