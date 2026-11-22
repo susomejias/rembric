@@ -9,7 +9,12 @@
     {
       "name": "rembric",
       "description": "Automatic memory for Claude Code, backed by your self-hosted Rembric server.",
-      "source": "./apps/plugin"
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/susomejias/rembric.git",
+        "path": "apps/plugin",
+        "ref": "plugin-release"
+      }
     }
   ]
 }

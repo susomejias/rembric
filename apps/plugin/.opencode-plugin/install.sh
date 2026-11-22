@@ -1,7 +1,7 @@
 #!/bin/sh
 # rembric opencode plugin installer.
 #
-# Download plugin.ts and its shared modules from the rembric main branch and
+# Download plugin.ts and its shared modules from the rembric plugin-release branch and
 # install them to ~/.config/opencode/plugins/ and ~/.config/rembric/bin/.
 # The installer never edits opencode.json; the plugin config hook owns its MCP entry.
 # Honour PLUGIN_SRC, BIN_SRC and MCP_BRIDGE_SRC for local development.
@@ -17,9 +17,9 @@
 
 set -eu
 
-PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin}"
-BIN_SRC="${BIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/bin}"
-MCP_BRIDGE_SRC="${MCP_BRIDGE_SRC:-https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/mcp-bridge}"
+PLUGIN_SRC="${PLUGIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/plugin-release/apps/plugin/.opencode-plugin}"
+BIN_SRC="${BIN_SRC:-https://raw.githubusercontent.com/susomejias/rembric/plugin-release/apps/plugin/bin}"
+MCP_BRIDGE_SRC="${MCP_BRIDGE_SRC:-https://raw.githubusercontent.com/susomejias/rembric/plugin-release/apps/plugin/mcp-bridge}"
 
 OPENCODE_DIR="${HOME}/.config/opencode"
 OPENCODE_PLUGINS_DIR="${OPENCODE_DIR}/plugins"

@@ -11,6 +11,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[4]
 _SOURCE = "https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin"
+_REV = "0123456789abcdef0123456789abcdef01234567"
 
 
 class MigrationTest(unittest.TestCase):
@@ -28,7 +29,8 @@ class MigrationTest(unittest.TestCase):
         self.bin = self.home / "bin"
         self.bin.mkdir()
         self.executable("ps", '#!/bin/sh\nprintf "1 /sbin/init\\n%s python3 -\\n" "$PPID"\n')
-        self.executable("curl", '#!/bin/sh\nfor arg do case "$arg" in https://raw.githubusercontent.com/susomejias/rembric/main/*) rel="${arg#https://raw.githubusercontent.com/susomejias/rembric/main/}" ;; esac; done\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp "' + str(_ROOT) + '/$rel" "$2"; exit; fi; shift; done\nexit 91\n')
+        self.executable("curl", '#!/bin/sh\nfor arg do case "$arg" in https://raw.githubusercontent.com/susomejias/rembric/*) rest="${arg#https://raw.githubusercontent.com/susomejias/rembric/}"; rel="${rest#*/}" ;; esac; done\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp "' + str(_ROOT) + '/$rel" "$2"; exit; fi; shift; done\nexit 91\n')
+        self.executable("git", f'#!/bin/sh\nprintf "%s\\trefs/heads/plugin-release\\n" {_REV}\n')
         self.executable("hermes", f'''#!{sys.executable}
 import json, os, sys
 from pathlib import Path
@@ -38,7 +40,8 @@ p = h / "plugins/rembric"
 p.mkdir(exist_ok=True)
 (p / "plugin.yaml").write_text("name: rembric\\nversion: 99.0.0\\n")
 (p / "__init__.py").write_text("new provider")
-record = {{"source": {_SOURCE!r}, "pinned": False, "revision": "a" * 40}}
+pinned = "--ref" in sys.argv
+record = {{"source": {_SOURCE!r}, "pinned": pinned, "revision": sys.argv[sys.argv.index("--ref") + 1] if pinned else "a" * 40}}
 (h / "plugins/.install-metadata.json").write_text(json.dumps({{"rembric": record}}))
 mode = os.environ.get("FAKE_NATIVE", "success")
 if mode != "success":
@@ -112,7 +115,7 @@ if mode != "success":
         code, out = self.run_tui()
         self.assertEqual(code, 0, out)
         self.assertIn("Type MIGRATE", out)
-        self.assertEqual((self.home / "invoked").read_text(), "plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable")
+        self.assertEqual((self.home / "invoked").read_text(), f"plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref {_REV} --enable")
         backups = list(self.home.glob("rembric-backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].stat().st_mode & 0o777, 0o700)

@@ -10,7 +10,7 @@
         "source": "git-subdir",
         "url": "https://github.com/susomejias/rembric.git",
         "path": "./apps/plugin",
-        "ref": "main"
+        "ref": "plugin-release"
       },
       "policy": {
         "installation": "AVAILABLE",

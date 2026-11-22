@@ -14,12 +14,17 @@ if [ -n "${PLUGIN_SRC:-}${REMBRIC_SRC:-}${REMBRIC_REF:-}" ]; then
   printf '[rembric] error: Hermes supports only the default native source; local sources and explicit refs are unsupported.\n' >&2
   exit 2
 fi
+REV="${REMBRIC_PLUGIN_REV:-}"
+if [ "$ACTION" != uninstall ] && ! printf '%s' "$REV" | grep -Eq '^[0-9a-f]{40}$'; then
+  printf '[rembric] error: Hermes installs pin the plugin release commit; run the root TUI, which resolves it.\n' >&2
+  exit 2
+fi
 command -v python3 >/dev/null 2>&1 || {
   printf '[rembric] error: Python 3 is required to validate Hermes source metadata.\n' >&2
   exit 1
 }
 STATE=$(
-  python3 - "$HERMES_HOME" "$ACTION" <<'PY'
+  python3 - "$HERMES_HOME" "$ACTION" "$REV" <<'PY'
 import hashlib
 import json
 import os
@@ -48,7 +53,7 @@ def state():
     if (target.is_dir() and (target / "plugin.yaml").is_file()
             and isinstance(record, dict)
             and record.get("source") == "https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin"
-            and record.get("pinned") is False
+            and isinstance(record.get("pinned"), bool)
             and isinstance(record.get("revision"), str)
             and re.fullmatch(r"[0-9a-f]{40}", record["revision"])):
         return "native"
@@ -165,7 +170,8 @@ def migrate():
             target.rename(backup / "previous")
             moved = True
             try:
-                subprocess.run(["hermes", "plugins", "install", "susomejias/rembric/apps/plugin/.hermes-plugin", "--enable"],
+                subprocess.run(["hermes", "plugins", "install", "susomejias/rembric/apps/plugin/.hermes-plugin",
+                                "--ref", sys.argv[3], "--enable"],
                                stdin=tty, stdout=sys.stderr, check=True)
                 if state() != "native" or not (target / "__init__.py").is_file():
                     raise ValueError("native installation verification failed")
@@ -214,6 +220,10 @@ if current == "legacy" and sys.argv[2] == "update":
         sys.exit(1)
     print("migrated")
 else:
+    if current == "native" and sys.argv[2] == "update":
+        record = json.loads(metadata.read_text())["rembric"]
+        if record["pinned"] is True and record["revision"] == sys.argv[3]:
+            current = "current"
     print("unsupported" if current == "legacy" else current)
 PY
 )
@@ -240,9 +250,15 @@ install)
     printf '[rembric] Hermes plugin already installed; use --action=update.\n'
     exit 0
   fi
-  hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable
+  hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref "$REV" --enable
   ;;
-update) if [ "$STATE" != migrated ]; then hermes plugins update rembric; fi ;;
+update)
+  if [ "$STATE" = current ]; then
+    printf '[rembric] Hermes plugin already pinned at %s.\n' "$REV"
+  elif [ "$STATE" != migrated ]; then
+    hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --force --ref "$REV"
+  fi
+  ;;
 uninstall) exec hermes plugins remove rembric ;;
 esac
 

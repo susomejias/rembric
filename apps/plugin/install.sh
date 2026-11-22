@@ -22,19 +22,21 @@
 #   sh install.sh --server
 #
 # Flags: --server | --agent=<a,b,..> | --action=install|update|uninstall
-#        --ref=<tag>  (pin the git ref; default main)
+#        --ref=<ref>  (pin both tracks; default plugin-release for plugins, main for the server)
 
 set -eu
 
 # ── source + ref resolution ────────────────────────────────────────────────
 # REMBRIC_SRC, when set, is a local checkout root: every artifact is read from
-# disk (cp), no network. Otherwise artifacts come from raw.githubusercontent
-# at REMBRIC_REF (default main); --ref overrides.
+# disk (cp), no network. Otherwise artifacts come from raw.githubusercontent:
+# plugin artifacts from plugin-release, which CI advances only after the pinned
+# bridge is on npm, and server artifacts from main. REMBRIC_REF / --ref set both.
 REMBRIC_SRC="${REMBRIC_SRC:-}"
-REF="${REMBRIC_REF:-main}"
+REF="${REMBRIC_REF:-}"
 EXPLICIT_REF="${REMBRIC_REF+x}"
 NONINTERACTIVE="${REMBRIC_NONINTERACTIVE:-0}"
 RAW_BASE="https://raw.githubusercontent.com/susomejias/rembric"
+REPO_GIT_URL="https://github.com/susomejias/rembric.git"
 
 ARG_SERVER=0
 ARG_AGENTS=''
@@ -200,7 +202,7 @@ banner() {
   printf '\n'
   # Always announce the source (supply-chain transparency): the local clone path,
   # or the remote ref artifacts are fetched from.
-  printf '%s  source: %s%s\n' "$DIM" "$([ -n "$REMBRIC_SRC" ] && echo "local:$REMBRIC_SRC" || echo "ref:$REF")" "$RESET"
+  printf '%s  source: %s%s\n' "$DIM" "$([ -n "$REMBRIC_SRC" ] && echo "local:$REMBRIC_SRC" || echo "plugins@$PLUGIN_REF server@$SERVER_REF")" "$RESET"
   hr
 }
 
@@ -330,7 +332,42 @@ arrow_menu() {
   trap - EXIT INT TERM
 }
 
-# ── fetch: local cp when REMBRIC_SRC set, else curl from the ref ────────────
+# ── refs: one per release track ─────────────────────────────────────────────
+SERVER_REF="${REF:-main}"
+PLUGIN_REF="${REF:-plugin-release}"
+PLUGIN_REV=''
+PLUGIN_REV_DONE=0
+
+is_sha() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{40}$'; }
+
+# Resolves PLUGIN_REF to a commit once per run (call it outside a subshell so the
+# result sticks). Fetching by commit cannot hit the raw CDN's stale branch cache.
+# Leaves PLUGIN_REV empty when git is absent or the ref does not resolve.
+resolve_plugin_rev() {
+  [ "$PLUGIN_REV_DONE" = 1 ] && return 0
+  PLUGIN_REV_DONE=1
+  [ -n "$REMBRIC_SRC" ] && return 0
+  if is_sha "$PLUGIN_REF"; then
+    PLUGIN_REV="$PLUGIN_REF"
+    return 0
+  fi
+  _lr=$(GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote "$REPO_GIT_URL" \
+    "refs/heads/$PLUGIN_REF" "refs/tags/$PLUGIN_REF" "refs/tags/$PLUGIN_REF^{}" 2>/dev/null) || return 0
+  PLUGIN_REV=$(printf '%s\n' "$_lr" | awk '$2 ~ /\^\{\}$/ { p = $1 } $2 ~ /^refs\/heads\// { h = $1 } NF == 2 && a == "" { a = $1 } END { print (p != "" ? p : (h != "" ? h : a)) }')
+  return 0
+}
+
+ref_for() { # $1 repo-relative path → the ref its release track is fetched from
+  case "$1" in
+  apps/plugin/* | .release-please-manifest.json)
+    resolve_plugin_rev
+    printf '%s' "${PLUGIN_REV:-$PLUGIN_REF}"
+    ;;
+  *) printf '%s' "$SERVER_REF" ;;
+  esac
+}
+
+# ── fetch: local cp when REMBRIC_SRC set, else curl from the track's ref ────
 fetch() { # $1 repo-relative path, $2 dest
   _rel="$1"
   _dest="$2"
@@ -342,8 +379,9 @@ fetch() { # $1 repo-relative path, $2 dest
     printf '[rembric] error: missing local file %s\n' "$REMBRIC_SRC/$_rel" >&2
     return 1
   fi
-  if ! curl -fsSL --max-time 30 --retry 2 --retry-connrefused "$RAW_BASE/$REF/$_rel" -o "$_dest"; then
-    printf '[rembric] error: failed to fetch %s\n' "$RAW_BASE/$REF/$_rel" >&2
+  _url="$RAW_BASE/$(ref_for "$_rel")/$_rel"
+  if ! curl -fsSL --max-time 30 --retry 2 --retry-connrefused "$_url" -o "$_dest"; then
+    printf '[rembric] error: failed to fetch %s\n' "$_url" >&2
     return 1
   fi
 }
@@ -383,9 +421,12 @@ client_at() { # $1 1-based position in CLIENTS → name (empty when out of range
 
 # ── version helpers ─────────────────────────────────────────────────────────
 # Available versions all live in one .release-please-manifest.json fetched at
-# the same ref we install from (so "update available" never lies).
+# the same plugin commit we install from (so "update available" never lies).
 MANIFEST=''
-load_manifest() { MANIFEST=$(read_remote ".release-please-manifest.json" 2>/dev/null || echo ''); }
+load_manifest() {
+  resolve_plugin_rev
+  MANIFEST=$(read_remote ".release-please-manifest.json" 2>/dev/null || echo '')
+}
 
 available_version() { # $1 component key (e.g. apps/plugin/.hermes-plugin)
   # Key contains '/', so use '|' as the sed delimiter.
@@ -891,17 +932,18 @@ run_client_script() { # $1 client, $2 install|uninstall
       REMBRIC_ACTION="$verb" sh "$REMBRIC_SRC/apps/plugin/$dir/$script"
     fi
   else
-    # Remote: fetch the script and point it at the same ref.
+    # Remote: fetch the script and point it at the same plugin commit.
+    resolve_plugin_rev
     t=$(mktemp)
     fetch "apps/plugin/$dir/$script" "$t" || {
       rm -f "$t"
       return 1
     }
-    base="$RAW_BASE/$REF/apps/plugin"
+    base="$RAW_BASE/$(ref_for "apps/plugin/$dir")/apps/plugin"
     if [ "$c" = "opencode" ]; then
       PLUGIN_SRC="$base/$dir" BIN_SRC="$base/bin" MCP_BRIDGE_SRC="$base/mcp-bridge" sh "$t"
     else
-      if REMBRIC_ACTION="$verb" REMBRIC_NONINTERACTIVE="$NONINTERACTIVE" sh "$t"; then _client_rc=0; else _client_rc=$?; fi
+      if REMBRIC_ACTION="$verb" REMBRIC_NONINTERACTIVE="$NONINTERACTIVE" REMBRIC_PLUGIN_REV="$PLUGIN_REV" REMBRIC_REF='' sh "$t"; then _client_rc=0; else _client_rc=$?; fi
       rm -f "$t"
       return "$_client_rc"
     fi
@@ -929,8 +971,10 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
     ;;
   hermes)
     add=''
-    ins="hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable"
-    upd="hermes plugins update rembric"
+    # A SHA-pinned install refuses `hermes plugins update`; `install --force
+    # --ref` is how Hermes moves the pin.
+    ins="hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref $PLUGIN_REV --enable"
+    upd="hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --force --ref $PLUGIN_REV"
     rem="hermes plugins remove rembric"
     say "  Native Hermes owns memory.provider and plugin selection/grants; removal deletes its entire managed plugin directory."
     if [ "$action" = update ]; then say "  Recognized legacy copies require a separate, interactive stopped-host migration confirmation."; fi
@@ -1077,9 +1121,17 @@ post_install_notes() { # $1 client, $2 action (install|update)
   esac
 }
 
-hermes_source_ok() {
+# Hermes cannot follow a branch (--ref takes only a commit), so install and
+# update pin the commit plugin-release resolves to, and refuse without one.
+hermes_source_ok() { # $1 action
   if [ -n "$REMBRIC_SRC${PLUGIN_SRC:-}$EXPLICIT_REF" ]; then
     printf '[rembric] error: Hermes supports only the default native source; local sources and explicit refs are unsupported.\n' >&2
+    return 2
+  fi
+  [ "${1:-}" = uninstall ] && return 0
+  resolve_plugin_rev
+  if [ -z "$PLUGIN_REV" ]; then
+    printf '[rembric] error: Hermes pins the plugin release commit, but %s did not resolve to one (git ls-remote %s).\n' "$PLUGIN_REF" "$REPO_GIT_URL" >&2
     return 2
   fi
   return 0
@@ -1088,7 +1140,7 @@ hermes_source_ok() {
 do_client() { # $1 client, $2 action
   c="$1"
   action="$2"
-  if [ "$c" = hermes ]; then hermes_source_ok || return $?; fi
+  if [ "$c" = hermes ]; then hermes_source_ok "$action" || return $?; fi
   say "${BOLD}${c} (${action})${RESET}"
   case "$c" in
   opencode)
@@ -1173,14 +1225,17 @@ Flags:
   --yes, -y           run the client CLI commands (marketplace, registry or
                       Hermes native) when the client binary is present (headless
                       opt-in; does not start Docker — use --up)
-  --ref=<tag>         git ref to install from (default: main); unsupported for Hermes
+  --ref=<ref>         git ref for every artifact (default: plugins from
+                      plugin-release, resolved to a commit; server files from
+                      main); unsupported for Hermes
   -h, --help          this help
 
 Env: REMBRIC_NONINTERACTIVE=1 (force headless) · REMBRIC_SRC=<clone> (read from
      disk, no network) · REMBRIC_REF=<tag> · NO_COLOR · REMBRIC_NO_PULL=1
      (skip 'docker compose pull' on --up) · REMBRIC_UPDATE_CHECK=off (skip the
      GitHub release lookup in --status).
-Hermes mutations reject REMBRIC_SRC, PLUGIN_SRC, REMBRIC_REF and explicit --ref.
+Hermes mutations reject REMBRIC_SRC, PLUGIN_SRC, REMBRIC_REF and explicit --ref,
+and pin the commit plugin-release resolves to (git required).
 Hermes update status is unknown; use explicit update for native-managed installs.
 EOF
 }
@@ -1240,8 +1295,8 @@ fi
 # Non-interactive / no-TTY → require explicit flags, never guess.
 if [ "$NONINTERACTIVE" = "1" ] || [ "$HAVE_TTY" = "0" ]; then
   case ",$ARG_AGENTS," in
-  *,hermes,*) hermes_source_ok || exit $? ;;
-  *,all,*) if [ "$ARG_ACTION" != update ]; then hermes_source_ok || exit $?; fi ;;
+  *,hermes,*) hermes_source_ok "$ARG_ACTION" || exit $? ;;
+  *,all,*) if [ "$ARG_ACTION" != update ]; then hermes_source_ok "$ARG_ACTION" || exit $?; fi ;;
   esac
   banner
   did=0

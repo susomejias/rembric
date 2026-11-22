@@ -246,7 +246,13 @@ describe('server update', () => {
   });
 });
 
-function nativeFixture(version = '0.0.1'): void {
+function nativeFixture(
+  version = '0.0.1',
+  pin: { pinned: boolean; revision: string } = {
+    pinned: false,
+    revision: '2e8cca2dc3a2ed23ee193bf1cfeb68ea9b6b7590',
+  },
+): void {
   const plugins = join(home, '.hermes', 'plugins');
   mkdirSync(join(plugins, 'rembric'), { recursive: true });
   writeFileSync(join(plugins, 'rembric', 'plugin.yaml'), `name: rembric\nversion: ${version}\n`);
@@ -255,14 +261,93 @@ function nativeFixture(version = '0.0.1'): void {
     JSON.stringify({
       rembric: {
         source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
-        pinned: false,
-        revision: '2e8cca2dc3a2ed23ee193bf1cfeb68ea9b6b7590',
+        ...pin,
       },
     }),
   );
 }
 
-function nativeRun(action: string, yes = true, failure = false, absent = false) {
+const RELEASE_SHA = '0123456789abcdef0123456789abcdef01234567';
+const TAG_SHA = 'fedcba9876543210fedcba9876543210fedcba98';
+const RAW_PREFIX = 'https://raw.githubusercontent.com/susomejias/rembric/';
+const GIT_URL = 'https://github.com/susomejias/rembric.git';
+
+// Remote-mode fakes: curl serves any ref from the working tree and logs the URL;
+// git answers ls-remote for plugin-release and one tag. Both append to `log`, so
+// a test can assert which ref every artifact came from without the network.
+function fakeRemote(bin: string, git: 'ok' | 'fail' | 'absent' = 'ok'): string {
+  mkdirSync(bin, { recursive: true });
+  const log = join(bin, 'remote.log');
+  writeFileSync(
+    join(bin, 'curl'),
+    `#!/bin/sh\nurl=''\nfor arg do case "$arg" in ${RAW_PREFIX}*) url="$arg" ;; esac; done\n[ -n "$url" ] || exit 91\necho "curl $url" >> '${log}'\nrest="\u0024{url#${RAW_PREFIX}}"\nrel="\u0024{rest#*/}"\n[ -f '${REPO_ROOT}/'"$rel" ] || exit 22\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp '${REPO_ROOT}/'"$rel" "$2"; exit; fi; shift; done\ncat '${REPO_ROOT}/'"$rel"\n`,
+  );
+  chmodSync(join(bin, 'curl'), 0o755);
+  if (git !== 'absent') {
+    writeFileSync(
+      join(bin, 'git'),
+      git === 'fail'
+        ? `#!/bin/sh\necho "git $*" >> '${log}'\nexit 128\n`
+        : `#!/bin/sh\necho "git $*" >> '${log}'\ncase "$*" in *refs/heads/plugin-release*) printf '%s\\trefs/heads/plugin-release\\n' ${RELEASE_SHA} ;; *refs/tags/plugin-v0.42.0*) printf '%s\\trefs/tags/plugin-v0.42.0\\n' ${TAG_SHA} ;; *refs/tags/plugin-v0.41.0*) printf '%s\\trefs/tags/plugin-v0.41.0\\n%s\\trefs/tags/plugin-v0.41.0^{}\\n' ${'b'.repeat(40)} ${TAG_SHA} ;; esac\n`,
+    );
+    chmodSync(join(bin, 'git'), 0o755);
+  }
+  return log;
+}
+
+const remoteLog = (log: string): string[] =>
+  existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [];
+
+// A PATH holding the core tools but no git, since /usr/bin/git exists on the
+// developer's machine and on CI alike.
+function gitlessPath(bin: string): string {
+  const tools = join(bin, 'tools');
+  mkdirSync(tools, { recursive: true });
+  for (const t of [
+    'sed',
+    'awk',
+    'grep',
+    'sort',
+    'mktemp',
+    'cat',
+    'rm',
+    'head',
+    'tail',
+    'tr',
+    'cut',
+    'cp',
+    'mv',
+    'mkdir',
+    'chmod',
+    'ls',
+    'dirname',
+    'basename',
+    'uname',
+    'env',
+    'wc',
+    'od',
+    'expr',
+    'printf',
+    'test',
+    'sleep',
+    'date',
+    'id',
+  ]) {
+    for (const d of ['/usr/bin', '/bin']) {
+      if (existsSync(join(d, t)) && !existsSync(join(tools, t)))
+        symlinkSync(join(d, t), join(tools, t));
+    }
+  }
+  return `${bin}:${tools}`;
+}
+
+function nativeRun(
+  action: string,
+  yes = true,
+  failure = false,
+  absent = false,
+  git: 'ok' | 'fail' = 'ok',
+) {
   const bin = join(home, 'bin');
   mkdirSync(bin, { recursive: true });
   if (!absent) {
@@ -272,11 +357,7 @@ function nativeRun(action: string, yes = true, failure = false, absent = false) 
     );
     chmodSync(join(bin, 'hermes'), 0o755);
   }
-  writeFileSync(
-    join(bin, 'curl'),
-    `#!/bin/sh\nfor arg do case "$arg" in https://raw.githubusercontent.com/susomejias/rembric/main/*) rel="\u0024{arg#https://raw.githubusercontent.com/susomejias/rembric/main/}" ;; esac; done\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp '${REPO_ROOT}/'"$rel" "$2"; exit; fi; shift; done\nexit 91\n`,
-  );
-  chmodSync(join(bin, 'curl'), 0o755);
+  fakeRemote(bin, git);
   return run(['--agent=hermes', `--action=${action}`, ...(yes ? ['--yes'] : [])], {
     home,
     path: `${bin}:${absent ? CORE_PATH : process.env.PATH}`,
@@ -284,20 +365,19 @@ function nativeRun(action: string, yes = true, failure = false, absent = false) 
   });
 }
 
+const HERMES_INSTALL = `hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref ${RELEASE_SHA} --enable`;
+const HERMES_UPDATE = `hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --force --ref ${RELEASE_SHA}`;
+
 describe('hermes native distribution', () => {
   it('prints without consent and executes native install only with --yes', () => {
     const printed = nativeRun('install', false);
     expect(printed.code).toBe(0);
-    expect(printed.out).toContain(
-      'hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
-    );
+    expect(printed.out).toContain(HERMES_INSTALL);
     expect(printed.out).not.toContain('RAN:hermes');
     expect(existsSync(join(home, '.hermes'))).toBe(false);
     const executed = nativeRun('install');
     expect(executed.code).toBe(0);
-    expect(executed.out).toContain(
-      'RAN:hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
-    );
+    expect(executed.out).toContain(`RAN:${HERMES_INSTALL}`);
     expect(executed.out).not.toContain('--force');
     expect(executed.out).not.toContain('--yes-deps');
   });
@@ -309,10 +389,62 @@ describe('hermes native distribution', () => {
       const result = nativeRun(action);
       expect(result.code).toBe(0);
       expect(result.out).toContain(
-        `RAN:hermes plugins ${action === 'uninstall' ? 'remove' : 'update'} rembric`,
+        action === 'uninstall' ? 'RAN:hermes plugins remove rembric' : `RAN:${HERMES_UPDATE}`,
       );
+      expect(result.out).not.toContain('plugins update rembric');
     },
   );
+
+  it('update moves an existing pin to the resolved release commit', () => {
+    nativeFixture('0.0.1', { pinned: true, revision: 'a'.repeat(40) });
+    const result = nativeRun('update');
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(`RAN:${HERMES_UPDATE}`);
+  });
+
+  it('update of an install already pinned at the release commit is a no-op', () => {
+    nativeFixture('0.0.1', { pinned: true, revision: RELEASE_SHA });
+    const result = nativeRun('update');
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('already pinned');
+    expect(result.out).not.toContain('RAN:hermes');
+  });
+
+  it('refuses install and update before any mutation when the release commit cannot be resolved', () => {
+    for (const action of ['install', 'update']) {
+      if (action === 'update') nativeFixture();
+      const result = nativeRun(action, true, false, false, 'fail');
+      expect(result.code).not.toBe(0);
+      expect(result.out).toContain('plugin-release');
+      expect(result.out).not.toContain('RAN:hermes');
+    }
+    const mixed = run(['--server', '--agent=hermes', '--action=update', '--yes'], {
+      home,
+      cwd: dir,
+      path: `${home}/bin:${process.env.PATH}`,
+      env: { REMBRIC_SRC: '' },
+    });
+    expect(mixed.code).not.toBe(0);
+    expect(existsSync(join(dir, 'docker-compose.yml'))).toBe(false);
+    const removed = nativeRun('uninstall', true, false, false, 'fail');
+    expect(removed.code).toBe(0);
+    expect(removed.out).toContain('RAN:hermes plugins remove rembric');
+  });
+
+  it('the direct adapter refuses install and update without a release commit', () => {
+    nativeRun('install', false);
+    for (const action of ['install', 'update']) {
+      const result = run([], {
+        home,
+        script: join(REPO_ROOT, 'apps/plugin/.hermes-plugin/install.sh'),
+        path: `${home}/bin:${process.env.PATH}`,
+        env: { REMBRIC_SRC: '', REMBRIC_ACTION: action },
+      });
+      expect(result.code).toBe(2);
+      expect(result.out).toContain('release commit');
+      expect(result.out).not.toContain('RAN:hermes');
+    }
+  });
 
   it('propagates native failure without repair or restart claims', () => {
     nativeFixture();
@@ -324,7 +456,7 @@ describe('hermes native distribution', () => {
     expect(readFileSync(config, 'utf8')).toBe(incomplete);
     expect(existsSync(`${config}.rembric-mcp-env.bak`)).toBe(false);
     expect(result.code).not.toBe(0);
-    expect(result.out).toContain('RAN:hermes plugins update rembric');
+    expect(result.out).toContain(`RAN:${HERMES_UPDATE}`);
     expect(result.out).not.toContain('gateway restart');
     expect(result.out).not.toContain('migrated');
   });
@@ -339,9 +471,7 @@ describe('hermes native distribution', () => {
     try {
       const result = nativeRun('install', true, false, true);
       expect(result.code).toBe(0);
-      expect(result.out).toContain(
-        'hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
-      );
+      expect(result.out).toContain(HERMES_INSTALL);
       expect(result.out).not.toContain('RAN:');
       expect(existsSync(join(home, '.hermes'))).toBe(false);
     } finally {
@@ -361,7 +491,7 @@ describe('hermes native distribution', () => {
       JSON.stringify({
         rembric: {
           source: 'https://github.com/susomejias/rembric.git#apps/plugin/.hermes-plugin',
-          pinned: true,
+          pinned: 'yes',
           revision: 'a'.repeat(40),
         },
       }),
@@ -516,6 +646,144 @@ describe('hermes native distribution', () => {
   });
 });
 
+describe('plugin release ref', () => {
+  const raw = (ref: string, rel: string): string => `curl ${RAW_PREFIX}${ref}/${rel}`;
+  const remote = (args: string[], path: string, env: Record<string, string> = {}) =>
+    run(args, { home, cwd: dir, path, env: { REMBRIC_SRC: '', ...env } });
+
+  it('fetches plugin artifacts and the manifest by the resolved plugin-release commit, server files from main', () => {
+    const bin = join(home, 'bin');
+    const log = fakeRemote(bin);
+    const result = remote(
+      ['--server', '--agent=opencode', '--action=install'],
+      `${bin}:${process.env.PATH}`,
+    );
+    expect(result.code).toBe(0);
+    const lines = remoteLog(log);
+    expect(lines).toContain(raw('main', 'docker-compose.yml'));
+    expect(lines).toContain(raw('main', '.env.example'));
+    expect(lines).toContain(raw(RELEASE_SHA, '.release-please-manifest.json'));
+    expect(lines).toContain(raw(RELEASE_SHA, 'apps/plugin/.opencode-plugin/install.sh'));
+    expect(lines).toContain(raw(RELEASE_SHA, 'apps/plugin/.opencode-plugin/plugin.ts'));
+    expect(lines.filter((l) => l.includes('/main/apps/plugin/'))).toEqual([]);
+    expect(lines).not.toContain(raw('main', '.release-please-manifest.json'));
+    expect(lines.filter((l) => l.startsWith('git '))).toEqual([
+      `git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 ls-remote ${GIT_URL} refs/heads/plugin-release refs/tags/plugin-release refs/tags/plugin-release^{}`,
+    ]);
+  });
+
+  it('control — a server-only install and update keep main and never resolve the plugin ref', () => {
+    const bin = join(home, 'bin');
+    const log = fakeRemote(bin);
+    const path = `${bin}:${process.env.PATH}`;
+    const installed = remote(['--server', '--action=install'], path);
+    expect(installed.code).toBe(0);
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toMatch(/^REMBRIC_ADMIN_TOKEN=[0-9a-f]{64}$/m);
+    expect(remoteLog(log)).toEqual([
+      raw('main', 'docker-compose.yml'),
+      raw('main', '.env.example'),
+    ]);
+    // `--action=update` without --agent also runs update-all, whose manifest is
+    // a plugin artifact; the server's own file still comes from main.
+    const updated = remote(['--server', '--action=update'], path);
+    expect(updated.code).toBe(0);
+    expect(updated.out).toContain('Refetched');
+    const serverFiles = remoteLog(log).filter((l) => /docker-compose|\.env\.example/.test(l));
+    expect(serverFiles).toEqual([
+      raw('main', 'docker-compose.yml'),
+      raw('main', '.env.example'),
+      raw('main', 'docker-compose.yml'),
+    ]);
+  });
+
+  it.each(['absent', 'fail'] as const)(
+    'with git %s the plugin track falls back to the plugin-release branch',
+    (git) => {
+      const bin = join(home, 'bin');
+      const log = fakeRemote(bin, git);
+      const result = remote(
+        ['--status', '--json'],
+        git === 'absent' ? gitlessPath(bin) : `${bin}:${CORE_PATH}`,
+      );
+      expect(result.code).toBe(0);
+      const opencode = JSON.parse(result.out).agents.find(
+        (a: { agent: string }) => a.agent === 'opencode',
+      );
+      expect(opencode.available).toBe(PLUGIN_VERSION.opencode);
+      expect(remoteLog(log).filter((l) => l.startsWith('curl '))).toEqual([
+        raw('plugin-release', '.release-please-manifest.json'),
+      ]);
+    },
+  );
+
+  it.each([
+    { args: ['--ref=plugin-v0.42.0'], env: {} },
+    { args: [], env: { REMBRIC_REF: 'plugin-v0.42.0' } },
+  ])('an explicit ref overrides both tracks: %j', ({ args, env }) => {
+    const bin = join(home, 'bin');
+    const log = fakeRemote(bin);
+    const result = remote(
+      ['--server', '--agent=opencode', '--action=install', ...args],
+      `${bin}:${process.env.PATH}`,
+      env,
+    );
+    expect(result.code).toBe(0);
+    const lines = remoteLog(log);
+    expect(lines).toContain(raw('plugin-v0.42.0', 'docker-compose.yml'));
+    expect(lines).toContain(raw(TAG_SHA, '.release-please-manifest.json'));
+    expect(lines).toContain(raw(TAG_SHA, 'apps/plugin/.opencode-plugin/plugin.ts'));
+    expect(lines.filter((l) => l.includes('/main/') || l.includes('/plugin-release/'))).toEqual([]);
+  });
+
+  it('an annotated tag resolves to the commit it points at, not the tag object', () => {
+    const bin = join(home, 'bin');
+    const log = fakeRemote(bin);
+    const result = remote(['--status', '--json', '--ref=plugin-v0.41.0'], `${bin}:${CORE_PATH}`);
+    expect(result.code).toBe(0);
+    expect(remoteLog(log).filter((l) => l.startsWith('curl '))).toEqual([
+      raw(TAG_SHA, '.release-please-manifest.json'),
+    ]);
+  });
+
+  it('an explicit full commit SHA is used as-is without asking git', () => {
+    const bin = join(home, 'bin');
+    const log = fakeRemote(bin);
+    const result = remote(['--status', '--json', `--ref=${TAG_SHA}`], `${bin}:${CORE_PATH}`);
+    expect(result.code).toBe(0);
+    expect(remoteLog(log)).toEqual([raw(TAG_SHA, '.release-please-manifest.json')]);
+  });
+
+  it('the opencode manual fallback defaults to plugin-release, never main', () => {
+    const script = readFileSync(join(REPO_ROOT, 'apps/plugin/.opencode-plugin/install.sh'), 'utf8');
+    expect(script).toMatch(
+      /^PLUGIN_SRC="\$\{PLUGIN_SRC:-https:\/\/raw\.githubusercontent\.com\/susomejias\/rembric\/plugin-release\/apps\/plugin\/\.opencode-plugin\}"$/m,
+    );
+    expect(script).not.toMatch(/rembric\/main\/apps\/plugin\/(bin|mcp-bridge|\.opencode-plugin)\}/);
+  });
+
+  it('both marketplace manifests pin the plugin to plugin-release', () => {
+    const claude = JSON.parse(
+      readFileSync(join(REPO_ROOT, '.claude-plugin/marketplace.json'), 'utf8'),
+    );
+    expect(claude.plugins).toHaveLength(1);
+    expect(claude.plugins[0].source).toEqual({
+      source: 'git-subdir',
+      url: GIT_URL,
+      path: 'apps/plugin',
+      ref: 'plugin-release',
+    });
+    const codex = JSON.parse(
+      readFileSync(join(REPO_ROOT, '.codex-plugin/marketplace.json'), 'utf8'),
+    );
+    expect(codex.plugins[0].source).toEqual({
+      source: 'git-subdir',
+      url: GIT_URL,
+      path: './apps/plugin',
+      ref: 'plugin-release',
+    });
+  });
+});
+
 describe('agent routing', () => {
   it('codex install prints marketplace commands, copies nothing', () => {
     const { code, out } = run(['--agent=codex', '--action=install'], { home });
@@ -555,9 +823,7 @@ describe('agent routing', () => {
     expect(codex.out).not.toContain('plugin_hooks'); // flag removed upstream in codex-cli 0.142.3+
     expect(codex.out).toContain('/hooks');
     const hermes = nativeRun('install', false);
-    expect(hermes.out).toContain(
-      'hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
-    );
+    expect(hermes.out).toContain(HERMES_INSTALL);
     expect(hermes.out).toContain('memory.provider');
     expect(hermes.out).not.toContain('hermes plugins enable rembric');
     expect(hermes.out).toContain('hermes gateway restart');
