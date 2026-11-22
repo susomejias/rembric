@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.32.4](https://github.com/susomejias/rembric/compare/server-v0.32.3...server-v0.32.4) (2026-11-22)
+
+
+### Features
+
+* **core:** pin and unpin memories with bounded, journaled state ([459518a](https://github.com/susomejias/rembric/commit/459518ab39f1ca69c1486577214b503ec86d29f9)), closes [#448](https://github.com/susomejias/rembric/issues/448)
+* **dashboard:** hide retirement maintenance runs from the consolidation list by default ([732ae75](https://github.com/susomejias/rembric/commit/732ae7556b6ea336bd4d35098e16b293c781b99a)), closes [#474](https://github.com/susomejias/rembric/issues/474)
+* **dashboard:** show, filter and change memory pin state ([ba7cd55](https://github.com/susomejias/rembric/commit/ba7cd55e4907cc8843092efbabb716f9ac1fb69f)), closes [#448](https://github.com/susomejias/rembric/issues/448)
+* **db:** add the append-only memory_pin_events journal ([b65537c](https://github.com/susomejias/rembric/commit/b65537c0b58a8fdd6216b73442d0ebc676e37ee8)), closes [#448](https://github.com/susomejias/rembric/issues/448)
+* **mcp:** add memory.pin and lead memory.context with pinned memories ([45823b3](https://github.com/susomejias/rembric/commit/45823b3b58f9f43447175152ac98b60c1c764cc4)), closes [#448](https://github.com/susomejias/rembric/issues/448)
+
+
+### Bug Fixes
+
+* **memory:** flag pinned entries truncated only when shortened ([0a1aa70](https://github.com/susomejias/rembric/commit/0a1aa70585ed4c97cbbe115524e38d395152e396))
+* **web:** let next dev serve the dashboard on 127.0.0.1 ([4e505bd](https://github.com/susomejias/rembric/commit/4e505bda6dfffd08062758ff74d137c219659bba))
+
 ## [0.32.3](https://github.com/susomejias/rembric/compare/server-v0.32.2...server-v0.32.3) (2026-11-21)
 
 

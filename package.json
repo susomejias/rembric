@@ -1,6 +1,6 @@
 {
   "name": "@rembric/monorepo",
-  "version": "0.32.3",
+  "version": "0.32.4",
   "description": "Rembric monorepo root — manages the apps/web and apps/plugin workspaces.",
   "type": "module",
   "license": "MIT",
