@@ -11,7 +11,7 @@
 ## 2. Spec
 
 - [x] 2.1 ADDED requirements in `specs/memory/spec.md` and `specs/persistence/spec.md`, with the draft notes removed; `openspec validate scope-save-time-lexical-index-per-project --strict` passes
-- [ ] 2.2 After `prune-common-terms-from-save-time-match` archives, rewrite the memory delta as MODIFIED of its two requirements (design D6)
+- [x] 2.2 After `prune-common-terms-from-save-time-match` archives, rewrite the memory delta as MODIFIED of its two requirements (design D6)
 
 ## 3. Index machinery
 
