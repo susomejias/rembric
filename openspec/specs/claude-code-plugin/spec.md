@@ -540,9 +540,90 @@ The advisory server-version handshake this requirement previously specified — 
 - **THEN** none SHALL issue a `GET /healthz` request
 - **AND** the single implementation SHALL be the one inside `@rembric/mcp-bridge`
 
-### Requirement: The plugin SHALL ship seven hook event types across ten handler entries at `apps/plugin/hooks/hooks.json`
+### Requirement: The `file-recall.sh` hook SHALL inject file-anchored recall into Claude Code's context
 
-The plugin's hook catalog SHALL declare exactly seven event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear|fork`, one for `compact`), `UserPromptSubmit` (THREE entries, NONE carrying a `matcher` key — the recall/first-prompt entry, the per-turn line emitter, and the prompt-time recall-hints emitter), `PreToolUse` (ONE entry, matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash` — the file-anchored recall hook), `SessionEnd`, `PreCompact`, `PostCompact`, and `Stop` (ONE entry — the synchronous end-of-turn report). That is **ten handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` entry in the `proactive-save-nudges` change, and the firing decision moved off the client entirely in `server-gated-session-nudges`).
+`apps/plugin/scripts/file-recall.sh <agent>` SHALL be the single script behind both manifests' `PreToolUse` entries. The agent argument selects the host's input shape. There SHALL be no `file-recall.codex.sh`.
+
+**Input:** under `claude-code` it SHALL read `session_id`, `cwd`, `tool_name`, `tool_input` and `agent_id` from stdin.
+
+- `Read`, `Edit`, `Write` and `MultiEdit` carry `tool_input.file_path`, which the host documents as always absolute. `NotebookEdit` carries `tool_input.notebook_path`.
+- `Bash` carries `tool_input.command`, and its paths are extracted by `_api.sh`'s extractor.
+- A call whose stdin carries `agent_id` comes from a sub-agent and SHALL be skipped.
+
+**Normalisation and request:** for each path it SHALL apply `plugin-session-protocol`'s normalisation, siblings and once-per-file rules.
+
+- The per-session record SHALL be a directory under `${TMPDIR:-/tmp}/rembric-file-recall/<session>/` holding one claim per file, each taken with an atomic `mkdir`. The host runs a turn's parallel tool hooks concurrently, so this is what keeps concurrent firings from sending a file twice, and they share no writable file that could be torn.
+- A file SHALL be claimed before its request is sent. A failed request is therefore not retried in that session, until a compaction resets the claims: a degraded server costs one budget per file, not one per tool call.
+- It SHALL POST through `_api.sh` with `REMBRIC_POST_MAX_TIME=0.3`. After the first failed request in a firing it SHALL stop, leaving that firing's remaining files unclaimed for a later firing.
+
+**Output:** on lines it SHALL print exactly one JSON object `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"<lines joined by newline>"}}`.
+
+- It SHALL NOT include `permissionDecision`. Staying silent on permissions is what leaves the tool to the normal permission flow.
+- On every other path it SHALL print nothing and exit `0`, because exit `2` would block the tool. It SHALL keep `_api.sh`'s `trap 'exit 0' ERR` discipline.
+
+#### Scenario: A read through Bash injects the note once
+
+- **GIVEN** a session in a repository with `.rembric` naming project `foo`, and an eligible memory linked to `packages/db/src/migrate.ts`
+- **WHEN** the agent runs `sed -n 1,40p packages/db/src/migrate.ts` and later `cat packages/db/src/migrate.ts`
+- **THEN** the first firing SHALL print one `additionalContext` JSON object whose text starts with `rembric: memories about packages/db/src/migrate.ts:`
+- **AND** the second firing SHALL print nothing and SHALL issue no HTTP request
+
+#### Scenario: Parallel firings send each file once
+
+- **GIVEN** eight concurrent firings of `file-recall.sh claude-code` in one session for the same tracked file, and eight more each for a different tracked file
+- **WHEN** they all complete
+- **THEN** the shared file SHALL have been requested exactly once, and each of the other files exactly once
+- **AND** the per-session directory SHALL hold exactly one claim per file requested
+- **AND** each firing SHALL have exited `0`
+
+#### Scenario: Directories and globs never stand in for a file
+
+- **WHEN** the agent runs `grep -rn TODO <repo>/src/` or `ls src/*.ts`
+- **THEN** no request SHALL be issued and no file SHALL be claimed
+- **AND** the control SHALL pass in the same run: a later `cat src/a.ts` SHALL issue its request
+
+#### Scenario: The hook never blocks a tool
+
+- **WHEN** the server is unreachable, answers `404`, or hangs past the budget, or the cwd is not a git repository
+- **THEN** the script SHALL print nothing and exit `0` within the 2-second hook timeout
+
+#### Scenario: A sub-agent's reads are skipped
+
+- **WHEN** stdin carries an `agent_id`
+- **THEN** the script SHALL issue no request and print nothing
+
+### Requirement: A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard
+
+When the bridge falls back to path-less `/mcp` outside a git work tree — no `.rembric`, a parse failure, no `PROJECT_SLUG`, or an invalid slug — the connection SHALL resolve to the server's default project for its whole life. Inside a git work tree there is no such fallback: a checkout that no `.rembric`, `REMBRIC_PROJECT_SLUG` or bound fingerprint resolves is unbound, or gets no connection at all, as the `repository-binding` and `mcp-bridge` capabilities specify. The plugin SHALL NOT rely on MCP roots discovery or on any tool call to select another project: the server does neither, and no tool can switch a connection's project. The bridge's stderr diagnostic SHALL name the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`), as the `mcp-bridge` capability specifies.
+
+When the bridge path-scopes the URL with a slug that does not yet correspond to a Rembric project, every scope-resolving tool SHALL be refused with `project_not_found`, and the refusal SHALL point to the dashboard. The project SHALL be created from the dashboard, or by an admin token through `project.create`, after which subsequent tool calls on the same URL find it; the plugin's model-facing text SHALL NOT instruct the agent to create or switch a project.
+
+To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`), or an admin changes the repository's binding, and starts a new host session; there is no in-session override.
+
+#### Scenario: No slug means the default project
+
+- **GIVEN** a project directory outside any git work tree with no `.rembric` and no `REMBRIC_PROJECT_SLUG`, and a host that advertises the `roots` capability
+- **WHEN** the agent calls `memory.save` through the plugin
+- **THEN** the row SHALL carry the default project's `project_id`
+- **AND** the server SHALL NOT have sent `roots/list` to the host
+
+#### Scenario: A new slug is created from the dashboard, not by the agent
+
+- **GIVEN** `.rembric` containing `PROJECT_SLUG=brand-new` and no project with that slug
+- **WHEN** the agent calls `memory.search` through the plugin
+- **THEN** the call SHALL be refused with `project_not_found`, the refusal SHALL point to the dashboard, and no `projects` row SHALL be inserted
+- **AND** after the operator creates `brand-new` from the dashboard, the same call on the same URL SHALL succeed against it
+
+#### Scenario: An unbound checkout does not reach the default project
+
+- **GIVEN** a git checkout with no `.rembric`, no `REMBRIC_PROJECT_SLUG`, and an unbound fingerprint
+- **WHEN** the agent calls `memory.save` through the plugin
+- **THEN** the call SHALL be refused with `project_unbound`
+- **AND** no row SHALL carry the default project's `project_id`
+
+### Requirement: The plugin SHALL ship eight hook event types across twelve handler entries at `apps/plugin/hooks/hooks.json`
+
+The plugin's hook catalog SHALL declare exactly eight event types: `SessionStart` (with TWO matcher groups — one for `startup|resume|clear|fork`, one for `compact`), `UserPromptSubmit` (THREE entries, NONE carrying a `matcher` key — the recall/first-prompt entry, the per-turn line emitter, and the prompt-time recall-hints emitter), `PreToolUse` (TWO entries — matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash` for the file-anchored recall hook, and matcher `SubagentHandback` for the subagent report forwarder), `SessionEnd`, `PreCompact`, `PostCompact`, `Stop` (ONE entry — the synchronous end-of-turn report), and `SubagentStop` (ONE entry — the subagent report forwarder). That is **twelve handler entries** in total. It SHALL NOT declare a `PostToolUse` entry (the save nudge moved off `PostToolUse` onto the `UserPromptSubmit` entry in the `proactive-save-nudges` change, and the firing decision moved off the client entirely in `server-gated-session-nudges`). The subagent report forwarder does not reopen that: on Claude Code v2.1.271+ the report a `SubagentHandback` call delivers is its `tool_input.message`, which `PreToolUse` receives exactly as `PostToolUse` would (`code.claude.com/docs/en/hooks`, "which a `PreToolUse` or `PostToolUse` hook matched on `SubagentHandback` receives as `tool_input.message`").
 
 Both counts SHALL be asserted as an exact set, not a containment check: a `toContain`-style assertion cannot catch a spec or manifest that wrongly claims an event type is _absent_, which is the defect class this requirement replaces. The handler count is stated separately from the event-type count because Codex's per-hook trust prompt counts handlers while its documentation counts event types (see `codex-distribution`).
 
@@ -550,7 +631,7 @@ The first matcher group SHALL include `fork`, and its omission was a defect rath
 
 Both `SessionStart` groups SHALL follow their `/sessions` ensure with one `POST /api/<slug>/sessions/<session_id>/resume`, unconditionally and without inspecting `source`. That rule is uniform across all five clients and is specified once in `plugin-session-protocol`'s lifecycle mapping; this capability records only that both of this client's ensure sites honour it.
 
-`PreCompact` and `PostCompact` snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` entries emit plain-stdout lines. The `PreToolUse` entry emits only `hookSpecificOutput.additionalContext` JSON, or nothing. Full behavioural detail lives in the per-hook subsections below and in the `plugin-session-protocol` capability's lifecycle mapping, which is the authoritative table of which hook POSTs what.
+`PreCompact` and `PostCompact` snapshot transcript/compaction-summary state as pure side effects — neither emits stdout that reaches the model. The matcher-less `UserPromptSubmit` entries emit plain-stdout lines. The file-recall `PreToolUse` entry emits only `hookSpecificOutput.additionalContext` JSON, or nothing. The two subagent report entries emit nothing at all. Full behavioural detail lives in the per-hook subsections below and in the `plugin-session-protocol` capability's lifecycle mapping, which is the authoritative table of which hook POSTs what.
 
 **`Stop` now carries exactly one entry, and it is model-silent.** The historical reason a `Stop` hook was once removed was a semantic bug, not a structural prohibition: Claude Code's `Stop` fires once per assistant turn, not at session end, and the prior hook posted to `/end`, transitioning the session on turn one. Neither the entry required here nor any of its predecessors since posts to `/end`.
 
@@ -564,7 +645,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Matcher: `startup|resume|clear|fork`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh claude-code`.
 - The script SHALL read `session_id`, `cwd`, and `source` from hook stdin. It SHALL NOT branch on `source`: all four matched values register a row, and `fork` carries a new session id, so registration is the correct response to every one of them.
-- The script SHALL resolve the session's project with `rembric_session_project <session_id> <cwd>` from `_api.sh`, which runs the `repository-binding` cascade once per session and caches the outcome; this is the session's first resolution.
+- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG` using the same dotenv parser as the bridge.
 - When a valid slug is resolved, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` with body `{"id": "<session_id>", "cwd": "<cwd>", "agent": "claude-code"}`. The server-side handler writes the placeholder title.
 - Immediately afterwards, and only when the ensure was attempted, the script SHALL POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. On a fresh row that is a documented no-op; on a row a previous run ended or the sweep abandoned, it is what returns the conversation's memories to it.
 - The script SHALL emit the generic nudge `rembric: If this is a continuation of recent work, call memory.context before responding.` to stdout.
@@ -575,7 +656,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`.
 - Matcher: `compact`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.sh claude-code`.
-- The script SHALL read `session_id` and `cwd` from hook stdin and SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session.
+- The script SHALL read `session_id` and `cwd` from hook stdin (slug resolution piggybacks on `.rembric` as elsewhere).
 - When both `session_id` and a valid slug resolve, the script SHALL re-POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions` as an idempotent session-row ensure, and SHALL then POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/resume` with body `{}`. The pair is what covers the case where the stale sweep abandoned the row between the pre-compact moment and the resume; the ensure alone never could, because the ensure path returns a terminal row untouched (`http-api`). This hook is NOT stdout-only.
 - The script SHALL emit an imperative instruction block to stdout, prefixed `rembric:` so Codex's `looks_like_json` heuristic does not flag it. Its content and its ≤700-byte cap are governed by `plugin-session-protocol`'s post-compaction requirement, which this change rewords for the section-wise merge; the reworded block SHALL be re-measured in the same commit.
 - Output cap: ≤175 tokens. `plugin-session-protocol` asserts the same number and the two SHALL be changed together.
@@ -614,7 +695,7 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - Type: `command`.
 - Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/session-end.sh claude-code`. The agent-name argument SHALL be passed explicitly rather than left to the script's default, because Codex CLI wires the same single script with `codex-cli` to select its own transcript parser (`codex-distribution`), and a bare invocation on one client against an argument on the other is the shape that lets the two drift.
 - The script SHALL read `session_id`, `cwd`, `transcript_path`, and `reason` from hook stdin.
-- The script SHALL resolve the slug with `rembric_session_project <session_id> <cwd>`, which returns the outcome cached for the session.
+- The script SHALL read `${cwd}/.rembric` for `PROJECT_SLUG`.
 - When both resolve, the script SHALL read `transcript_path` if the file exists and build the fallback body, PREFERRING the deterministic fact extraction over the raw transcript format and falling through to the format when the extractor is unavailable or yields nothing (`sessions`, "A session that ends without a curated summary MUST still leave grounded, checkable facts"). It SHALL extract a title from the first non-empty assistant message (truncated to 100 chars) and POST `${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/end` with body `{"summary": "<body>", "title": "<derived>", "final": false}`.
 - When `transcript_path` is missing/unreadable/empty, the script SHALL POST `/end {}` (degraded mode — transition without summary).
 - The script SHALL discard the response, SHALL emit no stdout (`SessionEnd` is not stdout-injected), and SHALL exit `0` on any error.
@@ -644,12 +725,25 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 - The script SHALL emit NO stdout under any circumstance — no `hookSpecificOutput`, no plain text, no `decision`. Output cap: 0 tokens to model. This is a strict tightening: the entry this one replaces was the single row in the on-invoke table with no fixed cap.
 - The script SHALL run on every `Stop` that is not a continuation, and SHALL exit `0` on any error, identically to every other hook script's fail-safe discipline.
 
-#### Scenario: The manifest declares seven event types and ten handlers
+#### PreToolUse (subagent report, matcher: SubagentHandback)
+
+- Type: `command`. Matcher: `SubagentHandback`. The entry SHALL declare `"async": true`, so the hook can never delay, block or deny the hand-back: the host documents that a denied `SubagentHandback` makes the subagent retry up to three times.
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/subagent-report.sh claude-code` with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` taken from the plugin options.
+- Behaviour is specified by this capability's subagent-report requirement. Output cap: 0 tokens to model.
+
+#### SubagentStop
+
+- Type: `command`. Matcher: NONE. The entry SHALL declare `"async": true`.
+- Action: invoke `${CLAUDE_PLUGIN_ROOT}/scripts/subagent-report.sh claude-code` with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` taken from the plugin options — the same script as the `SubagentHandback` entry.
+- Behaviour is specified by this capability's subagent-report requirement. Output cap: 0 tokens to model.
+
+#### Scenario: The manifest declares eight event types and twelve handlers
 
 - **WHEN** `apps/plugin/hooks/hooks.json` is loaded
-- **THEN** its event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop}`
-- **AND** it SHALL carry exactly ten handler entries, with NO `PostToolUse` entry
-- **AND** `PreToolUse` SHALL declare exactly one entry, with matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, invoking `file-recall.sh claude-code`, carrying no `async` key
+- **THEN** its event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop, SubagentStop}`
+- **AND** it SHALL carry exactly twelve handler entries, with NO `PostToolUse` entry
+- **AND** `PreToolUse` SHALL declare exactly two entries: one with matcher `Read|Edit|Write|MultiEdit|NotebookEdit|Bash`, invoking `file-recall.sh claude-code`, carrying no `async` key; and one with matcher `SubagentHandback`, invoking `subagent-report.sh claude-code`, with `"async": true`
+- **AND** `SubagentStop` SHALL declare exactly one entry, with no `matcher` key, invoking `subagent-report.sh claude-code`, with `"async": true`
 - **AND** `Stop` SHALL declare exactly one entry, invoking `stop-report.sh`, carrying no `async` key
 - **AND** both counts SHALL be asserted as exact sets rather than containment
 
@@ -740,88 +834,65 @@ Consequently the raw-sync entry is gone. It was asynchronous because it POSTed a
 
 - **WHEN** Claude Code consumes the plugin from the marketplace
 - **THEN** `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` SHALL resolve to a file whose source-of-truth in this repository is `apps/plugin/hooks/hooks.json`
-- **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop}` carrying exactly ten handler entries, with NO `PostToolUse` entry
+- **AND** the file's event-type set SHALL be exactly `{SessionStart, UserPromptSubmit, PreToolUse, SessionEnd, PreCompact, PostCompact, Stop, SubagentStop}` carrying exactly twelve handler entries, with NO `PostToolUse` entry
 
-### Requirement: The `file-recall.sh` hook SHALL inject file-anchored recall into Claude Code's context
+### Requirement: `subagent-report.sh` SHALL forward a finished subagent's report, silently and without blocking
 
-`apps/plugin/scripts/file-recall.sh <agent>` SHALL be the single script behind both manifests' `PreToolUse` entries. The agent argument selects the host's input shape. There SHALL be no `file-recall.codex.sh`.
+`apps/plugin/scripts/subagent-report.sh` is the one forwarder for Claude Code and Codex. It takes the agent name as its first argument (`claude-code` or `codex-cli`), exactly as `session-end.sh` and `stop-report.sh` do. There SHALL be no `subagent-report.codex.sh`.
 
-**Input:** under `claude-code` it SHALL read `session_id`, `cwd`, `tool_name`, `tool_input` and `agent_id` from stdin.
+The script SHALL read `hook_event_name`, `session_id`, `cwd` and `agent_type` from hook stdin, and SHALL take the report text from:
 
-- `Read`, `Edit`, `Write` and `MultiEdit` carry `tool_input.file_path`, which the host documents as always absolute. `NotebookEdit` carries `tool_input.notebook_path`.
-- `Bash` carries `tool_input.command`, and its paths are extracted by `_api.sh`'s extractor.
-- A call whose stdin carries `agent_id` comes from a sub-agent and SHALL be skipped.
+- `tool_input.message` when `hook_event_name` is `PreToolUse` (the `SubagentHandback` call, Claude Code v2.1.271+ in auto mode);
+- `last_assistant_message` when `hook_event_name` is `SubagentStop`.
 
-**Normalisation and request:** for each path it SHALL apply `plugin-session-protocol`'s normalisation, siblings and once-per-file rules.
+It SHALL do nothing more, and exit `0`, when any of these holds:
 
-- The per-session record SHALL be a directory under `${TMPDIR:-/tmp}/rembric-file-recall/<session>/` holding one claim per file, each taken with an atomic `mkdir`. The host runs a turn's parallel tool hooks concurrently, so this is what keeps concurrent firings from sending a file twice, and they share no writable file that could be torn.
-- A file SHALL be claimed before its request is sent. A failed request is therefore not retried in that session, until a compaction resets the claims: a degraded server costs one budget per file, not one per tool call.
-- It SHALL POST through `_api.sh` with `REMBRIC_POST_MAX_TIME=0.3`. After the first failed request in a firing it SHALL stop, leaving that firing's remaining files unclaimed for a later firing.
+- the report is empty, absent or `null`;
+- the event is `SubagentStop`, the agent is `claude-code`, and `agent_type` is empty or absent. Claude Code documents that such events come from host-internal agents (prompt suggestions, `/btw`), not from a subagent the model delegated to;
+- the report fails the cross-client pre-filter (`plugin-session-protocol`);
+- no project slug resolves from `${cwd}/.rembric`, or `session_id` is empty.
 
-**Output:** on lines it SHALL print exactly one JSON object `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"<lines joined by newline>"}}`.
+Otherwise it SHALL strip `<private>…</private>` spans with the existing shared helper and send `POST ${REMBRIC_SERVER_URL}/api/<slug>/sessions/<session_id>/learnings` with body `{"report": <text>, "agentType": <agent_type>}`. It SHALL omit `agentType` when `agent_type` is empty. The POST is capped at 2 seconds through the helper's budget override.
 
-- It SHALL NOT include `permissionDecision`. Staying silent on permissions is what leaves the tool to the normal permission flow.
-- On every other path it SHALL print nothing and exit `0`, because exit `2` would block the tool. It SHALL keep `_api.sh`'s `trap 'exit 0' ERR` discipline.
+The script SHALL discard the response. On `claude-code` it SHALL write nothing to stdout. On `codex-cli` it SHALL write exactly `{}` to stdout once, on every path including skips and failures, because Codex rejects non-JSON stdout from `SubagentStop`. It SHALL exit `0` on any error.
 
-#### Scenario: A read through Bash injects the note once
+#### Scenario: A hand-back report is forwarded
 
-- **GIVEN** a session in a repository with `.rembric` naming project `foo`, and an eligible memory linked to `packages/db/src/migrate.ts`
-- **WHEN** the agent runs `sed -n 1,40p packages/db/src/migrate.ts` and later `cat packages/db/src/migrate.ts`
-- **THEN** the first firing SHALL print one `additionalContext` JSON object whose text starts with `rembric: memories about packages/db/src/migrate.ts:`
-- **AND** the second firing SHALL print nothing and SHALL issue no HTTP request
+- **GIVEN** a `PreToolUse` stdin with `tool_name: "SubagentHandback"`, `agent_type: "Explore"`, a resolvable slug, and `tool_input.message` ending in a `## Key Learnings` list
+- **WHEN** `subagent-report.sh claude-code` runs
+- **THEN** it SHALL POST `/api/<slug>/sessions/<session_id>/learnings` with that message as `report` and `"agentType": "Explore"`
+- **AND** it SHALL write nothing to stdout and exit `0`
 
-#### Scenario: Parallel firings send each file once
+#### Scenario: A SubagentStop report is forwarded
 
-- **GIVEN** eight concurrent firings of `file-recall.sh claude-code` in one session for the same tracked file, and eight more each for a different tracked file
-- **WHEN** they all complete
-- **THEN** the shared file SHALL have been requested exactly once, and each of the other files exactly once
-- **AND** the per-session directory SHALL hold exactly one claim per file requested
-- **AND** each firing SHALL have exited `0`
+- **GIVEN** a `SubagentStop` stdin with a non-empty `agent_type` and a `last_assistant_message` containing a `## Key Learnings` list
+- **WHEN** `subagent-report.sh claude-code` runs
+- **THEN** it SHALL POST that text as `report`
 
-#### Scenario: Directories and globs never stand in for a file
+#### Scenario: A host-internal agent is ignored
 
-- **WHEN** the agent runs `grep -rn TODO <repo>/src/` or `ls src/*.ts`
-- **THEN** no request SHALL be issued and no file SHALL be claimed
-- **AND** the control SHALL pass in the same run: a later `cat src/a.ts` SHALL issue its request
+- **GIVEN** a `SubagentStop` stdin with `agent_type: ""` and a `last_assistant_message` containing a `## Key Learnings` list
+- **WHEN** `subagent-report.sh claude-code` runs
+- **THEN** it SHALL make no request and exit `0`
 
-#### Scenario: The hook never blocks a tool
+#### Scenario: A report without learnings is not sent
 
-- **WHEN** the server is unreachable, answers `404`, or hangs past the budget, or the cwd is not a git repository
-- **THEN** the script SHALL print nothing and exit `0` within the 2-second hook timeout
+- **GIVEN** a `SubagentStop` stdin whose `last_assistant_message` does not contain the string `key learnings` in any letter case
+- **WHEN** the script runs
+- **THEN** it SHALL make no request
 
-#### Scenario: A sub-agent's reads are skipped
+#### Scenario: Private spans never leave the machine
 
-- **WHEN** stdin carries an `agent_id`
-- **THEN** the script SHALL issue no request and print nothing
+- **GIVEN** a report containing `<private>secret-value</private>` above its learnings list
+- **WHEN** the script forwards it
+- **THEN** the posted `report` SHALL NOT contain `secret-value`
 
-### Requirement: A path-less bridge connection MUST resolve to the default project, and a new slug MUST be created from the dashboard
+#### Scenario: A failed POST is one diagnostic line and nothing else
 
-When the bridge falls back to path-less `/mcp` outside a git work tree — no `.rembric`, a parse failure, no `PROJECT_SLUG`, or an invalid slug — the connection SHALL resolve to the server's default project for its whole life. Inside a git work tree there is no such fallback: a checkout that no `.rembric`, `REMBRIC_PROJECT_SLUG` or bound fingerprint resolves is unbound, or gets no connection at all, as the `repository-binding` and `mcp-bridge` capabilities specify. The plugin SHALL NOT rely on MCP roots discovery or on any tool call to select another project: the server does neither, and no tool can switch a connection's project. The bridge's stderr diagnostic SHALL name the fix (a `.rembric` file containing `PROJECT_SLUG=<slug>`, or `REMBRIC_PROJECT_SLUG`), as the `mcp-bridge` capability specifies.
-
-When the bridge path-scopes the URL with a slug that does not yet correspond to a Rembric project, every scope-resolving tool SHALL be refused with `project_not_found`, and the refusal SHALL point to the dashboard. The project SHALL be created from the dashboard, or by an admin token through `project.create`, after which subsequent tool calls on the same URL find it; the plugin's model-facing text SHALL NOT instruct the agent to create or switch a project.
-
-To work in another project the operator changes `.rembric` (or `REMBRIC_PROJECT_SLUG`), or an admin changes the repository's binding, and starts a new host session; there is no in-session override.
-
-#### Scenario: No slug means the default project
-
-- **GIVEN** a project directory outside any git work tree with no `.rembric` and no `REMBRIC_PROJECT_SLUG`, and a host that advertises the `roots` capability
-- **WHEN** the agent calls `memory.save` through the plugin
-- **THEN** the row SHALL carry the default project's `project_id`
-- **AND** the server SHALL NOT have sent `roots/list` to the host
-
-#### Scenario: A new slug is created from the dashboard, not by the agent
-
-- **GIVEN** `.rembric` containing `PROJECT_SLUG=brand-new` and no project with that slug
-- **WHEN** the agent calls `memory.search` through the plugin
-- **THEN** the call SHALL be refused with `project_not_found`, the refusal SHALL point to the dashboard, and no `projects` row SHALL be inserted
-- **AND** after the operator creates `brand-new` from the dashboard, the same call on the same URL SHALL succeed against it
-
-#### Scenario: An unbound checkout does not reach the default project
-
-- **GIVEN** a git checkout with no `.rembric`, no `REMBRIC_PROJECT_SLUG`, and an unbound fingerprint
-- **WHEN** the agent calls `memory.save` through the plugin
-- **THEN** the call SHALL be refused with `project_unbound`
-- **AND** no row SHALL carry the default project's `project_id`
+- **GIVEN** the server is unreachable
+- **WHEN** the script forwards a report
+- **THEN** it SHALL write exactly one diagnostic line to stderr and exit `0`
+- **AND** on `codex-cli` its stdout SHALL be exactly `{}`
 
 ## Hook script invariants
 

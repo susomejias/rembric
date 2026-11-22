@@ -191,7 +191,7 @@ Codex CLI and Claude Code invoke the same post-compaction script, so the languag
 
 ### Requirement: Codex hook configuration and its `SessionEnd` budget
 
-The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the Codex-supported events the plugin wires: **seven event types across ten handler entries**.
+The repository SHALL host Codex hook configuration at `apps/plugin/hooks/hooks.codex.json`, sibling to the Claude Code plugin's `apps/plugin/hooks/hooks.json`, declaring the Codex-supported events the plugin wires: **eight event types across eleven handler entries**.
 
 Codex's hook surface differs from Claude Code's in ways the platform forces, and has evolved since this requirement was first written:
 
@@ -201,6 +201,7 @@ Codex's hook surface differs from Claude Code's in ways the platform forces, and
 - Codex's `SessionStart` stdin carries a `source` field and the dispatcher matches `SessionStart` matchers against it, so a `matcher: "compact"` group behaves the same way it does for Claude Code. Both matcher groups are declared **explicitly**: `startup|resume|clear` and `compact`. Neither is a default/unmatched group. Codex's documented `source` values are exactly `startup`, `resume`, `clear` and `compact`; there is no `fork` source as there is on Claude Code, so the Codex manifest SHALL NOT declare one and the divergence from `hooks.json` is the hosts', not a plugin inconsistency.
 - Codex's dispatcher does NOT filter `UserPromptSubmit` by matcher; the hook fires on every prompt regardless. The manifest therefore declares NO matcher on any of its three `UserPromptSubmit` entries (`prompt-search.sh`, `prompt-nudge.sh`, `prompt-hints.sh`), and each script self-filters internally.
 - **`PreToolUse` carries exactly ONE entry, the file-anchored recall hook**, with matcher `Bash|apply_patch` and `"timeout": 2`, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/file-recall.sh codex-cli`. Per the host's documentation, shell commands and `exec_command` match as `Bash` and carry the command string in `tool_input.command`; `apply_patch` matches as `apply_patch` (also `Edit`/`Write`) and carries the patch text in `tool_input.command`; plain-text stdout is ignored, so the hook's whole output is `hookSpecificOutput.additionalContext` JSON or nothing. Its behaviour is specified by this capability's file-recall requirement.
+- **`SubagentStop` carries exactly ONE entry, with no `matcher` key and `"timeout": 3`**, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/subagent-report.sh codex-cli` (`claude-code-plugin`, subagent-report requirement). Codex added the event in PR #22873, first released in `rust-v0.133.0`. Its stdin carries `last_assistant_message`, and the host documents the session id: "Subagent hooks use the parent session id." Like `Stop`, it "expects JSON on `stdout` when it exits `0`", so the script prints `{}` on every path. Codex has no hand-back tool, so this one entry is the whole Codex path. The entry is synchronous: its 2-second POST budget fits inside the declared timeout.
 - Codex's `Stop` hook REQUIRES JSON on stdout: "Stop expects JSON on stdout when it exits 0. Plain text output is invalid for this event." Per official docs. **`Stop` now carries exactly ONE entry**, `stop-report.sh codex-cli`, whose entire model-facing output is that `{}`.
 
 `apps/plugin/scripts/session-end.sh` SHALL take an optional agent-name argument selecting the per-client transcript parser, exactly as `pre-compact.sh <agent>` already does (`claude-code` default, `codex-cli` selecting the `*_codex_cli` helpers). There SHALL be no `session-end.codex.sh`. Both manifests SHALL pass the argument explicitly.
@@ -212,8 +213,9 @@ The authoritative table of which hook POSTs what for both clients is `plugin-ses
 #### Scenario: Hook event coverage
 
 - **WHEN** `apps/plugin/hooks/hooks.codex.json` is loaded
-- **THEN** the `hooks` object SHALL declare exactly these seven event types and no others: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`
-- **AND** those seven SHALL carry exactly ten handler entries in total
+- **THEN** the `hooks` object SHALL declare exactly these eight event types and no others: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `PreCompact`, `PostCompact`, `SessionEnd`, `SubagentStop`
+- **AND** those eight SHALL carry exactly eleven handler entries in total
+- **AND** `SubagentStop` SHALL declare exactly ONE entry, with no `matcher` key and `"timeout": 3`, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/subagent-report.sh codex-cli`
 - **AND** `SessionStart` SHALL declare exactly two matcher groups, with the literal matchers `startup|resume|clear` and `compact`
 - **AND** `UserPromptSubmit` SHALL declare exactly three entries, invoking `prompt-search.sh`, `prompt-nudge.sh` and `prompt-hints.sh`, and NONE SHALL carry a `matcher` key
 - **AND** `PreToolUse` SHALL declare exactly ONE entry, with matcher `Bash|apply_patch` and `"timeout": 2`, invoking `${CLAUDE_PLUGIN_ROOT}/scripts/file-recall.sh codex-cli`
@@ -230,8 +232,8 @@ The authoritative table of which hook POSTs what for both clients is `plugin-ses
 
 - **WHEN** `apps/plugin/test/hook-manifests.test.ts` is read at HEAD
 - **THEN** the `SessionEnd` assertion SHALL still require the entry to exist, declare `"timeout": 3` and carry no `matcher` key
-- **AND** the event-type set assertion SHALL name seven events including `SessionEnd` and `PreToolUse`
-- **AND** the handler-count assertion SHALL be `10`
+- **AND** the event-type set assertion SHALL name eight events including `SessionEnd`, `PreToolUse` and `SubagentStop`
+- **AND** the handler-count assertion SHALL be `11`
 - **AND** the ordered invocation list SHALL name `Stop command scripts/stop-report.sh codex-cli` exactly once and SHALL NOT name `stop-sync.sh` or `stop-nudge.sh`
 - **AND** each assertion SHALL still be an exact set or exact count, never a containment check
 
@@ -323,6 +325,13 @@ This is stated because it was broken: `_api.sh`'s promise that "every function e
 - **WHEN** the repository is at HEAD
 - **THEN** `apps/plugin/scripts/pre-compact.sh`, `apps/plugin/scripts/post-compaction.sh`, and `apps/plugin/scripts/post-compact.sh` SHALL all exist and be executable
 - **AND** `hooks.codex.json` SHALL reference `pre-compact.sh` from its `PreCompact` entry, `post-compaction.sh` from its `PostCompact` entry, and `post-compact.sh` from its `SessionStart` `"compact"` matcher group
+
+#### Scenario: A Codex subagent's report reaches the parent session
+
+- **GIVEN** a Codex `SubagentStop` stdin whose `session_id` is the parent session's id and whose `last_assistant_message` ends in a `## Key Learnings` list
+- **WHEN** `subagent-report.sh codex-cli` runs
+- **THEN** it SHALL POST `/api/<slug>/sessions/<session_id>/learnings` with that text as `report`
+- **AND** its stdout SHALL be exactly `{}`
 
 ### Requirement: Codex-specific MCP server configuration MUST spawn the pinned bridge through `npx`
 
