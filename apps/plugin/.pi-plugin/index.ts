@@ -7,6 +7,7 @@ import {
   createSessionProtocol,
   diag,
   extractCommandPaths,
+  RARELY_USED_TOOLS,
   underscoreToolNames,
 } from '../bin/rembric-plugin-core.mjs';
 import { HOST_SESSION_HEADER } from '../mcp-bridge/rembric-host-binding.mjs';
@@ -34,6 +35,7 @@ type ToolDefinition = {
   label: string;
   description: string;
   parameters: JsonSchema;
+  exposure?: 'deferred';
   execute: (
     toolCallId: string,
     params: unknown,
@@ -81,9 +83,14 @@ type ToolResultEvent = { toolCallId: string; content?: ToolContent[]; structured
 
 type ToolResultEventResult = { content: ToolContent[]; structuredContent?: unknown };
 
+type HostToolInfo = { name: string; reachesTools?: unknown };
+
 type ExtensionApi = {
   registerTool: (definition: ToolDefinition) => void;
   on: <E>(event: string, handler: (event: E, ctx: ExtensionContext) => unknown) => void;
+  getAllTools?: () => HostToolInfo[];
+  getActiveTools?: () => string[];
+  setActiveTools?: (names: string[]) => void;
 };
 
 type DiscoveredTool = { name: string; description?: string; inputSchema: JsonSchema };
@@ -94,6 +101,7 @@ const DISCOVERY_TIMEOUT_MS = 10_000;
 
 const CLOSING_SHUTDOWN_REASONS = new Set(['quit', 'new', 'resume', 'fork']);
 const PI_SUBAGENTS_CHILD_TAG = '<active_agent name=';
+const TOOL_SEARCH = 'tool_search';
 
 const SUBAGENT_SURFACES = {
   tools: new Set(['subagent', 'subagent_run', 'subagent_continue', 'subagent_result']),
@@ -332,17 +340,37 @@ export default function rembric(pi: ExtensionApi): void {
     return { ...params, sessionId: hostSessionId };
   }
 
+  // A deferred tool is reachable only through an active tool_search; without one it would vanish.
+  function activateToolSearch(): boolean {
+    try {
+      if (!pi.getAllTools || !pi.getActiveTools || !pi.setActiveTools) return false;
+      const all = pi.getAllTools();
+      if (!all.some((tool) => tool.name === TOOL_SEARCH && Boolean(tool.reachesTools)))
+        return false;
+      const active = pi.getActiveTools();
+      if (!active.includes(TOOL_SEARCH)) pi.setActiveTools([...active, TOOL_SEARCH]);
+      return true;
+    } catch (err) {
+      diag(`tool deferral skipped: ${err instanceof Error ? err.message : 'error'}`);
+      return false;
+    }
+  }
+
   async function discoverTools(client: McpClient, ctx: ExtensionContext): Promise<void> {
     try {
       const deadline = discoveryDeadline();
       await client.initialize(deadline);
-      for (const tool of await client.listTools(deadline)) {
+      const tools = await client.listTools(deadline);
+      const canDefer = activateToolSearch();
+      for (const tool of tools) {
         const attachesSession = declaresSessionId(tool.inputSchema);
+        const deferred = canDefer && RARELY_USED_TOOLS.includes(tool.name);
         pi.registerTool({
           name: tool.name.replace(/\./g, '_'),
           label: tool.name,
           description: underscoreToolNames(tool.description ?? tool.name),
           parameters: renameToolsInDescriptions(tool.inputSchema) as JsonSchema,
+          ...(deferred && { exposure: 'deferred' as const }),
           execute: async (_toolCallId, params, signal, _onUpdate, toolCtx) => {
             const args = (params ?? {}) as Record<string, unknown>;
             const hostSessionId = registeredHostSessionId(toolCtx);
@@ -441,7 +469,7 @@ export default function rembric(pi: ExtensionApi): void {
 
     const result: BeforeAgentStartResult = {};
 
-    const instructions = mcp?.instructions() ?? null;
+    const instructions = suppress ? null : (mcp?.instructions() ?? null);
     const base = event.systemPrompt ?? '';
     if (instructions && !base.includes(instructions)) {
       result.systemPrompt = base ? `${base}\n\n${instructions}` : instructions;

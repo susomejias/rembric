@@ -20,6 +20,7 @@ import { openTestDb, type OpenedTestDb } from '../../web/src/test-support/db.js'
 import {
   FIRST_PROMPT_NUDGE,
   POST_TIMEOUT_MS,
+  RARELY_USED_TOOLS,
   SESSION_ID_NUDGE_TEMPLATE,
   SESSION_OPENING_NUDGE,
   underscoreToolNames,
@@ -58,6 +59,7 @@ type RegisteredTool = {
   label: string;
   description: string;
   parameters: Record<string, unknown>;
+  exposure?: string;
   execute: (
     toolCallId: string,
     params: unknown,
@@ -86,6 +88,19 @@ function plain(line: string): string {
 }
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
+
+type HostToolInfo = { name: string; exposure: string; reachesTools?: () => 'all' };
+
+type ToolHost = { builtIn: HostToolInfo[]; active: string[]; failing?: boolean };
+
+function toolSearchHost(opts: { reaches?: boolean; active?: boolean } = {}): ToolHost {
+  const toolSearch: HostToolInfo = {
+    name: 'tool_search',
+    exposure: 'model-only',
+    ...(opts.reaches !== false && { reachesTools: () => 'all' as const }),
+  };
+  return { builtIn: [toolSearch], active: opts.active ? ['read', 'tool_search'] : ['read'] };
+}
 
 type Notification = { message: string; type?: string };
 
@@ -172,6 +187,7 @@ function makeHarness(
   withUi = true,
   sessionFile?: string,
   mode: string = 'tui',
+  host?: ToolHost,
 ): Harness {
   const tools: RegisteredTool[] = [];
   const handlers = new Map<string, Handler>();
@@ -186,6 +202,19 @@ function makeHarness(
   const api = {
     registerTool: (definition: RegisteredTool) => tools.push(definition),
     on: (event: string, handler: Handler) => handlers.set(event, handler),
+    ...(host && {
+      getAllTools: (): HostToolInfo[] => {
+        if (host.failing) throw new Error('host tool API unavailable');
+        return [
+          ...host.builtIn,
+          ...tools.map((tool) => ({ name: tool.name, exposure: tool.exposure ?? 'direct' })),
+        ];
+      },
+      getActiveTools: () => [...host.active],
+      setActiveTools: (names: string[]) => {
+        host.active = [...names];
+      },
+    }),
   };
   rembric(api as unknown as Parameters<typeof rembric>[0]);
   return {
@@ -205,8 +234,9 @@ async function startedHarness(
   sessionId: string,
   sessionFile?: string,
   mode?: string,
+  host?: ToolHost,
 ): Promise<Harness> {
-  const harness = makeHarness(sessionId, cwd, true, sessionFile, mode);
+  const harness = makeHarness(sessionId, cwd, true, sessionFile, mode, host);
   await harness.fire('session_start');
   return harness;
 }
@@ -527,6 +557,126 @@ describe('provider-safe registration names', () => {
       result?: { isError?: boolean };
     };
     expect(message.error ?? message.result?.isError).toBeTruthy();
+  });
+});
+
+describe('rarely used tools are deferred where the host can search for them', () => {
+  const FREQUENT = ['memory.save', 'memory.session_summary', 'memory.context', 'memory.search'];
+  let discovered: WireTool[];
+
+  beforeAll(async () => {
+    discovered = await rawListTools();
+  });
+
+  const rare = () => discovered.filter((tool) => RARELY_USED_TOOLS.includes(tool.name));
+
+  it('every name in the deferral set is a tool the server publishes', () => {
+    expect(RARELY_USED_TOOLS.length).toBeGreaterThan(0);
+    expect(
+      rare()
+        .map((tool) => tool.name)
+        .sort(),
+    ).toEqual([...RARELY_USED_TOOLS].sort());
+  });
+
+  it('registers each rarely used tool deferred and activates tool_search', async () => {
+    const host = toolSearchHost();
+    const harness = await startedHarness('pi-defer-rare', undefined, undefined, host);
+
+    for (const tool of rare()) {
+      expect(toolNamed(harness, tool.name).exposure, `${tool.name} is not deferred`).toBe(
+        'deferred',
+      );
+    }
+    expect(host.active).toEqual(['read', 'tool_search']);
+  });
+
+  it('keeps every other tool direct, the save, summary and recall tools included', async () => {
+    const harness = await startedHarness('pi-defer-direct', undefined, undefined, toolSearchHost());
+    const direct = harness.tools.filter((tool) => !RARELY_USED_TOOLS.includes(tool.label));
+
+    expect(direct.length).toBe(SERVER_TOOL_COUNT - RARELY_USED_TOOLS.length);
+    for (const tool of direct) {
+      expect(tool.exposure, `${tool.label} is not direct`).toBeUndefined();
+    }
+    for (const name of FREQUENT) expect(toolNamed(harness, name).exposure).toBeUndefined();
+  });
+
+  it('registers the same tools with the same schemas as a host without tool search', async () => {
+    const deferring = await startedHarness('pi-defer-same', undefined, undefined, toolSearchHost());
+    const plain = await startedHarness('pi-defer-same-plain');
+
+    expect(deferring.tools).toHaveLength(SERVER_TOOL_COUNT);
+    for (const tool of plain.tools) {
+      const twin = toolNamed(deferring, tool.label);
+      expect(twin.name).toBe(tool.name);
+      expect(twin.description).toBe(tool.description);
+      expect(twin.parameters).toEqual(tool.parameters);
+    }
+  });
+
+  it('a deferred tool still proxies to the server', async () => {
+    const harness = await startedHarness('pi-defer-call', undefined, undefined, toolSearchHost());
+    const about = toolNamed(harness, 'memory.about');
+    expect(about.exposure).toBe('deferred');
+
+    const result = await callThroughExtension(about, {});
+    expect(result.refused, result.text).toBe(false);
+    expect(result.text.length).toBeGreaterThan(0);
+  });
+
+  it('defers nothing, silently, on a host without the tool-listing API', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const harness = await startedHarness('pi-defer-legacy');
+
+      expect(harness.tools).toHaveLength(SERVER_TOOL_COUNT);
+      expect(harness.tools.filter((tool) => tool.exposure !== undefined)).toEqual([]);
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join('')).not.toContain('deferral');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('defers nothing when no registered tool_search can reach other tools', async () => {
+    const codemode: HostToolInfo = {
+      name: 'codemode',
+      exposure: 'model-only',
+      reachesTools: () => 'all',
+    };
+    for (const host of [
+      toolSearchHost({ reaches: false }),
+      { builtIn: [], active: ['read'] },
+      { builtIn: [codemode], active: ['read'] },
+    ]) {
+      const harness = await startedHarness('pi-defer-unreachable', undefined, undefined, host);
+
+      expect(harness.tools).toHaveLength(SERVER_TOOL_COUNT);
+      expect(harness.tools.filter((tool) => tool.exposure !== undefined)).toEqual([]);
+      expect(host.active).toEqual(['read']);
+    }
+  });
+
+  it('registers every tool direct when the host tool API throws', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const host = { ...toolSearchHost(), failing: true };
+      const harness = await startedHarness('pi-defer-throws', undefined, undefined, host);
+
+      expect(harness.tools).toHaveLength(SERVER_TOOL_COUNT);
+      expect(harness.tools.filter((tool) => tool.exposure !== undefined)).toEqual([]);
+      expect(harness.notifications).toEqual([]);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('does not activate tool_search a second time when it is already active', async () => {
+    const host = toolSearchHost({ active: true });
+    const harness = await startedHarness('pi-defer-active', undefined, undefined, host);
+
+    expect(toolNamed(harness, 'memory.about').exposure).toBe('deferred');
+    expect(host.active).toEqual(['read', 'tool_search']);
   });
 });
 
@@ -1000,6 +1150,41 @@ describe('the server’s own usage instructions reach the model', () => {
       systemPrompt: 'BASE PROMPT',
     })) as { systemPrompt: string };
     expect(occurrences(third.systemPrompt)).toBe(1);
+  });
+
+  it('is not appended to a suppressed sub-agent run', async () => {
+    const arms: Array<{ id: string; env?: Record<string, string>; mode?: string; base: string }> = [
+      { id: 'pi-instructions-child', env: { PI_SUBAGENT_CHILD: '1' }, mode: 'print', base: 'BASE' },
+      { id: 'pi-instructions-rpc', mode: 'rpc', base: 'BASE' },
+      { id: 'pi-instructions-tag', mode: 'print', base: 'BASE <active_agent name="probe"/>' },
+    ];
+    for (const arm of arms) {
+      for (const [key, value] of Object.entries(arm.env ?? {})) vi.stubEnv(key, value);
+      try {
+        const harness = await startedHarness(arm.id, undefined, arm.mode);
+        expect(harness.tools.length, `${arm.id} lost its tools`).toBe(SERVER_TOOL_COUNT);
+        const result = (await harness.fire('before_agent_start', {
+          prompt: 'delegated task',
+          systemPrompt: arm.base,
+        })) as { systemPrompt?: string } | undefined;
+        expect(result?.systemPrompt, `${arm.id} received the instructions`).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
+  });
+
+  it('the control — a primary print run still gets the instructions and the opening nudges', async () => {
+    const harness = await startedHarness('pi-instructions-primary', undefined, 'print');
+    const result = (await harness.fire('before_agent_start', {
+      prompt: 'first turn',
+      systemPrompt: 'BASE',
+    })) as { systemPrompt: string; message: { content: string } };
+
+    expect(result.systemPrompt).toBe(`BASE\n\n${expected()}`);
+    expect(result.systemPrompt).toContain('memory_save');
+    expect(result.systemPrompt).toContain('memory_session_summary');
+    expect(result.message.content).toContain(underscoreToolNames(SESSION_OPENING_NUDGE));
   });
 
   it('is dropped when discovery never completed, rather than injected empty', async () => {

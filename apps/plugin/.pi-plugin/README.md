@@ -4,7 +4,7 @@ Persistent memory for [Pi](https://pi.dev), backed by a self-hosted [Rembric](ht
 
 The same server and the same project selection as Rembric's Claude Code, Codex CLI, Hermes Agent and opencode clients — one memory store, whichever agent you are in.
 
-Pi ships no MCP client of its own, so this extension holds one: it connects to `${REMBRIC_SERVER_URL}/mcp/<slug>`, asks the server which tools exist, and registers every one of them with Pi. Nothing about the tool surface is written down here, so a server that gains a tool gains it in Pi with no update. The server's usage instructions — the crib-sheet the other four clients receive through their host — are forwarded into the system prompt for each turn. The extension declares **no runtime dependencies**.
+Pi ships no MCP client of its own, so this extension holds one: it connects to `${REMBRIC_SERVER_URL}/mcp/<slug>`, asks the server which tools exist, and registers every one of them with Pi. Nothing about the tool surface is written down here, so a server that gains a tool gains it in Pi with no update. The server's usage instructions — the crib-sheet the other four clients receive through their host — are forwarded into the system prompt for each turn of a primary session (never a subagent's). The extension declares **no runtime dependencies**.
 
 ## Install
 
@@ -71,6 +71,7 @@ For a temporary rollback after a broken release, see the [emergency plugin rollb
 ## What you get
 
 - **Every Rembric tool**, discovered from the server at session start and registered under a provider-safe name — the server's `memory.save` is registered as `memory_save`, and the call is issued to the server under its own dotted name. Providers reject a tool name containing a dot outright, rejecting the whole payload with it, so the mapping is not cosmetic. Every name you or the model sees in this client is the underscored one: tool descriptions, slash commands, nudges and the server's own usage instructions are all rewritten to match the registry, so nothing tells the model to call a tool that is not there.
+  On a Pi with `tool_search` the nine rarely used tools (`memory_stats`, `memory_doctor`, `memory_about`, `memory_compare`, `memory_merge`, `memory_archive`, `memory_timeline`, `memory_session_get_batch`, `memory_search_prompts`) are registered deferred and `tool_search` is switched on, so their schemas (about 11 KB) leave every request until the model searches for them; on an older Pi every tool stays declared.
 - **Four slash commands** — `/context`, `/recall`, `/remember`, `/summary` — the same markdown the other clients ship, not a per-client copy; the packaged copies carry the underscored tool names.
 - **Per-turn nudges**, byte-identical to every other Rembric client apart from those tool names: a first-prompt context reminder, a recall reminder when your prompt looks like one, a session-opening line on a new session, and the session-summary reminder the server composes from the session's own state and hands back at the end of each turn.
 - **Memories about the file in hand** — when the agent reads, edits or writes a file, or runs a `bash` command that names one (`cat`, `sed`, `grep`, `rg`, `git show`…), the memories linked to that file are appended to that tool's result, at most three per file, each file once per session and at most ten files per session. The lookup starts as the tool starts, so it adds no wait of its own, and any failure leaves the result exactly as the tool produced it.
@@ -137,7 +138,7 @@ Print mode is the exception, and this one is read from Pi's source rather than m
 
 ## Subagents
 
-A delegated child is not a conversation of its own, so it never registers a session row. Rembric tools stay available inside it, and its `memory_save` calls still reach the server. A child is recognised by any of:
+A delegated child is not a conversation of its own, so it never registers a session row and its system prompt does not get the server's usage instructions. Rembric tools stay available inside it, and its `memory_save` calls still reach the server. A child is recognised by any of:
 
 | Signal                                     | Set by                                                                |
 | ------------------------------------------ | --------------------------------------------------------------------- |

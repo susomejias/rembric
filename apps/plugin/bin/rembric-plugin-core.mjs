@@ -60,6 +60,18 @@ export function underscoreToolNames(text) {
   return text.replace(DOTTED_TOOL_NAME, '$1_$2');
 }
 
+export const RARELY_USED_TOOLS = Object.freeze([
+  'memory.stats',
+  'memory.doctor',
+  'memory.about',
+  'memory.compare',
+  'memory.merge',
+  'memory.archive',
+  'memory.timeline',
+  'memory.session_get_batch',
+  'memory.search_prompts',
+]);
+
 /** Read per use, not once: an override set after this module loads still wins. */
 function idleDebounceMs() {
   return Number(process.env.REMBRIC_IDLE_DEBOUNCE_MS ?? IDLE_DEBOUNCE_MS);
