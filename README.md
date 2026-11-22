@@ -434,7 +434,7 @@ Self-hosted operator surface for every memory, session, prompt, judgment, entity
 
 <br>
 
-Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashboard](http://127.0.0.1:8787/dashboard) (port `8788` in the dev stack). Mint and revoke API tokens at `/dashboard/tokens`, create and archive projects at `/dashboard/projects`, soft-delete agent sessions at `/dashboard/sessions`, browse and soft-delete curated user prompts at `/dashboard/prompts` (FTS5 search over content + tags; refined predecessors show a `REFINED` badge), trigger consolidation at `/dashboard/consolidation`, and run the operator-only purges from `/dashboard/maintenance`. Programmatic agents talk to the same data through the MCP `project.*` / `memory.*` tools or, for admin-only operations, through the HTTP endpoints under `/admin/*` (admin bearer token required — see [docs/agents.md](./docs/agents.md)).
+Day-to-day operator work lives in the dashboard at [http://127.0.0.1:8787/dashboard](http://127.0.0.1:8787/dashboard) (`http://localhost:3000/dashboard` under `pnpm run dev`). Mint and revoke API tokens at `/dashboard/tokens`, create and archive projects at `/dashboard/projects`, soft-delete agent sessions at `/dashboard/sessions`, browse and soft-delete curated user prompts at `/dashboard/prompts` (FTS5 search over content + tags; refined predecessors show a `REFINED` badge), trigger consolidation at `/dashboard/consolidation`, and run the operator-only purges from `/dashboard/maintenance`. Programmatic agents talk to the same data through the MCP `project.*` / `memory.*` tools or, for admin-only operations, through the HTTP endpoints under `/admin/*` (admin bearer token required — see [docs/agents.md](./docs/agents.md)).
 
 ### Maintenance (manual purges)
 
