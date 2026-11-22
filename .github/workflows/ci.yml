@@ -272,8 +272,8 @@ jobs:
             || { echo "::error::${{ matrix.arch }} boot did not open /data/data.db"; \
                  echo "$LOGS"; exit 1; }
           applied=$(echo "$LOGS" | grep -c '\[migrate\] applying' || true)
-          [ "$applied" = 41 ] \
-            || { echo "::error::expected 41 migrations, got $applied"; \
+          [ "$applied" = 42 ] \
+            || { echo "::error::expected 42 migrations, got $applied"; \
                  echo "$LOGS"; exit 1; }
           warmed=
           for _ in $(seq 1 30); do

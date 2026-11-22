@@ -124,6 +124,26 @@ const FORBIDDEN: ForbiddenRule[] = [
     allow: ['apps/web/src/scripts/seed-dev.ts'],
   },
   {
+    pattern: /delete\s*\(\s*memoryPinEvents\s*\)/i,
+    description:
+      'Drizzle `db.delete(memoryPinEvents)` is forbidden — the pin journal is append-only',
+  },
+  {
+    pattern: /DELETE\s+FROM\s+memory_pin_events\b/i,
+    description:
+      'raw `DELETE FROM memory_pin_events` is forbidden — the pin journal is append-only, except in the dev seed reset (apps/web/src/scripts/seed-dev.ts)',
+    allow: ['apps/web/src/scripts/seed-dev.ts'],
+  },
+  {
+    pattern: /update\s*\(\s*memoryPinEvents\s*\)/i,
+    description:
+      'Drizzle `db.update(memoryPinEvents)` is forbidden — pin events are never rewritten',
+  },
+  {
+    pattern: /UPDATE\s+memory_pin_events\b/i,
+    description: 'raw `UPDATE memory_pin_events` is forbidden — pin events are never rewritten',
+  },
+  {
     pattern: /delete\s*\(\s*prompts\s*\)/i,
     description:
       'Drizzle `db.delete(prompts)` is forbidden — prompts are append-only (lifecycle is `deleted_at` flips + `replaces`)',

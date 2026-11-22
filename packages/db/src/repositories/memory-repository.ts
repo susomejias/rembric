@@ -11,6 +11,12 @@ import {
   type MemoryType,
   type NewMemory,
 } from '../schema/memory.js';
+import {
+  memoryPinEvents,
+  type MemoryPinEvent,
+  type NewMemoryPinEvent,
+  type PinAction,
+} from '../schema/pins.js';
 import { projectScope, type Scope, type SearchScope } from '../scope.js';
 
 import { idJsonSet, projectIdsOf, scopeCondition, scopeWhere } from './scope-clause.js';
@@ -66,10 +72,16 @@ export interface SearchBm25IdsOpts {
   limit: number;
 }
 
+export interface PinnedMemory {
+  memory: Memory;
+  pinnedAt: Date;
+}
+
 export interface AdminListMemoriesOpts {
   status?: MemoryStatus;
   type?: MemoryType;
   projectId?: string;
+  pinned?: boolean;
   limit: number;
   offset: number;
 }
@@ -805,6 +817,64 @@ export class MemoryRepository {
       .all();
   }
 
+  insertPinEvent(values: NewMemoryPinEvent): void {
+    this.db.insert(memoryPinEvents).values(values).run();
+  }
+
+  latestPinActionsByIds(ids: readonly string[]): Map<string, PinAction> {
+    const out = new Map<string, PinAction>();
+    if (ids.length === 0) return out;
+    const rows = this.db.all<{ memory_id: string; action: PinAction }>(sql`
+      SELECT e.memory_id, e.action FROM memory_pin_events e
+       WHERE e.id IN (
+         SELECT MAX(id) FROM memory_pin_events
+          WHERE memory_id IN ${idJsonSet(ids)}
+          GROUP BY memory_id)
+    `);
+    for (const r of rows) out.set(r.memory_id, r.action);
+    return out;
+  }
+
+  pinnedIdsAmong(ids: readonly string[]): Set<string> {
+    if (ids.length === 0) return new Set();
+    const rows = this.db.all<{ id: string }>(sql`
+      SELECT m.id FROM memory m
+       WHERE m.id IN ${idJsonSet(ids)} AND m.status = 'active' AND ${PINNED_ID_CLAUSE}
+    `);
+    return new Set(rows.map((r) => r.id));
+  }
+
+  pinnedInScope(scope: Scope): PinnedMemory[] {
+    const rows = this.db.all<{ id: string; pinned_at: number }>(sql`
+      SELECT m.id, e.event_ts AS pinned_at
+        FROM (SELECT MAX(id) AS id FROM memory_pin_events
+               WHERE project_id = ${scope.projectId}
+               GROUP BY memory_id) l
+        JOIN memory_pin_events e ON e.id = l.id
+        JOIN memory m ON m.id = e.memory_id
+       WHERE e.action = 'pin' AND m.status = 'active' AND ${scopeWhere(scope, 'm')}
+       ORDER BY e.id
+    `);
+    const byId = new Map(this.unsafeGetByIds(rows.map((r) => r.id)).map((m) => [m.id, m]));
+    return rows.flatMap((r) => {
+      const m = byId.get(r.id);
+      return m ? [{ memory: m, pinnedAt: new Date(Number(r.pinned_at)) }] : [];
+    });
+  }
+
+  countPinnedInScope(scope: Scope): number {
+    return this.pinnedInScope(scope).length;
+  }
+
+  adminPinEventsForMemory(memoryId: string): MemoryPinEvent[] {
+    return this.db
+      .select()
+      .from(memoryPinEvents)
+      .where(eq(memoryPinEvents.memoryId, memoryId))
+      .orderBy(memoryPinEvents.id)
+      .all();
+  }
+
   markArchived(id: string, lastSeenAt: Date): void {
     this.db
       .update(memory)
@@ -862,12 +932,13 @@ export class MemoryRepository {
   /** Shared by `adminSearchFts` + `adminCountFts` so the list and its total filter the same set. */
   private adminFtsConds(
     query: string,
-    opts: Pick<AdminListMemoriesOpts, 'status' | 'type' | 'projectId'>,
+    opts: Pick<AdminListMemoriesOpts, 'status' | 'type' | 'projectId' | 'pinned'>,
   ): SQL[] {
     const conds: SQL[] = [sql`memory_fts MATCH ${query}`];
     if (opts.status) conds.push(sql`m.status = ${opts.status}`);
     if (opts.type) conds.push(sql`m.type = ${opts.type}`);
     if (opts.projectId) conds.push(scopeWhere(projectScope(opts.projectId), 'm'));
+    if (opts.pinned) conds.push(sql`m.status = 'active' AND ${PINNED_ID_CLAUSE}`);
     return conds;
   }
 
@@ -893,6 +964,7 @@ export class MemoryRepository {
     if (opts.status) conditions.push(eq(memory.status, opts.status));
     if (opts.type) conditions.push(eq(memory.type, opts.type));
     if (opts.projectId) conditions.push(scopeCondition(projectScope(opts.projectId)));
+    if (opts.pinned) conditions.push(ADMIN_PINNED_CONDITION);
     return this.db
       .select()
       .from(memory)
@@ -908,6 +980,7 @@ export class MemoryRepository {
     if (opts.status) conditions.push(eq(memory.status, opts.status));
     if (opts.type) conditions.push(eq(memory.type, opts.type));
     if (opts.projectId) conditions.push(scopeCondition(projectScope(opts.projectId)));
+    if (opts.pinned) conditions.push(ADMIN_PINNED_CONDITION);
     const row = this.db
       .select({ value: count() })
       .from(memory)
@@ -1031,4 +1104,16 @@ const PURGE_PREDICATE = sql`m.status = 'archived'
              SELECT source_id FROM memory_relations
               UNION ALL SELECT target_id FROM memory_relations)
          AND m.id NOT IN (
-             SELECT memory_id FROM confirmations)`;
+             SELECT memory_id FROM confirmations)
+         AND m.id NOT IN (
+             SELECT memory_id FROM memory_pin_events)`;
+
+const PINNED_ID_CLAUSE = sql`m.id IN (
+             SELECT e.memory_id FROM memory_pin_events e
+              WHERE e.action = 'pin'
+                AND e.id = (SELECT MAX(id) FROM memory_pin_events WHERE memory_id = e.memory_id))`;
+
+const ADMIN_PINNED_CONDITION = sql`${memory.status} = 'active' AND ${memory.id} IN (
+             SELECT e.memory_id FROM memory_pin_events e
+              WHERE e.action = 'pin'
+                AND e.id = (SELECT MAX(id) FROM memory_pin_events WHERE memory_id = e.memory_id))`;

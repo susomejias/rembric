@@ -6,6 +6,7 @@ export const SOURCE_TABLES = [
   'consolidation_runs',
   'dashboard_sessions',
   'memory',
+  'memory_pin_events',
   'memory_relations',
   'oauth_authorization_codes',
   'oauth_clients',
