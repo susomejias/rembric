@@ -914,7 +914,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
         )
 
     def system_prompt_block(self) -> str:
-        # MUST stay byte-identical to instructions.ts::BASE — Hermes never consumes the server block.
+        # MUST stay byte-identical to the judgmentQueue:false instructions.ts block — Hermes never consumes the server block.
         return (
             "Rembric is this project's memory: only what you write to "
             "it outlives this conversation. Run this loop yourself; host "
@@ -927,7 +927,7 @@ class RembricMemoryProvider(MemoryProvider):  # type: ignore[misc]
             "at the end: one fact per memory, written so a later session can act "
             "on it without this chat. A session summary never replaces it. "
             "topic_key? updates an evolving fact; "
-            "candidates[]→memory.judge_batch({judgments:[…]}).\n"
+            "candidates[]→memory.compare only for supersedes/conflicts_with.\n"
             "Tags required, normally 1–5 useful reusable lowercase ASCII kebab-case: "
             "dashboard/sqlite/bug-fix.\n"
             "Pass known sessionId; never guess.\n"
