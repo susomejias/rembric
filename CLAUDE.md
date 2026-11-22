@@ -13,6 +13,7 @@ Guidance for Claude Code working in this repo. Specs in `openspec/specs/` are th
 | OpenSpec         | `/opsx:propose` · `/opsx:explore` · `/opsx:apply` · `/opsx:archive`          |
 | Spec provenance  | `pnpm run check:spec-provenance` (only `origin/main...HEAD`; CI is the gate) |
 | Mutation check   | `node scripts/mutate.mjs --file … --spec … --mutation … --with …`            |
+| Migration order  | `pnpm run check:migrations` (against `origin/main`; CI job `migrations`)     |
 
 Conventional Commits required (commitlint). Pre-commit = lint-staged + `tsc --noEmit --incremental`. Pre-push = `pnpm test`. Never bypass git hooks with `--no-verify`.
 
@@ -55,6 +56,16 @@ Path-scoping contract (in `packages/mcp/src/_shared.ts::resolveEffectiveScope`):
 - **Scope still resolved at the service layer.** Services compute the `Scope` (`resolveEffectiveScope`, or `resolveEffectiveScopeOrNull` for the recovery tools exempt from `project_not_found`) and pass it down; scoped repository methods _require_ it as a parameter. Unscoped reads carry the `admin*` prefix and are callable ONLY from `src/dashboard/` (+ the dashboard router) — grep-enforced. Cross-scope service reads keep the `unsafe*` prefix.
 - Services own `db.transaction()`; repositories never open transactions (single synchronous connection means repo calls inside a service tx participate automatically).
 - Never hand-write row/DTO shapes. Derive from schema types: `$inferSelect`/`$inferInsert` for entities, `Pick<Entity, …> & { … }` for join projections, schema-derived aliases (`MemoryStatus`, `RelationKind`) for filter params.
+
+### Migration numbering
+
+Migrations apply in file-name order and are recorded by file name, so the numbering is part of every database's history.
+
+- Name a new one `NNNN_snake_case.sql` with the next number after the last migration on **`origin/main`**, not on your branch. If `main` gains a migration before yours merges, rebase and renumber yours.
+- Never edit, rename or delete a migration that is already on `main`. Fix forward with a new one.
+- Bump the two count gates in the same commit: `[ "$applied" = N ]` in `.github/workflows/ci.yml` and `[ "$migrations" -eq N ]` in `apps/web/Dockerfile`.
+
+`scripts/check-migrations.mjs` enforces all three (unique, contiguous, append-only, counts in step). It runs in CI against the PR base and against the previous `main` on every push.
 
 ### Table-rebuild migrations (SQLite)
 

@@ -35,6 +35,19 @@ jobs:
       - name: Replay the measured violation window
         run: pnpm --filter @rembric/web exec vitest run --root ../.. scripts/check-spec-provenance.history.test.ts
 
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check migrations stay unique, contiguous and append-only
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/check-migrations.mjs --base "$BASE"
+
   static:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -242,7 +255,7 @@ jobs:
           export-cache: ${{ github.event_name == 'push' }}
           hf-token: ${{ secrets.HF_TOKEN }}
 
-      - name: Boot smoke — healthz, data dir, 39 migrations
+      - name: Boot smoke — healthz, data dir, every migration
         if: needs.changes.outputs.docker != 'false'
         run: |
           set -eu
@@ -285,7 +298,7 @@ jobs:
           [ -n "$warmed" ] \
             || { echo "::error::${{ matrix.arch }} embedder did not run an inference"; \
                  echo "$LOGS"; exit 1; }
-          echo "${{ matrix.arch }} boot smoke: healthz=200, /data/data.db, 39 migrations, embedder inference ✓"
+          echo "${{ matrix.arch }} boot smoke: healthz=200, /data/data.db, $applied migrations, embedder inference ✓"
           docker rm -f rembric-boot-smoke
 
       - name: Installer e2e — server --up against the built image
