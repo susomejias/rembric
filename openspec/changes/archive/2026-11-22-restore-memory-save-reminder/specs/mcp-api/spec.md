@@ -9,12 +9,14 @@ Neither variant SHALL name `global`, `include_global` or user-wide memory (see "
 The instructions SHALL be organized as directive, proactively-phrased guidance citing the relevant tools by name, and SHALL include all of:
 
 1. **A proactive save flow** — directing the agent to call `memory.save` (with the required short `title` headline, `content`, and `tags`) the moment something noteworthy happens (bug fix · decision · discovery · config change · pattern · preference) rather than batching to session end, and naming the optional `topic_key` supersede path and the `candidates[]` → `memory.judge` conflict-resolution path. Tag guidance SHALL teach normally 1–5 useful reusable lowercase kebab-case labels such as `dashboard`, `sqlite`, and `bug-fix`; selecting tags SHALL NOT require another tool call. The existing explicit-batch-tool requirements continue to govern operational judgment calls. The flow SHALL state that the save happens when the fact is settled rather than at the end, that one memory holds one fact, and that a session summary does not replace a saved memory. Mechanical detail (error codes, scope semantics, the hard 1–64 tag bound) MAY be deferred to the tool's own `description` and schema.
-2. **A recall flow** — directing the agent that when starting or resuming work, after a `/compact` event, or when asked "what did we do", it SHALL call `memory.context` (or `memory.search` for keyword lookup) BEFORE acting, but ONLY when it lacks the prior detail it needs. The phrasing SHALL keep recall on-demand — it MUST NOT direct an unconditional `memory.context` load at session start.
+2. **A recall flow** — directing the agent to call `memory.context` (or `memory.search` for keyword lookup) BEFORE acting, but ONLY when it lacks the prior detail it needs. The trigger list SHALL name proactive moments — before starting work in an area untouched this session, before diagnosing a possibly-known error, before building something that may already exist — AND SHALL keep a reactive trigger for an explicit request to recall. Naming both categories is the obligation; the specific illustrations of each are wording, not contract. The phrasing SHALL keep recall on-demand — it MUST NOT direct an unconditional `memory.context` load at session start.
 3. **A session-close flow** — directing the agent to call `memory.session_summary({title, summary})`. The trigger SHALL be bound to ending a turn in which real work happened — phrased so the agent saves before ending any working turn, and SHALL NOT be evadable by avoiding the literal word "done". The flow SHALL describe the title constraint (≤100 chars, descriptive of what was actually worked on — NOT the cwd, NOT generic), the summary structure (the canonical section list defined in `sessions`, carried from its single source rather than restated), AND the summary length cap (currently ≤10000 chars, derived from `SUMMARY_MAX_CHARS`). The cap MUST be present inline so the agent budgets for it on the first attempt; this is verified by the same length test that enforces the 1500-character ceiling.
 4. **The update-guidance pointer** — a short clause naming `memory.about` as the tool to call when the operator asks how to update or upgrade Rembric (server or plugins).
 5. **The `sessionId` reinforcement clause** — a terse directive telling the agent to pass its current session id explicitly when it knows one, and to never guess/invent one, so writes attach correctly instead of falling through the ambiguous-session fallback (see the `sessionId` reinforcement requirement below).
 6. **The loop framing** — an opening line stating that only what the agent writes to Rembric outlives the conversation, and that the agent runs the RECALL → SAVE → SUMMARIZE loop itself rather than waiting for host reminders. A connection with no host plugin receives no turn notices at all, so this block is the whole protocol there; the RECALL, SAVE and SUMMARIZE lines SHALL appear in that order.
 7. **The no-host session recovery** — `memory.session_summary` answers `session_not_found` on a transport no host registered a session for, so the block SHALL name the recovery: `memory.session_start` once, then retry.
+
+**Every component in that list SHALL carry its own assertion.** The list is the whole point of the requirement, and a component with no test is a component that leaves silently: this change's own rewrite of the block dropped component 5 to make room for the new recall wording, no test named it before or after, and the loss surfaced only when a later reader diffed the block against `main`. A length test plus substring checks for a subset is not coverage of an enumerated list, and the enumeration SHALL NOT be trusted to survive a rewrite that no assertion defends. Where a component's presence is checked by substring, the substring SHALL be one the component cannot lose while still satisfying its own description.
 
 #### Scenario: An MCP client connects on `/mcp/<slug>`
 
@@ -26,6 +28,20 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **AND** the instructions SHALL contain the substring `memory.context` (the recall flow)
 - **AND** the instructions SHALL contain the substring `memory.about` (the update-guidance pointer)
 
+#### Scenario: Every enumerated component is asserted, including the `sessionId` clause
+
+- **WHEN** either variant of `buildInstructions(ctx)` is built
+- **THEN** a test SHALL assert the presence of each of the five enumerated components individually
+- **AND** the assertion for component 5 SHALL fail if the block stops directing the agent to pass a known session id and to never invent one
+- **AND** each assertion SHALL be separate, so one missing component is attributable to one component rather than to a single aggregate check
+
+#### Scenario: The recall flow names both trigger categories
+
+- **WHEN** either variant of `buildInstructions(ctx)` is built
+- **THEN** the recall flow SHALL name at least one proactive moment at which to recall before acting
+- **AND** it SHALL name a reactive trigger for an explicit request to recall
+- **AND** removing either category SHALL fail an assertion
+
 #### Scenario: The session-summary trigger is bound to ending a working turn
 
 - **WHEN** either variant of `buildInstructions(ctx)` is built
@@ -35,7 +51,7 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 #### Scenario: Recall guidance is on-demand, not unconditional-at-start
 
 - **WHEN** either variant of `buildInstructions(ctx)` is built
-- **THEN** the `memory.context` recall flow SHALL be conditioned on the agent lacking prior detail (e.g. starting/resuming work, after `/compact`, or "what did we do")
+- **THEN** the `memory.context` recall flow SHALL be conditioned on the agent lacking prior detail
 - **AND** the instructions SHALL NOT direct an unconditional `memory.context` load on every session start
 
 #### Scenario: An MCP client connects on `/mcp` without a project
@@ -58,6 +74,12 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **AND** both outputs SHALL contain the substring `10000`
 - **AND** both outputs SHALL contain the substring `memory.context`
 - **AND** both outputs SHALL contain the substring `memory.about`
+
+#### Scenario: The block carries no whitespace-only line
+
+- **WHEN** either variant of `buildInstructions(ctx)` is built
+- **THEN** no line SHALL consist solely of whitespace
+- **AND** this SHALL be asserted, because such a line is invisible in review, costs tokens on every connection, and reached production once through a template-literal edit
 
 #### Scenario: A client that does not consume `instructions` connects
 
@@ -91,7 +113,6 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 - **AND** its `RECALL:`, `SAVE:` and `SUMMARIZE:` lines SHALL appear in that order
 - **AND** its `SAVE:` line SHALL contain `as soon as it is settled, not at the end`, `one fact per memory` and `A session summary never replaces it`
 - **AND** it SHALL name `session_not_found` → `memory.session_start` once, then retry
-
 
 ### Requirement: The `instructions` block MUST state what a curated summary write replaces and what it keeps
 
