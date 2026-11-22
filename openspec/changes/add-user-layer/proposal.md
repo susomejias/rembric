@@ -34,7 +34,7 @@ None. The user layer is authentication and authorization state, so it lands in `
 
 ## Impact
 
-- Persistence: new `packages/db/src/schema/users.ts`; `packages/db/src/schema/tokens.ts` gains `user_id NOT NULL REFERENCES users(id)`; `packages/db/src/schema/oauth.ts` gains `administers` on `oauth_authorization_codes` and `oauth_tokens`; one generated-then-hand-edited migration `0041_*`; `packages/db/src/repositories/{tokens,oauth,dashboard-sessions}-repository.ts`; new `users-repository.ts`; `apps/web/src/test/schema-inventory.ts`.
+- Persistence: new `packages/db/src/schema/users.ts`; `packages/db/src/schema/tokens.ts` gains `user_id NOT NULL REFERENCES users(id)`; `packages/db/src/schema/oauth.ts` gains `administers` on `oauth_authorization_codes` and `oauth_tokens`; one generated-then-hand-edited migration `0042_*`; `packages/db/src/repositories/{tokens,oauth,dashboard-sessions}-repository.ts`; new `users-repository.ts`; `apps/web/src/test/schema-inventory.ts`.
 - Services: `packages/core/src/services/tokens.ts` (`authenticate`, `bootstrapAdmin`, `create`), `packages/core/src/services/oauth.ts` (`issueCode`, token pair, `authenticateAccessToken`), `packages/core/src/services/sessions.ts` (`SessionContext`), `packages/core/src/server-context/request-context.ts`.
 - MCP: `packages/mcp/src/project-tools.ts`, `packages/mcp/src/_shared.ts`.
 - Web: `apps/web/src/lib/{auth,mcp-auth}.ts`, `apps/web/src/lib/actions/guard.ts`, `apps/web/src/app/dashboard/login/verify/route.ts`, `apps/web/src/app/dashboard/oauth/consent/route.ts`, `apps/web/src/app/dashboard/oauth-consent/consent-card.tsx`.
