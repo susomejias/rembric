@@ -8,31 +8,23 @@ The orchestrator `install.sh` entry point for the Rembric server and all client 
 
 ### Requirement: Single orchestrator entry point
 
-The repository SHALL host a single installer at `apps/plugin/install.sh` that serves as the one copy-pasteable entry point for setting up the Rembric server and all five client plugins. The script SHALL be POSIX `sh` (no bash-only syntax), SHALL run cleanly under `set -eu`, and SHALL be executable both as `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/install.sh | sh` and as a downloaded local file. The script SHALL be an orchestrator: it SHALL delegate to the per-client primitives and SHALL NOT inline or duplicate any client's install/uninstall logic.
-
-There are **three** delegation backends, not two, and each client uses exactly one:
-
-1. **Repo-side shell scripts** — `apps/plugin/.opencode-plugin/{install,uninstall}.sh` and `apps/plugin/.hermes-plugin/{install,uninstall}.sh`, fetched from the same ref (or read via `PLUGIN_SRC` against a local clone).
-2. **Marketplace CLIs** — Claude Code and Codex, driven by the client's own plugin verbs against this repository as a marketplace.
-3. **A client CLI resolving a public registry package** — Pi, driven by `pi install npm:@rembric/pi`. There SHALL be no repo-side install script and no marketplace entry for this client: its install mechanism is its own CLI against the npm registry, and the installer's job is to invoke it (subject to the same binary-presence and `--yes` gating the marketplace backend uses).
+The repository SHALL host a single POSIX `sh` installer at `apps/plugin/install.sh`, fronted by the pure-forwarding root `install.sh`, for the server and all five client plugins. It SHALL run under `set -eu` from a downloaded file or `curl | sh` and delegate rather than duplicate client install logic. Delegation backends SHALL be opencode's repo-side scripts, Claude/Codex marketplace CLIs, Pi's registry CLI, and Hermes's native plugin-manager CLI. Hermes maintenance wrappers MAY retain recognized legacy MCP repair but SHALL NOT copy/fetch provider files or maintain a deletion whitelist. Pi SHALL retain no repo-side install/uninstall script or marketplace entry.
 
 #### Scenario: Installer is a single POSIX sh file at the plugin root
 
 - **WHEN** the repository is at HEAD
-- **THEN** `apps/plugin/install.sh` exists and is the only top-level orchestrator installer
-- **AND** the script passes `sh -n apps/plugin/install.sh` (POSIX syntax check) with no errors
+- **THEN** `apps/plugin/install.sh` SHALL be the sole orchestrator and pass `sh -n`
 
 #### Scenario: Installer delegates rather than duplicates
 
-- **WHEN** the installer performs an opencode or Hermes install/update/uninstall
-- **THEN** it SHALL invoke that client's own `install.sh`/`uninstall.sh` (fetched from the same ref, or via `PLUGIN_SRC` against a local clone)
-- **AND** it SHALL NOT contain a second copy of those scripts' file-copy or removal logic
+- **WHEN** opencode performs install/update/uninstall
+- **THEN** its existing repo-side scripts SHALL own the operation
+- **AND** Hermes SHALL instead delegate distribution to its native CLI
 
 #### Scenario: The registry-CLI backend has no repo-side script
 
 - **WHEN** the repository is at HEAD
-- **THEN** there SHALL be no `apps/plugin/.pi-plugin/install.sh` and no `apps/plugin/.pi-plugin/uninstall.sh`
-- **AND** the installer SHALL route that client's actions through its own CLI
+- **THEN** Pi SHALL have no repo-side install/uninstall script and SHALL use its own CLI
 
 ### Requirement: Brand-styled output with degradation
 
@@ -193,110 +185,99 @@ Before performing any install or update, the installer SHALL verify the tools it
 
 ### Requirement: Client presence and version detection
 
-For each of the five clients the installer SHALL determine (a) whether the client is present — Claude/Codex/opencode/Pi by `command -v <binary>`, Hermes by the existence of `${HERMES_HOME:-~/.hermes}` — and (b) the installed plugin version, read from that client's on-disk manifest using a per-client adapter: JSON `version` field for Claude Code and Codex manifests, YAML `version:` for `~/.hermes/plugins/rembric/plugin.yaml`, and the `@rembric-plugin-version` comment for `~/.config/opencode/plugins/rembric.ts`. The "available" version SHALL come from a single fetch of `.release-please-manifest.json` at the SAME git ref the installer would install from. The installer SHALL render a status table showing, per client: present (yes/no), installed version (or `—`), available version, and the recommended action. Semver comparison SHALL treat the manifest's bare semver values directly (e.g. via `sort -V`).
+The installer SHALL detect all five clients by executable presence on PATH, including Hermes rather than the existence of its data directory. Installed versions SHALL retain existing per-client adapters: Claude/Codex JSON cache manifests, opencode's version comment, Hermes `${HERMES_HOME:-$HOME/.hermes}/plugins/rembric/plugin.yaml`, and Pi's measured user-scope package location or explicit unknown. Available versions SHALL come from a single `.release-please-manifest.json` fetch at the installer's source ref. Unknown installed versions SHALL never render as current or outdated. Every recommended ACTION SHALL derive from the existing single state-to-accepted-verb mapping; non-actionable states SHALL remain `up to date`, `ahead` or `-`.
 
-**The table's "update available" SHALL never lie**, and a client for which the installed version cannot be determined SHALL NOT be made to look determinate. For the registry-CLI client (Pi) the installer SHALL do exactly one of the following, and nothing else:
-
-1. Read the installed version from a **deterministic on-disk location** whose contents were established by measurement, in the manner of the four existing adapters; or
-2. Report the installed version as **explicitly unknown** and recommend an action that is correct under ignorance — the idempotent reinstall — with the table rendering `unknown` for that row.
-
-Guessing, inferring from presence, or defaulting to the available version SHALL NOT be done. A row whose installed version is unknown SHALL NOT report "up to date" and SHALL NOT report "update available".
-
-**Every recommendation the ACTION column prints SHALL be a verb `--action` accepts.** A cell that names something else is a defect even when the underlying state is reported correctly, because the column is an instruction: an operator or an agent that follows it literally SHALL reach a real action. A state for which no action can be recommended SHALL print the state instead (`up to date`, `ahead`, or `-` when no available version could be read) — never an invented verb. The mapping from detected state to recommended verb SHALL exist in exactly ONE place, and every surface that names a verb (the ACTION column, and update-all's force hint) SHALL take it from there, so the surfaces cannot disagree. The idempotent reinstall of an unreadable install is therefore printed as `install`, the verb that performs it.
+Hermes local source/custom ref mutation requests SHALL be rejected rather than implied by the table's available version. Native provenance SHALL gate Hermes updateability: copied/untracked, linked, foreign-source, malformed, inconsistent or pinned installs SHALL not recommend or trigger unattended update. Their state SHALL be explicitly unknown with migration/pin guidance; the installer SHALL not call them natively updateable solely from semver comparison. Because the measured native subdirectory checker cannot reliably classify even a fresh supported installation, every existing Hermes installation SHALL report unknown update status and SHALL be skipped by update-all. Explicit update SHALL validate native source metadata or offer the separately confirmed stopped-host legacy transition; unknown update status SHALL NOT hide that explicit action. No other client's detection/version/recommendation behavior SHALL change.
 
 #### Scenario: Status table reflects installed vs available
 
-- **WHEN** opencode is present with an installed `rembric.ts` at version `0.9.0` and the available manifest reports `0.10.0`
-- **THEN** the status table SHALL show opencode present, installed `0.9.0`, available `0.10.0`, and an Update action
+- **WHEN** opencode is installed at `0.9.0` and available is `0.10.0`
+- **THEN** its row SHALL recommend update
 
 #### Scenario: Absent client is omitted from actionable rows
 
-- **WHEN** Hermes is not present (`${HERMES_HOME:-~/.hermes}` does not exist)
-- **THEN** the Hermes row SHALL show "not present" and SHALL NOT offer an install-version action that assumes an existing install
+- **WHEN** Hermes has a data directory but no executable on PATH
+- **THEN** its row SHALL report the client absent and execution SHALL remain disabled
 
 #### Scenario: Available version is read from the install ref
 
-- **WHEN** the installer is configured to install from ref `main`
-- **THEN** the available version SHALL be read from `.release-please-manifest.json` at `main`
-- **AND** when configured to install from a pinned tag, the available version SHALL be read from `.release-please-manifest.json` at that same tag
+- **WHEN** status uses a selected ref
+- **THEN** the available version SHALL be read at that ref without mutating a client
 
 #### Scenario: An undeterminable installed version renders as unknown, not as up-to-date
 
-- **GIVEN** the registry-CLI client is present but its installed extension version cannot be read from a deterministic location
-- **WHEN** `--status` renders the table
-- **THEN** that row's installed version SHALL render as `unknown`
-- **AND** its recommended action SHALL be the idempotent reinstall, printed as `install`
-- **AND** it SHALL NOT render "up to date" or "update available"
+- **WHEN** Pi is present but its installed package version is unreadable
+- **THEN** it SHALL render unknown and recommend the accepted `install` verb, not current/update
 
 #### Scenario: Every ACTION cell is an accepted verb or a state that recommends nothing
 
-- **WHEN** `--status` renders the table in each detectable state — not installed, installed and outdated, installed and current, ahead of the published version, and present with an unreadable version
-- **THEN** every ACTION cell SHALL be either one of the verbs `--action` accepts or one of `up to date` / `ahead` / `-`
-- **AND** the accepted-verb set used to check this SHALL be derived from the installer's own single definition, not restated in the test
+- **WHEN** status renders all supported states
+- **THEN** each recommendation SHALL use an accepted action or the existing non-actionable state labels
 
 #### Scenario: Following the table's recommendation reaches a real action
 
-- **GIVEN** a row whose ACTION cell names a verb
-- **WHEN** the installer is re-invoked as `--agent=<that row's agent> --action=<that cell> --yes`
-- **THEN** it SHALL exit `0` and SHALL execute that client's command
-- **AND** it SHALL NOT report an invalid action, and SHALL NOT exit `0` having run nothing
+- **WHEN** a supported row's action is invoked with `--yes` and an available binary
+- **THEN** the correct native/client primitive SHALL execute without an invented action label
+
+#### Scenario: A copied or pinned Hermes install cannot become an unattended update
+
+- **WHEN** its manifest version is older than available but provenance is unsupported
+- **THEN** status SHALL render unknown with guidance and update-all SHALL skip it
 
 ### Requirement: Per-client install / update / uninstall routing
 
-For each present client the installer SHALL offer Install, Update, and Uninstall, routing each to that client's real primitive. For opencode and Hermes, install/update SHALL delegate to the client `install.sh` (re-running it performs an update) and uninstall SHALL delegate to the client `uninstall.sh`. For Claude Code and Codex, the installer SHALL print the client's marketplace CLI commands for each action and, only when the client binary is detected on `PATH`, MAY offer to run them; the installer SHALL NOT create or rely on a repo-side install script for these two clients. For Pi, the installer SHALL print and (under the same gating) run that client's own CLI against the npm registry. The offer to run these commands SHALL be presented as an interactive `[y/N]` prompt when a controlling terminal is available; in addition, when the opt-in `--yes` flag (alias `-y`) is set the installer SHALL execute those commands directly without prompting, including under headless invocation (e.g. `curl … | sh`), but still ONLY when the client binary is detected on `PATH`. When `--yes` is set but the client binary is absent, the installer SHALL print the commands and SHALL NOT execute anything. When `--yes` is not set and there is no controlling terminal, the installer SHALL only print the commands, as today.
+For opencode, install/update SHALL delegate to its install script and uninstall to its uninstall script. Claude SHALL retain `claude plugin marketplace add https://github.com/susomejias/rembric.git`, `claude plugin install rembric@rembric`, `claude plugin update rembric@rembric` and `claude plugin uninstall rembric@rembric`. Codex SHALL retain marketplace add plus `codex plugin add rembric@rembric`, update via `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric`, and removal via `codex plugin remove rembric@rembric`. Pi SHALL retain the unpinned `pi install npm:@rembric/pi` for install and update and `pi remove npm:@rembric/pi` for removal; Git refs SHALL not be applied to that registry artifact.
 
-The Codex CLI exposes the plugin verbs `codex plugin add <PLUGIN[@MARKETPLACE]>` (install), `codex plugin remove <PLUGIN[@MARKETPLACE]>` (uninstall), and `codex plugin marketplace upgrade <name>` (refresh the marketplace snapshot). There is NO `codex plugin install` / `codex plugin uninstall` / per-plugin `codex plugin update` subcommand. The installer SHALL therefore use `codex plugin add rembric@rembric` for install, `codex plugin remove rembric@rembric` for uninstall, and `codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric` for update (the snapshot refresh alone does not re-install the cached plugin).
-
-For Pi the installer SHALL use `pi install npm:@rembric/pi` for install **and for update** — the package spec SHALL carry no version, because a version-pinned spec is treated as pinned and is skipped by that client's own update commands, so a pinned install would silently freeze the operator. Reinstall is idempotent and is therefore also the correct action when the installed version is unknown. `--ref=<tag>` SHALL NOT be applied to this client's install command: the artifact comes from the registry, not from a git ref, and applying the ref would produce a pin whose consequence is the one this requirement forbids.
+Hermes SHALL use `hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable`, `hermes plugins update rembric` and `hermes plugins remove rembric`, subject to its provenance and unsupported-source guards. Explicit update of a recognized legacy copy SHALL offer the guarded one-time interactive transition to native install instead of native update. Root invocation consent SHALL NOT substitute for migration-specific consent; native installations SHALL continue using native update. All CLI backends SHALL print their commands and execute only with an available executable and interactive confirmation or `--yes`/`-y`. Without consent a headless run SHALL print only; with absent binary even `--yes` SHALL execute nothing. Hermes failure SHALL propagate rather than reporting success. Root execution consent SHALL not add forced replacement or bypass Hermes's dependency/security/capability consent.
 
 #### Scenario: opencode update re-runs its installer
 
-- **WHEN** the user selects Update for opencode
-- **THEN** the installer SHALL invoke the opencode `install.sh` (which overwrites the installed files)
+- **WHEN** opencode update is selected
+- **THEN** its existing install script SHALL run
 
 #### Scenario: Marketplace client prints CLI commands
 
-- **WHEN** the user selects Install for Codex
-- **THEN** the installer SHALL print `codex plugin marketplace add …` and `codex plugin add rembric@rembric`
-- **AND** it SHALL NOT attempt to copy plugin files itself
+- **WHEN** Codex install is selected
+- **THEN** marketplace add and plugin add SHALL be printed without copying files
 
 #### Scenario: Marketplace client run-through gated on binary presence
 
-- **WHEN** the user selects Install for Claude Code and the `claude` binary is on `PATH`
-- **THEN** the installer MAY offer to run the `/plugin marketplace add` + `/plugin install` commands
-- **AND** when the binary is absent, the installer SHALL print the commands for the user to run manually
+- **WHEN** Claude is absent
+- **THEN** its commands SHALL be printed but never executed
 
 #### Scenario: Registry-CLI client install and update are the same unpinned command
 
-- **WHEN** the user selects Install or Update for Pi
-- **THEN** the printed command SHALL be `pi install npm:@rembric/pi` in both cases
-- **AND** it SHALL carry no `@<version>` suffix, even when the installer was invoked with `--ref=<tag>`
+- **WHEN** Pi install/update is selected, even under a Git ref
+- **THEN** the command SHALL remain `pi install npm:@rembric/pi`
 
 #### Scenario: --yes executes the marketplace command headlessly when the binary is present
 
-- **WHEN** the installer runs headless as `--agent=claude --action=update --yes` (or `-y`) and the `claude` binary is on `PATH`
-- **THEN** it SHALL execute `claude plugin update rembric@rembric` directly without any prompt
-- **AND** the same SHALL hold for Codex (`codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric`), for Pi (`pi install npm:@rembric/pi`), and for the install/uninstall actions of each
+- **WHEN** a supported CLI action is selected with `--yes` and the binary is available
+- **THEN** that action SHALL execute without the root confirmation prompt
 
 #### Scenario: --yes with an absent binary executes nothing
 
-- **WHEN** the installer runs headless as `--agent=codex --action=update --yes` and the `codex` binary is NOT on `PATH`
-- **THEN** it SHALL print the marketplace command(s) and SHALL NOT execute anything
+- **WHEN** a CLI binary is absent and `--yes` is passed
+- **THEN** only its command SHALL be printed
 
 #### Scenario: Without --yes a headless run only prints
 
-- **WHEN** the installer runs headless as `--agent=claude --action=update` (no `--yes`) and the `claude` binary is on `PATH`
-- **THEN** it SHALL only print the marketplace command and SHALL NOT execute it
+- **WHEN** headless install/update/uninstall lacks `--yes`
+- **THEN** no CLI command SHALL execute, including Hermes
 
 ### Requirement: Conservative uninstall across clients
 
-When the installer performs an uninstall for any client, it SHALL remove only plugin-owned files and SHALL NOT remove operator-owned configuration (`opencode.json`, `~/.hermes/.env`), credentials, or `.rembric` project markers. After an uninstall the installer SHALL print what was deliberately left in place so the operator can remove it manually if desired.
+Uninstall SHALL preserve unrelated operator settings, credentials outside a plugin-owned directory and `.rembric` markers and report what remains. opencode SHALL retain its existing conservative file-removal behavior. For a native-managed Hermes install, the approved exception SHALL permit Hermes to remove its whole plugin directory and clean up `memory.provider`, plugin selection and grants. Hermes's unrelated MCP settings and exact bridge pins SHALL remain intact. Copied/untracked, linked, foreign-source, pinned, malformed or inconsistent Hermes targets SHALL be refused without deletion. Already-absent Hermes uninstall SHALL succeed only when both target and source record are absent.
 
 #### Scenario: Uninstall preserves operator config and credentials
 
-- **WHEN** the user uninstalls the opencode plugin via the installer
-- **THEN** the `mcp.rembric` block in `~/.config/opencode/opencode.json`, any `.rembric` files, and stored credentials SHALL remain untouched
-- **AND** the installer SHALL print a list of what it left behind
+- **WHEN** opencode uninstall completes
+- **THEN** its MCP config, credentials and project markers SHALL remain intact
+
+#### Scenario: Native Hermes removal has explicit ownership
+
+- **WHEN** a consenting operator removes a verified native-managed Hermes install
+- **THEN** Hermes SHALL own directory/selection/grant removal while unrelated settings, MCP configuration and external credentials remain
 
 ### Requirement: Supply-chain-safe distribution guidance
 
@@ -324,13 +305,12 @@ Invoking a client's own CLI, which resolves that client's extension from the npm
 
 ### Requirement: The TUI is the canonical single documented install path
 
-The installer at `apps/plugin/install.sh` SHALL be the primary, canonical entry point that all user-facing documentation leads with for install, setup, upgrade, and uninstall of the Rembric server and every client plugin. Per-client manual mechanisms — the Claude/Codex marketplace commands, the opencode/Hermes `curl | sh` scripts, and the manual Docker quickstart — SHALL remain documented, but ONLY under explicitly-labelled "Manual / advanced" sections, never as the primary instruction. The per-client primitives themselves (each `install.sh`/`uninstall.sh`, the `marketplace.json` files, the bridge, the hooks) are unchanged: they are the installer's backend and the documented manual fallback.
+The installer at `apps/plugin/install.sh`, fronted by root `install.sh`, SHALL remain the primary canonical path for install/setup/update/uninstall of the server and every client. Docs SHALL lead with it. Claude/Codex marketplace commands, opencode shell scripts, Hermes native plugin commands, Pi's unpinned registry CLI and manual Docker commands SHALL appear only as explicitly labelled manual/advanced fallback. Hermes shell adapters SHALL not constitute a separate file-copy backend. Existing shared bridge/hooks and non-Hermes primitives SHALL remain unchanged.
 
 #### Scenario: Docs lead with the installer
 
-- **WHEN** a user opens `README.md`, `apps/plugin/README.md`, or any per-client section of `docs/agents.md`
-- **THEN** the first documented install / setup / upgrade instruction SHALL be the TUI installer
-- **AND** any per-client marketplace or `curl | sh` command SHALL appear only under a heading that marks it as manual / advanced
+- **WHEN** a reader opens root/plugin READMEs or client sections in `docs/agents.md`
+- **THEN** the root TUI SHALL be the first installation instruction and per-client commands SHALL appear only under manual/advanced headings
 
 ### Requirement: Root install.sh shim
 
@@ -423,34 +403,34 @@ In colour mode the header SHALL show, under the lime block wordmark, a two-line 
 
 ### Requirement: Per-agent post-install steps are surfaced
 
-After a successful install or update (NOT uninstall), the installer SHALL print the required platform post-install steps for that agent, so the user is not left with a half-wired plugin. The steps SHALL reflect the action: install-only wiring (credential prompts, enabling the plugin) SHALL NOT be repeated on update, where the plugin is already installed and enabled. At minimum: Codex SHALL show trusting the 5 hooks via `/hooks` (hooks are stable and on by default as of `codex-cli 0.142.3+`; the removed `plugin_hooks` flag SHALL NOT be shown), plus exporting `REMBRIC_*`; Hermes install SHALL show `hermes plugins install rembric` (which triggers the `requires_env` credential prompts), then `hermes plugins enable rembric`, then a reminder to run `hermes gateway restart` so it loads the (new) plugin, while Hermes **update** SHALL show only `hermes gateway restart`; opencode install SHALL point at pasting the printed MCP block and exporting `REMBRIC_*` while opencode **update** SHALL only point at restarting opencode; Claude install SHALL note credentials are prompted (keychain) while Claude **update** SHALL only point at restarting Claude Code; **Pi install SHALL point at exporting `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell environment** — that client injects no environment from its own settings file, so there is no settings-file alternative to offer — **and Pi update SHALL only point at restarting the client.** The full walkthrough remains in `docs/agents.md`.
+After successful installation/update, the installer SHALL print platform-specific next steps, but SHALL omit them on uninstall or native Hermes failure. Codex SHALL retain hook trust via `/hooks` and explicit shell exports, never the removed `plugin_hooks` flag. Claude installation SHALL describe keychain prompts and update SHALL request restart. opencode installation SHALL retain its MCP/environment guidance and update only restart. Pi installation SHALL require shell `REMBRIC_SERVER_URL`/`REMBRIC_API_TOKEN` with no settings-file alternative and update only restart.
+
+Hermes installation SHALL explain that native `--enable` selects the memory provider and may prompt for missing required credentials; it SHALL not instruct a second bare-name plugin install or generic enable step. Existing complementary pinned MCP wiring guidance SHALL remain. Hermes update SHALL retain recognized legacy MCP repair guidance and gateway restart without installation-only prompts.
 
 #### Scenario: Codex install prints the hook-trust step
 
-- **WHEN** `--agent=codex --action=install` runs
-- **THEN** the output SHALL include trusting the hooks via `/hooks`
-- **AND** the output SHALL NOT instruct enabling the removed `plugin_hooks` flag
+- **WHEN** Codex install runs
+- **THEN** `/hooks` trust SHALL be shown without `plugin_hooks`
 
 #### Scenario: Hermes install prints the requires_env + enable + gateway-restart steps
 
-- **WHEN** `--agent=hermes --action=install` runs
-- **THEN** the output SHALL include `hermes plugins install rembric`, `hermes plugins enable rembric`, and a reminder to run `hermes gateway restart`
+- **WHEN** Hermes installation is offered or succeeds
+- **THEN** output SHALL describe native credential prompts/provider selection, complementary MCP wiring and gateway restart, without obsolete bare-name install/enable steps
 
 #### Scenario: Hermes update only reminds to restart the gateway
 
-- **WHEN** `--agent=hermes --action=update` runs
-- **THEN** the output SHALL include `hermes gateway restart` and SHALL NOT repeat the install-only `hermes plugins install rembric` step
+- **WHEN** native Hermes update succeeds
+- **THEN** output SHALL include existing legacy MCP repair guidance and gateway restart, not install-only prompts
 
 #### Scenario: Pi install prints the environment-variable step and no settings-file alternative
 
-- **WHEN** `--agent=pi --action=install` runs
-- **THEN** the output SHALL instruct exporting `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the shell environment
-- **AND** it SHALL NOT suggest placing them in the client's settings file
+- **WHEN** Pi install runs
+- **THEN** shell exports SHALL be shown without a settings-file alternative
 
 #### Scenario: Uninstall omits post-install steps
 
-- **WHEN** any `--action=uninstall` runs
-- **THEN** no post-install "Next" steps SHALL be printed
+- **WHEN** any uninstall runs
+- **THEN** no post-install next steps SHALL be printed
 
 ### Requirement: bring-up MUST verify application health before reporting success
 
@@ -533,3 +513,17 @@ In the interactive menu, the Plugins section's agent-selection prompt SHALL incl
 - **WHEN** the "Which agent?" prompt is shown
 - **THEN** its first entry SHALL be `all — update outdated`, appearing below the rendered status table
 - **AND** selecting it SHALL run the same update-all behavior as the headless `--action=update` command
+
+### Requirement: Hermes unsupported source requests fail before mutation
+
+Hermes mutation requests SHALL reject `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` or an explicit `--ref` before any client/server/config mutation in the requested transaction. This stage SHALL support only default unpinned native distribution. It SHALL not silently reinterpret a local tree, tag, branch or SHA, even an explicitly supplied `main`. Read-only status/help SHALL remain available. Other clients' source/ref contracts SHALL remain unchanged.
+
+#### Scenario: Unsupported mixed-client transaction
+
+- **WHEN** a mutating transaction includes Hermes and an explicit ref or local source
+- **THEN** it SHALL fail with a clear unsupported-operation diagnostic before modifying any selected client or server
+
+#### Scenario: Supported default native transaction
+
+- **WHEN** Hermes mutation uses the default source without an explicit ref/local override
+- **THEN** it SHALL proceed through binary-presence, provenance and consent gates

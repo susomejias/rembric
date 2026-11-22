@@ -8,13 +8,20 @@ TBD - created by archiving change add-hermes-agent-plugin. Update Purpose after 
 
 ### Requirement: Plugin source location
 
-The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling to `apps/plugin/.claude-plugin/`, `apps/plugin/.codex-plugin/`, and `apps/plugin/.opencode-plugin/`. The directory SHALL contain exactly five files at the top level: `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh`, `README.md`. A nested `apps/plugin/.hermes-plugin/tests/` directory MAY exist for Python unittest sources and SHALL NOT ship to end users (the `install.sh` whitelist of three shipped files — `plugin.yaml`, `__init__.py`, `README.md` — is what guarantees this; nothing else under `apps/plugin/.hermes-plugin/` is copied). `uninstall.sh` is a local-execution maintenance script and, like `install.sh`, is NOT itself copied into the user's plugin directory.
+The plugin SHALL live in this monorepo at `apps/plugin/.hermes-plugin/`, sibling to the other client manifest directories. The directory SHALL contain `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh` and `README.md`, and MAY contain a nested Python `tests/` directory. Native Hermes SHALL own installation of this source subdirectory; Rembric SHALL NOT maintain a three-file copy whitelist or a second packaging path. Maintenance scripts SHALL delegate distribution to the native CLI while retaining recognized legacy MCP repair.
 
 #### Scenario: Plugin tree contains the five top-level files
 
 - **WHEN** the repository is at HEAD
-- **THEN** `ls apps/plugin/.hermes-plugin/` lists `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh`, `README.md`, and the `tests/` directory
-- **AND** the only nested directory permitted under `apps/plugin/.hermes-plugin/` is `tests/`, and its contents SHALL NOT be referenced by `install.sh` or `uninstall.sh`
+- **THEN** `apps/plugin/.hermes-plugin/` SHALL contain `plugin.yaml`, `__init__.py`, `install.sh`, `uninstall.sh`, and `README.md`
+- **AND** Python test sources MAY live in its nested `tests/` directory
+- **AND** native installation MAY ship that subtree without a Rembric file-copy whitelist
+
+#### Scenario: Plugin subtree is natively installable
+
+- **WHEN** Hermes installs `susomejias/rembric/apps/plugin/.hermes-plugin`
+- **THEN** the installed plugin SHALL retain manifest name `rembric` and the unified plugin version
+- **AND** Rembric SHALL NOT promise that scripts/tests are excluded from the native-installed subtree
 
 ### Requirement: Plugin manifest declares lifecycle hooks
 
@@ -216,181 +223,25 @@ The provider SHALL NOT implement `get_config_schema` or `save_config`. Hermes ow
 - **THEN** the thread SHALL return without building a transcript or making the POST
 - **AND** the thread SHALL NOT call `release()` on a lock it never acquired
 
-### Requirement: Distribution via curl-installer
-
-The plugin SHALL be installable through a single shell script hosted at `apps/plugin/.hermes-plugin/install.sh` in the rembric monorepo. The script SHALL:
-
-- Default to `PLUGIN_SRC="https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin"`.
-- Honour an overriding `PLUGIN_SRC` environment variable that points at any local directory (for developers with a cloned monorepo) or any other reachable URL prefix.
-- Honour `HERMES_HOME` (default `${HOME}/.hermes`).
-- Create the target directory `${HERMES_HOME}/plugins/rembric/` if it does not exist.
-- Copy or fetch exactly three files into the target directory: `plugin.yaml`, `__init__.py`, `README.md`. When `PLUGIN_SRC` resolves to a local path that contains these files, the script SHALL prefer local `cp`; otherwise the script SHALL `curl -fsSL` from the prefix.
-- Exit non-zero on any unrecoverable error (target directory cannot be created; all sources for a required file fail). Print a clear `[rembric] error: <reason>` line to stderr before exiting.
-- Print a one-line success message identifying the install location and the next step to stdout: `✓ rembric installed at <path>\n  enable: hermes plugins enable rembric`.
-
-The recommended public install command in `README.md` SHALL be:
-
-```
-curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh
-```
-
-The legacy URL `https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh` SHALL return HTTP 404 — no shim file is kept under `plugin/.hermes-plugin/`. The breakage is communicated via the first post-restructure `hermes-plugin-vX.Y.Z` release notes (BREAKING), and via the install command published in `README.md`, `docs/agents.md`, and `apps/plugin/.hermes-plugin/README.md`.
-
-The plugin's README and docs SHALL NOT recommend a `git clone + cp -r` two-step install as a parallel path. The curl-installer with `PLUGIN_SRC` covers both the casual-user and the developer-with-clone case.
-
-#### Scenario: Default install fetches the three files via curl
-
-- **WHEN** a user runs `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh` in a fresh shell with `HERMES_HOME` unset
-- **THEN** the script creates `${HOME}/.hermes/plugins/rembric/` and writes `plugin.yaml`, `__init__.py`, `README.md` into it
-- **AND** stdout includes `✓ rembric installed at` followed by the resolved path
-
-#### Scenario: Developer install reads from local clone
-
-- **WHEN** a developer with a clone of rembric runs `PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh`
-- **THEN** the three files in the target directory are byte-identical to the files in the local source
-- **AND** no network request is issued by the script
-
-#### Scenario: Missing remote file fails loudly
-
-- **WHEN** the script runs with the default `PLUGIN_SRC` and the upstream `plugin.yaml` returns HTTP 404
-- **THEN** the script writes `[rembric] error:` to stderr and exits with a non-zero status
-- **AND** the target directory may exist but does not contain a half-written `plugin.yaml`
-
-#### Scenario: Legacy install URL returns 404
-
-- **WHEN** a user runs the legacy command `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/plugin/.hermes-plugin/install.sh | sh`
-- **THEN** `curl -fsSL` SHALL fail with a 404 from `raw.githubusercontent.com` and exit non-zero
-- **AND** no plugin files SHALL be installed
-- **AND** the user SHALL find the corrected install command in the README / docs / release notes
-
-### Requirement: Uninstall via local script
-
-The plugin SHALL be removable through a script at `apps/plugin/.hermes-plugin/uninstall.sh`, mirroring the conservative, idempotent semantics of `apps/plugin/.opencode-plugin/uninstall.sh`. The script SHALL:
-
-- Be POSIX-compatible and run cleanly such that re-running it on an already-clean system is a no-op that still exits zero (idempotent).
-- Honour `HERMES_HOME` (default `${HOME}/.hermes`).
-- Remove the three installed plugin files (`plugin.yaml`, `__init__.py`, `README.md`) from `${HERMES_HOME}/plugins/rembric/` if present, then `rmdir` the `rembric` plugin directory when it is empty.
-- Run `hermes plugins disable rembric` on a best-effort basis (failure SHALL NOT abort the uninstall).
-- NOT remove operator-owned state: it SHALL leave `${HERMES_HOME}/.env`, any stored credentials, and any `.rembric` project markers untouched.
-- Print which files were removed, which were already absent, and an explicit list of what it deliberately left in place (the `.env` credentials and `.rembric` files), so the operator can remove them manually if desired.
-
-#### Scenario: Uninstall removes plugin files and reports
-
-- **WHEN** the plugin is installed at `${HOME}/.hermes/plugins/rembric/` and the user runs `sh apps/plugin/.hermes-plugin/uninstall.sh`
-- **THEN** the three plugin files SHALL be removed and the now-empty `rembric` directory SHALL be `rmdir`-ed
-- **AND** stdout SHALL list the removed files and the deliberately-left-behind state
-
-#### Scenario: Uninstall is idempotent
-
-- **WHEN** `uninstall.sh` runs against a system where the plugin is already absent
-- **THEN** it SHALL exit zero
-- **AND** it SHALL report the files as already absent without erroring
-
-#### Scenario: Uninstall preserves credentials and project markers
-
-- **WHEN** `uninstall.sh` completes
-- **THEN** `${HERMES_HOME}/.env` and any `.rembric` files SHALL remain on disk
-- **AND** stdout SHALL name them as deliberately left in place
-
-### Requirement: User documentation
-
-The plugin's `README.md` (at `apps/plugin/.hermes-plugin/README.md`) SHALL include, in this order:
-
-1. The **TUI installer** as the primary install/upgrade instruction (the root `install.sh` shim, canonical URL `.../main/install.sh`, or `--agent=hermes`). The per-client manual install — `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.hermes-plugin/install.sh | sh` followed by `hermes plugins install rembric` to trigger the `requires_env` prompts — SHALL be retained below under an explicitly-labelled "Manual install" heading, not as the lead instruction.
-2. A description of what Hermes prompts for during install (the three `requires_env` vars) and where the answers are persisted (`${HERMES_HOME:-~/.hermes}/.env`).
-3. A two-block `~/.hermes/config.yaml` example showing **both** the `mcp_servers.rembric` block (registering the bundled bridge via `node` or `npx`) AND the `memory: provider: rembric` block, so users wire both the tool surface and the lifecycle in one go.
-4. A short "Project slug resolution" section explaining the `.rembric` → `REMBRIC_PROJECT_SLUG` → no-slug fallback in plain prose.
-5. A "Troubleshooting" section that covers: provider visible in `hermes memory status` but server unhealthy, missing slug diagnostic, mismatched provider-vs-bridge slug, `~/.hermes/.env` edited manually after install.
-
-Hermes is the one client whose MCP entry is **documented** rather than shipped as a manifest, so the transport contract other clients get from a tracked file has to be carried by this README instead — and a documented block that violates the contract teaches users to opt out of it. The `mcp_servers.rembric` block SHALL therefore satisfy four properties, each of which the block violated before this requirement:
-
-- It SHALL name `@rembric/mcp-bridge` at an **exact pinned version**, never `mcp-remote` and never a floating tag such as `@latest`. `npx` re-resolves a floating tag on every session start, so a compromised or broken publish reaches the user immediately.
-- Its `args` SHALL be exactly the `-y` flag and the pinned package specifier. There SHALL be **no** URL argument, **no** `--header` argument and **no** `--allow-http` argument: the bridge takes no arguments and reads its whole configuration from the environment.
-- The bearer SHALL reach the process through explicit `env` mappings for `REMBRIC_SERVER_URL`, `REMBRIC_API_TOKEN`, and `REMBRIC_PROJECT_SLUG`, never through `args`. Hermes MCP subprocesses SHALL NOT be documented as inheriting `${HERMES_HOME:-~/.hermes}/.env` implicitly. A token in an argument vector is readable by any local process via `ps` and `/proc/<pid>/cmdline`.
-- The slug SHALL be expressed as `REMBRIC_PROJECT_SLUG` in the environment, not as a `/mcp/<slug>` URL suffix. With no URL argument the environment variable is the only way to express a default slug — and it is the variable this plugin's own `requires_env` already collects, resolved by the bridge with the same precedence this capability's cascade defines (`.rembric` first, the environment variable second).
-
-Any `node`-instead-of-`npx` variant the README shows SHALL point at a current path; the pre-monorepo `plugin/bin/…` path SHALL NOT appear.
-
-The README SHALL NOT mention `~/.rembric/.env`, `${XDG_CONFIG_HOME}/rembric/.env`, `get_config_schema`, `save_config`, or `~/.hermes/rembric.json`. Those mechanisms were removed; documenting them would mislead users into setting up files the plugin ignores.
-
-The repository's root `README.md` SHALL be updated to list Hermes Agent under "Supported clients" alongside Claude Code, Codex CLI, and opencode, with a link to the plugin README at `apps/plugin/.hermes-plugin/README.md`.
-
-`docs/agents.md` SHALL gain (or retain, after path swap) a "Hermes Agent" section mirroring the structure of the existing Claude Code and Codex CLI sections, leading with the TUI installer and covering install (including the `requires_env` prompt flow as the manual fallback), config, env vars, slug resolution, and a pointer to the plugin README at the new path.
-
-That section's `mcp_servers.rembric` block SHALL satisfy the same four properties as the plugin README's, since it is the same block shown twice.
-
-`apps/plugin/README.md` and `apps/plugin/CHANGELOG.md` SHALL be updated to include Hermes alongside the other clients.
-
-#### Scenario: README leads with the TUI, manual curl-installer retained below
-
-- **WHEN** a user reads `apps/plugin/.hermes-plugin/README.md` top-to-bottom
-- **THEN** the first install instruction SHALL be the TUI installer
-- **AND** the `curl … install.sh | sh` + `hermes plugins install rembric` flow SHALL appear under an explicit "Manual install" heading
-
-#### Scenario: README pairs provider and bridge in the config example
-
-- **WHEN** a user reads `apps/plugin/.hermes-plugin/README.md` end-to-end
-- **THEN** the first config block they see registers BOTH the `mcp_servers.rembric` entry (bridge) AND the `memory.provider: rembric` entry (provider) in the same `~/.hermes/config.yaml` snippet
-- **AND** the prose preceding the block explicitly notes that lifecycle (provider) and tool access (bridge) are complementary, not redundant
-- **AND** the README contains no reference to `~/.rembric/.env` or `get_config_schema`
-
-#### Scenario: The documented MCP block pins an exact transport version
-
-- **WHEN** every `mcp_servers.rembric` block in `apps/plugin/.hermes-plugin/README.md` and `docs/agents.md` is read
-- **THEN** each SHALL name `@rembric/mcp-bridge@<x.y.z>` with an exact version
-- **AND** no occurrence of `mcp-remote` SHALL remain
-- **AND** no `@latest` or other floating tag SHALL appear in either block
-
-#### Scenario: The documented MCP block passes no arguments beyond the specifier
-
-- **WHEN** the `mcp_servers.rembric` block is read
-- **THEN** its `args` SHALL be exactly `-y` and the pinned package specifier
-- **AND** it SHALL contain no URL entry, no `--header` entry and no `--allow-http` entry
-
-#### Scenario: The documented MCP block keeps the token and the slug in the environment
-
-- **WHEN** the block is read
-- **THEN** the bearer SHALL be supplied through the explicit `env` mapping to the subprocess, not through `args`
-- **AND** the default project slug SHALL be expressed as `REMBRIC_PROJECT_SLUG`, not as a `/mcp/<slug>` suffix on `REMBRIC_SERVER_URL`
-
-#### Scenario: A per-directory `.rembric` still wins over the documented default
-
-- **GIVEN** a documented block setting `REMBRIC_PROJECT_SLUG=alpha` and a working directory containing `.rembric` with `PROJECT_SLUG=gamma`
-- **WHEN** the transport resolves the slug
-- **THEN** it SHALL use `gamma`
-- **AND** the resolution SHALL match the precedence this capability's slug cascade defines for the provider, so the two surfaces cannot disagree
-
-#### Scenario: No stale bridge path is documented
-
-- **WHEN** any local-checkout alternative to `npx` is shown
-- **THEN** it SHALL NOT name the pre-monorepo `plugin/bin/rembric-bridge.mjs` path
-
 ### Requirement: Version coupling with other client manifests
 
-The `version` field in `apps/plugin/.hermes-plugin/plugin.yaml` SHALL be managed by the single unified `plugin` release-please component (covering all of `apps/plugin/`, package `@rembric/plugin`, tag `plugin-vX.Y.Z`), via an `extra-files` updater on `plugin.yaml`. Hermes is NO LONGER a separate release-please component, and there is no `node-workspace` cascade.
-
-All plugin clients (claude, codex, opencode, hermes, pi) share the single `plugin` version — Hermes's `plugin.yaml::version` always equals the current `plugin` version. The `CLAUDE.md` "Releasing a new plugin version" guidance SHALL describe the two-track model (`server` · unified `plugin`), not the former six-component cascade. A client that is additionally published to a package registry does NOT get its own component or its own version line; it is one more `extra-files` carrier of the same `plugin` version.
-
-Hermes users still receive shared-asset updates on their next `curl … install.sh | sh` (the installer re-fetches from `main`); the unified version is bookkeeping/changelog, independent of how shared code reaches an install.
+The `version` in `apps/plugin/.hermes-plugin/plugin.yaml` SHALL remain managed by the single unified `plugin` release-please component covering all of `apps/plugin/`, package `@rembric/plugin`, tag `plugin-vX.Y.Z`, via its `extra-files` updater. All five clients SHALL share that version. There SHALL be no separate Hermes release component, node-workspace cascade or registry publication introduced by this change. Contributor guidance SHALL retain the two-track server/plugin model. Hermes SHALL obtain provider updates through native source tracking rather than repeated file-copy installer fetches; its MCP bridge and exact pins SHALL retain their separate existing contract.
 
 #### Scenario: A Hermes-only change bumps the unified plugin component
 
-- **WHEN** a contributor merges a `fix:` commit modifying only files under `apps/plugin/.hermes-plugin/`
-- **THEN** release-please SHALL open a release PR for the `plugin` component (tag `plugin-vX.Y.Z`), updating `plugin.yaml::version` alongside the other client carriers
-- **AND** the `server` version SHALL remain unchanged and the server image SHALL NOT be rebuilt
-- **AND** no separate `hermes-plugin` component / `hermes-plugin-v*` tag SHALL exist
+- **WHEN** a `fix:` commit changes only the Hermes subtree
+- **THEN** release-please SHALL update all plugin carriers together, without rebuilding the server or creating a separate Hermes tag
 
 #### Scenario: A shared-bin change bumps the one plugin version
 
-- **WHEN** a contributor merges a `feat:` commit modifying `apps/plugin/mcp-bridge/`
-- **THEN** release-please SHALL bump the single `plugin` component, moving `plugin.yaml::version` to the same new version as every other client
-- **AND** Hermes users SHALL receive the updated bridge on their next re-run of the installer from `main`
+- **WHEN** a `feat:` commit modifies `apps/plugin/mcp-bridge/`
+- **THEN** the single plugin version SHALL move for all clients
+- **AND** native Hermes provider distribution SHALL not silently change a complete current MCP pin
 
 #### Scenario: A change to a registry-published client still bumps Hermes's carrier
 
-- **WHEN** a contributor merges a commit modifying only `apps/plugin/.pi-plugin/`
-- **THEN** `plugin.yaml::version` SHALL be moved to the same new `plugin` version in the same release PR
-- **AND** the changelog entry, scoped by conventional commit, SHALL identify which client actually changed
+- **WHEN** only Pi changes
+- **THEN** Hermes's version carrier SHALL still move in the unified plugin release, with client-specific change attribution
 
 ### Requirement: The Hermes provider SHALL report each turn from `sync_turn` and print the server's notice from `prefetch`, plus a pre-compaction save reminder
 
@@ -780,3 +631,88 @@ Any resulting adapter change SHALL use a supported hook demonstrated on that hos
 - **WHEN** the completed-chat control makes its first MCP summary or memory write
 - **THEN** the actual session row SHALL already be ensured/resumed and the write SHALL attach to that explicit ID
 - **AND** failure of that control SHALL reject the registration change
+
+### Requirement: Hermes native distribution contract
+
+Hermes installation SHALL delegate to `hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable`, update to `hermes plugins update rembric`, and uninstall to `hermes plugins remove rembric`. The canonical root TUI SHALL remain the primary entry point. No file-copy fallback, automatic `adopt`, forced replacement or scan/dependency-consent bypass SHALL be added. Native failures SHALL propagate.
+
+#### Scenario: Fresh native installation
+
+- **WHEN** an operator consents to native install with no existing target
+- **THEN** Hermes SHALL own installation and source metadata for `rembric`
+- **AND** Rembric SHALL NOT copy provider files itself
+
+#### Scenario: Native update failure
+
+- **WHEN** the native update command fails
+- **THEN** Rembric SHALL return failure without reporting successful installation or executing legacy MCP repair
+
+### Requirement: Copied installs require explicit operator transition
+
+Native update/removal SHALL require canonical unpinned source metadata and a non-linked target. Explicit update MAY instead migrate a recognized legacy Rembric copy after separate interactive confirmation that Hermes gateway/CLI sessions and automatic restarts are stopped. Ordinary `--yes` SHALL NOT grant migration consent. Recognition SHALL require the old regular manifest/provider/README files, Rembric manifest identity and provider class, with no source record or Git metadata. Unknown, linked, foreign-source, pinned, malformed or inconsistent targets SHALL remain refused. The adapter SHALL inspect processes conservatively and refuse activity or unavailable inspection; it SHALL NOT stop/restart Hermes. The operator SHALL keep Hermes stopped throughout migration. A verified private full backup outside plugin discovery SHALL precede moving the old directory aside. Native install SHALL own new files; old unknown files SHALL remain in backup, not be overlaid. Failed installation or verification SHALL restore the previous directory/configuration and retain evidence only when no native publication journal remains, dependency selection is unchanged and Hermes remains stopped. Otherwise it SHALL preserve the backup and migration lock, report manual recovery required, and never restore a tree that a pending native journal could subsequently delete. Concurrent migration SHALL be refused. No force/adopt or alternate copy-install backend SHALL be introduced.
+
+#### Scenario: Copied directory contains unknown local data
+
+- **WHEN** explicit update encounters a recognized legacy Rembric copy with an operator file and the stopped-host operator confirms migration
+- **THEN** it SHALL retain the entire old directory in a verified private backup outside plugins and delegate installation to Hermes
+- **AND** it SHALL verify native source metadata before success without overwriting the new provider with old files
+
+#### Scenario: Migration is not unattended
+
+- **WHEN** migration lacks its specific interactive confirmation, Hermes is active, inspection fails, or another migration holds the lock
+- **THEN** no plugin or configuration mutation SHALL occur, even with ordinary `--yes`
+
+#### Scenario: Native migration fails
+
+- **WHEN** native installation fails or returns success without valid canonical source metadata, with no pending publication, changed dependency selection or renewed activity
+- **THEN** the adapter SHALL return failure, restore the old directory and configuration, retain its backup, and omit success/restart claims
+
+#### Scenario: Native recovery remains pending
+
+- **WHEN** native publication remains pending, dependency selection changes or Hermes starts during failure recovery
+- **THEN** the adapter SHALL preserve the backup and lock, require manual recovery with Hermes stopped, and SHALL NOT restore over uncertain native state
+
+#### Scenario: Native pinned or foreign install
+
+- **WHEN** a native source record is pinned or does not match the canonical source
+- **THEN** Rembric SHALL refuse mutation rather than silently unpin or replace the source
+
+### Requirement: Native ownership and conservative state preservation
+
+The user-approved native contract SHALL permit Hermes to select/reset `memory.provider`, manage plugin selection/grants and remove the entire native-managed plugin directory. Unrelated config values, MCP settings, exact bridge pins, credentials outside that directory and `.rembric` project markers SHALL remain preserved. Rembric SHALL NOT perform a general config rewrite. An untracked/linked directory SHALL NOT be silently removed. Repeated uninstall SHALL be a successful no-op only when both target and native source record are absent; inconsistent state SHALL fail visibly.
+
+#### Scenario: Native uninstall of a managed install
+
+- **WHEN** a consenting operator uninstalls a native-managed Rembric plugin
+- **THEN** Hermes SHALL own whole-directory removal and selection/grant cleanup
+- **AND** unrelated settings, MCP bridge configuration, credentials and project markers SHALL remain intact
+
+#### Scenario: Already absent installation
+
+- **WHEN** uninstall finds neither a Rembric directory nor its native source record
+- **THEN** it SHALL return success without invoking a failing native removal
+
+### Requirement: Recognized legacy MCP repair survives native distribution
+
+After successful native update, the existing recognition and backup rules for legacy MCP repair SHALL remain available. The recognized legacy transport block and incomplete bridge block SHALL receive the existing repair, with a backup written before mutation. Unrecognized/current MCP blocks SHALL remain untouched. This change SHALL NOT broaden repair patterns, replace the MCP transport, alter current bridge pins or introduce new tool wiring.
+
+#### Scenario: Recognized legacy block on native update
+
+- **WHEN** native update succeeds and the existing legacy migration recognizes the MCP block
+- **THEN** the existing backup-and-repair behavior SHALL run
+- **AND** unrelated configuration SHALL be preserved
+
+#### Scenario: Current pinned MCP block
+
+- **WHEN** native install/update/remove encounters a complete current MCP block
+- **THEN** its package pin and explicit environment mappings SHALL remain unchanged
+
+### Requirement: Native distribution documentation replaces obsolete instructions
+
+The distribution portions of user documentation SHALL lead with the canonical TUI and show native CLI commands only as manual/advanced fallback. They SHALL describe the supported default source, rejected local/ref operations, explicit copied-install backup/reinstall, Hermes-owned activation/removal effects and credential prompts. The old claim that Git-subdirectory installs are rejected SHALL be removed. The plugin README SHALL retain credential prompt/storage explanations, a combined provider/MCP configuration example, slug-resolution and troubleshooting sections. The first configuration example SHALL pair lifecycle provider and complementary tool bridge. Every MCP block in the plugin README and `docs/agents.md` SHALL use an exact pinned `@rembric/mcp-bridge` version, only `-y` and the package specifier in args, explicit environment mappings for server/token/slug, and no URL/header/allow-http arguments, floating tags or obsolete bridge paths. Per-directory `.rembric` SHALL retain precedence over the documented default slug. Removed credential mechanisms (`~/.rembric/.env`, `get_config_schema`, `save_config`, `~/.hermes/rembric.json`) SHALL not be documented. Root/plugin READMEs SHALL retain Hermes client links. Existing credential and slug guidance SHALL remain unchanged except for action wording required by native activation. No hand-written CHANGELOG entry SHALL be added.
+
+#### Scenario: Reader follows the installation instructions
+
+- **WHEN** a reader follows the Hermes distribution section
+- **THEN** it SHALL use the root TUI first and native subdirectory install as the manual fallback
+- **AND** it SHALL NOT instruct copying three files or claim `adopt` can migrate copied installations
