@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "rembric": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@rembric/mcp-bridge@0.45.1"
-      ],
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs"],
       "env": {
         "REMBRIC_SERVER_URL": "${user_config.server_url}",
         "REMBRIC_API_TOKEN": "${user_config.api_token}"

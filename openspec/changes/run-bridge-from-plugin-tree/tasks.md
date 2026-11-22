@@ -6,9 +6,9 @@
 
 ## 2. Claude Code and Codex manifests
 
-- [ ] 2.1 RED first: update the manifest assertions in `apps/web/src/test/invariants.test.ts` and `apps/plugin/test/` to expect `command: "node"` with `${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs` (Claude) and `./mcp-bridge/cli.mjs` with `cwd: "."` (Codex), and to refuse `npx` or a package specifier
-- [ ] 2.2 Change `apps/plugin/.claude-plugin/mcp.json` and `apps/plugin/.codex-plugin/mcp.json`; the tests from 2.1 pass
-- [ ] 2.3 Add a test that every module `cli.mjs` reaches by relative import exists under `apps/plugin/mcp-bridge/` and imports only siblings and `node:` builtins
+- [x] 2.1 RED first: update the manifest assertions in `apps/web/src/test/invariants.test.ts` and `apps/plugin/test/` to expect `command: "node"` with `${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs` (Claude) and `./mcp-bridge/cli.mjs` with `cwd: "."` (Codex), and to refuse `npx` or a package specifier
+- [x] 2.2 Change `apps/plugin/.claude-plugin/mcp.json` and `apps/plugin/.codex-plugin/mcp.json`; the tests from 2.1 pass. In the same commit, drop the two `mcp.json` JSONPath entries from `release-please-config.json` `extra-files` (their `args[1]` target no longer exists) and delete `scripts/release-please-jsonpath.test.ts`
+- [x] 2.3 Add a test that every module `cli.mjs` reaches by relative import exists under `apps/plugin/mcp-bridge/` and imports only siblings and `node:` builtins
 
 ## 3. opencode
 
@@ -27,8 +27,8 @@
 
 ## 5. Stop publishing the bridge
 
-- [ ] 5.1 RED first, in `scripts/release-workflow.test.ts`: `publish-npm` publishes `apps/plugin/.pi-plugin` only, runs no bridge pack assertion, and `release-please-config.json` `extra-files` has no `mcp.json` JSONPath entry while `mcp-bridge/package.json` stays
-- [ ] 5.2 Edit `.github/workflows/release-please.yml` and `release-please-config.json`; delete `scripts/mcp-bridge-package.mjs` and its test; set `"private": true` in `apps/plugin/mcp-bridge/package.json`
+- [ ] 5.1 RED first, in `scripts/release-workflow.test.ts`: `publish-npm` publishes `apps/plugin/.pi-plugin` only, runs no bridge pack assertion, and `release-please-config.json` `extra-files` keeps `mcp-bridge/package.json` (the JSONPath entries already went with 2.2)
+- [ ] 5.2 Edit `.github/workflows/release-please.yml`; delete `scripts/mcp-bridge-package.mjs` and its test; set `"private": true` in `apps/plugin/mcp-bridge/package.json`
 - [ ] 5.3 Confirm `node scripts/pi-package.mjs materialize` and `assert-pack` still pass, so `@rembric/pi` keeps embedding the bridge modules
 - [ ] 5.4 Consult `.agents/skills/npm-security-best-practices/` for the `package.json` and workflow edits; `ALLOWED_BUILD_SCRIPTS` and the lockfile are unchanged
 

@@ -1262,31 +1262,79 @@ describe('the published npm packages', () => {
   });
 });
 
-describe('the bridge version carriers', () => {
+describe('the bridge runs from the plugin tree', () => {
   const pluginVersion = (
     JSON.parse(readFileSync(join(repoRoot, 'apps/plugin/package.json'), 'utf8')) as {
       version: string;
     }
   ).version;
+  const bridgeDir = join(repoRoot, 'apps/plugin/mcp-bridge');
 
-  it('keeps every bridge pin equal to the unified plugin version', () => {
-    const pin = /@rembric\/mcp-bridge@(\d+\.\d+\.\d+)/g;
+  function manifestEntry(path: string): Record<string, unknown> {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, path), 'utf8')) as {
+      mcpServers: { rembric: Record<string, unknown> };
+    };
+    return manifest.mcpServers.rembric;
+  }
+
+  it('Claude Code spawns the bridge shipped in its own plugin copy', () => {
+    expect(manifestEntry('apps/plugin/.claude-plugin/mcp.json')).toEqual({
+      command: 'node',
+      args: ['${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs'],
+      env: {
+        REMBRIC_SERVER_URL: '${user_config.server_url}',
+        REMBRIC_API_TOKEN: '${user_config.api_token}',
+      },
+    });
+  });
+
+  it('Codex spawns the bridge relative to its installed plugin directory', () => {
+    expect(manifestEntry('apps/plugin/.codex-plugin/mcp.json')).toEqual({
+      command: 'node',
+      args: ['./mcp-bridge/cli.mjs'],
+      cwd: '.',
+      env_vars: ['REMBRIC_SERVER_URL', 'REMBRIC_API_TOKEN', 'PWD'],
+    });
+  });
+
+  it('no operational file pins a published bridge version', () => {
     const carriers = execSync(
-      `git -C ${repoRoot} grep -l -E '@rembric/mcp-bridge@[0-9]+\\.[0-9]+\\.[0-9]+' -- ':!openspec/**' ':!*.test.*' || true`,
+      `git -C ${repoRoot} grep -l -E '@rembric/mcp-bridge@[0-9]+\\.[0-9]+\\.[0-9]+' -- ':!openspec/**' ':!*.test.*' ':!apps/web/src/test/fixtures/**' ':!**/CHANGELOG.md' || true`,
       { encoding: 'utf8' },
     )
       .split('\n')
       .filter(Boolean);
-    expect(carriers, 'no operational bridge pin carriers were found').not.toHaveLength(0);
-    for (const carrier of carriers) {
-      const pins = [...readFileSync(join(repoRoot, carrier), 'utf8').matchAll(pin)].map(
-        (match) => match[1],
-      );
-      expect(pins, `${carrier} must carry at least one bridge pin`).not.toHaveLength(0);
-      expect(pins, `${carrier} must use the unified plugin version`).toEqual(
-        pins.map(() => pluginVersion),
-      );
+    expect(carriers).toEqual([]);
+  });
+
+  it('cli.mjs reaches only sibling modules and node: builtins', () => {
+    const seen = new Set<string>();
+    const pending = ['cli.mjs'];
+    while (pending.length > 0) {
+      const name = pending.pop() as string;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const path = join(bridgeDir, name);
+      expect(existsSync(path), `${name} is imported but missing`).toBe(true);
+      const source = readFileSync(path, 'utf8');
+      for (const match of source.matchAll(/\bfrom\s+'([^']+)'|\bimport\(\s*'([^']+)'\s*\)/g)) {
+        const specifier = match[1] ?? match[2] ?? '';
+        if (specifier.startsWith('node:')) continue;
+        expect(specifier, `${name} imports ${specifier}`).toMatch(/^\.\/[\w.-]+\.mjs$/);
+        pending.push(specifier.slice(2));
+      }
     }
+    expect([...seen].sort()).toEqual([
+      'bridge.mjs',
+      'cli.mjs',
+      'rembric-dotenv.mjs',
+      'rembric-host-binding.mjs',
+      'rembric-project.mjs',
+      'slug.mjs',
+    ]);
+  });
+
+  it('the opencode hook and the bridge package still carry the plugin version', () => {
     const bridgeVersion = publishedManifests.find(
       (manifest) => manifest.name === '@rembric/mcp-bridge',
     )?.version;
