@@ -145,9 +145,10 @@ describe('the resumed-process read line', () => {
       const url = String(input);
       if (url.endsWith('/summary')) {
         return new Proxy(new Response('{"ok":true,"summary":"stored"}', { status: 200 }), {
-          get(target, prop, receiver) {
+          get(target, prop) {
             if (prop === 'json' || prop === 'text') bodyReadAttempted = true;
-            return Reflect.get(target, prop, receiver);
+            const value: unknown = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? value.bind(target) : value;
           },
         });
       }
