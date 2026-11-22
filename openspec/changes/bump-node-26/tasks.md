@@ -17,4 +17,4 @@
 
 ## 4. Follow-up outside this change
 
-- [ ] 4.1 `@rembric/mcp-bridge` exits 1 ("transport failure: This operation was aborted") when stdin closes while an id-less request is still in flight. Under Node 26 the race hits `bridge.test.ts` "exits when stdin closes during a held-open SSE response" in 3 of 30 runs; on Node 22 it hit 0 of 12.
+- [x] 4.1 `@rembric/mcp-bridge` exits 1 ("transport failure: This operation was aborted") when stdin closes while an id-less request is still in flight. Under Node 26 the race hits `bridge.test.ts` "exits when stdin closes during a held-open SSE response" in 3 of 30 runs; on Node 22 it hit 0 of 12. Fixed by `exit-bridge-cleanly-on-stdin-close` (#562).
