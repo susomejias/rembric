@@ -728,6 +728,113 @@ describe('stdio to HTTP transport', () => {
     server.close();
   });
 
+  async function closeStdinWhileHeld(held: 'notification' | 'request') {
+    const seen: string[] = [];
+    let wake: () => void = () => {};
+    const server = createServer(async (request, response) => {
+      if (request.url === '/healthz') {
+        response.end(JSON.stringify({ version: '0.28.2' }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const message = JSON.parse(Buffer.concat(chunks).toString()) as {
+        id?: number;
+        method?: string;
+      };
+      const isNotification = message.method === 'notifications/initialized';
+      if (message.method !== 'initialize') {
+        seen.push(message.method ?? '');
+        wake();
+        if (held === (isNotification ? 'notification' : 'request')) return;
+      }
+      if (isNotification) {
+        response.statusCode = 202;
+        response.end();
+      } else {
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+      }
+    });
+    const base = await listen(server);
+    const client = await startBridge({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+    });
+    client.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    await client.nextLine();
+    client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    client.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {} });
+    while (seen.length < 2) {
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+    let relayed = '';
+    client.child.stdout.on('data', (chunk: string) => {
+      relayed += chunk;
+    });
+    client.child.stdin.end();
+    const [code] = (await Promise.race([
+      once(client.child, 'exit') as Promise<[number | null, string | null]>,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('bridge did not exit')), 2000),
+      ),
+    ])) as [number | null, string | null];
+    server.closeAllConnections();
+    server.close();
+    return { code, stderr: client.stderr, relayed };
+  }
+
+  it('exits 0 when stdin closes while a notification is still in flight', async () => {
+    const result = await closeStdinWhileHeld('notification');
+    expect(result.stderr).not.toContain('transport failure');
+    expect(result.code).toBe(0);
+  });
+
+  it('relays no error for a request that closing stdin aborted', async () => {
+    const result = await closeStdinWhileHeld('request');
+    expect(result.relayed).toBe('');
+    expect(result.code).toBe(0);
+  });
+
+  it('still exits non-zero when a notification fails on the transport, erroring held requests', async () => {
+    let toolRequestSeen: () => void = () => {};
+    const toolRequest = new Promise<void>((resolve) => {
+      toolRequestSeen = resolve;
+    });
+    const server = createServer(async (request, response) => {
+      if (request.url === '/healthz') {
+        response.end(JSON.stringify({ version: '0.28.2' }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const message = JSON.parse(Buffer.concat(chunks).toString()) as { method?: string };
+      if (message.method === 'tools/call') {
+        toolRequestSeen();
+        response.setHeader('content-type', 'text/event-stream');
+        response.write(': open\n\n');
+      } else {
+        response.destroy();
+      }
+    });
+    const base = await listen(server);
+    const client = await startBridge({
+      REMBRIC_SERVER_URL: base,
+      REMBRIC_API_TOKEN: 'secret-token',
+    });
+    client.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {} });
+    await toolRequest;
+    const exited = once(client.child, 'exit') as Promise<[number | null, string | null]>;
+    client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    expect(await client.nextLine()).toMatchObject({ id: 2, error: { code: -32000 } });
+    const [code] = await exited;
+    expect(client.stderr).toContain('transport failure');
+    expect(code).not.toBe(0);
+    server.closeAllConnections();
+    server.close();
+  });
+
   it('keeps concurrent request IDs independent', async () => {
     const server = createServer(async (request, response) => {
       if (request.url === '/healthz') {

@@ -5,6 +5,7 @@ import { projectDirectorySource, resolveProjectDirectory } from './slug.mjs';
 const MIN_SERVER_VERSION = '0.24.0';
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 const TRANSPORT_ERROR_CODE = -32000;
+const STDIN_CLOSED = Symbol('stdin closed');
 
 function semver(value) {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(value ?? '');
@@ -141,8 +142,7 @@ export async function runBridge({
     return headers;
   }
 
-  async function post(raw, isInitialize) {
-    const controller = new globalThis.AbortController();
+  async function post(raw, isInitialize, controller) {
     controllers.add(controller);
     try {
       const response = await fetchImpl(endpoint, {
@@ -262,14 +262,16 @@ export async function runBridge({
     if (!message) return;
     const isInitialize = message.method === 'initialize';
 
+    const controller = new globalThis.AbortController();
     try {
-      const posted = await post(raw, isInitialize);
+      const posted = await post(raw, isInitialize, controller);
       await consume(posted.response, {
         expectedId: hasId(message) ? message.id : undefined,
         controller: posted.controller,
         initialize: isInitialize,
       });
     } catch (error) {
+      if (controller.signal.reason === STDIN_CLOSED) return;
       const failure = describeFailure(error);
       const status = /HTTP (\d+)/.exec(failure)?.[1];
       failHostRequest(message, failure, status ? Number(status) : undefined);
@@ -290,7 +292,7 @@ export async function runBridge({
     stdin.on('end', async () => {
       if (terminated) return;
       if (buffer) await handleLine(buffer);
-      for (const controller of controllers) controller.abort();
+      for (const controller of controllers) controller.abort(STDIN_CLOSED);
       await Promise.allSettled(active);
       finish?.(0);
     });
