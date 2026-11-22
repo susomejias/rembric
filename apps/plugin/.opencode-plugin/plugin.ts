@@ -546,8 +546,7 @@ const RembricPluginV2: V2Plugin = {
         core.appendUserMessage(sessionID, text);
       }
 
-      const block = await buildBlock(sessionID, text);
-      if (block) injected.set(sessionID, block);
+      injected.set(sessionID, await buildBlock(sessionID, text));
     });
 
     await ctx.session.hook('context', async (input) => {
