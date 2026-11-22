@@ -158,9 +158,9 @@ The repository extraction SHALL NOT change any observable behavior: HTTP endpoin
 
 ### Requirement: Scoped repository reads MUST require a Scope parameter, not merely a naming convention
 
-Data-access confinement is enforced by a grep gate that matches call sites by method-name prefix: `admin*` reads are callable only from allow-listed call sites, `unsafe*` marks a deliberate cross-scope read. A repository read that is unscoped but carries **neither** prefix is invisible to that gate, so an unscoped aggregate can be served from the MCP layer while the invariant test passes — which was the case for the session status count consumed by `memory.stats` until `countByStatus` was made to require a `Scope`.
-
 Every repository read reachable from the MCP layer SHALL take the `Scope` as a required parameter, so omitting it is a type error rather than a naming oversight. An unscoped variant SHALL exist only under the `admin` prefix, bringing it inside the confinement gate.
+
+Data-access confinement is enforced by a grep gate that matches call sites by method-name prefix: `admin*` reads are callable only from allow-listed call sites, `unsafe*` marks a deliberate cross-scope read. A repository read that is unscoped but carries **neither** prefix is invisible to that gate, so an unscoped aggregate can be served from the MCP layer while the invariant test passes — which was the case for the session status count consumed by `memory.stats` until `countByStatus` was made to require a `Scope`.
 
 An MCP-reachable read MAY legitimately take no `Scope` — but only when the scoped alternative does not exist or is shown by MEASUREMENT to be unaffordable, and only under the `admin` prefix with the call site named as a `(file, method)` pair. "Would be slower" is not the standard; the numbers and the instrument that produced them are, and they SHALL be recorded with the change that admits the read so that the next proposal to scope it meets a figure rather than an assertion. Two such records stand behind the relevance level's term statistics:
 
@@ -344,13 +344,7 @@ The harness SHALL be deterministic under a stated seed, so that a before-and-aft
 
 ### Requirement: Hot query paths MUST retain the index and query shapes their measured basis rests on
 
-Every figure below was captured on one machine against a corpus rebuilt by
-`pnpm run corpus:build -- --db <dir> --memories 50000 --sessions 50000 --relations 43000 --prompts 50000 --seed 1`.
-They establish the **relative ordering of alternatives and the shape of the
-growth**, which is what the decisions rest on — not absolute latency on any
-host. A reader on other hardware SHALL expect different absolute numbers and the
-same ordering; a change that reverses an ordering is the signal to re-open the
-decision.
+Every figure below was captured on one machine against a corpus rebuilt by `pnpm run corpus:build -- --db <dir> --memories 50000 --sessions 50000 --relations 43000 --prompts 50000 --seed 1`. They establish the **relative ordering of alternatives and the shape of the growth**, which is what the decisions rest on — not absolute latency on any host. A reader on other hardware SHALL expect different absolute numbers and the same ordering; a change that reverses an ordering is the signal to re-open the decision.
 
 `EXPLAIN QUERY PLAN` is the primary detector, not wall-clock. A `SCAN` is
 invisible at the few hundred rows a real installation holds today and fatal at
