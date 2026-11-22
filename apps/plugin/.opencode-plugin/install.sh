@@ -1,8 +1,8 @@
 #!/bin/sh
 # rembric opencode plugin installer.
 #
-# Download plugin.ts and its shared modules from the rembric main branch and
-# install them to ~/.config/opencode/plugins/ and ~/.config/rembric/bin/.
+# Download plugin.ts, its shared modules and the MCP bridge from the rembric
+# main branch and install them to ~/.config/opencode/plugins/ and ~/.config/rembric/bin/.
 # The installer never edits opencode.json; the plugin config hook owns its MCP entry.
 # Honour PLUGIN_SRC, BIN_SRC and MCP_BRIDGE_SRC for local development.
 #
@@ -30,6 +30,8 @@ DOTENV_LIB='rembric-dotenv.mjs'
 PROJECT_LIB='rembric-project.mjs'
 CORE_LIB='rembric-plugin-core.mjs'
 SHARED_LIBS="$DOTENV_LIB $PROJECT_LIB $CORE_LIB"
+# cli.mjs goes last, so its presence means every module it imports is in place.
+BRIDGE_MODULES='slug.mjs rembric-host-binding.mjs bridge.mjs cli.mjs'
 # rembric-dotenv.mjs is reached through rembric-project.mjs's own relative import.
 IMPORTED_LIBS="$PROJECT_LIB $CORE_LIB"
 
@@ -64,10 +66,22 @@ fetch_file() {
   return 0
 }
 
-fetch_file "${MCP_BRIDGE_SRC}/${DOTENV_LIB}" "${REMBRIC_BIN_DIR}/${DOTENV_LIB}" || exit 1
-fetch_file "${MCP_BRIDGE_SRC}/${PROJECT_LIB}" "${REMBRIC_BIN_DIR}/${PROJECT_LIB}" || exit 1
-fetch_file "${BIN_SRC}/${CORE_LIB}" "${REMBRIC_BIN_DIR}/${CORE_LIB}" || exit 1
-for lib in $SHARED_LIBS; do chmod 644 "${REMBRIC_BIN_DIR}/${lib}"; done
+install_file() {
+  staged="${2}.tmp.$$"
+  if ! fetch_file "$1" "$staged"; then
+    rm -f "$staged"
+    return 1
+  fi
+  chmod 644 "$staged"
+  mv -f "$staged" "$2"
+}
+
+install_file "${MCP_BRIDGE_SRC}/${DOTENV_LIB}" "${REMBRIC_BIN_DIR}/${DOTENV_LIB}" || exit 1
+install_file "${MCP_BRIDGE_SRC}/${PROJECT_LIB}" "${REMBRIC_BIN_DIR}/${PROJECT_LIB}" || exit 1
+install_file "${BIN_SRC}/${CORE_LIB}" "${REMBRIC_BIN_DIR}/${CORE_LIB}" || exit 1
+for module in $BRIDGE_MODULES; do
+  install_file "${MCP_BRIDGE_SRC}/${module}" "${REMBRIC_BIN_DIR}/${module}" || exit 1
+done
 
 # Every relative dev-time import is rewritten to its absolute installed path,
 # which Bun's ESM resolver in opencode 1.15.x accepts.
@@ -109,6 +123,7 @@ for lib in $SHARED_LIBS; do
 done
 
 cat <<EOF
+  Bridge:     node ${REMBRIC_BIN_DIR}/cli.mjs
   Config:     ${OPENCODE_JSON} (left untouched)
 
   The config hook adds the MCP entry in memory and upgrades legacy launchers.

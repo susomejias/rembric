@@ -1334,13 +1334,11 @@ describe('the bridge runs from the plugin tree', () => {
     ]);
   });
 
-  it('the opencode hook and the bridge package still carry the plugin version', () => {
+  it('the bridge package still carries the plugin version', () => {
     const bridgeVersion = publishedManifests.find(
       (manifest) => manifest.name === '@rembric/mcp-bridge',
     )?.version;
     expect(bridgeVersion).toBe(pluginVersion);
-    const opencode = readFileSync(join(repoRoot, 'apps/plugin/.opencode-plugin/plugin.ts'), 'utf8');
-    expect(opencode).toContain(`const MCP_BRIDGE_VERSION = '${pluginVersion}';`);
   });
 });
 

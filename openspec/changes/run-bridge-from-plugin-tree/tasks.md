@@ -12,10 +12,10 @@
 
 ## 3. opencode
 
-- [ ] 3.1 RED first, in `apps/plugin/.opencode-plugin/plugin.test.ts`: with `~/.config/rembric/bin/cli.mjs` present the hook sets `['node', '<abs>/cli.mjs']`; with it absent an existing `npx` or legacy command is left untouched, no entry is created, and one hint is logged
-- [ ] 3.2 Implement the hook in `apps/plugin/.opencode-plugin/plugin.ts`; delete `MCP_BRIDGE_VERSION`
-- [ ] 3.3 `apps/plugin/.opencode-plugin/install.sh`: fetch `cli.mjs`, `bridge.mjs`, `slug.mjs` and `rembric-host-binding.mjs` to `~/.config/rembric/bin/` with write-then-rename, write `rembric.ts` last, and print the `node` snippet; `install.test.ts` covers a full install, an interrupted download leaving no partial `cli.mjs`, and `opencode.json` staying untouched
-- [ ] 3.4 `apps/plugin/.opencode-plugin/uninstall.sh`: keep all six bridge modules while the Hermes `config.yaml` references `~/.config/rembric/bin/cli.mjs` (both the expanded and the `~/` spelling) and name them as kept; test both branches
+- [x] 3.1 RED first, in `apps/plugin/.opencode-plugin/plugin.test.ts`: with `~/.config/rembric/bin/cli.mjs` present the hook sets `['node', '<abs>/cli.mjs']`; with it absent an existing `npx` or legacy command is left untouched, no entry is created, and one hint is logged
+- [x] 3.2 Implement the hook in `apps/plugin/.opencode-plugin/plugin.ts`; delete `MCP_BRIDGE_VERSION`
+- [x] 3.3 `apps/plugin/.opencode-plugin/install.sh`: fetch `cli.mjs`, `bridge.mjs`, `slug.mjs` and `rembric-host-binding.mjs` to `~/.config/rembric/bin/` with write-then-rename, write `rembric.ts` last, and print the `node` snippet; `install.test.ts` covers a full install (modules byte-identical to the repository), a source that stops mid-list (previous `cli.mjs` kept, no plugin file), a network failure that leaves partial curl output (previously installed modules intact, no `.tmp` left), and `opencode.json` staying untouched
+- [x] 3.4 `apps/plugin/.opencode-plugin/uninstall.sh`: keep all six bridge modules (including `rembric-project.mjs` and `rembric-dotenv.mjs`, which the bridge imports and which this script used to remove unconditionally) while the Hermes `config.yaml` references `~/.config/rembric/bin/cli.mjs` (both the expanded and the `~/` spelling) and name them as kept; test both branches
 
 ## 4. Hermes and the TUI installer
 

@@ -27,6 +27,14 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 // artifacts from disk (cp), never the network.
 
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
+const BRIDGE_MODULES = [
+  'cli.mjs',
+  'bridge.mjs',
+  'slug.mjs',
+  'rembric-host-binding.mjs',
+  'rembric-project.mjs',
+  'rembric-dotenv.mjs',
+];
 const INSTALL_SH = join(REPO_ROOT, 'apps', 'plugin', 'install.sh');
 const ROOT_SHIM = join(REPO_ROOT, 'install.sh');
 
@@ -1047,6 +1055,7 @@ describe('opencode installer verifications', () => {
       join(home, '.config', 'rembric', 'bin', 'rembric-dotenv.mjs'),
       join(home, '.config', 'rembric', 'bin', 'rembric-project.mjs'),
       join(home, '.config', 'rembric', 'bin', 'rembric-plugin-core.mjs'),
+      ...BRIDGE_MODULES.map((name) => join(home, '.config', 'rembric', 'bin', name)),
     ];
     const first = run(['--agent=opencode', '--action=install'], { home });
     expect(first.code).toBe(0);
@@ -1057,6 +1066,80 @@ describe('opencode installer verifications', () => {
     expect(second.code).toBe(0);
     expect(second.out).toContain('left untouched');
     expect(files.map((f) => readFileSync(f, 'utf8'))).toEqual(snapshot);
+  });
+
+  it('places the bridge modules byte-identical to the repository and names the node command', () => {
+    const bin = join(home, '.config', 'rembric', 'bin');
+    const result = run(['--agent=opencode', '--action=install'], { home });
+
+    expect(result.code).toBe(0);
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bin, name), 'utf8'), name).toBe(
+        readFileSync(join(REPO_ROOT, 'apps', 'plugin', 'mcp-bridge', name), 'utf8'),
+      );
+    }
+    expect(readdirSync(bin).filter((name) => name.includes('.tmp'))).toEqual([]);
+    expect(result.out).toContain(`node ${join(bin, 'cli.mjs')}`);
+  });
+
+  it('an interrupted bridge download keeps the previous bridge and writes no plugin file', () => {
+    const bin = join(home, '.config', 'rembric', 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'cli.mjs'), 'previous bridge\n');
+    const partial = mkdtempSync(join(tmpdir(), 'rembric-partial-bridge-'));
+    for (const name of BRIDGE_MODULES.filter((module) => module !== 'bridge.mjs')) {
+      writeFileSync(
+        join(partial, name),
+        readFileSync(join(REPO_ROOT, 'apps', 'plugin', 'mcp-bridge', name)),
+      );
+    }
+
+    const result = spawnSync('/bin/sh', [OPENCODE_INSTALL], {
+      env: {
+        HOME: home,
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        PLUGIN_SRC: join(REPO_ROOT, 'apps', 'plugin', '.opencode-plugin'),
+        BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin'),
+        MCP_BRIDGE_SRC: partial,
+      },
+      encoding: 'utf8',
+    });
+    rmSync(partial, { recursive: true, force: true });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(join(bin, 'cli.mjs'), 'utf8')).toBe('previous bridge\n');
+    expect(readdirSync(bin).filter((name) => name.includes('.tmp'))).toEqual([]);
+    expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
+  });
+
+  it('a failed network download leaves the previously installed modules intact', () => {
+    const bin = join(home, '.config', 'rembric', 'bin');
+    mkdirSync(bin, { recursive: true });
+    for (const name of BRIDGE_MODULES) writeFileSync(join(bin, name), 'previous\n');
+    const fakeBin = mkdtempSync(join(tmpdir(), 'rembric-partial-curl-'));
+    writeFileSync(
+      join(fakeBin, 'curl'),
+      '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do [ "$1" = -o ] && printf partial > "$2"; shift; done\nexit 22\n',
+    );
+    chmodSync(join(fakeBin, 'curl'), 0o755);
+
+    const result = spawnSync('/bin/sh', [OPENCODE_INSTALL], {
+      env: {
+        HOME: home,
+        PATH: `${fakeBin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        PLUGIN_SRC: join(REPO_ROOT, 'apps', 'plugin', '.opencode-plugin'),
+        BIN_SRC: join(REPO_ROOT, 'apps', 'plugin', 'bin'),
+        MCP_BRIDGE_SRC: 'https://example.invalid/mcp-bridge',
+      },
+      encoding: 'utf8',
+    });
+    rmSync(fakeBin, { recursive: true, force: true });
+
+    expect(result.status).not.toBe(0);
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bin, name), 'utf8'), name).toBe('previous\n');
+    }
+    expect(readdirSync(bin).filter((name) => name.includes('.tmp'))).toEqual([]);
   });
 
   it('leaves an existing opencode.json byte-identical', () => {
@@ -1218,6 +1301,27 @@ describe('opencode installer verifications', () => {
     expect(typeof mod.RembricPlugin).toBe('function');
     expect(mod.default).toEqual({ id: 'rembric.lifecycle', setup: expect.any(Function) });
     expect(Object.keys(mod)).toEqual(['RembricPlugin', 'default']);
+  });
+
+  it.each([
+    ['expanded', (home: string) => `${home}/.config/rembric/bin/cli.mjs`],
+    ['tilde', () => '~/.config/rembric/bin/cli.mjs'],
+  ])('uninstall keeps the bridge while Hermes runs it (%s path)', (_, path) => {
+    const bin = join(home, '.config', 'rembric', 'bin');
+    expect(run(['--agent=opencode', '--action=install'], { home }).code).toBe(0);
+    mkdirSync(join(home, '.hermes'), { recursive: true });
+    writeFileSync(
+      join(home, '.hermes', 'config.yaml'),
+      `mcp_servers:\n  rembric:\n    command: node\n    args: ['${path(home)}']\n`,
+    );
+
+    const result = run(['--agent=opencode', '--action=uninstall'], { home });
+
+    expect(result.code).toBe(0);
+    for (const name of BRIDGE_MODULES) expect(existsSync(join(bin, name)), name).toBe(true);
+    expect(existsSync(join(bin, 'rembric-plugin-core.mjs'))).toBe(false);
+    expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(false);
+    expect(result.out).toContain('kept for Hermes');
   });
 
   it('every file the install copies is removed by the uninstall', () => {

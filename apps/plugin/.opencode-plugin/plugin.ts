@@ -1,12 +1,13 @@
 // x-release-please-start-version
 // @rembric-plugin-version 0.45.1
-const MCP_BRIDGE_VERSION = '0.45.1';
 // x-release-please-end
 // cwd-spike-result: plan-a
 // dispose-spike-result: fire-and-forget
 // ONLY `RembricPlugin` may be exported: opencode invokes every named export as a Plugin function.
 
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import {
   createSessionProtocol,
@@ -201,7 +202,14 @@ export const RembricPlugin: Plugin = async (ctx) => {
 
   return {
     config: (config) => {
-      const command = ['npx', '-y', `@rembric/mcp-bridge@${MCP_BRIDGE_VERSION}`];
+      const bridge = join(homedir(), '.config', 'rembric', 'bin', 'cli.mjs');
+      if (!existsSync(bridge)) {
+        diag(
+          `MCP bridge not found at ${bridge}; re-run the Rembric installer to enable memory tools`,
+        );
+        return;
+      }
+      const command = ['node', bridge];
       config.mcp ??= {};
       const rembric = (config.mcp.rembric ??= {
         type: 'local',

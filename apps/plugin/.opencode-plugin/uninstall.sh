@@ -8,8 +8,16 @@ set -u
 REMBRIC_BIN_DIR="${HOME}/.config/rembric/bin"
 REMBRIC_DIR="${HOME}/.config/rembric"
 PLUGIN_DEST="${HOME}/.config/opencode/plugins/rembric.ts"
-# Must stay in step with install.sh's list, which is what put these on disk.
-SHARED_LIBS='rembric-dotenv.mjs rembric-project.mjs rembric-plugin-core.mjs'
+# Must stay in step with install.sh's lists, which are what put these on disk.
+OPENCODE_ONLY_LIBS='rembric-plugin-core.mjs'
+BRIDGE_MODULES='cli.mjs bridge.mjs slug.mjs rembric-host-binding.mjs rembric-project.mjs rembric-dotenv.mjs'
+HERMES_CONFIG="${HERMES_HOME:-${HOME}/.hermes}/config.yaml"
+
+hermes_runs_bridge() {
+  [ -f "$HERMES_CONFIG" ] || return 1
+  grep -qF "${REMBRIC_BIN_DIR}/cli.mjs" "$HERMES_CONFIG" && return 0
+  grep -qF '~/.config/rembric/bin/cli.mjs' "$HERMES_CONFIG"
+}
 
 removed=''
 absent=''
@@ -25,9 +33,20 @@ drop() {
 }
 
 drop "$PLUGIN_DEST"
-for lib in $SHARED_LIBS; do
+for lib in $OPENCODE_ONLY_LIBS; do
   drop "${REMBRIC_BIN_DIR}/${lib}"
 done
+kept=''
+if hermes_runs_bridge; then
+  for module in $BRIDGE_MODULES; do
+    [ -e "${REMBRIC_BIN_DIR}/${module}" ] && kept="${kept}    ${REMBRIC_BIN_DIR}/${module}
+"
+  done
+else
+  for module in $BRIDGE_MODULES; do
+    drop "${REMBRIC_BIN_DIR}/${module}"
+  done
+fi
 
 rmdir "$REMBRIC_BIN_DIR" 2>/dev/null || true
 rmdir "$REMBRIC_DIR" 2>/dev/null || true
@@ -40,6 +59,10 @@ fi
 
 if [ -n "$absent" ]; then
   printf '  Not present (already absent):\n%s\n' "$absent"
+fi
+
+if [ -n "$kept" ]; then
+  printf '  Bridge kept for Hermes (%s runs it):\n%s\n' "$HERMES_CONFIG" "$kept"
 fi
 
 printf '  NOT removed (edit manually if you want them gone):\n'
