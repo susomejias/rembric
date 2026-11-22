@@ -1,54 +1,5 @@
 ## ADDED Requirements
 
-### Requirement: Shared dotenv lib among the bridge files SHALL be the single source of truth for slug parsing
-
-The repository SHALL contain a shared dotenv module exporting exactly: `parseDotenv(content: string)`, `readRembricSlug(directory: string)`, and `SLUG_RE`. This module SHALL be the only place where the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and the dotenv parser live in JS/TS form across the entire repository.
-
-Its canonical location SHALL be `apps/plugin/mcp-bridge/rembric-dotenv.mjs`. It moved there from `apps/plugin/bin/` because slug resolution became the bridge's job, so the module must sit among the bridge files under `apps/plugin/mcp-bridge/` that clients run and the installer downloads; the property that matters — **exactly one** JS/TS implementation — is unchanged, only its address is. A copy left behind at the old path would be the second implementation this requirement exists to forbid.
-
-`apps/plugin/.opencode-plugin/plugin.ts` and `apps/plugin/.pi-plugin/index.ts` SHALL import `readRembricSlug` from `../mcp-bridge/rembric-dotenv.mjs`. The bridge SHALL import `parseDotenv` and `SLUG_RE` from `./rembric-dotenv.mjs`. No client file SHALL define its own copy of these helpers.
-
-Bash (`apps/plugin/scripts/_api.sh::rembric_parse_dotenv` and `::rembric_read_project_slug`) and Python (`apps/plugin/.hermes-plugin/__init__.py::_SLUG_RE`) clients keep their own implementations because cross-language wrapping a 20-line parser costs more than the duplication. Those implementations MUST agree on the regex.
-
-An invariant test in `apps/web/src/test/invariants.test.ts` SHALL fail the build if any JS/TS file under `apps/plugin/` declares its own `parseDotenv` function or `SLUG_RE` constant. The scanned set SHALL be every JS/TS source file under `apps/plugin/` — not only client files — so a non-client artefact such as the bridge is covered by contract rather than by the incidental reach of a glob. The invariant test SHALL reference the canonical path in its assertions, and moving the module SHALL therefore require updating that reference in the same change.
-
-The set of files the invariant scans SHALL be **derived by a repository-wide search**, not hard-coded, and the invariant SHALL assert a **non-zero** scanned-file count. A hard-coded two-file list does not scan a client added later, and a negative assertion over an empty list passes vacuously — both were true of the version this requirement replaces.
-
-Any tracked file that names the module's path as a literal SHALL be updated in the same commit as the move. At minimum this covers the invariant test's path constants, `scripts/pi-package.mjs`'s packable-import pattern (which matches a `bin/` prefix literally and would reject the new specifier as stray), and the opencode install script's fetch URL, `sed` rewrite and post-rewrite guard.
-
-#### Scenario: Shared dotenv lib exists and exports the canonical helpers
-
-- **WHEN** the repository is at HEAD
-- **THEN** `apps/plugin/mcp-bridge/rembric-dotenv.mjs` exists and `apps/plugin/bin/rembric-dotenv.mjs` does not
-- **AND** it exports `parseDotenv`, `readRembricSlug`, and `SLUG_RE` as named exports
-- **AND** `SLUG_RE.source` equals `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`
-
-#### Scenario: Bridge and opencode plugin both import from the shared lib
-
-- **WHEN** the repository is at HEAD
-- **THEN** the bridge's slug resolution contains an import statement referencing `./rembric-dotenv.mjs`
-- **AND** `apps/plugin/.opencode-plugin/plugin.ts` contains an import statement referencing `../mcp-bridge/rembric-dotenv.mjs`
-- **AND** neither file contains a local `function parseDotenv` or `SLUG_RE = /`
-
-#### Scenario: Every other JS/TS consumer imports from the shared lib too
-
-- **WHEN** the repository is at HEAD
-- **THEN** every JS/TS file the invariant scans that needs slug parsing SHALL import the shared dotenv module
-- **AND** none SHALL contain a local `function parseDotenv` or `SLUG_RE = /`
-- **AND** the scanned set SHALL include `apps/plugin/.pi-plugin/index.ts` and the bridge's sources
-
-#### Scenario: Invariant test catches drift
-
-- **GIVEN** a future change introduces a local `function parseDotenv` inside any JS/TS file under `apps/plugin/`
-- **WHEN** `pnpm vitest run apps/web/src/test/invariants.test.ts` runs
-- **THEN** the test FAILS with a message naming the offending file
-
-#### Scenario: The invariant scans a derived, non-empty file list
-
-- **WHEN** the invariant runs
-- **THEN** its scanned-file list SHALL be derived from a repository-wide search over `apps/plugin/`
-- **AND** the test SHALL fail if that list is empty, before evaluating any negative assertion
-
 ### Requirement: MCP transport spawns the downloaded bridge through the config hook
 
 The plugin's `config` hook SHALL configure `mcp.rembric` in memory with `type: "local"`, `command: ['node', '<home>/.config/rembric/bin/cli.mjs']`, the environment references `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN`, and `enabled: true`, where `<home>` is the user's home directory as an absolute path. It SHALL do so only when `<home>/.config/rembric/bin/cli.mjs` exists. When that file exists and an entry already exists, the hook SHALL replace only its in-memory command and preserve its other values and unrelated entries; this covers a legacy `node` command naming `rembric-bridge.mjs` and a pinned `npx` command naming `@rembric/mcp-bridge`. When that file exists and no entry exists, the hook SHALL add this default entry in memory. The hook SHALL never write `opencode.json`.
@@ -113,6 +64,61 @@ The command SHALL contain no URL, header, `--allow-http` argument, package speci
 - **AND** the config hook SHALL spawn the bridge files the installer downloads from `apps/plugin/mcp-bridge/`
 
 ## MODIFIED Requirements
+
+### Requirement: Shared dotenv lib SHALL be the single source of truth for slug parsing
+
+The repository SHALL contain a shared dotenv module exporting exactly: `parseDotenv(content: string)`, `readRembricSlug(directory: string)`, and `SLUG_RE`. This module SHALL be the only place where the slug regex `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and the dotenv parser live in JS/TS form across the entire repository.
+
+Its canonical location SHALL be `apps/plugin/mcp-bridge/rembric-dotenv.mjs`. It moved there from `apps/plugin/bin/` because slug resolution became the bridge's job, so the module must ship inside the bridge's published tarball and sit among the bridge files under `apps/plugin/mcp-bridge/` that the plugins run and the installer downloads; the property that matters — **exactly one** JS/TS implementation — is unchanged, only its address is. A copy left behind at the old path would be the second implementation this requirement exists to forbid.
+
+`apps/plugin/.opencode-plugin/plugin.ts` and `apps/plugin/.pi-plugin/index.ts` SHALL import `readRembricSlug` from `../mcp-bridge/rembric-dotenv.mjs`. The bridge SHALL import `parseDotenv` and `SLUG_RE` from `./rembric-dotenv.mjs`. No client file SHALL define its own copy of these helpers.
+
+Bash (`apps/plugin/scripts/_api.sh::rembric_parse_dotenv` and `::rembric_read_project_slug`) and Python (`apps/plugin/.hermes-plugin/__init__.py::_SLUG_RE`) clients keep their own implementations because cross-language wrapping a 20-line parser costs more than the duplication. Those implementations MUST agree on the regex.
+
+An invariant test in `apps/web/src/test/invariants.test.ts` SHALL fail the build if any JS/TS file under `apps/plugin/` declares its own `parseDotenv` function or `SLUG_RE` constant. The scanned set SHALL be every JS/TS source file under `apps/plugin/` — not only client files — so a non-client artefact such as the bridge is covered by contract rather than by the incidental reach of a glob. The invariant test SHALL reference the canonical path in its assertions, and moving the module SHALL therefore require updating that reference in the same change.
+
+The set of files the invariant scans SHALL be **derived by a repository-wide search**, not hard-coded, and the invariant SHALL assert a **non-zero** scanned-file count. A hard-coded two-file list does not scan a client added later, and a negative assertion over an empty list passes vacuously — both were true of the version this requirement replaces.
+
+Any tracked file that names the module's path as a literal SHALL be updated in the same commit as the move. At minimum this covers the invariant test's path constants, `scripts/pi-package.mjs`'s packable-import pattern (which matches a `bin/` prefix literally and would reject the new specifier as stray), and the opencode install script's fetch URL, `sed` rewrite and post-rewrite guard.
+
+#### Scenario: Shared dotenv lib exists and exports the canonical helpers
+
+- **WHEN** the repository is at HEAD
+- **THEN** `apps/plugin/mcp-bridge/rembric-dotenv.mjs` exists and `apps/plugin/bin/rembric-dotenv.mjs` does not
+- **AND** it exports `parseDotenv`, `readRembricSlug`, and `SLUG_RE` as named exports
+- **AND** `SLUG_RE.source` equals `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`
+
+#### Scenario: Bridge and opencode plugin both import from the shared lib
+
+- **WHEN** the repository is at HEAD
+- **THEN** the bridge's slug resolution contains an import statement referencing `./rembric-dotenv.mjs`
+- **AND** `apps/plugin/.opencode-plugin/plugin.ts` contains an import statement referencing `../mcp-bridge/rembric-dotenv.mjs`
+- **AND** neither file contains a local `function parseDotenv` or `SLUG_RE = /`
+
+#### Scenario: Every other JS/TS consumer imports from the shared lib too
+
+- **WHEN** the repository is at HEAD
+- **THEN** every JS/TS file the invariant scans that needs slug parsing SHALL import the shared dotenv module
+- **AND** none SHALL contain a local `function parseDotenv` or `SLUG_RE = /`
+- **AND** the scanned set SHALL include `apps/plugin/.pi-plugin/index.ts` and the bridge's sources
+
+#### Scenario: The module ships in the published tarball
+
+- **WHEN** `npm pack --dry-run` runs for `@rembric/mcp-bridge`
+- **THEN** the file list SHALL include `rembric-dotenv.mjs`
+- **AND** the assertion SHALL fail if it is absent, rather than publishing a package whose slug resolution cannot load
+
+#### Scenario: Invariant test catches drift
+
+- **GIVEN** a future change introduces a local `function parseDotenv` inside any JS/TS file under `apps/plugin/`
+- **WHEN** `pnpm vitest run apps/web/src/test/invariants.test.ts` runs
+- **THEN** the test FAILS with a message naming the offending file
+
+#### Scenario: The invariant scans a derived, non-empty file list
+
+- **WHEN** the invariant runs
+- **THEN** its scanned-file list SHALL be derived from a repository-wide search over `apps/plugin/`
+- **AND** the test SHALL fail if that list is empty, before evaluating any negative assertion
 
 ### Requirement: Install script contract
 
@@ -264,14 +270,8 @@ The script SHALL NOT touch `~/.config/opencode/opencode.json`. The script SHALL 
 
 ## REMOVED Requirements
 
-### Requirement: Shared dotenv lib SHALL be the single source of truth for slug parsing
-
-**Reason**: The requirement tied the module's location to the published `@rembric/mcp-bridge` tarball and asserted its presence with an `npm pack --dry-run` scenario. The bridge is no longer published, so that scenario has no package to inspect.
-
-**Migration**: Replaced by the ADDED requirement for the shared dotenv lib among the bridge files, which keeps the single-implementation property, the invariant test and the other scenarios and drops only the tarball scenario. The single-implementation property and the invariant test are unchanged, now tied to the bridge files under `apps/plugin/mcp-bridge/`.
-
 ### Requirement: MCP transport spawns the published bridge through the config hook
 
-**Reason**: The hook spawned `npx -y @rembric/mcp-bridge@<plugin version>`, which depends on a package that is no longer published and on an npm publish that lagged the plugin release.
+**Reason**: The hook spawned `npx -y @rembric/mcp-bridge@<plugin version>`, so the MCP server could not start until the npm publish of that version, which lagged the plugin release, had completed. The hook now runs the bridge the installer placed from the same ref as the plugin.
 
 **Migration**: Replaced by the ADDED requirement for the downloaded bridge. The hook switches to `node <home>/.config/rembric/bin/cli.mjs` only when that file exists; an existing `npx` or legacy command keeps working until the installer has placed the bridge files.

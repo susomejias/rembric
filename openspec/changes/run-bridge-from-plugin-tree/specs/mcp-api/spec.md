@@ -11,9 +11,9 @@ A bridge that is already installed is not updated when the server is: a hand-wri
 
 Additions to that surface are allowed. Removing, renaming or narrowing any part of it is a breaking change and SHALL NOT land without an OpenSpec change that names the released bridge versions it breaks.
 
-The repository SHALL keep a frozen copy of the last bridge version published to npm (`@rembric/mcp-bridge@0.45.1`) as a test fixture, and CI SHALL run that frozen bridge as a subprocess against the current server. The fixture SHALL NOT be edited to make the test pass.
+The repository SHALL keep a frozen copy of `@rembric/mcp-bridge@0.45.1`, the last version published before the plugins stopped spawning the npm package and so the version that installs which never update keep running, as a test fixture, and CI SHALL run that frozen bridge as a subprocess against the current server. The fixture SHALL NOT be edited to make the test pass.
 
-#### Scenario: The last published bridge still works against the current server
+#### Scenario: The frozen 0.45.1 bridge still works against the current server
 
 - **WHEN** the frozen `0.45.1` bridge fixture is spawned against a server built from the current tree, with a valid token and a project slug
 - **THEN** `initialize`, `tools/list` and a `tools/call` round-trip SHALL succeed through the bridge

@@ -235,7 +235,7 @@ afterAll(async () => {
   for (const dir of [dataDir, home]) rmSync(dir, { recursive: true, force: true });
 });
 
-describe('the last published bridge (@rembric/mcp-bridge@0.45.1) against the current server', () => {
+describe('the frozen @rembric/mcp-bridge@0.45.1 against the current server', () => {
   it('the fixture is byte-identical to the published tarball', () => {
     const manifest = JSON.parse(readFileSync(join(FIXTURE_DIR, 'checksums.json'), 'utf8')) as {
       version: string;

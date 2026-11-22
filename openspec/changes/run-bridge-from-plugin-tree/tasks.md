@@ -25,19 +25,20 @@
 - [x] 4.4 `apps/plugin/install.sh` uninstall: remove the bridge files only when opencode's plugin file is absent and the Hermes `config.yaml` does not reference `cli.mjs`; test opencode-only, Hermes-only, both, and a preserved Hermes MCP block keeping its bridge (both spellings), plus a failed native removal leaving the bridge untouched and a directory holding other files surviving
 - [x] 4.5 Run `scripts/mutate.mjs` over each new guard in 3.x and 4.x (file-exists check, recognised-shape check, last-client check) and confirm the test naming it turns red. 4.x done by backup/edit/run/restore (`scripts/mutate.mjs` cannot run `install.test.ts`): bridge-exists check removed or narrowed to `cli.mjs`, complete-shape check widened, opencode and Hermes last-client checks removed, tilde spelling dropped, `cli.mjs` committed first, staging removed, per-file commit, placement skipped and prune ungated each turned the named test red, and every filter passes unmutated. 3.x: `scripts/mutate.mjs` caught the opencode hook's file-exists check (`plugin.test.ts`, 2 tests red); by backup/edit/run/restore, opencode uninstall's Hermes check and tilde spelling, `cli.mjs` fetched first and `install_file` staging removed each turned their `install.test.ts` case red
 
-## 5. Stop publishing the bridge
+## 5. Keep publishing the bridge
 
-- [ ] 5.1 RED first, in `scripts/release-workflow.test.ts`: `publish-npm` publishes `apps/plugin/.pi-plugin` only, runs no bridge pack assertion, and `release-please-config.json` `extra-files` keeps `mcp-bridge/package.json` (the JSONPath entries already went with 2.2)
-- [ ] 5.2 Edit `.github/workflows/release-please.yml`; delete `scripts/mcp-bridge-package.mjs` and its test; set `"private": true` in `apps/plugin/mcp-bridge/package.json`
-- [ ] 5.3 Confirm `node scripts/pi-package.mjs materialize` and `assert-pack` still pass, so `@rembric/pi` keeps embedding the bridge modules
-- [ ] 5.4 Consult `.agents/skills/npm-security-best-practices/` for the `package.json` and workflow edits; `ALLOWED_BUILD_SCRIPTS` and the lockfile are unchanged
+- [x] 5.1 Owner decision 2026-11-22: the plugins run their shipped bridge and `@rembric/mcp-bridge` stays published for hand-written configs, with no `npm deprecate`. Commit `3c21375d` reverts `df9f1dc8`: `publish-npm` again asserts both tarballs (`scripts/pi-package.mjs assert-pack`, then `scripts/mcp-bridge-package.mjs assert-pack`) before publishing `@rembric/pi` and `@rembric/mcp-bridge`; `apps/plugin/mcp-bridge/package.json` is not private and keeps its `files` allowlist; `.github/workflows/release-please.yml`, the bridge `package.json`, `scripts/mcp-bridge-package.mjs`, `scripts/npm-publish.test.ts` and `scripts/release-workflow.test.ts` are identical to `main`
+- [x] 5.2 `release-please-config.json` `extra-files` keeps `mcp-bridge/package.json` as a carrier; the two `mcp.json` JSONPath entries stay removed (2.2), because no manifest names a bridge version
+- [x] 5.3 `apps/web/src/test/invariants.test.ts` (published-estate enumeration over both packages, no numeric bridge pin in operational files), `scripts/npm-publish.test.ts` (both assertions precede either publish) and `scripts/release-workflow.test.ts` pass after the revert
+- [x] 5.4 Lockfile, `pnpm-workspace.yaml`, `.npmrc` and `ALLOWED_BUILD_SCRIPTS` are unchanged against `main`, so no `npm-security-best-practices` review is triggered
 
 ## 6. Docs and specs
 
 - [x] 6.1 Replace the `npx` bridge instructions in `CLAUDE.md`, `apps/plugin/README.md`, `apps/plugin/mcp-bridge/README.md`, `apps/plugin/.opencode-plugin/README.md`, `apps/plugin/.hermes-plugin/README.md` and `docs/agents.md` (Hermes block, opencode troubleshooting, Codex bridge paragraph); leave the no-plugin HTTP sections as they are
 - [x] 6.2 Update `.agents/skills/rembric-plugin-development/` (SKILL.md, `references/e2e-walkthrough.md`, `references/per-client-gotchas.md`) and `.agents/skills/rembric-tui-installer/`
 - [ ] 6.3 `openspec validate run-bridge-from-plugin-tree --strict`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` and `pnpm run check:delta-freshness` pass
-- [ ] 6.4 At archive time, hand-edit the non-requirement prose the deltas cannot reach: `openspec/specs/claude-code-plugin/spec.md` `## MCP server declaration` and `## Project slug selection` (stale `bin/rembric-bridge.mjs`), the `mcp-bridge` Purpose line ("published … package-distribution contract"), the three scenario titles the freshness gate forced the deltas to keep (`mcp-bridge` "npx resolves the executable without a bin name" and "A consumer's install adds nothing but the bridge", `open-source-distribution` "The bridge's pin names the version that release publishes"), and reconcile `opencode-plugin` `Install script auto-configures opencode.json` with `Install script contract`
+- [ ] 6.4 At archive time, hand-edit the non-requirement prose the deltas cannot reach: `openspec/specs/claude-code-plugin/spec.md` `## MCP server declaration` and `## Project slug selection` (stale `bin/rembric-bridge.mjs`), the scenario title the freshness gate forced the `open-source-distribution` delta to keep ("The bridge's pin names the version that release publishes", although no pin remains), and reconcile `opencode-plugin` `Install script auto-configures opencode.json` with `Install script contract`
+- [x] 6.5 After the owner decision (5.1), restore the published-package wording: proposal, design D6 and the deltas keep the bridge published for hand-written configs (the `supply-chain-hygiene` and `development-environment` deltas are deleted, the deprecation requirement is dropped), and the docs and skills show `npx -y @rembric/mcp-bridge@<version>` for stdio-only clients and for Hermes configured without the TUI, while the plugins run their shipped copy
 
 ## 7. Verification before merge
 
@@ -47,10 +48,7 @@
 - [ ] 7.4 Operator, real clients: opencode and Hermes connect after a TUI update; Hermes's migrated block has a backup and Hermes stays enabled
 - [ ] 7.5 Operator, not-updated path: a client left on its `npx -y @rembric/mcp-bridge@0.45.1` entry still connects to a server built from this branch
 
-## 8. Release and deprecation (owner)
+## 8. Release (owner)
 
 - [ ] 8.1 Owner: merge; after the plugin release that contains this change is tagged, confirm on a real install of each client that the MCP server connects at once, with no wait for an npm publish
-- [ ] 8.2 Owner: confirm npx prints a deprecated-package warning on stderr and nothing on stdout, using any already-deprecated public package and a throwaway npm cache
-- [ ] 8.3 Owner, only after 8.1 and 8.2: run `npm deprecate @rembric/mcp-bridge "use the Rembric installer"`; unpublish nothing
-- [ ] 8.4 Owner: re-run 7.5 against the now-deprecated package and confirm the client still connects
-- [ ] 8.5 Close PR #556 as superseded and delete its `serve-plugins-from-release-ref` change with the branch; close issue #513
+- [ ] 8.2 Close PR #556 as superseded and delete its `serve-plugins-from-release-ref` change with the branch; close issue #513

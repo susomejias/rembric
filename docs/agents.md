@@ -374,7 +374,7 @@ codex plugin add rembric@rembric
 
 The Codex CLI has no dedicated per-plugin `update` verb, so re-running `codex plugin add` against the refreshed snapshot is the upgrade mechanism — this is exactly what the TUI installer's Update action runs for you. (`codex plugin marketplace upgrade` with no argument refreshes ALL configured marketplaces.) Restart `codex` after the update so the bridge and hooks re-spawn from the new cache path.
 
-Earlier plugin versions started the bridge with `npx -y @rembric/mcp-bridge@<version>`. That package is no longer published, but the versions already on npm stay installable, so an older install keeps working on the version it names, and this update switches it to the `node` form. Claude Code does the same on its next plugin update. Nothing has to be migrated by hand.
+Earlier plugin versions started the bridge with `npx -y @rembric/mcp-bridge@<version>`. That package is still published, for hand-written configs, so an older install keeps working on the version it names, and this update switches it to the `node` form. Claude Code does the same on its next plugin update. Nothing has to be migrated by hand.
 
 ### Hermes Agent (memory provider plugin)
 
@@ -399,9 +399,9 @@ Hermes supports Git-subdirectory installation and records its source. `--enable`
 
 Hermes mutations reject `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` and every explicit `--ref` rather than silently ignoring local/tag/SHA requests. Unrecognized, linked, foreign-source, pinned or inconsistent installations are refused. For a recognized old Rembric copy, choose **Plugins → hermes → update**: stop Hermes and automatic restarts, then type `MIGRATE` at the separate prompt. The TUI verifies a private full backup outside `plugins/`, installs natively and restores the old plugin/configuration on ordinary failure. Pending native publication or changed dependency state requires manual recovery from the retained backup, with Hermes kept stopped. Generic `--yes` does not authorize migration. Do not use `adopt` or forced replacement. [Full transition and ownership details](../apps/plugin/.hermes-plugin/README.md#transition-from-a-copied-installation).
 
-**Measured limitation (Hermes v0.22.5):** its checker reports native subdirectory installs as provenance `drift` despite source tracking. Explicit update passed with an already-current result, not a measured version advance. TUI Hermes update status remains unknown and update-all skips it; request `--agent=hermes --action=update --yes` explicitly. Native install and update check out only `.hermes-plugin/`, so they never receive the bridge: the TUI places its files in `~/.config/rembric/bin/` on every Hermes install and update, before running the native command. A successful TUI update then migrates the `mcp_servers.rembric` blocks the installer wrote, including the earlier `npx -y @rembric/mcp-bridge@<version>` form, to the `node` form below, with a one-time backup; a hand-customised block is left alone and the updater prints the replacement. Manual native update neither places the bridge nor migrates the block. An `npx` block left in place keeps working on the version it names, because published versions stay on npm.
+**Measured limitation (Hermes v0.22.5):** its checker reports native subdirectory installs as provenance `drift` despite source tracking. Explicit update passed with an already-current result, not a measured version advance. TUI Hermes update status remains unknown and update-all skips it; request `--agent=hermes --action=update --yes` explicitly. Native install and update check out only `.hermes-plugin/`, so they never receive the bridge: the TUI places its files in `~/.config/rembric/bin/` on every Hermes install and update, before running the native command. A successful TUI update then migrates the `mcp_servers.rembric` blocks the installer wrote, including the earlier `npx -y @rembric/mcp-bridge@<version>` form, to the `node` form below, with a one-time backup; a hand-customised block is left alone and the updater prints the replacement. Manual native update neither places the bridge nor migrates the block. An `npx` block left in place keeps working on the version it names, because the package is still published.
 
-Then drop this block into `~/.hermes/config.yaml`, replacing `<HOME>` with your absolute home directory (the TUI installer prints the block with the path filled in):
+Then drop this block into `~/.hermes/config.yaml`. The TUI installer prints it with the path filled in and places the bridge files it runs; otherwise replace `<HOME>` with your absolute home directory:
 
 ```yaml
 mcp_servers:
@@ -417,6 +417,22 @@ mcp_servers:
 memory:
   provider: rembric
 ```
+
+Configuring Hermes by hand, without the TUI installer, leaves no bridge files in `~/.config/rembric/bin/`. Run the published bridge package instead, replacing `<version>` with an exact version (never `latest`):
+
+```yaml
+mcp_servers:
+  rembric:
+    command: npx
+    args: ['-y', '@rembric/mcp-bridge@<version>']
+    env:
+      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
+      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
+      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}
+    enabled: true
+```
+
+A later TUI update recognises this exact block and migrates it to the `node` form above, with a one-time backup.
 
 #### Credentials — install-time prompt writes `~/.hermes/.env`
 
@@ -656,7 +672,7 @@ headers = { Authorization = "Bearer codex-token-XXXXXXXX" }
 
 Cursor, Windsurf, VS Code Copilot Chat, Gemini CLI, etc. — they all speak Streamable HTTP with the same URL + Bearer shape. Locate their MCP config file in the client's docs and drop in the same block, adjusting field names (`type`, `transport`, `httpUrl`, plain `url`) to match.
 
-If your client is stdio-only, run the bridge as a stdio↔HTTP shim with `node <dir>/cli.mjs`, where `<dir>` holds the six modules of [`apps/plugin/mcp-bridge/`](../apps/plugin/mcp-bridge/README.md) (the TUI installer places them in `~/.config/rembric/bin/` when it installs opencode or Hermes), with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the environment. The bridge is not published to npm; an existing `npx -y @rembric/mcp-bridge@<version>` entry keeps working on the version it names. The bridge accepts no URL, header, or token arguments, and selects the project as described in [How a client selects its project](#how-a-client-selects-its-project).
+If your client is stdio-only, use `npx -y @rembric/mcp-bridge@<exact-version>` as a stdio↔HTTP shim, with `REMBRIC_SERVER_URL` and `REMBRIC_API_TOKEN` in the environment. If you already have the TUI installer's copy in `~/.config/rembric/bin/` (placed when it installs opencode or Hermes), `node ~/.config/rembric/bin/cli.mjs` (with `~` written out as your home directory) runs the same bridge without a download. The package accepts no URL, header, or token arguments, and selects the project as described in [How a client selects its project](#how-a-client-selects-its-project).
 
 ## Path-less connections
 

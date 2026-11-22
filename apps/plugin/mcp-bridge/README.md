@@ -1,8 +1,10 @@
 # Rembric MCP bridge
 
-A zero-dependency MCP stdio-to-Streamable-HTTP bridge for Rembric. It ships in
-the plugin tree, is started with `node <dir>/cli.mjs`, and takes no arguments.
-It is not published to npm.
+A zero-dependency MCP stdio-to-Streamable-HTTP bridge for Rembric. It takes no
+arguments. The same files ship in two ways: inside the plugin tree, where every
+Rembric plugin runs them with `node <dir>/cli.mjs`, and on npm as
+`@rembric/mcp-bridge`, published on every plugin release for configurations you
+write by hand (`npx -y @rembric/mcp-bridge@<version>`, with an exact version).
 
 The bridge is six modules that must sit in one directory: `cli.mjs`,
 `bridge.mjs`, `slug.mjs`, `rembric-host-binding.mjs`, `rembric-project.mjs` and
@@ -12,10 +14,11 @@ plugin directory). For opencode and Hermes the TUI installer places them in
 `~/.config/rembric/bin/`, from the same ref as the client's other files.
 
 Earlier plugin versions started the bridge with
-`npx -y @rembric/mcp-bridge@<version>`. Every version already on npm stays
-installable, so such an entry keeps working on the version it names. The
-entries the plugins and the installer manage switch to the `node` form on the
-client's next plugin or TUI update; nobody has to migrate by hand.
+`npx -y @rembric/mcp-bridge@<version>`. Such an entry keeps working on the
+version it names. The entries the plugins and the installer manage switch to the
+`node` form on the client's next plugin or TUI update; nobody has to migrate by
+hand. A hand-written `npx` entry for a stdio-only client, or for Hermes set up
+without the TUI, stays the supported way to use the bridge outside a plugin.
 
 Set `REMBRIC_SERVER_URL` (without `/mcp`) and `REMBRIC_API_TOKEN` in the
 process environment. The project directory is selected from
