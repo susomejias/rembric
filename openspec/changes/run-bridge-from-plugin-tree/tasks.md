@@ -42,8 +42,8 @@
 
 ## 7. Verification before merge
 
-- [ ] 7.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` and the Hermes Python suites pass
-- [ ] 7.2 Run the `rembric-tui-installer-e2e` playbook: headless, local round-trips in a throwaway HOME, and the pty smoke
+- [x] 7.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` and the Hermes Python suites pass (typecheck, lint, format:check, `pnpm test` and Hermes 212 OK; the one `mcp-http.test.ts` failure in the parallel run was a 30 s timeout that passes alone in 2 s; the Pi suite needs `pnpm --filter @rembric/web build` first, then 90/90)
+- [ ] 7.2 Run the `rembric-tui-installer-e2e` playbook: headless, local round-trips in a throwaway HOME, and the pty smoke — headless `pnpm run e2e:installer` 144/144 and an independent verifier's local round-trips in throwaway HOMEs (opencode/Hermes upgrade from the baseline installer, all uninstall orders, 26-case differential vs baseline) passed; the operator pty smoke is still open
 - [ ] 7.3 Operator, real clients in isolated config dirs, upgrade path from 0.45.x: Claude Code and Codex connect after a plugin update with the bridge spawned by `node`, and a `memory.save` attaches to the host session (this measures the host-binding path without the `npx` layer)
 - [ ] 7.4 Operator, real clients: opencode and Hermes connect after a TUI update; Hermes's migrated block has a backup and Hermes stays enabled
 - [ ] 7.5 Operator, not-updated path: a client left on its `npx -y @rembric/mcp-bridge@0.45.1` entry still connects to a server built from this branch

@@ -1063,8 +1063,18 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
 hermes_bridge_config() {
   say "    mcp_servers:"
   say "      rembric:"
-  say "        command: node"
-  say "        args: ['${BRIDGE_DIR}/cli.mjs']"
+  if [ -f "${BRIDGE_DIR}/cli.mjs" ]; then
+    say "        command: node"
+    say "        args: ['${BRIDGE_DIR}/cli.mjs']"
+  else
+    _bridge_version=$(available_version apps/plugin)
+    if [ -z "$_bridge_version" ]; then
+      _bridge_manifest="${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml"
+      [ -f "$_bridge_manifest" ] && _bridge_version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$_bridge_manifest" | head -1)
+    fi
+    say "        command: npx"
+    say "        args: ['-y', '@rembric/mcp-bridge@${_bridge_version:-<version>}']"
+  fi
   say "        env:"
   say "          REMBRIC_SERVER_URL: \${REMBRIC_SERVER_URL}"
   say "          REMBRIC_API_TOKEN: \${REMBRIC_API_TOKEN}"
@@ -1073,9 +1083,13 @@ hermes_bridge_config() {
 }
 
 hermes_bridge_migration_note() {
-  say "  ${DIM}The updater repairs recognized Rembric MCP blocks and writes a backup before changing config.${RESET}"
-  say "  ${DIM}If it reported no migration, replace your mcp_servers.rembric entry with:${RESET}"
-  hermes_bridge_config
+  if [ -f "${BRIDGE_DIR}/cli.mjs" ]; then
+    say "  ${DIM}The updater repairs recognized Rembric MCP blocks and writes a backup before changing config.${RESET}"
+    say "  ${DIM}If it reported no migration, replace your mcp_servers.rembric entry with:${RESET}"
+    hermes_bridge_config
+  else
+    say "  ${DIM}Your current mcp_servers.rembric entry keeps working. Re-run this update with --yes to place the bridge and migrate it.${RESET}"
+  fi
 }
 
 # Required post-install/upgrade steps per agent (the platform bits the installer

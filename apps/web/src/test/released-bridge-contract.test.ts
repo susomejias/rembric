@@ -1,7 +1,14 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -338,6 +345,41 @@ describe('the frozen @rembric/mcp-bridge@0.45.1 against the current server', () 
     expect(content.slug).toBe('repo-shop');
     expect(content.repository?.fingerprint).toBe(repository.fingerprint);
     expect(bridge.stderr).toContain(`url=${origin}/mcp/repo-shop`);
+  });
+
+  it('is accepted when it reports an unavailable fingerprint from a repository without commits', async () => {
+    const services = getServices();
+    const fresh = services.projects.create({ slug: 'fresh-repo' });
+    const created = services.tokens.create({
+      name: 'released-bridge-unavailable',
+      project: fresh,
+      access: 'write',
+    });
+    execFileSync('git', ['init', '-q'], {
+      cwd: workDir,
+      env: isolatedGitEnv(home),
+      stdio: 'ignore',
+    });
+    writeFileSync(join(workDir, '.rembric'), 'PROJECT_SLUG=fresh-repo\n');
+
+    const bridge = spawnReleasedBridge(workDir, home, {
+      REMBRIC_SERVER_URL: origin,
+      REMBRIC_API_TOKEN: created.plaintext,
+    });
+
+    await initialize(bridge);
+    const current = await bridge.request(2, 'tools/call', {
+      name: 'project.current',
+      arguments: {},
+    });
+    const result = current['result'] as {
+      isError?: boolean;
+      structuredContent: { slug: string; repository?: { fingerprint: string | null } };
+    };
+    expect(result.isError ?? false, bridge.stderr).toBe(false);
+    expect(result.structuredContent.slug).toBe('fresh-repo');
+    expect(result.structuredContent.repository).toBeDefined();
+    expect(result.structuredContent.repository?.fingerprint).toBeNull();
   });
 
   it('declares the host session so a save attaches to it', async () => {

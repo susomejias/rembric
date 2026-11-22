@@ -97,7 +97,7 @@ The bridge files in `~/.config/rembric/bin/` SHALL be removed only when nothing 
 
 After successful installation/update, the installer SHALL print platform-specific next steps, but SHALL omit them on uninstall or native Hermes failure. Codex SHALL retain hook trust via `/hooks` and explicit shell exports, never the removed `plugin_hooks` flag. Claude installation SHALL describe keychain prompts and update SHALL request restart. opencode installation SHALL retain its MCP/environment guidance and update only restart. Pi installation SHALL require shell `REMBRIC_SERVER_URL`/`REMBRIC_API_TOKEN` with no settings-file alternative and update only restart.
 
-Hermes installation SHALL explain that native `--enable` selects the memory provider and may prompt for missing required credentials; it SHALL not instruct a second bare-name plugin install or generic enable step. Existing complementary MCP wiring guidance SHALL remain, and it SHALL show the `node` form (`command: node` with the absolute path of `~/.config/rembric/bin/cli.mjs` as its only argument, the three `env` mappings and `enabled: true`), not a pinned `npx` command. Hermes update SHALL retain recognized legacy MCP repair guidance and gateway restart without installation-only prompts.
+Hermes installation SHALL explain that native `--enable` selects the memory provider and may prompt for missing required credentials; it SHALL not instruct a second bare-name plugin install or generic enable step. Existing complementary MCP wiring guidance SHALL remain. When the bridge is present in `~/.config/rembric/bin/`, it SHALL show the `node` form (`command: node` with the absolute path of `~/.config/rembric/bin/cli.mjs` as its only argument, the three `env` mappings and `enabled: true`). When the bridge is absent (a print-only run, or a run that did not place it), it SHALL show the `npx` form pinned to the exact plugin version, and update guidance SHALL say the current entry keeps working and how to place the bridge, never advise replacing a working entry with one that names a missing file. Hermes update SHALL retain recognized legacy MCP repair guidance and gateway restart without installation-only prompts.
 
 #### Scenario: Codex install prints the hook-trust step
 
@@ -126,6 +126,13 @@ Hermes installation SHALL explain that native `--enable` selects the memory prov
 
 #### Scenario: Hermes MCP wiring guidance shows the node form
 
-- **WHEN** the Hermes install or update guidance prints the `mcp_servers.rembric` block
+- **WHEN** the Hermes install or update guidance prints the `mcp_servers.rembric` block and `~/.config/rembric/bin/cli.mjs` exists
 - **THEN** the block SHALL use `command: node` with the absolute path of `~/.config/rembric/bin/cli.mjs` as its only argument
 - **AND** it SHALL contain no `npx` or `@rembric/mcp-bridge`
+
+#### Scenario: Guidance never points at a bridge that is not there
+
+- **WHEN** a print-only Hermes install or update runs and `~/.config/rembric/bin/cli.mjs` does not exist
+- **THEN** no printed block SHALL name `command: node` or that path
+- **AND** an install SHALL print the `npx` block pinned to the exact plugin version
+- **AND** an update SHALL say the current entry keeps working and that re-running with `--yes` places the bridge and migrates it
