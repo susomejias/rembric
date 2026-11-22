@@ -28,7 +28,7 @@ class SystemPromptBlockTest(unittest.TestCase):
             "ids OR from/to", "full current data/errors", "limit≤20",
             "offset=nextOffset until null", "all failed=isError",
             "Pass known sessionId; never guess.",
-            "topic_key?", "memory.judge_batch({judgments:[…]})", "memory.about",
+            "topic_key?", "memory.compare only for supersedes/conflicts_with", "memory.about",
         ):
             self.assertIn(clause, block)
         self.assertIn("title", block)

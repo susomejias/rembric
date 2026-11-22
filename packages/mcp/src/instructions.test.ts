@@ -34,7 +34,9 @@ describe('MCP initialize instructions', () => {
       ],
       { encoding: 'utf8' },
     );
-    expect(buildInstructions({ requestedSlug: 'demo' }).split('\n\n')[0]).toBe(hermes);
+    expect(
+      buildInstructions({ requestedSlug: 'demo', judgmentQueue: false }).split('\n\n')[0],
+    ).toBe(hermes);
   });
   it('emits ≤ INSTRUCTIONS_MAX_LENGTH characters for the unscoped variant', () => {
     const text = buildInstructions({ requestedSlug: null });
