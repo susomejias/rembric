@@ -2,6 +2,8 @@
 
 ### Requirement: The Pi extension SHALL suppress session lifecycle persistence for non-primary pi processes
 
+The Pi extension SHALL suppress session lifecycle persistence for non-primary pi processes.
+
 A Rembric session row exists for a pi process's primary conversation. Some pi processes
 are not primary conversations: another program drives them as a tool, or their spawner
 declares them children. When such a process registered its own row, every delegated task
