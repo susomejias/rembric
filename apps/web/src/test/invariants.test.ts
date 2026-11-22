@@ -1303,7 +1303,6 @@ const LEGACY_INSTALL_URL_SUBSTRINGS = [
 
 const LEGACY_URL_ALLOW_LIST = new Set([
   'openspec/specs/open-source-distribution/spec.md',
-  'openspec/specs/hermes-agent-plugin/spec.md',
   'apps/web/src/test/invariants.test.ts',
 ]);
 
