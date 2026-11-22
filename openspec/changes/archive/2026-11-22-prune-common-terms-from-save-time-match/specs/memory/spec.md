@@ -2,7 +2,9 @@
 
 ### Requirement: `memory.save` MUST surface candidate conflicts at save-time
 
-After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always), vec kNN neighbors (when the just-saved row has an embedding), and entity-overlap neighbors (see `memory-entities`'s save-time conflict-detection requirement, which owns the gate: an entity common enough to occupy the whole per-save budget contributes nothing, while one linked to fewer memories than that budget holds is not gated at all), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, rank the merged list by the precedence the `memory-entities` capability defines (entity-sourced candidates lead, then the reported `similarity` descending), and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates.
+After a `memory.save` inserts the new row, the server SHALL run a candidate-detection step over rows in the same `(scope, project_id)`, excluding the newly inserted row and any rows already linked to it via `replaces`. The detection SHALL combine FTS5 lexical neighbors (always), vec kNN neighbors (when the just-saved row has an embedding), and entity-overlap neighbors (see `memory-entities`'s save-time conflict-detection requirement, which owns the gate: an entity common enough to occupy the whole per-save budget contributes nothing, while one linked to fewer memories than that budget holds is not gated at all), apply the internal similarity thresholds (compile-time constants, calibrated for the compiled-in model — not environment-configurable), deduplicate by target id, rank the merged list by the precedence the `memory-entities` capability defines (entity-sourced candidates lead, then the reported `similarity` descending), classify every ranked pair into a confidence band (see "Save-time candidates MUST be classified into confidence bands by one shared function"), and return up to `CANDIDATES_PER_SAVE_MAX` (default 5) candidates from the middle and high bands, in that ranked order.
+
+A low-band pair SHALL NOT be a candidate. It SHALL be returned separately as a related memory (see the `mcp-api` capability, "Save responses MUST report low-band pairs as `related[]` and high-band candidates in `convergeWith[]`"): at most `CANDIDATES_PER_SAVE_MAX` of them, in the same ranked order. A low-band pair SHALL NOT occupy a candidate slot, so it can never displace a middle- or high-band pair from the list.
 
 Each detection channel SHALL scan a bounded pool before that ranking is applied, sized by a single named constant (`CANDIDATE_POOL_SIZE`, see "Retrieval and lifecycle constants MUST be named and bounded in one place"). The pool bound is therefore UPSTREAM of the cap: the merged, ranked list is itself bounded, and no scope-wide count of related memories is available at save time. Consequently the count the response reports (see the `mcp-api` capability, "`memory.save` MUST report how many candidates its detection produced") SHALL be specified as a LOWER BOUND on how many memories in scope resemble the saved row, and SHALL NOT be specified as a total. A count that happens to be exact — which it is whenever the scope holds fewer comparable rows than the pool bound — SHALL NOT be relied upon as exact, because that exactness is a property of corpus size and not of the count.
 
@@ -10,7 +12,7 @@ The lexical pass SHALL build its FTS5 `MATCH` expression from the tokens of the 
 
 The detection SHALL additionally exclude any target id that was already judged `relation = 'not_conflict'` against the new memory's `replaces` ancestry. That ancestry is the TRANSITIVE closure of `replaces[]`, bounded by its own constant — see "Dismissal suppression MUST bound its ancestry walk with its own named constant", which owns the depth, the order and the bound. It is NOT the array's own elements: `replaces[]` alone is one hop, and one hop loses a dismissal made two or more saves back on the same topic, which is the case this suppression exists for. This suppresses the re-surfacing of a pair the agent already dismissed as a false positive on an earlier save of the same evolving topic. Because `memory_relations` has no topic column and each save mints a fresh `source_id`, the dismissal SHALL be carried forward by walking that ancestry, NOT by the new row's own id (which no prior relation references). Only `not_conflict` SHALL be suppressed; other judged relations (notably `conflicts_with`) SHALL continue to surface so an unresolved contradiction re-confronts the agent on the next save.
 
-For each candidate surfaced, a `memory_relations` row SHALL be inserted with `status = 'pending'`, `source_id = <new row>`, `target_id = <candidate>`, and a generated `judgment_id`.
+For each candidate surfaced, a `memory_relations` row SHALL be inserted with `status = 'pending'`, `source_id = <new row>`, `target_id = <candidate>`, and a generated `judgment_id`. A low-band pair returned as a related memory SHALL NOT be recorded: no `memory_relations` row, no `judgment_id`, no journal entry. It is the same derived prompt the next paragraphs describe, so not recording it loses nothing.
 
 Candidates that were detected but fall outside `CANDIDATES_PER_SAVE_MAX` SHALL NOT be recorded: no `memory_relations` row, no `judgment_id`, no journal entry. This is not an information loss, and the requirement states why so that a future change does not "fix" it by recording them.
 
@@ -22,7 +24,7 @@ That re-derivability SHALL be specified as re-derivability and NOT as reproducib
 
 #### Scenario: A save finds two strong candidates
 
-- **GIVEN** two existing active memories M1 and M2 in the same scope each exceed the internal vec threshold against the just-saved row N
+- **GIVEN** two existing active memories M1 and M2 in the same scope each reach the middle or high band against the just-saved row N (for example a dense cosine of at least `CANDIDATE_LOW_BAND_CEILING`)
 - **WHEN** `memory.save({...})` returns
 - **THEN** the response SHALL include `candidates: [{ judgmentId, targetId: M1, snippet, similarity, source }, { judgmentId, targetId: M2, ... }]` and `judgmentRequired: true`; two `memory_relations` rows SHALL exist with `status = 'pending'`
 
@@ -39,7 +41,7 @@ That re-derivability SHALL be specified as re-derivability and NOT as reproducib
 
 #### Scenario: Candidate count exceeds the cap
 
-- **GIVEN** `CANDIDATES_PER_SAVE_MAX = 5` and 12 candidates exceed the thresholds
+- **GIVEN** `CANDIDATES_PER_SAVE_MAX = 5` and 12 middle- or high-band candidates exceed the thresholds
 - **WHEN** `memory.save` returns
 - **THEN** the response SHALL include the top 5 by the ranking precedence above; the remaining 7 SHALL NOT have `memory_relations` rows inserted and SHALL NOT surface to the agent; and the response SHALL report the detected count so the truncation is not silent
 
@@ -110,6 +112,18 @@ That re-derivability SHALL be specified as re-derivability and NOT as reproducib
 - **GIVEN** a save whose detection ranked more candidates than the cap, and a later session that wants the pairs which were not surfaced
 - **WHEN** the agent re-derives them by calling `memory.search` with the memory's own text and with an `entity` filter
 - **THEN** the pairs SHALL be reachable, and the re-derived set SHALL reflect the CURRENT corpus — including memories saved after the original save and excluding rows now `superseded` or `archived` — rather than the set that existed at save time
+
+#### Scenario: A low-band pair is reported as related and not recorded
+
+- **GIVEN** an existing active memory M admitted only by the dense channel against the just-saved row N, at a cosine of 0.72, sharing no entity with N
+- **WHEN** `memory.save` returns
+- **THEN** M SHALL NOT appear in `candidates[]`, SHALL appear in the related memories without a `judgmentId`, and no `memory_relations` row SHALL exist for `(N, M)`
+
+#### Scenario: A low-band pair takes no candidate slot
+
+- **GIVEN** `CANDIDATES_PER_SAVE_MAX = 1`, an entity-only pair L whose cosine is known and below `VEC_THRESHOLD`, which leads the ranking, and a middle-band pair M
+- **WHEN** `memory.save` returns
+- **THEN** `candidates[]` SHALL hold M, the related memories SHALL hold L, and the reported detected count SHALL be 1
 
 ## ADDED Requirements
 

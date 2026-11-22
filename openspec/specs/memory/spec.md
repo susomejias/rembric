@@ -652,7 +652,7 @@ A low-band pair SHALL NOT be a candidate. It SHALL be returned separately as a r
 
 Each detection channel SHALL scan a bounded pool before that ranking is applied, sized by a single named constant (`CANDIDATE_POOL_SIZE`, see "Retrieval and lifecycle constants MUST be named and bounded in one place"). The pool bound is therefore UPSTREAM of the cap: the merged, ranked list is itself bounded, and no scope-wide count of related memories is available at save time. Consequently the count the response reports (see the `mcp-api` capability, "`memory.save` MUST report how many candidates its detection produced") SHALL be specified as a LOWER BOUND on how many memories in scope resemble the saved row, and SHALL NOT be specified as a total. A count that happens to be exact — which it is whenever the scope holds fewer comparable rows than the pool bound — SHALL NOT be relied upon as exact, because that exactness is a property of corpus size and not of the count.
 
-The lexical pass SHALL build its FTS5 `MATCH` expression with the SAME Unicode-aware builder used by interactive `memory.search` (see the `mcp-api` hybrid-retrieval contract): it SHALL keep whole Unicode word tokens and SHALL NOT split a token at a non-ASCII character nor drop tokens that are entirely non-ASCII (accented or CJK text), and it SHALL apply a bounded term cap so a long save body cannot build an unbounded `MATCH` expression. Consequently, save-time candidate detection SHALL NOT silently degrade to vector-only for non-ASCII content: a non-ASCII memory body SHALL produce a non-empty `MATCH` expression and SHALL be eligible to surface `source: 'fts'` candidates. The lexical pass SHALL still skip only when the builder yields no usable tokens at all.
+The lexical pass SHALL build its FTS5 `MATCH` expression from the tokens of the SAME Unicode-aware builder used by interactive `memory.search` (see the `mcp-api` hybrid-retrieval contract): it SHALL keep whole Unicode word tokens and SHALL NOT split a token at a non-ASCII character, SHALL NOT drop a token because it is entirely non-ASCII (accented or CJK text), and SHALL apply a bounded term cap so a long save body cannot build an unbounded `MATCH` expression. Within that cap, a token SHALL be omitted only by the document-frequency rule of "The save-time lexical `MATCH` MUST omit terms present in at least half of the index", which reads a token's frequency in the index and never its script; a kept token SHALL keep the builder's quoting and order. Consequently, save-time candidate detection SHALL NOT silently degrade to vector-only for non-ASCII content: a non-ASCII memory body SHALL produce a non-empty `MATCH` expression and SHALL be eligible to surface `source: 'fts'` candidates. Whenever the builder yields at least one token the `MATCH` expression SHALL be non-empty, whatever that rule omits. The lexical pass SHALL still skip only when the builder yields no usable tokens at all.
 
 The detection SHALL additionally exclude any target id that was already judged `relation = 'not_conflict'` against the new memory's `replaces` ancestry. That ancestry is the TRANSITIVE closure of `replaces[]`, bounded by its own constant — see "Dismissal suppression MUST bound its ancestry walk with its own named constant", which owns the depth, the order and the bound. It is NOT the array's own elements: `replaces[]` alone is one hop, and one hop loses a dismissal made two or more saves back on the same topic, which is the case this suppression exists for. This suppresses the re-surfacing of a pair the agent already dismissed as a false positive on an earlier save of the same evolving topic. Because `memory_relations` has no topic column and each save mints a fresh `source_id`, the dismissal SHALL be carried forward by walking that ancestry, NOT by the new row's own id (which no prior relation references). Only `not_conflict` SHALL be suppressed; other judged relations (notably `conflicts_with`) SHALL continue to surface so an unresolved contradiction re-confronts the agent on the next save.
 
@@ -744,6 +744,12 @@ That re-derivability SHALL be specified as re-derivability and NOT as reproducib
 - **GIVEN** an existing active memory whose content is non-ASCII (e.g. CJK or accented text) in scope `project:'A'`, and a just-saved row N in the same scope whose content lexically overlaps it
 - **WHEN** `memory.save` runs candidate detection
 - **THEN** the FTS5 `MATCH` expression built from N's content SHALL be non-empty (it SHALL NOT degrade to skipping the lexical pass), and the overlapping memory SHALL be eligible to surface as a `source: 'fts'` candidate when it clears the FTS threshold
+
+#### Scenario: Omitting common tokens never empties the lexical pass
+
+- **GIVEN** a just-saved row N in scope `project:'A'` whose every builder token occurs in at least half of the indexed rows, and an existing memory in the same scope that is byte-identical to N
+- **WHEN** `memory.save` runs candidate detection with no embedding available
+- **THEN** the FTS5 `MATCH` expression SHALL be non-empty, the lexical pass SHALL run, and the identical memory SHALL be eligible to surface as a `source: 'fts'` candidate
 
 #### Scenario: A dropped candidate is re-derivable but not reproducible
 
@@ -2230,3 +2236,93 @@ A change to either constant, or to the compiled-in embedding model, SHALL carry 
 
 - **WHEN** a pair has a cosine below `VEC_THRESHOLD` or none, is not lexically admitted, and shares no entity
 - **THEN** `classifyCandidateBand` SHALL return no band
+
+### Requirement: The save-time lexical `MATCH` MUST omit terms present in at least half of the index
+
+Before it builds its FTS5 `MATCH` expression, the save-time lexical pass SHALL omit every COMMON token: a token whose document frequency is at least `COMMON_TERM_DOCUMENT_RATIO` times the document total. The comparison SHALL be inclusive.
+
+The pass ORs its capped builder tokens into one `MATCH`, and FTS5 ranks that match set by bm25 before the query's project, status and limit filters apply. The match set is the union of every token's documents across every project, so one token present in most memories made the pass score and sort the entire index on every save. bm25 gives such a token almost no weight: its inverse document frequency is `ln((N − n + 0.5) / (n + 0.5))`, which is at most zero exactly when `n >= N/2`, and FTS5 replaces every such value with the constant `1e-6`. That is also why the comparison is inclusive: at exactly half the index FTS5 already applies the constant. The token's only effect on the result was to enlarge the set being ranked.
+
+- **Frequency source:** the document frequencies and the document total SHALL be read from the index exactly as "The relevance level's term statistics MUST come from the search index" requires: per-term counts over every indexed row, against a total of every row the index covers, in every scope and status. The just-saved row is already indexed when detection runs, so it counts in both, as it does in the bm25 the pass then computes.
+- **Tokenisation:** each token SHALL be tokenised by the index's own tokenizer, one token at a time, as "Term-statistics lookups MUST be keyed on the index's own terms" requires. The pass therefore knows each token's terms and SHALL NOT reproduce the tokenizer to find them.
+- **Phrases:** a token the tokenizer turns into exactly one term is common when that term's document frequency reaches the ratio. A token it turns into more than one term instance is matched by FTS5 as a phrase. bm25 weights a phrase by the phrase's own document frequency, which the term statistics do not hold, so such a token SHALL NOT be omitted.
+- **Fallback:** when no kept token can occur in a row other than the saved one, the pass SHALL keep every token, exactly as the builder produced them. A single-term token can occur elsewhere only when its document frequency exceeds 1. A phrase can occur elsewhere only when every one of its terms has a document frequency above 1. The condition also holds when no token is kept. Keeping every token rather than only the rarest is a measured choice: each token the fallback restores occurs in at least half of the index, so no number of them makes the fallback's query cheap, and keeping fewer than all of them lost near-duplicates of such saves that keeping every token still finds (see this change's measurements).
+- **Cost bound:** the frequency read SHALL be bounded by the builder's term cap and SHALL NOT scale with the saved body's length.
+- **What the rule decides:** only which rows the bm25 ranking considers. It SHALL NOT change the reported `similarity`, `LEXICAL_CANDIDATE_FLOOR` or `CANDIDATE_POOL_SIZE`, and it SHALL NOT apply to the dense or entity channels.
+- **Statistics as a read channel:** term statistics SHALL only remove rows from the match set. No candidate SHALL reach the pool except by matching a kept token, and no response SHALL expose a statistic, a ratio or the omitted tokens.
+- **The constant:** `COMMON_TERM_DOCUMENT_RATIO` SHALL be `0.5`, declared once as a named constant in the module that owns save-time detection. It SHALL NOT be operator-configurable, readable from the environment or settable per request. Its value is derived from FTS5's bm25 rather than calibrated. A change to it therefore SHALL carry, in the same change:
+  - the save-time calibration sweep;
+  - the retrieval evaluation;
+  - a measurement of `memory.save` latency at 1 000, 20 000 and 50 000 rows,
+
+  because below half the index a token carries real weight, and omitting it changes the ranking.
+
+- **Reads on the save path:** this rule adds the term-statistics read to the save path. The lexical floor still adds no read of its own.
+
+#### Scenario: A token present in at least half of the index is omitted
+
+- **GIVEN** an index in which one token of a save occurs in at least half of all rows and another occurs in fewer
+- **WHEN** save-time candidate detection runs for that save
+- **THEN** the `MATCH` expression SHALL contain the rarer token and SHALL NOT contain the common one
+
+#### Scenario: The ratio is inclusive
+
+- **GIVEN** a save sharing a token with other rows, and an index of N rows
+- **WHEN** the token's document frequency is exactly N/2
+- **THEN** the token SHALL be omitted
+- **AND** when its document frequency is one less, the token SHALL be kept
+
+#### Scenario: A multi-term token is never omitted
+
+- **GIVEN** a save token that the index's tokenizer splits into several terms, each present in every row
+- **WHEN** save-time candidate detection runs
+- **THEN** that token SHALL remain in the `MATCH` expression
+
+#### Scenario: A save whose every token is common keeps every token
+
+- **GIVEN** a save whose every builder token occurs in at least half of all rows
+- **WHEN** save-time candidate detection runs
+- **THEN** the `MATCH` expression SHALL be the builder's unmodified expression
+
+#### Scenario: Tokens that exist only in the saved text do not count as kept
+
+- **GIVEN** a save whose tokens are either common or present in no row other than the saved one, and an existing memory in the same scope sharing its common tokens
+- **WHEN** save-time candidate detection runs with no embedding available
+- **THEN** the `MATCH` expression SHALL be the builder's unmodified expression, and that memory SHALL be eligible to surface as a `source: 'fts'` candidate
+
+#### Scenario: A near-duplicate sharing a rarer token is still surfaced
+
+- **GIVEN** a scope in which some tokens occur in at least half of all rows, and a save that restates an existing memory, sharing at least one rarer token with it
+- **WHEN** save-time candidate detection runs with no embedding available
+- **THEN** that memory SHALL be surfaced with `source: 'fts'` and the same `similarity` as without the omission
+
+#### Scenario: The ratio is not configuration
+
+- **WHEN** the environment schema and every MCP tool input schema are inspected
+- **THEN** `COMMON_TERM_DOCUMENT_RATIO` SHALL NOT be readable from the environment and SHALL NOT be settable per request
+
+### Requirement: The save-time lexical query MUST score only the saving project's matches
+
+The save-time lexical query SHALL order its pool by bm25 computed after the scope, status and exclusion filters have been applied, so that only rows that can enter the pool are scored and sorted. It SHALL NOT order by FTS5's `rank` column, because FTS5 consumes `ORDER BY rank` itself and then scores and sorts every match in every project before the query's own filters run.
+
+The scores and the order SHALL remain exactly those of default bm25 over the whole index. The statistics bm25 uses (the document total, each phrase's document count and the average row length) still cover every indexed row, so for the saving project's rows the returned `(id, score)` list SHALL be identical to the list FTS5 would produce by ranking every match. That identity is what keeps the save-time calibration sweep and the lexical floor valid without recalibration.
+
+What stays corpus-wide SHALL be stated rather than hidden:
+
+- FTS5 still walks the postings of the kept tokens in every project;
+- the join still looks up each matching row before the project filter can reject it;
+- bm25's inverse document frequencies are still counted over every project.
+
+These costs scale with the match set of the kept tokens, which "The save-time lexical `MATCH` MUST omit terms present in at least half of the index" bounds. They do not scale with the number of rows scored. Making them independent of other projects' rows requires an index restricted to one project. Such an index computes inverse document frequencies over that project alone, so it changes scores and order and needs its own calibration.
+
+#### Scenario: Out-of-project matches are not scored
+
+- **GIVEN** an index in which a save's kept tokens match rows in its own project and in other projects
+- **WHEN** the save-time lexical query runs
+- **THEN** its query plan SHALL apply the project filter before computing bm25, and SHALL NOT let FTS5 order the whole match set by rank
+
+#### Scenario: Scoring after the filter changes no score and no order
+
+- **GIVEN** a save whose kept tokens match more rows of its project than the pool holds
+- **WHEN** the save-time lexical query runs
+- **THEN** it SHALL return the same rows, in the same order and with the same scores, as ordering by FTS5's rank over every match and then keeping the project's rows
