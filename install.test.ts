@@ -790,7 +790,31 @@ describe('agent routing', () => {
     expect(hermes.out).toContain('hermes gateway restart');
   });
 
-  it('hermes update explains the automatic legacy migration and exact fallback before restart', () => {
+  it('hermes print-only update without the bridge keeps the working npx entry and never points at a missing file', () => {
+    const { code, out } = nativeRun('update', false);
+    expect(code).toBe(0);
+    expect(existsSync(join(bridgeDir(), 'cli.mjs'))).toBe(false);
+    expect(out).not.toContain('command: node');
+    expect(out).not.toContain(join(bridgeDir(), 'cli.mjs'));
+    expect(out).not.toContain('replace your mcp_servers.rembric entry');
+    expect(out).toContain('keeps working');
+    expect(out).toContain('--yes');
+    expect(out).toContain('hermes gateway restart');
+    expect(out).not.toContain('hermes plugins install rembric');
+  });
+
+  it('hermes print-only install without the bridge prints the exact npx block', () => {
+    const { code, out } = nativeRun('install', false);
+    expect(code).toBe(0);
+    expect(out).not.toContain('command: node');
+    expect(out).toContain('command: npx');
+    expect(out).toContain(`args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']`);
+    expect(out).toContain('REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}');
+    expect(out).toContain('enabled: true');
+  });
+
+  it('hermes guidance shows the node form once the bridge is in place', () => {
+    seedBridge();
     const { code, out } = nativeRun('update', false);
     expect(code).toBe(0);
     expect(out).toContain('command: node');
@@ -800,8 +824,6 @@ describe('agent routing', () => {
     expect(out).toContain('enabled: true');
     expect(out).toContain('repairs recognized Rembric MCP blocks');
     expect(out).toContain('writes a backup before changing config');
-    expect(out).toContain('hermes gateway restart');
-    expect(out).not.toContain('hermes plugins install rembric');
   });
 
   it('hermes update migrates only the documented legacy MCP block and preserves a backup', () => {
