@@ -88,16 +88,17 @@ The plugin ships no skills, so there is no skill description and no skill body i
 
 **On-invoke cost**, per hook:
 
-| Surface                                         | Cap             |
-| ----------------------------------------------- | --------------- |
-| `SessionStart` (`startup\|resume\|clear\|fork`) | ≤30 tokens      |
-| `SessionStart` (`compact`)                      | ≤175 tokens     |
-| `UserPromptSubmit`, per FIRING turn             | ≤272 tokens     |
-| `UserPromptSubmit`, amortised over 10 turns     | ≤60 tokens/turn |
-| `SessionEnd`                                    | 0 tokens        |
-| `PreCompact`                                    | 0 tokens        |
-| `PostCompact`                                   | 0 tokens        |
-| `Stop`                                          | 0 tokens        |
+| Surface                                                 | Cap             |
+| ------------------------------------------------------- | --------------- |
+| `SessionStart` (`startup\|resume\|clear\|fork`)         | ≤30 tokens      |
+| `SessionStart` (`compact`)                              | ≤175 tokens     |
+| `UserPromptSubmit`, fixed-line entries, per FIRING turn | ≤272 tokens     |
+| `UserPromptSubmit`, amortised over 10 turns             | ≤60 tokens/turn |
+| `UserPromptSubmit`, entity-recall hints entry           | ≤161 tokens     |
+| `SessionEnd`                                            | 0 tokens        |
+| `PreCompact`                                            | 0 tokens        |
+| `PostCompact`                                           | 0 tokens        |
+| `Stop`                                                  | 0 tokens        |
 
 **`Stop` is now a single row at 0 tokens, and that is a strict tightening of what this table previously published.** It carried two rows — an asynchronous raw sync at 0 tokens and a synchronous reminder explicitly exempted from any fixed cap, because `plugin-session-protocol` required it to carry "the long form precisely because it has no length budget". The raw-sync entry is deleted, the reminder is composed on the server and bounded there, and the remaining `Stop` handler writes nothing a model can read. No surface in this plugin is uncapped any more.
 
@@ -125,6 +126,8 @@ The `save` (132) and `summary` (400) rows are removed with their fixtures: no cl
 **The server-composed notice is the first model-facing string in this plugin with no fixture, and its cap is therefore asserted elsewhere.** There is nothing to pin across languages — one implementation composes it and five clients print it — so its 640-byte bound is asserted on the server against the emitted string, including a case whose stored summary forces elision (`session-nudges`). The 640 figure is derived from the per-firing ceiling above and not chosen: 1063 − 125 − 90 − 204 − 4 leaves the notice 640.
 
 The `sessionIdTemplate` line remains the largest single per-turn client-composed contributor (51.0 tokens) and SHALL NOT be removed to reduce the budget. It is not redundant: `resolveActiveSessionId` has two paths, an explicit `sessionId` and `findActiveForTransport`; the server binds no session to a connection, and `findActiveForTransport` refuses by design to guess under concurrent ambiguity within its staleness window. With two host sessions open on one repository the line is the only mechanism that attaches a memory to the right session.
+
+The `UserPromptSubmit` channel now carries a third matcher-less entry, and it is additive by construction rather than a revision of the two fixed-line budgets: the fixed-line ceiling stays measured as it has been — `prompt-search.sh` plus `prompt-nudge.sh`, the pair the existing test sums — because the hook that queries the server is a separate script. The hints entry carries its own bound, inherited rather than invented: the server trims its whole lines to `NOTICE_MAX_BYTES` (640 bytes), the ceiling the stretch-close notice already publishes, so the entry emits at most 640 bytes plus one newline ≈ 161 tokens, and the worst reachable turn across all three entries is 1088 + 641 = **1729 bytes** (~433 tokens). Because entity recall deduplicates per session, that entry emits nothing on a turn that names no new indexed entity, so the amortised 60 tokens/turn figure is not charged on every turn; the 161-token row is its per-firing ceiling, not its expected cost.
 
 #### Scenario: Every fixture line has its own asserted budget
 
@@ -167,6 +170,12 @@ The `sessionIdTemplate` line remains the largest single per-turn client-composed
 - **WHEN** a contributor raises any cap in this requirement
 - **THEN** the change SHALL record the new measured value alongside the new cap
 - **AND** the corresponding assertion SHALL be updated in the same commit
+
+#### Scenario: The hints entry is bounded by the shared notice ceiling
+
+- **WHEN** `POST /sessions/:id/recall-hints` returns its maximum three lines
+- **THEN** the server SHALL have trimmed the emitted lines to at most `NOTICE_MAX_BYTES` in total, dropping whole lines rather than truncating a title
+- **AND** the hints entry's emission SHALL stay within 641 bytes (~161 tokens) regardless of how many memories matched
 
 ### Requirement: The plugin SHALL ship a thin curl helper at `${CLAUDE_PLUGIN_ROOT}/scripts/_api.sh`
 
@@ -371,7 +380,9 @@ On the first user prompt of a session the plugin SHALL therefore emit a bounded,
 
 The recall hook fires a keyword-gated instruction only when the user's prompt matches a recall-intent keyword list. Without a second trigger, every other session would begin with no relevance signal at all, so whether the agent goes looking for prior knowledge would depend on the user's phrasing rather than on whether prior knowledge exists.
 
-This is an **instruction to the model, not a server-side prefetch**. The hook SHALL make no HTTP request: the emitted text is fixed and byte-identical whether or not the scope contains any relevant memory, and the plugin performs no relevance query of its own. The consequence SHALL be recorded rather than implied — relevance injection depends on the model acting on the instruction, which a prefetch would not. A prefetch was considered and rejected FOR THIS HOOK: it would put an HTTP call on the first prompt of every session, on the latency-critical path, implemented in bash, to replace an instruction that works. Because this hook makes no request, there is no unreachable-server failure mode on this path.
+This is an **instruction to the model, not a server-side prefetch**. The hook SHALL make no HTTP request: the emitted text is fixed and byte-identical whether or not the scope contains any relevant memory, and THIS hook performs no relevance query of its own. The consequence SHALL be recorded rather than implied — relevance injection by this line depends on the model acting on the instruction, which a prefetch would not. A prefetch was considered and rejected FOR THIS HOOK: it would put an HTTP call on the first prompt of every session, on the latency-critical path, implemented in bash, to replace an instruction that works. Because this hook makes no request, there is no unreachable-server failure mode on this path.
+
+This change RETRACTS that rejection, but only for a SEPARATE hook, and deliberately keeps this one byte-identical. The rejected option was rejected because it replaced a working instruction; `proactive-entity-recall` adds a different signal instead of replacing one: a keyword regex cannot notice that a prompt names a file, a ticket or an error code that the corpus already holds learnings about, and no instruction makes the model look when it does not know to look. The query therefore lives in its own matcher-less `UserPromptSubmit` entry (`apps/plugin/scripts/prompt-hints.sh`), leaving the fixed-line hook's two properties — no request, corpus-independent text — intact and asserted. The cost the rejection named is real and is bounded rather than denied: one request per prompt, a 200 ms client-side budget, and total silence on any failure, so the unreachable-server failure mode now exists on this path and degrades to emitting no lines.
 
 Both statements are scoped to this capability's bash hooks and SHALL NOT be read as a four-client claim. The Hermes provider does implement a real prefetch — `queue_prefetch` in `apps/plugin/.hermes-plugin/__init__.py` POSTs `/memory/recall` and prepends the recalled text to the hint — so on that client the emitted block is corpus-dependent and does have a silent unreachable-server path. That divergence is deliberate: Hermes is an in-process Python provider with no bash latency budget and no per-client duplication cost. It is specified by `hermes-agent-plugin`, which this change does not audit; the two capabilities SHALL NOT be conflated, and a future four-client parity claim about relevance injection has to reconcile them first.
 
@@ -411,6 +422,41 @@ The emitted line SHALL be represented in the shared nudge fixtures with a byte b
 
 - **WHEN** the first-prompt line diverges from the equivalent line in another client, or exceeds its byte budget
 - **THEN** the lock-step fixture test SHALL fail and the build SHALL be rejected
+
+#### Scenario: The relevance query is a separate hook, and the fixed-line hook stays request-free
+
+- **WHEN** `apps/plugin/scripts/prompt-search.sh` is inspected after this change
+- **THEN** it SHALL still contain no `curl`, no `rembric_post`, and no dependency on `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN`
+- **AND** the entity-recall request SHALL live in `apps/plugin/scripts/prompt-hints.sh`, registered as its own matcher-less `UserPromptSubmit` entry
+
+#### Scenario: The hints hook never blocks the model
+
+- **GIVEN** the server is unreachable, slow, or returns an error for `POST /sessions/:id/recall-hints`
+- **WHEN** `prompt-hints.sh` runs on a user prompt
+- **THEN** it SHALL emit nothing on stdout and SHALL exit 0
+- **AND** the fixed-line hooks' output SHALL be unaffected by its presence or absence
+
+#### Scenario: The hints hook abandons the request within the turn-start budget
+
+- **GIVEN** a server that accepts the connection and never responds
+- **WHEN** `prompt-hints.sh` runs on a user prompt naming an indexed entity
+- **THEN** it SHALL abandon the request within the turn-start budget this capability publishes, not within the background-POST budget the shared helper defaults to
+- **AND** the elapsed time SHALL be asserted against that published number, because failing open is not sufficient on this path: the hook already exited 0 and emitted nothing while holding the user's turn for 3022 ms, measured, which is 15× the published budget
+- **AND** the budget SHALL be set at this call site, since the value is inherited from a shared helper that legitimately defaults to the longer background budget for every other caller
+
+#### Scenario: The hints hook redacts with the same semantics as every other transport
+
+- **WHEN** `prompt-hints.sh` processes a prompt whose `<private>` span is written with mixed-case tags
+- **THEN** the span SHALL be replaced before the prompt leaves the process, matching the shared redaction fixtures that pin the JS, bash and Python arms together
+- **AND** the hook SHALL reach that behaviour through the one canonical bash implementation rather than a local re-implementation, since a second implementation is what allowed the case-insensitivity the fixtures require to be lost on this path
+
+#### Scenario: The emitted request body is valid JSON at the truncation boundary
+
+- **GIVEN** a prompt whose 500-character window ends inside a character that JSON escaping expands
+- **WHEN** `prompt-hints.sh` builds the request body
+- **THEN** the body SHALL be valid JSON
+- **AND** the window SHALL be measured against the prompt rather than against its escaped form, so the amount of prompt sent does not vary with how much punctuation it contains
+- **AND** a control case one character shorter SHALL also be valid, so the assertion distinguishes a real boundary defect from a broken probe
 
 ### Requirement: All agent-facing text MUST be English and lock-step tested
 

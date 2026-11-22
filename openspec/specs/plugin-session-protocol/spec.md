@@ -613,6 +613,10 @@ A member of that list SHALL live in the core even when exactly one client calls 
 
 **The turn-report call and its line cache SHALL be one core-owned pair.** The cache SHALL be keyed per session, SHALL be cleared when the session is forgotten, and SHALL NOT be overwritten with an empty result — a report that returns no lines leaves any pending lines intact, so a second end-of-turn event within one turn cannot swallow a notice. Reading the cache SHALL clear it, so a notice is printed exactly once.
 
+**The turn body retains `{usedTools}` (+`title` once) exactly as today.** The `prompt` field is NOT part of the turn body; proactive recall hints are delivered via a separate synchronous endpoint called at turn START.
+
+**The recall-hints call SHALL be one core-owned function.** The function SHALL call `POST /api/<slug>/sessions/:id/recall-hints` with the current turn's user prompt (`<private>`-redacted, truncated to 500 chars), and SHALL return the `{lines: string[]}` response. The function SHALL accept a timeout parameter with a bounded default (e.g. 200ms) and SHALL return an empty array on timeout or error — proactive recall is best-effort, never blocking the model.
+
 The resume SHALL be issued by the core's session-registration entry point itself, on the branch that has just added the id to its known-session set, rather than by each client after calling it. That set is already the once-per-id gate for the ensure, so making the resume ride on the same branch makes "exactly one resume per id per process" structural instead of a rule two clients each have to remember. No JS/TS client SHALL call the resume path directly, and no JS/TS client SHALL keep its own known-session set for this purpose.
 
 The resume SHALL be skipped when the ensure that precedes it did not land. Whatever prevented the ensure — an unreachable server, a revoked token, an unresolvable slug — prevents the resume too, so issuing it anyway buys nothing and doubles the wait a quitting or starting user absorbs, each POST being separately bounded by the client's timeout. The id SHALL nevertheless remain in the known-session set, so the pair is not retried on the next call.
@@ -651,7 +655,7 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 - **GIVEN** a core whose tool latch is armed for a session it has not registered
 - **WHEN** `reportTurn` is called for that session
 - **THEN** no request SHALL be issued
-- **AND** the latch SHALL still be armed, so that session's first SENT report SHALL carry `usedTools: true`
+- **AND** the latch SHALL still be armed, so that session's first sent report SHALL carry `usedTools: true`
 
 #### Scenario: A non-client file under `apps/plugin/` cannot redefine a core-owned helper
 
@@ -691,7 +695,42 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 - **WHEN** the core's session-registration entry point runs for a new id
 - **THEN** it SHALL NOT POST the resume
 - **AND** the id SHALL still be in the known-session set, so a later call for the same id POSTs neither
-- **AND** the control SHALL pass in the same run: with the ensure answering `200`, the resume IS POSTed
+- **AND** the control SHALL pass in the same run: with the ensure answering `200`, the resume IS posted
+
+#### Scenario: The turn body does not carry a prompt
+
+- **WHEN** `reportTurn` is called for any session
+- **THEN** the POST body SHALL contain `{usedTools}` (and optionally `title`)
+- **AND** the POST body SHALL NOT contain a `prompt` field
+
+#### Scenario: The recall-hints call returns lines synchronously
+
+- **GIVEN** a core with a recorded prompt "Fix the login flow in src/auth/handler.ts"
+- **WHEN** `recallHints(sessionId, prompt)` is called
+- **THEN** it SHALL POST to `/api/<slug>/sessions/<id>/recall-hints` with `{prompt: "<redacted and truncated>"}`
+- **AND** it SHALL return the `{lines: string[]}` response
+- **AND** it SHALL return an empty array on timeout or error
+
+#### Scenario: A missing prompt omits the recall-hints call
+
+- **GIVEN** a core with no recorded prompt for the current turn
+- **WHEN** the client reaches the hints call site
+- **THEN** it SHALL NOT call the recall-hints endpoint
+
+#### Scenario: The core function is tested directly, not only through its call sites
+
+- **WHEN** the invariant set for this capability is evaluated
+- **THEN** a test SHALL call the core's `recallHints` entry point directly and assert its request path, its redacted and truncated body, its return value on a populated response, and its empty return on each failure mode it declares
+- **AND** the failure modes asserted SHALL include a non-2xx status, a timeout, a malformed body, an unregistered session, and a sub-agent session
+- **AND** a call-site test whose transport returns an empty body SHALL NOT count as coverage of this function, because every declared failure mode and the success path collapse to the same empty array through such a transport
+
+#### Scenario: Each client's merge of the returned lines is exercised with real content
+
+- **GIVEN** a client whose transport is configured to return a non-empty `lines` array for the recall-hints path
+- **WHEN** that client's turn-start handler runs
+- **THEN** the returned lines SHALL be observable in the artifact that client uses to reach the model
+- **AND** this SHALL be asserted for every client that carries this mechanism, since the merge branch is the one step the server's own tests cannot reach
+- **AND** a suite in which the transport always answers empty SHALL be treated as not covering this scenario at all, rather than as covering it trivially
 
 ### Requirement: The protocol nudge MUST live in `initialize.instructions`, and every client MUST reach it or document its own equivalent
 

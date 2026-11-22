@@ -24,7 +24,7 @@ The resume SHALL be issued by the core's session-registration entry point itself
 
 The resume SHALL be skipped when the ensure that precedes it did not land. Whatever prevented the ensure — an unreachable server, a revoked token, an unresolvable slug — prevents the resume too, so issuing it anyway buys nothing and doubles the wait a quitting or starting user absorbs, each POST being separately bounded by the client's timeout. The id SHALL nevertheless remain in the known-session set, so the pair is not retried on the next call.
 
-An invariant test in `apps/server/src/test/invariants.test.ts` SHALL fail the build when a second JS/TS definition of any of these appears. The test SHALL (a) assert a **non-zero count** of scanned files, so an empty file list cannot satisfy the negative assertions vacuously, and (b) derive its scanned file list from a repository-wide search rather than a hard-coded list, so a client added later is scanned on the day it is added. The failure message SHALL name the offending `<file>:<line>`.
+An invariant test in `apps/web/src/test/invariants.test.ts` SHALL fail the build when a second JS/TS definition of any of these appears. The test SHALL (a) assert a **non-zero count** of scanned files, so an empty file list cannot satisfy the negative assertions vacuously, and (b) derive its scanned file list from a repository-wide search rather than a hard-coded list, so a client added later is scanned on the day it is added. The failure message SHALL name the offending `<file>:<line>`.
 
 **The scanned set is every JS/TS source file under `apps/plugin/`, which is broader than the set of clients, and the two halves of the invariant apply to different sets.** The repository ships a JS/TS artifact under `apps/plugin/` that is deliberately not a session client — the transport package `apps/plugin/mcp-bridge/` — and the distinction has to be normative rather than an accident of the pattern the test happens to use:
 
@@ -38,7 +38,7 @@ The core SHALL require `agent` as a mandatory parameter of session registration,
 #### Scenario: A second redaction implementation fails the build
 
 - **GIVEN** a change introduces a local `function stripPrivateTags` in any JS/TS client file
-- **WHEN** `pnpm vitest run apps/server/src/test/invariants.test.ts` runs
+- **WHEN** `pnpm vitest run apps/web/src/test/invariants.test.ts` runs
 - **THEN** the test SHALL fail with a message naming the offending file and line
 
 #### Scenario: No cadence constant survives anywhere in the plugin tree
