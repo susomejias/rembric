@@ -1331,59 +1331,63 @@ The rule is a MATCHING rule, not a format validator. It never names `Goal`, neve
 
 ### Requirement: Session rows MUST carry the four nudge-gate timestamps, three of them monotone and the turn anchor free to follow the clock
 
-`sessions` SHALL carry `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`, all `timestamp_ms`, all NULLABLE, all defaulting to NULL. `session-nudges` owns which write sets each and what the gate reads from them; this requirement owns their presence, their nullability, WHICH of them are monotone, and the migrations that add them.
+`sessions` SHALL carry `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at`, all `timestamp_ms`, all NULLABLE, all defaulting to NULL. `session-nudges` owns which write sets each and what the gate reads from them; this requirement owns their presence, nullability and monotonicity.
 
-**NULL means "never", and it is a load-bearing value rather than a missing one.** Every row that predates the columns reads NULL on all four, and the gate is specified so that a NULL row behaves as a silent one until a client reports work. A NULL `last_turn_report_at` means "no turn has been reported yet", and the first report of a session therefore anchors on `started_at`. No backfill SHALL be performed, and the reason is now stronger than the one originally given: there is no column anywhere from which `last_summary_at` could be inferred. The candidate this requirement was written against, `session_summary_versions.created_at`, was already the wrong instant — a byte-identical curated re-write appended no row, so the newest version's timestamp was not the moment the column was last written — and the table itself is retired (`persistence`, "The `session_summary_versions` table MUST be dropped by a dedicated migration, with `0033` retained on disk"). What remains on the row is `started_at`, `ended_at` and `last_activity_at`, none of which is the moment a summary was written. A pre-existing row therefore reads NULL and the gate treats it as silent until a client reports work, exactly as the paragraph above specifies for NULL.
+NULL SHALL mean never observed. A pre-existing row SHALL remain silent without a completed report. The first incoming completed report SHALL capture `last_turn_report_at ?? started_at` as its ephemeral activity anchor before advancing `last_turn_report_at`, whether or not tools ran. No new column, migration, backfill or historical content rewrite SHALL be required for conversational eligibility. In particular, `last_summary_at` SHALL NOT be inferred from summary text, `started_at`, `ended_at`, `last_activity_at` or the retired `session_summary_versions` table: none establishes the latest stored curated write, including byte-identical rewrites.
 
-**Three of them SHALL move forward only** — `last_work_at`, `last_summary_at` and `last_nudge_at`. A write SHALL NOT set one of those three to a value earlier than the value already stored. **No path SHALL clear ANY of the four to NULL once it holds a timestamp**, including `resume`, which clears `ended_at` and SHALL leave them alone: a session that is resumed keeps the moment its summary was last written, because that is still when it was last written.
+`last_work_at`, `last_summary_at` and `last_nudge_at` SHALL move forward only. No path SHALL clear any of the four timestamps to NULL once set, including `resume`. `last_work_at` SHALL remain tool-only; a conversational report SHALL NOT advance it to make the session eligible.
 
-**`last_turn_report_at` SHALL be stamped with the current instant on every report, and SHALL NOT be clamped forward.** It is the one exception and the exception is load-bearing rather than an oversight. The other three are cumulative observations — the latest moment at which work happened, a summary was stored, a notice was sent — and for those "the highest value seen" IS the value. `last_turn_report_at` is not an observation but an ANCHOR: it marks where the turn now being reported began, and the report that reads it is the same report that replaces it. Clamping it forward would leave a host whose clock steps backwards with an anchor AHEAD of a curated summary written after the step, so `last_work_at` would land later than `last_summary_at`, the gate's condition (2) would hold, and the notice would fire on exactly the turn that had just complied — the defect this column was added to remove. Measured on this tree with the clamp in place: the report following a mid-turn `memory.session_summary` returns one notice line where it must return none. Correctness here comes from the column having exactly ONE writer, not from moving forward only. The asymmetry of the two failures is what settles it: a backwards step costs at most one over-suppressed notice, bounded by the floor, while the clamped reading costs a notice fired at a model that did what it was asked.
+`last_turn_report_at` SHALL be stamped with the current instant on every active report and SHALL NOT be clamped forward. The captured pre-update anchor SHALL be used directly for activity eligibility, independently of monotone `last_work_at`. After a clock rollback, retaining a future high-water anchor could place activity after a complying curated write; conservative suppression is preferred to that false reminder. No other write SHALL stamp `last_turn_report_at`.
 
-The migration SHALL be a plain `ALTER TABLE sessions ADD COLUMN` per column. No table rebuild is required — no `CHECK`, no `NOT NULL`, no foreign key is introduced — so the rebuild dance and its `DROP TABLE` foreign-key hazard do not apply, and `PRAGMA foreign_key_check` passes trivially before `COMMIT`.
-
-These columns SHALL be exempt from the summary/title `final` precedence machinery. They are not model-authored values and there is no writer whose claim on them could lose to another's.
+The original column-add migrations SHALL remain plain `ALTER TABLE sessions ADD COLUMN`, with no table rebuild, new CHECK, NOT NULL or foreign key, and with the existing pre-commit foreign-key check. They SHALL NOT be rerun or rewritten by this policy change. These columns SHALL remain exempt from summary/title `final` precedence because they are observations, not model-authored fields.
 
 #### Scenario: A populated table migrates without rewriting a row
 
-- **GIVEN** a `sessions` table carrying rows with curated summaries, terminal statuses and soft-deletes
-- **WHEN** the migration runs
-- **THEN** every existing row SHALL be preserved verbatim with the new columns NULL
-- **AND** `PRAGMA foreign_key_check` SHALL report no violations before `COMMIT`
-- **AND** no table rebuild SHALL have occurred
+- **GIVEN** a sessions table carrying curated summaries, terminal statuses and soft-deletes
+- **WHEN** the original column-add migrations run
+- **THEN** existing values SHALL be preserved and the new columns SHALL be NULL
+- **AND** `PRAGMA foreign_key_check` SHALL report no violations before COMMIT and no table rebuild SHALL occur
 
 #### Scenario: Resume does not reset the timestamps
 
-- **GIVEN** session `<S>` with `status = 'ended'` and all four timestamps set
-- **WHEN** `resume(<S>, { tokenId })` succeeds
-- **THEN** `ended_at` SHALL be NULL and `status` SHALL be `'active'`
-- **AND** `last_work_at`, `last_summary_at`, `last_nudge_at` and `last_turn_report_at` SHALL be byte-identical to their pre-resume values
+- **GIVEN** an ended session with all four timestamps set
+- **WHEN** authorized resume succeeds
+- **THEN** status SHALL be active and `ended_at` NULL
+- **AND** all four observation timestamps SHALL be unchanged
 
 #### Scenario: A stale write cannot move a timestamp backwards
 
-- **GIVEN** session `<S>` whose `last_work_at` is `T`
-- **WHEN** a write attempts to set `last_work_at` to a value earlier than `T`
-- **THEN** the stored value SHALL remain `T`
+- **GIVEN** `last_work_at` is T
+- **WHEN** a write attempts to set it earlier than T
+- **THEN** it SHALL remain T
 
 #### Scenario: The turn anchor follows a clock that steps backwards, and the other three do not
 
-- **GIVEN** session `<S>` whose `last_turn_report_at` is `T`, with `last_work_at` and `last_nudge_at` set
-- **WHEN** a turn report is handled at an instant `E` earlier than `T`, because the host clock stepped backwards between two reports
-- **THEN** `last_turn_report_at` SHALL be `E`
-- **AND** `last_work_at` SHALL NOT have moved backwards and `last_nudge_at` SHALL be unchanged
+- **GIVEN** `last_turn_report_at` is T with work and nudge timestamps set
+- **WHEN** a report arrives at E earlier than T
+- **THEN** `last_turn_report_at` SHALL become E
+- **AND** `last_work_at` SHALL NOT move backwards and `last_nudge_at` SHALL remain unchanged while the floor is not elapsed
 
 #### Scenario: A turn that refreshes the summary after a backwards clock step is still not reminded
 
-- **GIVEN** session `<S>` past the floor whose `last_turn_report_at` was stamped after a backwards clock step, so it reads earlier than the highest value the column has ever held
-- **WHEN** the session's next turn writes a curated summary mid-turn and then reports itself with `usedTools: true`
-- **THEN** no notice SHALL be returned, because `last_work_at` anchors on that earlier report and lands before `last_summary_at`
-- **AND** the control SHALL pass in the same run: the identical timeline with the curated write removed SHALL return a notice, so the silence above is suppression and not an unreachable gate
+- **GIVEN** a previous report stamped the post-rollback instant and the nudge floor permits emission
+- **WHEN** the next turn stores a curated summary mid-turn and reports itself
+- **THEN** no notice SHALL be returned because the captured activity anchor is no later than that summary
+- **AND** the same timeline without the curated write SHALL return a notice, independent of `usedTools`
 
 #### Scenario: A report lost to an interrupted turn suppresses more, never less
 
-- **GIVEN** two identical session timelines that differ only in that one report is never issued, as happens on a Hermes turn the user interrupts
-- **WHEN** both are driven through the same turns
-- **THEN** the lost-report timeline's `last_work_at` SHALL never be later than the kept-report timeline's at the same turn
-- **AND** the control SHALL pass in the same run: there SHALL be a turn on which the kept-report timeline returns a notice and the lost-report one returns none
+- **GIVEN** identical timelines differing only by one lost report and no differing prior notice emission
+- **WHEN** the next report is evaluated against the same stored summary and elapsed floor
+- **THEN** the lost-report timeline SHALL have an activity anchor no later than the kept-report timeline
+- **AND** a control SHALL demonstrate a kept-report notice and lost-report silence when the stored summary lies between those anchors
+
+#### Scenario: Conversation eligibility requires no schema or provenance mutation
+
+- **GIVEN** an existing active session with `last_work_at` NULL
+- **WHEN** its completed conversational report earns a notice
+- **THEN** `last_work_at` SHALL remain NULL and no summary SHALL be fabricated
+- **AND** the existing schema SHALL suffice without migration or backfill
 
 ### Requirement: Batch session retrieval returns full summaries without mutating sessions
 
