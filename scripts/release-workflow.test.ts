@@ -37,38 +37,3 @@ describe('release-please flow', () => {
     expect(jobBlock('publish-npm')).toMatch(queuedGroup('publish-npm'));
   });
 });
-
-describe('the npm publish estate', () => {
-  const publishNpm = jobBlock('publish-npm');
-  const bridgeManifest = JSON.parse(read('apps/plugin/mcp-bridge/package.json')) as Record<
-    string,
-    unknown
-  >;
-  const pluginExtraFiles = (config.packages as Record<string, { 'extra-files': unknown[] }>)[
-    'apps/plugin'
-  ]['extra-files'];
-
-  it('publishes the Pi client and nothing else', () => {
-    const published = [...publishNpm.matchAll(/node scripts\/npm-publish\.mjs (\S+)/g)];
-    expect(published.map((m) => m[1])).toEqual(['apps/plugin/.pi-plugin']);
-  });
-
-  it('runs no bridge pack assertion or bridge publish step', () => {
-    expect(publishNpm).not.toMatch(/mcp-bridge/);
-  });
-
-  it('asserts the Pi tarball before publishing it', () => {
-    const materialize = publishNpm.indexOf('node scripts/pi-package.mjs materialize');
-    const assertPack = publishNpm.indexOf('node scripts/pi-package.mjs assert-pack');
-    const publish = publishNpm.indexOf('node scripts/npm-publish.mjs apps/plugin/.pi-plugin');
-    expect(materialize).toBeGreaterThan(-1);
-    expect(assertPack).toBeGreaterThan(materialize);
-    expect(publish).toBeGreaterThan(assertPack);
-  });
-
-  it('keeps the bridge manifest private, dependency-free and a plugin version carrier', () => {
-    expect(bridgeManifest.private).toBe(true);
-    expect(bridgeManifest.dependencies).toEqual({});
-    expect(pluginExtraFiles).toContain('mcp-bridge/package.json');
-  });
-});

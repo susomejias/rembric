@@ -27,10 +27,10 @@
 
 ## 5. Stop publishing the bridge
 
-- [x] 5.1 RED first, in `scripts/release-workflow.test.ts`: `publish-npm` publishes `apps/plugin/.pi-plugin` only, runs no bridge pack assertion, and `release-please-config.json` `extra-files` keeps `mcp-bridge/package.json` (the JSONPath entries already went with 2.2)
-- [x] 5.2 Edit `.github/workflows/release-please.yml`; delete `scripts/mcp-bridge-package.mjs` and its test; set `"private": true` and drop the `files` allowlist in `apps/plugin/mcp-bridge/package.json` (the published-estate filter treats a `files` list as intent to publish); remove the stale tarball-ordering case from `scripts/npm-publish.test.ts`
-- [x] 5.3 Confirm `node scripts/pi-package.mjs materialize` and `assert-pack` still pass, so `@rembric/pi` keeps embedding the bridge modules
-- [x] 5.4 Consult `.agents/skills/npm-security-best-practices/` for the `package.json` and workflow edits; `ALLOWED_BUILD_SCRIPTS` and the lockfile are unchanged
+- [ ] 5.1 RED first, in `scripts/release-workflow.test.ts`: `publish-npm` publishes `apps/plugin/.pi-plugin` only, runs no bridge pack assertion, and `release-please-config.json` `extra-files` keeps `mcp-bridge/package.json` (the JSONPath entries already went with 2.2)
+- [ ] 5.2 Edit `.github/workflows/release-please.yml`; delete `scripts/mcp-bridge-package.mjs` and its test; set `"private": true` in `apps/plugin/mcp-bridge/package.json`
+- [ ] 5.3 Confirm `node scripts/pi-package.mjs materialize` and `assert-pack` still pass, so `@rembric/pi` keeps embedding the bridge modules
+- [ ] 5.4 Consult `.agents/skills/npm-security-best-practices/` for the `package.json` and workflow edits; `ALLOWED_BUILD_SCRIPTS` and the lockfile are unchanged
 
 ## 6. Docs and specs
 
