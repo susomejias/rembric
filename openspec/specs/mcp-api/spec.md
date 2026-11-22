@@ -1003,11 +1003,11 @@ The instructions SHALL be organized as directive, proactively-phrased guidance c
 
 ### Requirement: Tools that attach a write to a session MUST accept an explicit `sessionId` override, reinforced in their descriptions
 
-`memory.save`, `memory.session_summary`, `memory.session_end`, `memory.save_prompt`, and `memory.capture_passive` SHALL accept an optional `sessionId: string` argument. When provided, it SHALL take precedence over the server's own session resolution — mirroring the explicit-first precedence `memory.session_summary`/`memory.session_end` already apply via `resolveSessionId`. The resolution order SHALL be exactly two steps: (1) the explicit, ownership-checked `sessionId`; (2) otherwise `findActiveForTransport(tokenId, projectId)`, which returns a session only when the choice is unambiguous and returns none otherwise (see the `sessions` requirement "`findActiveForTransport` MUST NOT guess under concurrent ambiguity"). No session SHALL be bound to the connection or transport, and no step SHALL consult per-connection state: the server keeps none. Each tool's description SHALL mention `sessionId` explicitly (not only via the input schema's per-argument `describe()`, since some MCP clients do not surface per-property schema descriptions to the model) with guidance to pass it only if genuinely known and never invent one.
+`memory.save`, `memory.session_summary`, `memory.session_end`, `memory.save_prompt`, and `memory.capture_passive` SHALL accept an optional `sessionId: string` argument. When provided, it SHALL take precedence over the server's transport lookup (step (3) below), and yield only to an honoured host-declared session. The resolution order SHALL be exactly three steps: (1) an honoured host-declared session (see "An honoured host-declared session MUST take precedence over the model's `sessionId`"), in which case the `sessionId` argument SHALL be ignored without being validated; (2) otherwise the explicit, ownership-checked `sessionId`; (3) otherwise `findActiveForTransport(tokenId, projectId)`, which returns a session only when the choice is unambiguous and returns none otherwise (see the `sessions` requirement "`findActiveForTransport` MUST NOT guess under concurrent ambiguity"). The host's declaration outranks the argument because the client's lifecycle code knows the live session, while the model's copy of the id is lost to compaction and goes stale on `/clear`. No session SHALL be bound to the connection or transport, and no step SHALL consult per-connection state: the server keeps none. Each tool's description SHALL mention `sessionId` explicitly (not only via the input schema's per-argument `describe()`, since some MCP clients do not surface per-property schema descriptions to the model) with guidance to pass it only if genuinely known and never invent one.
 
 This closes a blind spot: `memory.session_summary`'s and `memory.session_end`'s zod schemas already declared `sessionId` as optional, but their tool descriptions never mentioned it — a model reading only the description had no reason to believe passing it was possible. `memory.save` and `memory.save_prompt` did not accept the argument at all prior to this requirement.
 
-An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.save_prompt`, `memory.capture_passive`) SHALL be validated before it is honored. The server SHALL resolve the named session row and require that it (a) is owned by the caller's token (`token_id` matches the request context), (b) belongs to the caller's effective project (`project_id` equals the connection's resolved project id), and (c) is not soft-deleted (`deleted_at IS NULL`). When (a) or (b) fails, the call SHALL be rejected with code `session_not_found` — the same masking code the session-lifecycle tools use, so a caller cannot probe which session ids exist under other tokens or projects. When (a) and (b) pass but (c) fails, the call SHALL be rejected with code `session_deleted`. On rejection no row SHALL be written. Validation applies only when `sessionId` is explicitly supplied; the active-session fallback already resolves to a session owned by the caller within the effective scope. An `ended` (but not soft-deleted) session remains a valid attachment target. `memory.session_summary`/`memory.session_end` retain their existing service-layer cross-token + soft-delete checks. This closes a security blind spot: prior to this requirement an explicit `sessionId` was honored verbatim, letting a caller forge an attachment to another token's or another project's session.
+An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.save_prompt`, `memory.capture_passive`) SHALL be validated before it is honored. The server SHALL resolve the named session row and require that it (a) is owned by the caller's token (`token_id` matches the request context), (b) belongs to the caller's effective project (`project_id` equals the connection's resolved project id), and (c) is not soft-deleted (`deleted_at IS NULL`). When (a) or (b) fails, the call SHALL be rejected with code `session_not_found` — the same masking code the session-lifecycle tools use, so a caller cannot probe which session ids exist under other tokens or projects. When (a) and (b) pass but (c) fails, the call SHALL be rejected with code `session_deleted`. On rejection no row SHALL be written. Validation applies only when `sessionId` is explicitly supplied and no honoured host-declared session precedes it; the active-session fallback already resolves to a session owned by the caller within the effective scope, and an honoured declaration is by definition the caller's own `active` row in the effective project. An `ended` (but not soft-deleted) session remains a valid attachment target. `memory.session_summary`/`memory.session_end` retain their existing service-layer cross-token + soft-delete checks. This closes a security blind spot: prior to this requirement an explicit `sessionId` was honored verbatim, letting a caller forge an attachment to another token's or another project's session.
 
 #### Scenario: memory.save accepts and prioritizes an explicit sessionId
 
@@ -1049,6 +1049,19 @@ An explicit `sessionId` on the write-_attaching_ tools (`memory.save`, `memory.s
 - **GIVEN** the caller's token owns a session `<S>` in the effective project whose `deleted_at` is non-null
 - **WHEN** the caller calls a write-attaching tool with `sessionId = '<S>'`
 - **THEN** the call SHALL be rejected with code `session_deleted` and no row SHALL be written
+
+#### Scenario: An honoured host declaration outranks an explicit sessionId
+
+- **GIVEN** two `active` sessions `<H>` and `<M>` owned by the caller's token in the effective project, and the request declares `<H>` in `X-Rembric-Session`
+- **WHEN** the agent calls `memory.save({..., sessionId: '<M>'})`
+- **THEN** the saved memory's `session_id` SHALL be `'<H>'`
+- **AND** the same call with `sessionId` naming no row SHALL also succeed and attach to `'<H>'`, because the argument is ignored without being validated
+
+#### Scenario: An unhonoured declaration leaves the explicit sessionId validated as before
+
+- **GIVEN** the request declares a session id that names no row, and `<S>` is owned by a different token
+- **WHEN** the caller calls `memory.save` with `sessionId = '<S>'`
+- **THEN** the call SHALL be rejected with code `session_not_found` and no row SHALL be written
 
 ### Requirement: The MCP server MUST expose `memory.suggest_topic_key`
 
@@ -2909,9 +2922,9 @@ The `/mcp` and `/mcp/<slug>` endpoints SHALL register the tools `memory.session_
 
 The response SHALL additionally carry a REQUIRED `agent` field reporting the attribution the resolved row actually carries: on `reused: false` the value just written, and on `reused: true` the adopted row's own value, which MAY differ from the `agent` argument the call passed. It SHALL be read from the resolved row rather than from the argument, so the field reports what is stored and not what was requested. The adopt path SHALL NOT write the passed `agent` onto the adopted row: `sessions.agent` is immutable (see the `sessions` capability, "The system SHALL never physically delete a session row and SHALL never mutate the `agent`, `token_id`, `started_at`, or `project_id` of an existing session") and no verb re-attributes a session, so a differing argument is discarded permanently and every memory and summary version anchored to that row inherits the row's attribution instead. Reporting it is therefore the entire remedy available: `reused: true` alone tells the caller it is attached to a session it did not open but not whose, and without `agent` the discard is not merely unnoticed but unobservable. Refusing the call on a mismatch SHALL NOT be adopted as the remedy — a host-registered row whose `agent` string the hook chose, adopted by a model that names itself differently, is the ordinary case the reuse exists to serve — and neither SHALL `agent` be added to the reuse key, which would restore the duplicate-session bug the reuse prevents. `agent` SHALL be non-nullable and always present, since the column is `NOT NULL` and the insert path substitutes `'unknown'`; a nullable declaration would publish a state the tool cannot produce. Its `outputSchema` SHALL mark it required and the description's closed-form `Returns: { … }` list SHALL name it, per "A tool's description and its response MUST agree, and neither may promise an unreachable state".
 
-`memory.session_start` SHALL resolve the session it reports in this order, and the order is normative: (1) the windowed sole-active lookup (`findActiveForTransport`); (2) the sole-active reuse lookup that applies no staleness window (`findSoleActiveForReuse`); (3) a mint. Steps (1) and (2) are specified in the `sessions` capability, "`findActiveForTransport` MUST NOT guess under concurrent ambiguity". No step SHALL consult a binding between the connection and a session: the server keeps no per-connection state, and neither `memory.session_start` nor `memory.session_resume` binds a session to the connection.
+`memory.session_start` SHALL resolve the session it reports in this order, and the order is normative: (0) an honoured host-declared session (see "An honoured host-declared session MUST take precedence over the model's `sessionId`"); (1) the windowed sole-active lookup (`findActiveForTransport`); (2) the sole-active reuse lookup that applies no staleness window (`findSoleActiveForReuse`); (3) a mint. Steps (1) and (2) are specified in the `sessions` capability, "`findActiveForTransport` MUST NOT guess under concurrent ambiguity". No step SHALL consult a binding between the connection and a session: the server keeps no per-connection state, and neither `memory.session_start` nor `memory.session_resume` binds a session to the connection.
 
-Both adoption paths report the same way: `reused: true` carrying the adopted row's `sessionId` and that row's stored `agent`, and neither SHALL insert a row. Only step (3) reports `reused: false`. Minting under two-or-more live rows is preserved as published behaviour, and with no connection binding to answer a repeated call, each repeated call under that condition mints again; the description clause below is what limits repeated calls.
+The three adoption paths report the same way: `reused: true` carrying the adopted row's `sessionId` and that row's stored `agent`, and none of them SHALL insert a row. Only step (3) reports `reused: false`. Minting under two-or-more live rows is preserved as published behaviour, and with no connection binding to answer a repeated call, each repeated call under that condition mints again; the description clause below is what limits repeated calls.
 
 `memory.session_start`'s optional `project` argument SHALL be an assertion, not an activation. When it names the project the connection resolved — from the URL path, or the default project on a path-less connection — the call SHALL proceed exactly as if the argument were omitted. When it names any other slug, the call SHALL be refused with `scope_locked`, naming the resolved slug, and SHALL insert, adopt and modify no row. It SHALL NOT activate, switch or create a project.
 
@@ -2929,9 +2942,9 @@ The tool's description SHALL additionally tell the model not to repeat the call 
 
 `sessionId` SHALL have no fallback resolution on `memory.session_resume`. Unlike the other three tools it SHALL NOT consult the sole-active-session lookup. That fallback is structurally unavailable — the active-session lookup filters `status = 'active'`, which the resume target by definition is not — so any fallback would have to select a terminal row by recency, precisely the heuristic the `sessions` capability's "`findActiveForTransport` MUST NOT guess under concurrent ambiguity" refuses. A call omitting `sessionId` SHALL be rejected at the zod boundary with `invalid_input`, never resolved to a guess.
 
-`memory.session_resume` SHALL NOT bind the resumed session to the connection, on the transition path or on the already-`active` no-op path, and SHALL NOT set a project: resume names a session, and the project is whatever the connection already resolved. A later write reaches the resumed session through an explicit `sessionId`, or through the sole-active-session lookup when the resumed session is the only `active` one for the caller's `(token, project)`. `memory.session_end` has no binding to clear.
+`memory.session_resume` SHALL NOT bind the resumed session to the connection, on the transition path or on the already-`active` no-op path, and SHALL NOT set a project: resume names a session, and the project is whatever the connection already resolved. A later write reaches the resumed session through an honoured host-declared session naming it, through an explicit `sessionId` when no declared session is honoured, or through the sole-active-session lookup when the resumed session is the only `active` one for the caller's `(token, project)`. `memory.session_end` has no binding to clear.
 
-Session resolution is unchanged for the other three tools and SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an explicit `sessionId`, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The second source SHALL continue to consider only `active` rows, so an agent that supplies no explicit id SHALL receive a refusal rather than having its write attached to a closed session picked by recency.
+Session resolution for the other three tools SHALL remain status-aware where it already is: `memory.session_summary` resolves its target from an honoured host-declared session, else an explicit `sessionId`, else the unambiguous `active` session for the caller's `(token_id, project_id)`. The last source, the transport lookup, SHALL continue to consider only `active` rows, so an agent that supplies no explicit id SHALL receive a refusal rather than having its write attached to a closed session picked by recency.
 
 When `memory.session_summary` or `memory.session_end` is called without `sessionId` and no session resolves, the refusal SHALL say why, because the remedy differs and a wrong remedy misfiles the write permanently. The tool SHALL classify through `AgentSessionsService.resolveForTransport` (see the `sessions` capability, "Transport resolution MUST distinguish absence from ambiguity") and SHALL refuse with:
 
@@ -3170,6 +3183,13 @@ When `memory.session_summary` or `memory.session_end` is called without `session
 - **GIVEN** two `active` rows for the caller's `(token_id, project_id)`
 - **WHEN** the agent calls `memory.session_end({})`
 - **THEN** the call SHALL be refused with `session_ambiguous` and both rows SHALL remain `active`
+
+#### Scenario: `memory.session_start` adopts an honoured host-declared session before any other lookup
+
+- **GIVEN** two `active` rows for the caller's `(token_id, project_id)` and a request whose `X-Rembric-Session` names one of them
+- **WHEN** the agent calls `memory.session_start`
+- **THEN** the response SHALL carry `reused: true`, that row's `sessionId` and that row's stored `agent`
+- **AND** no `sessions` row SHALL be inserted
 
 ### Requirement: The MCP server MUST expose `project.bind_repository` to admin tokens
 
@@ -3509,3 +3529,79 @@ The defect this closes was observed, not inferred: in Claude Code the first-prom
 - **AND** it SHALL state that a host hook asking for the call with `focus` on the first turn is not speculative and is to be made before responding
 - **AND** it SHALL define a speculative call as one with no `focus` that no hook requested
 - **AND** it SHALL be `DESCRIPTION_MAX_LENGTH` characters or fewer
+
+### Requirement: An honoured host-declared session MUST take precedence over the model's `sessionId`
+
+A request MAY carry a host-declared session id, read by the MCP route from `X-Rembric-Session` into `RequestContext.declaredSessionId` (see the `http-api` capability, "The MCP route MUST read `X-Rembric-Session` into the request context and never refuse on it"). The declaration is attribution metadata, never authority. The server SHALL **honour** it only when all of these hold, checked when the tool resolves its session:
+
+1. a `sessions` row with that id exists;
+2. its `token_id` equals the request token's id;
+3. its `project_id` equals the connection's resolved project id;
+4. its `status` is `active`;
+5. its `deleted_at` is `NULL`.
+
+Otherwise the declaration SHALL be ignored exactly as if absent, and the call SHALL NOT be refused because of it: a stale declaration (the host's previous session after `/clear`, or a session the sweep abandoned) degrades to the resolution the call would have without it. Requiring `active` is what keeps a stale declaration from attaching new writes to a closed session, and conditions 2 and 3 confine any declaration to the caller's own sessions in its own project.
+
+For `memory.save`, `memory.confirm`, `memory.merge`, `memory.save_prompt`, `memory.capture_passive`, `memory.session_summary`, `memory.session_end`, and the focus seed of `memory.context`, the session SHALL resolve in this order:
+
+1. An honoured declared session. The tool's `sessionId` argument SHALL then be ignored entirely, without an ownership check.
+2. Otherwise the explicit `sessionId` argument, validated exactly as it is without a declaration.
+3. Otherwise `findActiveForTransport` (the sole `active` row inside the staleness window). `memory.session_summary` and `memory.session_end` SHALL classify the unresolved case through `AgentSessionsService.resolveForTransport` and refuse with `session_ambiguous` or `session_not_found`, unchanged. `memory.context`'s focus seed has no `sessionId` argument and uses steps 1 and 3.
+
+`memory.session_start` SHALL adopt an honoured declared session before step (1) of the order published in "The MCP server MUST expose four session-lifecycle tools that keep no per-connection binding", reporting `reused: true`, that row's `sessionId` and that row's stored `agent`, and SHALL insert no row. Every other clause of that requirement is unchanged: the `project` assertion and authorization run first, and without an honoured declaration the published order applies as written.
+
+`memory.session_resume` SHALL ignore the declaration. Its explicit `sessionId` is required and wins, because naming the session is the tool's whole purpose.
+
+The declaration is not a connection binding. It is read from each request and never stored, so the server stays stateless. One helper in `packages/mcp/src/_shared.ts` SHALL decide whether a declaration is honoured, and every resolution path listed above SHALL call it rather than re-implement the check.
+
+#### Scenario: memory.save attaches to the declared session over a different explicit sessionId
+
+- **GIVEN** two `active` sessions `<H>` and `<M>` owned by the caller's token in the connection's project, and the request declares `<H>`
+- **WHEN** the agent calls `memory.save({..., sessionId: '<M>'})`
+- **THEN** the saved memory's `session_id` SHALL be `'<H>'`
+
+#### Scenario: A declaration resolves the session where the sole-active lookup has no answer
+
+- **GIVEN** two `active` sessions `<H>` and `<O>` for the caller's `(token_id, project_id)`
+- **WHEN** the agent calls `memory.save` without `sessionId`, first without a declaration and then declaring `<H>`
+- **THEN** the first saved row SHALL carry `session_id = NULL` and the second SHALL carry `session_id = '<H>'`
+
+#### Scenario: memory.session_summary writes the declared session
+
+- **GIVEN** two `active` sessions `<H>` and `<M>` for the caller's `(token_id, project_id)`, and the request declares `<H>`
+- **WHEN** the agent calls `memory.session_summary({ sessionId: '<M>', summary })`, or the same call without `sessionId`
+- **THEN** the response SHALL carry `sessionId = '<H>'`, the summary SHALL be written to `<H>`, and `<M>`'s summary SHALL be unchanged
+- **AND** the call without `sessionId` SHALL NOT be refused with `session_ambiguous`
+
+#### Scenario: memory.session_end ends the declared session
+
+- **GIVEN** two `active` sessions `<H>` and `<M>`, and the request declares `<H>`
+- **WHEN** the agent calls `memory.session_end({ sessionId: '<M>' })`
+- **THEN** `<H>` SHALL become `ended` and `<M>` SHALL stay `active`
+
+#### Scenario: An unhonoured declaration is ignored as if absent
+
+- **GIVEN** the declared id names a row owned by another token, a row in another project, an `ended` row, an `abandoned` row, a soft-deleted row, or no row at all
+- **WHEN** the agent calls `memory.save` without `sessionId` while exactly one other `active` session `<S>` exists for its `(token_id, project_id)`
+- **THEN** the saved row SHALL carry `session_id = '<S>'`
+- **AND** `memory.session_summary({ sessionId: '<E>', summary })`, naming the caller's own `active` session `<E>`, SHALL write to `<E>`, and `memory.session_start` with no `active` row SHALL mint a new row with `reused: false`, which is the behaviour without the header
+- **AND** none of these calls SHALL be refused because of the declaration
+
+#### Scenario: memory.session_start adopts the declared session
+
+- **GIVEN** two `active` sessions `<H>` (`agent = 'claude-code'`) and `<O>` for the caller's `(token_id, project_id)`, and the request declares `<H>`
+- **WHEN** the client calls `memory.session_start({ agent: 'pi' })`
+- **THEN** the response SHALL carry `sessionId = '<H>'`, `reused: true` and `agent: 'claude-code'`
+- **AND** the `sessions` row count SHALL be unchanged; without the declaration the same call mints, as published
+
+#### Scenario: memory.session_resume ignores the declaration
+
+- **GIVEN** an `active` session `<H>` declared on the request and an `ended` session `<E>` owned by the caller
+- **WHEN** the client calls `memory.session_resume({ sessionId: '<E>' })`
+- **THEN** the response SHALL carry `sessionId = '<E>'` and `previousStatus: 'ended'`, and `<E>` SHALL become `active`
+
+#### Scenario: memory.context seeds its focus from the declared session
+
+- **GIVEN** two `active` sessions for the caller's `(token_id, project_id)`, the declared one `<H>` titled with a term only one memory contains
+- **WHEN** the agent calls `memory.context({})` without a declaration and then declaring `<H>`
+- **THEN** that memory SHALL be absent from `relevantMemories` on the first call and present on the second
