@@ -224,6 +224,8 @@ Mutations require reviewed explicit items: `memory.confirm_batch({ ids: [id], ve
 
 `memory.merge` replaces 2–10 active memories with one new memory in a single reviewed step. Call it first without `fingerprint`: the preview writes nothing and returns the originals, the successor as it will be stored, `warnings[]` and a `fingerprint`. Show that plan to the user, then repeat the same call with the `fingerprint` to commit. If anything changed in between, nothing is merged and the error `fingerprint_mismatch` carries a fresh preview. The merge is journaled as one `merge` op that an operator can undo from the dashboard.
 
+`memory.pin({ id, pinned })` pins or unpins one active memory, only when the user asks for it. Every `memory.context` then opens with `pinnedMemories[]`, outside the recency and relevance quotas; an entry with `truncated: true` is read in full with `memory.get_batch`. A project holds at most 10 pins: past that the call fails with `pin_limit_reached`, whose `pinned[]` lists the current pins. Pin state is derived from an append-only journal, so superseding, archiving or decay releases a pin with its cause, and a `topic_key` upsert carries it to the new row. Pinning does not suspend `needs_review`.
+
 The four original tool names and scalar arguments have no aliases. Upgrade the server and all five clients together through the installer; restart the client to rediscover tools. Roll back both components together if needed, keeping the normal database backup precautions. HTTP session lifecycle endpoints are unchanged.
 
 ## Validated configs

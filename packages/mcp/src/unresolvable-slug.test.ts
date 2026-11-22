@@ -426,6 +426,7 @@ const MINIMAL_ARGS: Record<string, Record<string, unknown>> = {
   'memory.get_batch': { ids: ['placeholder'] },
   'memory.confirm_batch': { ids: ['placeholder'] },
   'memory.archive': { id: 'placeholder' },
+  'memory.pin': { id: 'placeholder', pinned: true },
   'memory.merge': {
     ids: ['placeholder-a', 'placeholder-b'],
     type: 'user',

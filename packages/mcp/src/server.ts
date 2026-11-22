@@ -26,6 +26,8 @@ import {
   contextSchema,
   memoryArchiveOutput,
   memoryArchiveSchema,
+  memoryPinOutput,
+  memoryPinSchema,
   memoryConfirmOutput,
   memoryConfirmSchema,
   memoryGetOutput,
@@ -146,6 +148,9 @@ const CONFIRM_DESCRIPTION =
 
 const ARCHIVE_DESCRIPTION =
   'Retire a memory: flip one active memory in this scope to `archived` so it stops surfacing in recall. Call this ONLY when the user explicitly asks to retire, remove, or forget a specific memory — never as autonomous cleanup or housekeeping while recalling or saving, and never on your own judgement that a memory looks stale. If a replacement exists, do NOT archive: prefer a supersede (memory.save with the same `topic_key`, or memory.judge_batch) which keeps a successor link — archive is the no-successor path for genuine retirement. Also use it as the second half of a user-requested cross-project move: memory.save the memory into the destination project, then memory.archive the original here. Args: { id }. Errors: `not_found` if the id is missing or in another scope, `conflict` if it is not active. Reversible: an operator can undo the archive from the dashboard.';
+
+const PIN_DESCRIPTION =
+  "Pin or unpin one active memory in this scope (`pinned: true|false`). Pinned memories lead every memory.context as `pinnedMemories[]`, outside the recency and relevance quotas, so a project's standing rules load in every session. Call this ONLY when the user explicitly asks to pin, always load, or stop always loading a specific memory — never on your own judgement that a memory matters, and never as housekeeping while recalling or saving. The count per project is bounded: past it the call fails with `pin_limit_reached`, whose `pinned[]` names the current pins — show them to the user and ask which to unpin. Pinning does not suspend review: a pinned memory still turns `needs_review` when its shelf life elapses. Superseding, archiving or decay removes the pin; a `topic_key` upsert carries it to the new row. Repeating a call changes nothing (`changed: false`). Args: { id, pinned }. Errors: `not_found` (missing or in another scope), `conflict` (not active). An operator can pin and unpin from the dashboard.";
 
 const MERGE_DESCRIPTION =
   "Merge 2–10 active memories in this scope into ONE new memory that supersedes them all, recorded as a single merge an operator can undo from the dashboard. Use it when several memories each hold part of one fact or convention, instead of saving a new memory and judging it against each original. Two calls with the SAME arguments: (1) WITHOUT `fingerprint`: a preview that writes nothing and returns `originals[]`, the `successor` exactly as it will be stored, `warnings[]` and a `fingerprint`. SHOW that plan to the user — what is merged, the new text and every warning — and confirm only once they agree. (2) WITH that `fingerprint`: commits. Never confirm a preview the user has not seen, and never invent a fingerprint. If anything changed since the preview, nothing is merged and you get `fingerprint_mismatch` with a fresh `preview`: show it again before confirming with its fingerprint. Write `content` as the complete merged memory, because the originals stop surfacing in recall. topic_key: omit it to keep the originals' single key; when they hold different keys, name the one to keep; a key held by an active memory outside `ids` is refused. Confirmations and judgments are not carried over; pending judgments on an original are closed as orphaned, and undoing the merge restores them. The commit response is like memory.save's: close `candidates[]` with memory.judge_batch. Errors: `not_found` (id missing or in another scope), `conflict` (an original not active, or a topic_key clash), `invalid_input`.";
@@ -295,6 +300,16 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
     memoryHandlers.archive,
   );
   registerTool(
+    'memory.pin',
+    {
+      description: PIN_DESCRIPTION,
+      inputSchema: memoryPinSchema,
+      outputSchema: memoryPinOutput,
+      annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Pin memory'),
+    },
+    memoryHandlers.pin,
+  );
+  registerTool(
     'memory.merge',
     {
       description: withRedactionNote(MERGE_DESCRIPTION),
@@ -385,7 +400,7 @@ Does NOT end the session — use memory.session_end for that.`,
     'memory.context',
     {
       description:
-        'Get recent context for this scope: recentSessions (summary snippet: its `## Unfinished+why` section if it lists pending work, else the opening), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge_batch, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm_batch, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). A host hook asking you to call it with `focus` on the first turn is not speculative: make that call before responding. Speculative means a call with no `focus` that no hook requested. To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small (sessions 3, memories 10, prompts 5, judgments 5) and each has a maximum: sessions 25, prompts 50, memories 100, judgments 50. Above it the call is rejected, not clamped.',
+        'Get recent context for this scope: pinnedMemories first (memories the user pinned, always loaded; `truncated:true` means read the full text with memory.get_batch), recentSessions (summary snippet: its `## Unfinished+why` section if it lists pending work, else the opening), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge_batch, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm_batch, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). A host hook asking you to call it with `focus` on the first turn is not speculative: make that call before responding. Speculative means a call with no `focus` that no hook requested. To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small (sessions 3, memories 10, prompts 5, judgments 5) and each has a maximum: sessions 25, prompts 50, memories 100, judgments 50. Above it the call is rejected, not clamped.',
       inputSchema: contextSchema,
       outputSchema: contextOutput,
       annotations: READ_ANNOTATIONS('Recent context'),
@@ -475,7 +490,7 @@ Does NOT end the session — use memory.session_end for that.`,
     'memory.stats',
     {
       description:
-        'Read-only counters: `memoriesByStatus`, `memoriesByType`, `sessionsByStatus`, `needsReviewTotal`, `pendingJudgmentsTotal` — all scoped to the active project. `memory.doctor` reports same-named counters server-wide, so its numbers will differ.',
+        'Read-only counters: `memoriesByStatus`, `memoriesByType`, `sessionsByStatus`, `needsReviewTotal`, `pendingJudgmentsTotal`, `pinnedTotal` — all scoped to the active project. `memory.doctor` reports same-named counters server-wide, so its numbers will differ; it has no pinned counter.',
       inputSchema: {},
       outputSchema: statsOutput,
       annotations: READ_ANNOTATIONS('Stats'),

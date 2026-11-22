@@ -4,6 +4,7 @@ import { RANK_WINDOW_CEILING, type SearchVerdict } from '@rembric/core';
 import {
   DEFAULT_SEARCH_LIMIT,
   MERGE_MAX_IDS,
+  PIN_MAX_PER_PROJECT,
   MERGE_MIN_IDS,
   pendingSection,
   type MergeMemoriesInput,
@@ -35,6 +36,7 @@ import {
   MEMORY_STATUSES,
   MEMORY_TYPES,
   type Memory,
+  type PinnedMemory,
   type Repositories,
   type Scope,
   type SearchScope,
@@ -285,6 +287,11 @@ export const memoryMergeSchema = {
     ),
 };
 
+export const memoryPinSchema = {
+  id: z.string().min(1).describe('The id of an active memory in the connection’s scope.'),
+  pinned: z.boolean().describe('true pins the memory, false unpins it.'),
+};
+
 export const contextSchema = {
   sessions: z.number().int().min(0).max(CONTEXT_SESSIONS_MAX).optional(),
   prompts: z.number().int().min(0).max(CONTEXT_PROMPTS_MAX).optional(),
@@ -351,6 +358,7 @@ const memoryRow = z.object({
   createdAt: z.string().optional(),
   lastSeenAt: z.string().nullable().optional(),
   topicKey: z.string().nullable().optional(),
+  pinned: z.boolean().optional(),
   relations: z.array(relationView).optional(),
   relationsTotal: z.number().optional(),
   reviewState: z.string().optional(),
@@ -422,6 +430,7 @@ export const memoryGetOutput = {
         createdAt: true,
         lastSeenAt: true,
         topicKey: true,
+        pinned: true,
         relations: true,
         relationsTotal: true,
         entities: true,
@@ -474,6 +483,15 @@ export const memoryArchiveOutput = {
   status: z.literal('archived'),
 };
 
+export const memoryPinOutput = {
+  ok: z.literal(true),
+  id: z.string(),
+  pinned: z.boolean(),
+  changed: z.boolean(),
+  pinnedCount: z.number(),
+  pinnedMax: z.number(),
+};
+
 export const memoryMergeOutput = {
   merged: z.boolean(),
   originals: z.array(
@@ -513,6 +531,18 @@ export const memoryMergeOutput = {
 };
 
 export const contextOutput = {
+  pinnedMemories: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      title: z.string(),
+      content: z.string(),
+      truncated: z.boolean(),
+      createdAt: z.string(),
+      topicKey: z.string().nullable(),
+      pinnedAt: z.string(),
+    }),
+  ),
   scope: z.string(),
   recentSessions: z.array(
     z.object({
@@ -622,6 +652,7 @@ export function buildMemoryHandlers(deps: MemoryToolDeps) {
     get: handleGet.bind(null, deps),
     confirm: handleConfirm.bind(null, deps),
     archive: handleArchive.bind(null, deps),
+    pin: handlePin.bind(null, deps),
     merge: handleMerge.bind(null, deps),
     context: counted(deps, 'memory.context', handleContext.bind(null, deps)),
     timeline: handleTimeline.bind(null, deps),
@@ -841,6 +872,7 @@ async function handleSearch(
         )
       : null;
     const review = deps.memory.reviewStateForMemories(memories);
+    const pinnedIds = deps.memory.pinnedIdsAmong(memories.map((m) => m.id));
     const fieldSet =
       args.fields && args.fields.length > 0
         ? new Set<string>(['id', 'type', 'title', ...args.fields])
@@ -859,6 +891,7 @@ async function handleSearch(
       createdAt: m.createdAt,
       lastSeenAt: m.lastSeenAt,
       topicKey: m.topicKey,
+      pinned: pinnedIds.has(m.id),
     });
 
     // One-hop expansion is a capped, un-ranked appendix — never blended into `memories` nor counted against `limit`.
@@ -967,6 +1000,7 @@ async function handleGet(deps: MemoryToolDeps, args: z.infer<z.ZodObject<typeof 
     );
     const entities = deps.repos?.entities.findEntitiesForMemories(rows.map((m) => m.id));
     const review = deps.memory.reviewStateForMemories(rows);
+    const pinnedIds = deps.memory.pinnedIdsAmong(rows.map((m) => m.id));
     const memories = [];
     for (const h of histories) {
       const m = h.memory;
@@ -986,6 +1020,7 @@ async function handleGet(deps: MemoryToolDeps, args: z.infer<z.ZodObject<typeof 
           createdAt: m.createdAt,
           lastSeenAt: m.lastSeenAt,
           topicKey: m.topicKey,
+          pinned: pinnedIds.has(m.id),
           head: {
             id: h.head.id,
             title: h.head.title,
@@ -1065,6 +1100,23 @@ async function handleArchive(deps: MemoryToolDeps, args: { id: string }) {
     assertAuthorized('write', scope, deps);
     deps.memory.archive(args.id, scope);
     return ok({ ok: true, id: args.id, status: 'archived' as const });
+  } catch (err) {
+    if (isDomainError(err) && err.code === 'memory_not_found') {
+      return mcpError('not_found', 'memory not found');
+    }
+    return errToMcp(err, deps.logInternalError);
+  }
+}
+
+async function handlePin(deps: MemoryToolDeps, args: { id: string; pinned: boolean }) {
+  try {
+    const { scope } = await resolveEffectiveScope(deps);
+    assertAuthorized('write', scope, deps);
+    const result = deps.memory.setPinned(args.id, scope, args.pinned, {
+      cause: 'agent',
+      name: getRequestContext().token.name,
+    });
+    return ok({ ok: true as const, ...result, pinnedMax: PIN_MAX_PER_PROJECT });
   } catch (err) {
     if (isDomainError(err) && err.code === 'memory_not_found') {
       return mcpError('not_found', 'memory not found');
@@ -1154,6 +1206,27 @@ function sessionSnippet(summary: string): string {
 /** Small and separate from `memoriesLimit` so enabling relevance never halves the recency channel (design.md Open Questions). */
 export const RELEVANCE_LIMIT = 5;
 
+export const PINNED_CONTEXT_CHAR_BUDGET = 4000;
+
+function pinnedSection(pins: readonly PinnedMemory[]) {
+  let remaining = PINNED_CONTEXT_CHAR_BUDGET;
+  return pins.map(({ memory: m, pinnedAt }) => {
+    const fits = m.content.length <= remaining;
+    const content = fits ? m.content : snippet(m.content, CONTEXT_SNIPPET_CHARS);
+    if (fits) remaining -= content.length;
+    return {
+      id: m.id,
+      type: m.type,
+      title: m.title,
+      content,
+      truncated: !fits,
+      createdAt: m.createdAt.toISOString(),
+      topicKey: m.topicKey,
+      pinnedAt: pinnedAt.toISOString(),
+    };
+  });
+}
+
 function deriveFocusSeed(
   deps: MemoryToolDeps,
   scope: Scope,
@@ -1219,12 +1292,16 @@ async function handleContext(
       summary: s.summary && s.summaryFinal ? sessionSnippet(s.summary) : null,
     }));
 
+  const pins = deps.memory.listPinned(scope);
+  const pinnedIds = new Set(pins.map((p) => p.memory.id));
   const recentMemories = deps.repos.memory
     .recentForContext({
       projectId: scope.projectId,
       includeArchived,
-      limit: memoriesLimit,
+      limit: memoriesLimit + pinnedIds.size,
     })
+    .filter((m) => !pinnedIds.has(m.id))
+    .slice(0, memoriesLimit)
     .map((m) => ({
       id: m.id,
       type: m.type,
@@ -1266,18 +1343,18 @@ async function handleContext(
       for (const { memories } of iterateEntityMatches(deps.repos, {
         scope,
         seedText: focusText,
-        limit: RELEVANCE_LIMIT,
+        limit: RELEVANCE_LIMIT + pinnedIds.size,
         shouldContinue: () => byId.size < RELEVANCE_LIMIT,
       })) {
         for (const r of memories) {
           if (byId.size >= RELEVANCE_LIMIT) break;
-          if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'entity' });
+          if (!byId.has(r.id) && !pinnedIds.has(r.id)) byId.set(r.id, { memory: r, via: 'entity' });
         }
       }
     }
     if (byId.size < RELEVANCE_LIMIT) {
       const pass = await deps.memory.searchWithAbstention(
-        { query: focusText, limit: RELEVANCE_LIMIT },
+        { query: focusText, limit: RELEVANCE_LIMIT + pinnedIds.size },
         scope,
         undefined,
         { rerank: true },
@@ -1289,7 +1366,7 @@ async function handleContext(
       };
       for (const r of pass.memories) {
         if (byId.size >= RELEVANCE_LIMIT) break;
-        if (!byId.has(r.id)) byId.set(r.id, { memory: r, via: 'ranked' });
+        if (!byId.has(r.id) && !pinnedIds.has(r.id)) byId.set(r.id, { memory: r, via: 'ranked' });
       }
     }
     relevantMemories = [...byId.values()].map(({ memory: m, via }) => ({
@@ -1342,6 +1419,7 @@ async function handleContext(
   const needsReviewTotal = deps.memory.countNeedsReview(scope);
 
   return ok({
+    pinnedMemories: pinnedSection(pins),
     scope: `project:${scope.projectId}`,
     recentSessions,
     recentPrompts,

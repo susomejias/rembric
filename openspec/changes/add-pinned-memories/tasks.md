@@ -13,10 +13,10 @@
 
 ## 3. MCP
 
-- [ ] 3.1 `memory.pin` schema, output, handler, registration and steering description; catalog wiring (write tools, minimal args, authorization).
-- [ ] 3.2 `memory.context.pinnedMemories[]` first, budget truncation, dedupe without quota loss; `PINNED_CONTEXT_CHAR_BUDGET`.
-- [ ] 3.3 `pinned` on `memory.search` and `memory.get_batch` rows; `memory.stats.pinnedTotal`.
-- [ ] 3.4 Docs that list the tool catalog.
+- [x] 3.1 `memory.pin` schema, output, handler, registration and steering description; catalog wiring (write tools, minimal args, authorization).
+- [x] 3.2 `memory.context.pinnedMemories[]` first, budget truncation, dedupe without quota loss; `PINNED_CONTEXT_CHAR_BUDGET`.
+- [x] 3.3 `pinned` on `memory.search` and `memory.get_batch` rows; `memory.stats.pinnedTotal`.
+- [x] 3.4 Docs that list the tool catalog.
 
 ## 4. Dashboard
 
