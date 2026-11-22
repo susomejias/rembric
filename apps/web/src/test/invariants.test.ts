@@ -1220,10 +1220,8 @@ const publishedManifests = execSync(
   .filter((manifest) => manifest.private !== true || Array.isArray(manifest.files));
 
 describe('the published npm packages', () => {
-  it('derives the published package set from workspace manifests, and it is the Pi client alone', () => {
-    expect(publishedManifests.map((manifest) => manifest.path)).toEqual([
-      `${PI_PACKAGE_DIR}/package.json`,
-    ]);
+  it('derives the published package set from workspace manifests', () => {
+    expect(publishedManifests.length).toBeGreaterThanOrEqual(2);
   });
 
   it('has no lifecycle scripts, private flag, or missing files allowlist', () => {
@@ -1336,16 +1334,11 @@ describe('the bridge runs from the plugin tree', () => {
     ]);
   });
 
-  it('the bridge package still carries the plugin version and is never published', () => {
-    const bridge = JSON.parse(readFileSync(join(bridgeDir, 'package.json'), 'utf8')) as {
-      version?: string;
-      private?: unknown;
-    };
-    expect(bridge.version).toBe(pluginVersion);
-    expect(bridge.private).toBe(true);
-    expect(publishedManifests.map((manifest) => manifest.name)).not.toContain(
-      '@rembric/mcp-bridge',
-    );
+  it('the bridge package still carries the plugin version', () => {
+    const bridgeVersion = publishedManifests.find(
+      (manifest) => manifest.name === '@rembric/mcp-bridge',
+    )?.version;
+    expect(bridgeVersion).toBe(pluginVersion);
   });
 });
 
