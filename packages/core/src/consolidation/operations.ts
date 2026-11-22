@@ -78,6 +78,40 @@ export function orphanPendingOnRetirement(
   return rows.length;
 }
 
+/** Runs inside the retiring transaction, after the status flip: the derivation alone already hides the pin. */
+export function releasePinsOnRetirement(
+  repos: Pick<Repositories, 'memory'>,
+  input: RetirementInput,
+): number {
+  const latest = repos.memory.latestPinActionsByIds(input.retiredIds);
+  const rows = repos.memory.unsafeGetByIds(
+    input.retiredIds.filter((id) => latest.get(id) === 'pin'),
+  );
+  for (const row of rows) {
+    if (row.projectId === null) continue;
+    repos.memory.insertPinEvent({
+      memoryId: row.id,
+      projectId: row.projectId,
+      action: 'unpin',
+      cause: input.cause,
+      runId: input.runId ?? null,
+      actor: null,
+      eventTs: input.at,
+    });
+  }
+  return rows.length;
+}
+
+/** Every retirement path goes through here, so pins and pending judgments cannot be released apart. */
+export function applyRetirementEffects(
+  repos: ConsolidationDeps,
+  relations: Pick<RelationsService, 'orphan'>,
+  input: RetirementInput,
+): void {
+  releasePinsOnRetirement(repos, input);
+  orphanPendingOnRetirement(repos, relations, input);
+}
+
 export const PROJECT_ARCHIVE_ORPHAN_REASON = 'project archived';
 export const PROJECT_ARCHIVE_ORPHANING_PREFIX = `orphaned: ${PROJECT_ARCHIVE_ORPHAN_REASON}`;
 export const PROJECT_ARCHIVE_RUN_KIND = 'project_archive_orphan';
@@ -284,7 +318,7 @@ export function applyDecay(
       reasoning: input.reasoning,
       appliedAt: now,
     });
-    orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+    applyRetirementEffects(repos, new RelationsService(repos, tx), {
       retiredIds: input.ids,
       status: 'archived',
       cause: 'decay',
@@ -381,7 +415,7 @@ export function undoOp(repos: UndoDeps, tx: TransactionRunner, opId: string): Un
       // The successor may hold an original's topic_key slot; free it before reactivating.
       if (op.opType === 'merge' && op.createdId) {
         repos.memory.archiveOne(op.createdId);
-        orphanPendingOnRetirement(repos, new RelationsService(repos, tx), {
+        applyRetirementEffects(repos, new RelationsService(repos, tx), {
           retiredIds: [op.createdId],
           status: 'archived',
           cause: 'merge undo',

@@ -2016,7 +2016,7 @@ describe('the widened scope has one construction site', () => {
   });
 });
 
-const RETIREMENT_HELPER = 'orphanPendingOnRetirement';
+const RETIREMENT_HELPER = 'applyRetirementEffects';
 
 const MEMORY_RETIREMENT_FLIPS = [
   'memory-repository.ts::archiveActive',

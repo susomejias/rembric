@@ -1,15 +1,15 @@
 ## 1. Persistence
 
-- [ ] 1.1 Migration `0041_memory_pin_events.sql`, Drizzle schema, index snapshot and schema inventory; boot gates expect 41 migrations.
-- [ ] 1.2 Memory-repository pin reads (latest action per id, pinned list and count per project, pin history, admin filter) and the event insert.
-- [ ] 1.3 Purge predicate: a pin event blocks the purge (RED first).
-- [ ] 1.4 Invariant test: no UPDATE or DELETE of `memory_pin_events` outside the dev seed reset.
+- [x] 1.1 Migration `0041_memory_pin_events.sql`, Drizzle schema, index snapshot and schema inventory; boot gates expect 41 migrations.
+- [x] 1.2 Memory-repository pin reads (latest action per id, pinned list and count per project, pin history, admin filter) and the event insert.
+- [x] 1.3 Purge predicate: a pin event blocks the purge (RED first).
+- [x] 1.4 Invariant test: no UPDATE or DELETE of `memory_pin_events` outside the dev seed reset.
 
 ## 2. Service
 
-- [ ] 2.1 RED: pin, unpin, idempotence, cross-scope, non-active, count bound (with control), per-project bound.
-- [ ] 2.2 GREEN: `MemoryService.setPinned`, `listPinned`, `pinnedIdsAmong`, `PIN_MAX_PER_PROJECT`, `pin_limit_reached`.
-- [ ] 2.3 RED then GREEN: `applyRetirementEffects` releases pins on topic_key revision, supersedes verdict, merge, archive, decay and merge undo; topic_key upsert carries the pin; undo does not restore it; review axis unchanged.
+- [x] 2.1 RED: pin, unpin, idempotence, cross-scope, non-active, count bound (with control), per-project bound.
+- [x] 2.2 GREEN: `MemoryService.setPinned`, `listPinned`, `pinnedIdsAmong`, `PIN_MAX_PER_PROJECT`, `pin_limit_reached`.
+- [x] 2.3 RED then GREEN: `applyRetirementEffects` releases pins on topic_key revision, supersedes verdict, merge, archive, decay and merge undo; topic_key upsert carries the pin; undo does not restore it; review axis unchanged.
 
 ## 3. MCP
 

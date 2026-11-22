@@ -10,7 +10,7 @@ import {
 import { ulid } from 'ulid';
 
 import {
-  orphanPendingOnRetirement,
+  applyRetirementEffects,
   RETIREMENT_ORPHANING_PREFIX,
 } from '../consolidation/operations.js';
 
@@ -453,7 +453,7 @@ export class RelationsService {
 
     this.repos.memory.markSuperseded(targetId);
     this.repos.memory.setReplaces(sourceId, nextReplaces);
-    orphanPendingOnRetirement(this.repos, this, {
+    applyRetirementEffects(this.repos, this, {
       retiredIds: [targetId],
       status: 'superseded',
       cause: 'supersedes verdict',

@@ -6,7 +6,9 @@ export type { DecayThresholds } from './decay.js';
 export {
   applyDecay,
   orphanPendingOnProjectArchive,
+  applyRetirementEffects,
   orphanPendingOnRetirement,
+  releasePinsOnRetirement,
   PROJECT_ARCHIVE_ORPHAN_REASON,
   PROJECT_ARCHIVE_ORPHANING_PREFIX,
   PROJECT_ARCHIVE_RUN_KIND,
