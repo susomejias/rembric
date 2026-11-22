@@ -27,7 +27,7 @@ const COMMANDS = readdirSync(join(pluginRoot, 'commands'))
   .sort();
 
 const RELATIVE_IMPORT = /from\s+'(\.[^']*)'/g;
-// Source modules live either under `bin/` or the published bridge package; all
+// Source modules live either under `bin/` or `mcp-bridge/`; all
 // become `./bin/` siblings in the Pi tarball after materialisation.
 const PACKABLE_IMPORT = /^(?:\.\.\/(bin|mcp-bridge)|\.\/(bin))\/([\w.-]+\.mjs)$/;
 
