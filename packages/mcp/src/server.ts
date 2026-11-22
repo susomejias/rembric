@@ -134,8 +134,16 @@ function withRedactionNote(description: string): string {
   return `${description} ${REDACTION_NOTE}`;
 }
 
-const SAVE_DESCRIPTION =
-  "Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a ≤100-char scannable headline of what this memory is about, not the cwd), content, tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix). Optional: topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this is the LATEST take on a topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the slot's previous active row is superseded atomically. The response includes `candidates[]` when the save resembles existing memories in wording, meaning, or a shared rare identifier like a file path or URL (that kind may share little wording); judge each with memory.judge_batch while the context is fresh. `convergeWith[]` holds judgmentIds of candidates likely restating this fact (advisory): memory.merge them, or judge supersedes; reuse their topic_key. `candidatesDetected` counts the judgeable matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5): a lower bound, not a scope total; no request argument raises it. Only `candidates[]` entries carry `judgmentId`s (`related[]`: weaker matches, nothing to judge), so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key). The remainder is reachable via memory.search, recordable per pair with memory.compare.";
+const SAVE_INTRO =
+  "Save a structured memory. Call this IMMEDIATELY after: bug fix · architecture/design decision · non-obvious discovery · configuration change · pattern (naming, structure, convention) · user preference or constraint learned. Required: type ∈ {user,feedback,project,reference,procedural}, title (a ≤100-char scannable headline of what this memory is about, not the cwd), content, tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix). Optional: topic_key, sessionId (pass it if you know your current session id — never invent one — to guarantee correct attachment when multiple sessions could be active). If this is the LATEST take on a topic you saved before, pass `topic_key` (call memory.suggest_topic_key first if unsure) — the slot's previous active row is superseded atomically. ";
+
+const SAVE_CANDIDATES_QUEUED =
+  'The response includes `candidates[]` when the save resembles existing memories in wording, meaning, or a shared rare identifier like a file path or URL (that kind may share little wording); judge each with memory.judge_batch while the context is fresh. `convergeWith[]` holds judgmentIds of candidates likely restating this fact (advisory): memory.merge them, or judge supersedes; reuse their topic_key. `candidatesDetected` counts the judgeable matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5): a lower bound, not a scope total; no request argument raises it. Only `candidates[]` entries carry `judgmentId`s (`related[]`: weaker matches, nothing to judge), so a high count is NOT a queue you just created — when it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key). The remainder is reachable via memory.search, recordable per pair with memory.compare.';
+
+const SAVE_CANDIDATES_ADVISORY =
+  "The response includes `candidates[]` when the save resembles existing memories in wording, meaning, or a shared rare identifier like a file path or URL (that kind may share little wording). Nothing is recorded for them; each names its pair (`sourceId` = this memory, `targetId`). Act only if this memory replaces one, memory.compare({ memoryIdA: sourceId, memoryIdB: targetId, relation: 'supersedes', confidence }), or contradicts it, relation 'conflicts_with'; otherwise do nothing. `converge: true` marks a likely restatement: supersede it, memory.merge, or reuse its topic_key. `candidatesDetected` counts matches ranked BEFORE the operator cap CANDIDATES_PER_SAVE_MAX (default 5), a lower bound; `related[]` holds weaker matches. When it far exceeds the returned length, converge the topic under one `topic_key` (memory.suggest_topic_key).";
+
+const SAVE_DESCRIPTION = SAVE_INTRO + SAVE_CANDIDATES_QUEUED;
 
 const SEARCH_DESCRIPTION =
   'Search memories. Call this before starting work in an area untouched this session, before diagnosing a possibly-known error, before building something that may already exist — or whenever the user references past work or asks to recall ("remember", "recall", "what did we do"). Ranks by hybrid semantic + keyword relevance (vector similarity ⊕ FTS5), so paraphrases and cross-lingual queries match. Supports type/tag/status/limit filters, plus an exact `topic_key` filter that returns a topic\'s whole history — the active row plus every row it superseded, so you can check whether a topic already converged. Got a literal identifier? Pass it as `entity`, not `query` — exact-address lookup, unranked and complete within scope (with no `limit`, up to 400 linked memories rather than the 8-row default), combinable with the same filters, without the noise a text query has on identifiers. With `query` it narrows rather than fuses. Returns a small default page (8); need more? Prefer raising `limit` (up to 200). `offset` paging is shallow on a text query (ranked over a bounded window, so a deep `offset` returns an empty page); the no-query listing paginates fully. `across_projects:true` also reads the other projects this token may reach. Never a default: only on an explicit ask; it dilutes the page with foreign memories. `searchedProjects[]` names what was read. Each row carries `reviewState`: `needs_review` means the memory has not been re-affirmed within its shelf life — re-verify it (memory.confirm_batch if still true, memory.save+topic_key if it changed, memory.judge_batch if it contradicts another memory). `abstained:true` means nothing matched — treat as "nothing relevant found", not as a signal to invent or assume context. `gateShortened:true` means a relevance gate cut weaker rows: a short page is not corpus exhaustion, and a full page is not proof of relevance.';
@@ -154,6 +162,90 @@ const PIN_DESCRIPTION =
 
 const MERGE_DESCRIPTION =
   "Merge 2–10 active memories in this scope into ONE new memory that supersedes them all, recorded as a single merge an operator can undo from the dashboard. Use it when several memories each hold part of one fact or convention, instead of saving a new memory and judging it against each original. Two calls with the SAME arguments: (1) WITHOUT `fingerprint`: a preview that writes nothing and returns `originals[]`, the `successor` exactly as it will be stored, `warnings[]` and a `fingerprint`. SHOW that plan to the user — what is merged, the new text and every warning — and confirm only once they agree. (2) WITH that `fingerprint`: commits. Never confirm a preview the user has not seen, and never invent a fingerprint. If anything changed since the preview, nothing is merged and you get `fingerprint_mismatch` with a fresh `preview`: show it again before confirming with its fingerprint. Write `content` as the complete merged memory, because the originals stop surfacing in recall. topic_key: omit it to keep the originals' single key; when they hold different keys, name the one to keep; a key held by an active memory outside `ids` is refused. Confirmations and judgments are not carried over; pending judgments on an original are closed as orphaned, and undoing the merge restores them. The commit response is like memory.save's: close `candidates[]` with memory.judge_batch. Errors: `not_found` (id missing or in another scope), `conflict` (an original not active, or a topic_key clash), `invalid_input`.";
+
+const CONTEXT_DESCRIPTION =
+  'Get recent context for this scope: pinnedMemories first (memories the user pinned, always loaded; `truncated:true` means read the full text with memory.get_batch), recentSessions (summary snippet: its `## Unfinished+why` section if it lists pending work, else the opening), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge_batch, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm_batch, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). A host hook asking you to call it with `focus` on the first turn is not speculative: make that call before responding. Speculative means a call with no `focus` that no hook requested. To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small (sessions 3, memories 10, prompts 5, judgments 5) and each has a maximum: sessions 25, prompts 50, memories 100, judgments 50. Above it the call is rejected, not clamped.';
+
+const CAPTURE_PASSIVE_DESCRIPTION =
+  'Bulk-save learnings. Required: tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix), applied to every learning. Extract numbered/bulleted items from a "## Key Learnings" (or "### Key Learnings", colon optional, case-insensitive) section in the given text and save each as a separate memory (type=reference) through the same curation pipeline as memory.save — topic_key handling, inline embedding, save-time candidate detection. When no such section is found, `saved` is 0 and `reason` explains why; this is NOT the same as success. An item already saved with the same content in the same session is not saved again: it is counted in `skipped`, and `reason` says so when every item was skipped. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. The response may include `candidates[]` if any captured learning conflicts with an existing memory — judge them with memory.judge_batch — plus `convergeWith[]` and `related[]`, meaning what they mean in memory.save. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).';
+
+const JUDGE_DESCRIPTION =
+  'Close pending judgments from memory.save.candidates[] with { judgments: [{ judgmentId, relation, reason?, confidence?, evidence? }, ...] } (1–20). No scalar arguments or date selection. Relation: supersedes/conflicts_with/related/compatible/scoped/not_conflict. Ordered independent transactions; preserve duplicate IDs and inspect every results[] entry. A failed item does not roll back others. Malformed nested entries reject the whole request before mutations. Supersedes atomically flips the target memory and links its successor. Returns { ok, results }; mixed success is not an MCP error. If all items fail, ok:false and MCP isError:true retain every result (not_found if all missing/foreign, otherwise batch_failed). Judge while context is fresh, never on invented IDs.';
+
+const COMPARE_DESCRIPTION =
+  'Proactively record a verdict on two arbitrary memories without a preceding save. Idempotent: re-calling with the same (memoryIdA, memoryIdB) pair updates the existing row. Use when independent analysis finds two memories that are related or contradict; for save-time candidates use memory.judge_batch instead.';
+
+const PREDATES_SWITCH = 'recorded before the judgment queue was disabled';
+
+function swap(text: string, from: string, to: string): string {
+  if (!text.includes(from)) throw new Error(`description fragment not found: ${from}`);
+  return text.replace(from, to);
+}
+
+interface CandidateGuidance {
+  save: string;
+  search: string;
+  archive: string;
+  merge: string;
+  context: string;
+  capturePassive: string;
+  judge: string;
+  compare: string;
+}
+
+const QUEUED_GUIDANCE: CandidateGuidance = {
+  save: SAVE_DESCRIPTION,
+  search: SEARCH_DESCRIPTION,
+  archive: ARCHIVE_DESCRIPTION,
+  merge: MERGE_DESCRIPTION,
+  context: CONTEXT_DESCRIPTION,
+  capturePassive: CAPTURE_PASSIVE_DESCRIPTION,
+  judge: JUDGE_DESCRIPTION,
+  compare: COMPARE_DESCRIPTION,
+};
+
+const ADVISORY_GUIDANCE: CandidateGuidance = {
+  save: SAVE_INTRO + SAVE_CANDIDATES_ADVISORY,
+  search: swap(
+    SEARCH_DESCRIPTION,
+    'memory.judge_batch if it contradicts another memory',
+    'memory.compare(conflicts_with) if it contradicts another memory',
+  ),
+  archive: swap(
+    ARCHIVE_DESCRIPTION,
+    '`topic_key`, or memory.judge_batch)',
+    "`topic_key`, or memory.compare with relation 'supersedes')",
+  ),
+  merge: swap(
+    MERGE_DESCRIPTION,
+    'close `candidates[]` with memory.judge_batch',
+    'act on `candidates[]` as memory.save describes',
+  ),
+  context: swap(
+    CONTEXT_DESCRIPTION,
+    'pendingJudgments (unresolved relation pairs to close with memory.judge_batch,',
+    `pendingJudgments (relation pairs ${PREDATES_SWITCH}, to close with memory.judge_batch,`,
+  ),
+  capturePassive: swap(
+    swap(
+      CAPTURE_PASSIVE_DESCRIPTION,
+      'judge them with memory.judge_batch',
+      "act on them as memory.save describes, using each entry's sourceId",
+    ),
+    'plus `convergeWith[]` and `related[]`',
+    'plus `related[]`',
+  ),
+  judge: swap(
+    JUDGE_DESCRIPTION,
+    'Close pending judgments from memory.save.candidates[] with',
+    `Close pending judgments ${PREDATES_SWITCH} (memory.context.pendingJudgments[]; a new save's candidates[] carry no judgmentId, so use memory.compare for them) with`,
+  ),
+  compare: swap(
+    COMPARE_DESCRIPTION,
+    'for save-time candidates use memory.judge_batch instead.',
+    "for a save's candidates[], pass memoryIdA = the entry's sourceId and memoryIdB = its targetId, and call it only for supersedes or conflicts_with.",
+  ),
+};
 
 const NON_DESTRUCTIVE_CLOSED = { destructiveHint: false, openWorldHint: false } as const;
 
@@ -180,6 +272,8 @@ const IDEMPOTENT_WRITE_ANNOTATIONS = (title: string): ToolAnnotations => ({
 
 export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   const version = opts.version ?? '0.0.0';
+  const judgmentQueue = opts.candidates.persist ?? true;
+  const guidance = judgmentQueue ? QUEUED_GUIDANCE : ADVISORY_GUIDANCE;
   const server = new McpServer(
     {
       name: opts.name ?? 'rembric',
@@ -189,6 +283,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
       instructions: buildInstructions({
         requestedSlug: opts.requestedSlug ?? null,
         unbound: opts.unbound ?? false,
+        judgmentQueue,
       }),
     },
   );
@@ -252,7 +347,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.save',
     {
-      description: withRedactionNote(SAVE_DESCRIPTION),
+      description: withRedactionNote(guidance.save),
       inputSchema: memorySaveSchema,
       outputSchema: memorySaveOutput,
       annotations: WRITE_ANNOTATIONS('Save memory'),
@@ -262,7 +357,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.search',
     {
-      description: SEARCH_DESCRIPTION,
+      description: guidance.search,
       inputSchema: memorySearchSchema,
       outputSchema: memorySearchOutput,
       annotations: READ_ANNOTATIONS('Search memories'),
@@ -292,7 +387,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.archive',
     {
-      description: ARCHIVE_DESCRIPTION,
+      description: guidance.archive,
       inputSchema: memoryArchiveSchema,
       outputSchema: memoryArchiveOutput,
       annotations: WRITE_ANNOTATIONS('Archive memory'),
@@ -312,7 +407,7 @@ export function createMcpServer(opts: CreateMcpServerOptions): McpServer {
   registerTool(
     'memory.merge',
     {
-      description: withRedactionNote(MERGE_DESCRIPTION),
+      description: withRedactionNote(guidance.merge),
       inputSchema: memoryMergeSchema,
       outputSchema: memoryMergeOutput,
       annotations: WRITE_ANNOTATIONS('Merge memories'),
@@ -399,8 +494,7 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.context',
     {
-      description:
-        'Get recent context for this scope: pinnedMemories first (memories the user pinned, always loaded; `truncated:true` means read the full text with memory.get_batch), recentSessions (summary snippet: its `## Unfinished+why` section if it lists pending work, else the opening), recentMemories (sorted by last_seen_at), relevantMemories (ranked by relevance to `focus`, or a server-derived seed when omitted — empty if nothing is relevant), pendingJudgments (unresolved relation pairs to close with memory.judge_batch, by default only the aged ones, 5 at a time) with pendingJudgmentsTotal (how many adjudicable pairs are pending in scope — the list is a page of it), and needsReview (active memories past their re-verification shelf life — re-affirm with memory.confirm_batch, supersede with memory.save+topic_key, or judge if they contradict another memory) with needsReviewTotal. Call this when starting or resuming work that may have prior context, after a /compact event, or when asked "what did we do" — before acting, but only if you lack the prior detail you need (do not load it speculatively on every session start). A host hook asking you to call it with `focus` on the first turn is not speculative: make that call before responding. Speculative means a call with no `focus` that no hook requested. To DRAIN the judgment queue rather than be warned about it, pass `judgments: N` (max 50 — a deeper queue takes more than one pass; asking for more is rejected, not clamped): an explicit size also lifts the age filter, so pairs created recently — unreachable any other way once their save-time candidates[] is gone — are returned too. Default sizes are small (sessions 3, memories 10, prompts 5, judgments 5) and each has a maximum: sessions 25, prompts 50, memories 100, judgments 50. Above it the call is rejected, not clamped.',
+      description: guidance.context,
       inputSchema: contextSchema,
       outputSchema: contextOutput,
       annotations: READ_ANNOTATIONS('Recent context'),
@@ -432,9 +526,7 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.capture_passive',
     {
-      description: withRedactionNote(
-        'Bulk-save learnings. Required: tags[] (1–64 useful reusable lowercase ASCII kebab-case labels, normally 1–5: dashboard, sqlite, bug-fix), applied to every learning. Extract numbered/bulleted items from a "## Key Learnings" (or "### Key Learnings", colon optional, case-insensitive) section in the given text and save each as a separate memory (type=reference) through the same curation pipeline as memory.save — topic_key handling, inline embedding, save-time candidate detection. When no such section is found, `saved` is 0 and `reason` explains why; this is NOT the same as success. An item already saved with the same content in the same session is not saved again: it is counted in `skipped`, and `reason` says so when every item was skipped. Call this when you have produced (or the user supplied) a Key Learnings list worth persisting — e.g. when wrapping up a task — instead of issuing many individual memory.save calls. The response may include `candidates[]` if any captured learning conflicts with an existing memory — judge them with memory.judge_batch — plus `convergeWith[]` and `related[]`, meaning what they mean in memory.save. Optional: sessionId (pass it if you know your current one — never invent one — to guarantee correct attachment when multiple sessions could be active).',
-      ),
+      description: withRedactionNote(guidance.capturePassive),
       inputSchema: capturePassiveSchema,
       outputSchema: capturePassiveOutput,
       annotations: WRITE_ANNOTATIONS('Capture learnings'),
@@ -570,9 +662,7 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.judge_batch',
     {
-      description: withRedactionNote(
-        'Close pending judgments from memory.save.candidates[] with { judgments: [{ judgmentId, relation, reason?, confidence?, evidence? }, ...] } (1–20). No scalar arguments or date selection. Relation: supersedes/conflicts_with/related/compatible/scoped/not_conflict. Ordered independent transactions; preserve duplicate IDs and inspect every results[] entry. A failed item does not roll back others. Malformed nested entries reject the whole request before mutations. Supersedes atomically flips the target memory and links its successor. Returns { ok, results }; mixed success is not an MCP error. If all items fail, ok:false and MCP isError:true retain every result (not_found if all missing/foreign, otherwise batch_failed). Judge while context is fresh, never on invented IDs.',
-      ),
+      description: withRedactionNote(guidance.judge),
       inputSchema: judgeSchema,
       outputSchema: judgeOutput,
       annotations: WRITE_ANNOTATIONS('Judge memories'),
@@ -582,9 +672,7 @@ Does NOT end the session — use memory.session_end for that.`,
   registerTool(
     'memory.compare',
     {
-      description: withRedactionNote(
-        'Proactively record a verdict on two arbitrary memories without a preceding save. Idempotent: re-calling with the same (memoryIdA, memoryIdB) pair updates the existing row. Use when independent analysis finds two memories that are related or contradict; for save-time candidates use memory.judge_batch instead.',
-      ),
+      description: withRedactionNote(guidance.compare),
       inputSchema: compareSchema,
       outputSchema: compareOutput,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS('Compare memories'),

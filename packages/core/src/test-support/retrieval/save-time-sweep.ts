@@ -103,7 +103,12 @@ export async function runSaveTimeArm(
       }
       const bandOf = (targetId: string): CandidateBand | null => {
         const pending = candidates.find((c) => c.targetId === targetId);
-        if (pending) return convergeWith.includes(pending.judgmentId) ? 'high' : 'middle';
+        if (pending) {
+          const high =
+            pending.converge === true ||
+            (pending.judgmentId !== undefined && convergeWith.includes(pending.judgmentId));
+          return high ? 'high' : 'middle';
+        }
         return related.some((r) => r.targetId === targetId) ? 'low' : null;
       };
       outcomes.push({

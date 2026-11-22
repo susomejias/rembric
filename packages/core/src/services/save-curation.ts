@@ -9,7 +9,11 @@ import {
 } from './save-time-candidates.js';
 
 export interface SaveTimeCandidateView {
-  judgmentId: string;
+  /** Present only when the pair was persisted as a pending judgment. */
+  judgmentId?: string;
+  /** Present only when it was not: the memory whose save detected the pair. */
+  sourceId?: string;
+  converge?: true;
   targetId: string;
   title: string;
   snippet: string;
@@ -20,7 +24,7 @@ export interface SaveTimeCandidateView {
   entityValue?: string;
 }
 
-export type RelatedMemoryView = Omit<SaveTimeCandidateView, 'judgmentId'>;
+export type RelatedMemoryView = Omit<SaveTimeCandidateView, 'judgmentId' | 'sourceId' | 'converge'>;
 
 export interface PostSaveDeps {
   relations?: RelationsService;
@@ -59,7 +63,16 @@ export async function runPostSaveSteps(
       const found = findSaveTimeCandidates(deps.repos, m, deps.candidates, extractedEntities);
       candidatesDetected = found.detected;
       related = found.related.map(view);
+      const persist = deps.candidates.persist ?? true;
       for (const c of found.candidates) {
+        if (!persist) {
+          candidates.push({
+            sourceId: m.id,
+            ...view(c),
+            ...(c.band === 'high' ? { converge: true as const } : {}),
+          });
+          continue;
+        }
         const row = deps.relations.createPending({
           sourceId: m.id,
           targetId: c.targetId,

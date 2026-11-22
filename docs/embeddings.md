@@ -113,8 +113,11 @@ memory.save (MCP)                            ← packages/mcp/src/memory-tools.t
    │     ├─ classifyCandidateBand() per pair       low / middle / high, see below
    │     └─ cap CANDIDATES_PER_SAVE_MAX on middle+high; low capped separately
    │
-   └─ response: candidates[] (middle+high, pending) → memory.judge_batch
-                convergeWith[] (high: judgmentIds, advisory) → memory.merge or supersedes
+   └─ response: candidates[] (middle+high)
+                  JUDGMENT_QUEUE_ENABLED=0: no row; sourceId+targetId, converge:true on high
+                                            → memory.compare for supersedes/conflicts_with only
+                  JUDGMENT_QUEUE_ENABLED=1: pending row + judgmentId → memory.judge_batch
+                convergeWith[] (=1 only; high: judgmentIds, advisory) → memory.merge or supersedes
                 related[] (low: no row, no judgmentId) → context only
 ```
 

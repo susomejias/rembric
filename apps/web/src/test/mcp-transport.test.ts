@@ -1087,7 +1087,7 @@ describe('MCP protocol conformance', () => {
     expect(desc).toContain('a full page is not proof of relevance');
 
     expect(desc.length).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
-    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1885);
+    expect(desc.length, 'the reword drifted from the recorded description budget').toBe(1897);
   });
 
   describe('memory.merge over the wire', () => {
@@ -1775,14 +1775,13 @@ describe('MCP protocol conformance', () => {
     expect(save).toMatch(/shared rare identifier like a file path or URL/);
     expect(save).toMatch(/may share little wording/);
     expect(save).toMatch(/lower bound/);
-    expect(save).toContain('judgmentId');
-    expect(save).toContain('memory.search');
+    expect(save).toContain('sourceId');
     expect(save).toContain('memory.compare');
+    expect(save).toContain('conflicts_with');
+    expect(save).not.toContain('memory.judge_batch');
 
-    expect(save).toMatch(/`related\[\]`: weaker matches, nothing to judge/);
-    expect(save).toMatch(
-      /`convergeWith\[\]` holds judgmentIds of candidates likely restating this fact \(advisory\)/,
-    );
+    expect(save).toMatch(/`related\[\]` holds weaker matches/);
+    expect(save).toMatch(/`converge: true` marks a likely restatement/);
     expect(save).toContain('memory.merge');
     expect(save).not.toMatch(/often a real contradiction/);
   });
@@ -1803,12 +1802,12 @@ describe('MCP protocol conformance', () => {
     });
 
     it.each([
-      ['memory.context', 1834],
+      ['memory.context', 1872],
       ['memory.search_prompts', 428],
       ['memory.session_start', 1142],
       ['memory.doctor', 603],
       ['memory.timeline', 395],
-      ['memory.save', 1891],
+      ['memory.save', 1804],
       ['memory.stats', 283],
     ])('%s is %i chars, inside the ceiling', (name, expected) => {
       const desc = descriptions.get(name);
@@ -3639,7 +3638,7 @@ describe('MCP protocol conformance', () => {
     await client.close();
   });
 
-  it('memory.save surfaces candidates[] when similar content already exists', async () => {
+  it('memory.save surfaces candidates[] as unpersisted pairs, acted on through memory.compare', async () => {
     const client = await connect();
     for (let i = 0; i < 3; i++) {
       await client.callTool({
@@ -3664,33 +3663,41 @@ describe('MCP protocol conformance', () => {
     expect(second.isError).toBeFalsy();
     const payload = readJson(second) as {
       id: string;
-      candidates: { judgmentId: string; targetId: string; source: 'fts' | 'vec' }[];
+      candidates: {
+        judgmentId?: string;
+        sourceId?: string;
+        targetId: string;
+        source: 'fts' | 'vec';
+      }[];
       judgmentRequired: boolean;
     };
     expect(payload.candidates.length).toBeGreaterThanOrEqual(1);
-    expect(payload.judgmentRequired).toBe(true);
+    expect(payload.judgmentRequired).toBe(false);
     expect(payload.candidates[0]!.source).toBe('vec');
+    expect(payload.candidates[0]!.sourceId).toBe(payload.id);
+    expect(payload.candidates[0]).not.toHaveProperty('judgmentId');
+    const rows = services.db.raw
+      .prepare<
+        [string],
+        { n: number }
+      >(`SELECT count(*) AS n FROM memory_relations WHERE source_id = ?`)
+      .get(payload.id);
+    expect(rows?.n).toBe(0);
 
-    const judgmentId = payload.candidates[0]!.judgmentId;
-    const judgement = (await client.callTool({
-      name: 'memory.judge_batch',
+    const verdict = (await client.callTool({
+      name: 'memory.compare',
       arguments: {
-        judgments: [
-          {
-            judgmentId,
-            relation: 'related',
-            confidence: 0.9,
-            reason: 'overlapping content',
-          },
-        ],
+        memoryIdA: payload.candidates[0]!.sourceId,
+        memoryIdB: payload.candidates[0]!.targetId,
+        relation: 'conflicts_with',
+        confidence: 0.9,
+        reason: 'same subject, opposite claim',
       },
     })) as ToolResult;
-    expect(judgement.isError).toBeFalsy();
-    const judgedPayload = (
-      readJson(judgement) as { results: { status: string; relation: string }[] }
-    ).results[0]!;
-    expect(judgedPayload.status).toBe('judged');
-    expect(judgedPayload.relation).toBe('related');
+    expect(verdict.isError).toBeFalsy();
+    const recorded = readJson(verdict) as { status: string; relation: string };
+    expect(recorded.status).toBe('judged');
+    expect(recorded.relation).toBe('conflicts_with');
 
     await client.close();
   });

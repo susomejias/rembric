@@ -128,7 +128,10 @@ function buildServices(): Services {
   const postSave: Services['postSave'] = {
     relations,
     repos,
-    candidates: { perSaveMax: envInt('CANDIDATES_PER_SAVE_MAX', 5, { min: 0, max: 25 }) },
+    candidates: {
+      perSaveMax: envInt('CANDIDATES_PER_SAVE_MAX', 5, { min: 0, max: 25 }),
+      persist: envInt('JUDGMENT_QUEUE_ENABLED', 0, { min: 0, max: 1 }) === 1,
+    },
     embedNow: (memoryId, title, content, projectId) =>
       embeddingWorker().then((worker) => worker.embedNow(memoryId, title, content, projectId)),
   };

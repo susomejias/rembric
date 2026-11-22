@@ -355,7 +355,7 @@ describe('memory.save and memory.merge — confidence bands', () => {
     return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
   }
 
-  function bandHandlers(vectorByContent: Map<string, Buffer>) {
+  function bandHandlers(vectorByContent: Map<string, Buffer>, persist?: boolean) {
     const repos = createRepositories(db.handle.db);
     return buildMemoryHandlers({
       logInternalError,
@@ -363,7 +363,7 @@ describe('memory.save and memory.merge — confidence bands', () => {
       repos,
       projects,
       relations: new RelationsService(repos, db.handle.db),
-      candidates: { perSaveMax: 5 },
+      candidates: { perSaveMax: 5, ...(persist === undefined ? {} : { persist }) },
       embedNow: (id, _title, content, projectId) => {
         const v = vectorByContent.get(content);
         if (v) repos.vectors.insertEmbedding(id, v, partitionKeyFor(projectId));
@@ -442,6 +442,175 @@ describe('memory.save and memory.merge — confidence bands', () => {
     expect(r.related.map((x) => x.targetId)).toEqual([low]);
     expect(r.candidatesDetected).toBe(1);
     expect(pendingRowsFor(r.id)).toBe(1);
+  });
+
+  describe('with the judgment queue disabled', () => {
+    interface PairPayload {
+      id: string;
+      candidates: Record<string, unknown>[];
+      related: Record<string, unknown>[];
+      convergeWith: string[];
+      judgmentRequired: boolean;
+      candidatesDetected: number;
+    }
+
+    const relationRowsFor = (sourceId: string) =>
+      db.handle.db
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.sourceId, sourceId))
+        .all();
+
+    const RULE = 'use two-space indentation always in every file';
+
+    it('memory.save returns a high-band candidate as an unpersisted pair marked converge', async () => {
+      const h = bandHandlers(vectors(), false);
+      const { low, high } = await seedLowAndHigh(h);
+      const r = parseText<PairPayload>(await save(h, 'Probe', PROBE));
+
+      expect(r.candidates).toHaveLength(1);
+      expect(r.candidates[0]).toMatchObject({ sourceId: r.id, targetId: high, converge: true });
+      expect(r.candidates[0]).not.toHaveProperty('judgmentId');
+      expect(r.convergeWith).toEqual([]);
+      expect(r.judgmentRequired).toBe(false);
+      expect(r.related.map((x) => x.targetId)).toEqual([low]);
+      expect(r.candidatesDetected).toBe(1);
+      expect(relationRowsFor(r.id)).toEqual([]);
+    });
+
+    it('memory.save returns a middle-band candidate as a pair without the converge flag', async () => {
+      const h = bandHandlers(new Map(), false);
+      const first = parseText<{ id: string }>(await save(h, 'Indent rule', RULE)).id;
+      const r = parseText<PairPayload>(await save(h, 'Indent rule again', `${RULE}, revised`));
+
+      expect(r.candidates).toHaveLength(1);
+      expect(r.candidates[0]).toMatchObject({ sourceId: r.id, targetId: first });
+      expect(r.candidates[0]).not.toHaveProperty('converge');
+      expect(r.candidates[0]).not.toHaveProperty('judgmentId');
+      expect(r.judgmentRequired).toBe(false);
+      expect(relationRowsFor(r.id)).toEqual([]);
+    });
+
+    it('memory.save detects the same candidates on both settings and only the enabled one persists them', async () => {
+      async function probe(persist: boolean) {
+        const own = createTestDb();
+        try {
+          const repos = createRepositories(own.handle.db);
+          const ownProjects = new ProjectsService(repos, undefined, own.handle.db);
+          const project = ownProjects.create({ slug: 'test-rembric' });
+          const vectorByContent = vectors();
+          const h = buildMemoryHandlers({
+            logInternalError,
+            memory: new MemoryService(repos, own.handle.db),
+            repos,
+            projects: ownProjects,
+            relations: new RelationsService(repos, own.handle.db),
+            candidates: { perSaveMax: 5, persist },
+            embedNow: (id, _title, content, projectId) => {
+              const v = vectorByContent.get(content);
+              if (v) repos.vectors.insertEmbedding(id, v, partitionKeyFor(projectId));
+              return Promise.resolve(v !== undefined);
+            },
+          });
+          const saveIn = (title: string, content: string) =>
+            runWithContext(fakeContext(project), () =>
+              Promise.resolve(h.save({ type: 'project', title, content })),
+            );
+          await saveIn('Restore drill', LOW);
+          await saveIn('Scheduler port', HIGH);
+          await saveIn('Indent rule', RULE);
+          const r = parseText<PairPayload>(await saveIn('Indent rule again', `${RULE}, revised`));
+          const pending = own.handle.db
+            .select()
+            .from(memoryRelations)
+            .where(eq(memoryRelations.status, 'pending'))
+            .all().length;
+          return {
+            titles: r.candidates.map((c) => c['title']),
+            related: r.related.map((c) => c['title']),
+            detected: r.candidatesDetected,
+            pending,
+          };
+        } finally {
+          own.cleanup();
+        }
+      }
+
+      const enabled = await probe(true);
+      const disabled = await probe(false);
+      expect(enabled.titles.length).toBeGreaterThan(0);
+      expect(disabled.titles).toEqual(enabled.titles);
+      expect(disabled.related).toEqual(enabled.related);
+      expect(disabled.detected).toBe(enabled.detected);
+      expect(enabled.pending).toBeGreaterThan(0);
+      expect(disabled.pending).toBe(0);
+    });
+
+    it('a topic_key upsert still records its supersession', async () => {
+      const h = bandHandlers(new Map(), false);
+      const saveKeyed = (content: string) =>
+        runWithContext(fakeContext(projectA), () =>
+          Promise.resolve(
+            h.save({ type: 'project', title: 'Port', content, topic_key: 'config/port' }),
+          ),
+        );
+      const first = parseText<{ id: string }>(await saveKeyed('port is 8080')).id;
+      const second = parseText<{ id: string }>(await saveKeyed('port is 9090')).id;
+
+      expect(relationRowsFor(second)).toEqual([
+        expect.objectContaining({
+          targetId: first,
+          relation: 'supersedes',
+          status: 'judged',
+          markedByKind: 'agent_topic_key',
+        }),
+      ]);
+    });
+
+    it('a row pending from before the switch stays pending and judgeable', async () => {
+      const before = bandHandlers(vectors(), true);
+      await seedLowAndHigh(before);
+      const probe = parseText<{ id: string; candidates: { judgmentId: string }[] }>(
+        await save(before, 'Probe', PROBE),
+      );
+      const judgmentId = probe.candidates[0]!.judgmentId;
+
+      const after = bandHandlers(vectors(), false);
+      await save(after, 'Unrelated', 'an utterly singular observation about nothing');
+
+      expect(pendingRowsFor(probe.id)).toBe(1);
+      const repos = createRepositories(db.handle.db);
+      const judged = new RelationsService(repos, db.handle.db).judgeInScope(
+        judgmentId,
+        projectScope(projectA.id),
+        { relation: 'related', actor: 'test', kind: 'agent' },
+      );
+      expect(judged.status).toBe('judged');
+    });
+
+    it('a memory.merge commit returns unpersisted pairs as memory.save does', async () => {
+      const h = bandHandlers(vectors(), false);
+      const { high } = await seedLowAndHigh(h);
+      const ids = ['first half', 'second half'].map(
+        (t) => memory.save({ type: 'project', title: t, content: t }, projectScope(projectA.id)).id,
+      );
+      const args = { ids, type: 'project' as const, title: 'Merged', content: PROBE, tags: ['x'] };
+      const plan = parseText<{ fingerprint: string }>(
+        await runWithContext(fakeContext(projectA), () => h.merge(args)),
+      );
+      const r = parseText<PairPayload>(
+        await runWithContext(fakeContext(projectA), () =>
+          h.merge({ ...args, fingerprint: plan.fingerprint }),
+        ),
+      );
+
+      expect(r.candidates).toHaveLength(1);
+      expect(r.candidates[0]).toMatchObject({ sourceId: r.id, targetId: high, converge: true });
+      expect(r.candidates[0]).not.toHaveProperty('judgmentId');
+      expect(r.convergeWith).toEqual([]);
+      expect(r.judgmentRequired).toBe(false);
+      expect(pendingRowsFor(r.id)).toBe(0);
+    });
   });
 });
 

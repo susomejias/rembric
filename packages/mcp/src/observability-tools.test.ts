@@ -85,7 +85,7 @@ function fakeContext(): RequestContext {
   };
 }
 
-function makeObservability(db: TestDb, vectorByContent?: Map<string, Buffer>) {
+function makeObservability(db: TestDb, vectorByContent?: Map<string, Buffer>, persist?: boolean) {
   const repos = createRepositories(db.handle.db);
   const memory = new MemoryService(repos, db.handle.db);
   const relations = new RelationsService(repos, db.handle.db);
@@ -116,7 +116,7 @@ function makeObservability(db: TestDb, vectorByContent?: Map<string, Buffer>) {
       warnings: [],
     }),
     relations,
-    candidates: { perSaveMax: 5 },
+    candidates: { perSaveMax: 5, ...(persist === undefined ? {} : { persist }) },
   });
   return { repos, memory, agentSessions, handlers };
 }
@@ -309,6 +309,31 @@ describe('memory.capture_passive — handler-level (fix-audited-defects)', () =>
     expect(new Set(out.convergeWith).size).toBe(out.convergeWith.length);
     expect(out.convergeWith.every((id) => byJudgment.has(id))).toBe(true);
     expect(out.convergeWith.filter((id) => byJudgment.get(id) === target.id)).toHaveLength(2);
+  });
+
+  it('with the judgment queue disabled, names the pair of each candidate and persists none', async () => {
+    const rule = 'use two-space indentation always in every file';
+    const { repos, memory: mem, handlers: h } = makeObservability(db, undefined, false);
+    const target = mem.save({ type: 'project', title: 'Indent', content: rule }, defaultScope);
+
+    const out = parse<{
+      ids: string[];
+      candidates: Record<string, unknown>[];
+      convergeWith?: string[];
+    }>(
+      await runWithContext(fakeContext(), () =>
+        h.capturePassive({
+          text: `## Key Learnings\n\n1. ${rule} under src\n2. ${rule} under tests`,
+        }),
+      ),
+    );
+
+    const [l1, l2] = out.ids;
+    const onTarget = out.candidates.filter((c) => c['targetId'] === target.id);
+    expect(onTarget.map((c) => c['sourceId'])).toEqual([l1, l2]);
+    expect(out.candidates.every((c) => !('judgmentId' in c))).toBe(true);
+    expect(out).not.toHaveProperty('convergeWith');
+    expect(repos.relations.countPendingInScope({ projectId: target.projectId! })).toBe(0);
   });
 });
 

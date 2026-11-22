@@ -144,6 +144,7 @@ describe('secret redaction sweep — every write path through its real boundary'
     resetAppGlobals();
     dataDir = mkdtempSync(join(tmpdir(), 'rembric-web-redaction-'));
     process.env['REMBRIC_DATA_DIR'] = dataDir;
+    process.env['JUDGMENT_QUEUE_ENABLED'] = '1';
     delete process.env['REMBRIC_PUBLIC_URL'];
     services = getServices();
     services.projects.create({ slug: SLUG });
@@ -327,6 +328,7 @@ describe('secret redaction sweep — every write path through its real boundary'
     await new Promise((resolve) => setImmediate(resolve));
     resetAppGlobals();
     delete process.env['REMBRIC_DATA_DIR'];
+    delete process.env['JUDGMENT_QUEUE_ENABLED'];
     rmSync(dataDir, { recursive: true, force: true });
   });
 
