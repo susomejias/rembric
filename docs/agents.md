@@ -2,7 +2,7 @@
 
 Rembric ships first-class plugins for **Claude Code**, **Codex CLI**, **Hermes Agent**, **opencode**, and **Pi**. **ChatGPT** connects as a custom MCP connector over OAuth 2.1 (no plugin) — see [ChatGPT](#chatgpt-custom-mcp-connector-over-oauth).
 
-> **Install with the TUI — the single, recommended path.** [`install.sh`](../install.sh) (canonical URL `https://raw.githubusercontent.com/susomejias/rembric/main/install.sh`) is one brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version. Inspect-first: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh && less rembric-install.sh && sh rembric-install.sh`. Pin a release with `--ref=<tag>`. The per-client commands in the sections below are what the installer runs under the hood — documented here as the **manual fallback**.
+> **Install with the TUI — the single, recommended path.** [`install.sh`](../install.sh) (canonical URL `https://raw.githubusercontent.com/susomejias/rembric/main/install.sh`) is one brand-styled menu that prepares the server and installs / updates / uninstalls every client plugin, detecting what you have and at which version. Inspect-first: `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh -o rembric-install.sh && less rembric-install.sh && sh rembric-install.sh`. Without `--ref`, plugins come from the `plugin-release` branch, which CI moves only after a release's npm packages are published, and server files come from `main`. `--ref=<tag>` pins both. The per-client commands in the sections below are what the installer runs under the hood — documented here as the **manual fallback**.
 
 > **Running Rembric itself?** The canonical install is Docker — see [`docs/docker.md`](./docker.md) for the operator guide (topologies, GHCR auth, upgrades, troubleshooting). This page covers the agent side: how each MCP client connects to a running Rembric instance.
 
@@ -386,14 +386,17 @@ The Codex CLI has no dedicated per-plugin `update` verb, so re-running `codex pl
 #### Manual / advanced distribution
 
 ```sh
-hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable
-hermes plugins update rembric
+REV=$(git ls-remote https://github.com/susomejias/rembric.git refs/heads/plugin-release | cut -f1)
+hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref "$REV" --enable
+hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --force --ref "$REV"   # update
 hermes plugins remove rembric
 ```
 
+Hermes accepts only a full commit SHA for `--ref`, and a pinned install refuses `hermes plugins update`; `install --force --ref` moves the pin and keeps your state. The TUI resolves `plugin-release` to that SHA itself, and refuses a Hermes install or update when it cannot (git is required).
+
 Hermes supports Git-subdirectory installation and records its source. `--enable` selects `memory.provider: rembric`; remove deletes the entire managed directory and clears provider/plugin selection and grants. Unrelated MCP settings, exact bridge pins, credentials outside that directory and project markers remain intact. Back up local plugin-directory data before removal. The TUI requires binary presence and execution consent (`--yes` for headless runs); it does not bypass Hermes's own security/dependency consent.
 
-Hermes mutations reject `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` and every explicit `--ref` rather than silently ignoring local/tag/SHA requests. Unrecognized, linked, foreign-source, pinned or inconsistent installations are refused. For a recognized old Rembric copy, choose **Plugins → hermes → update**: stop Hermes and automatic restarts, then type `MIGRATE` at the separate prompt. The TUI verifies a private full backup outside `plugins/`, installs natively and restores the old plugin/configuration on ordinary failure. Pending native publication or changed dependency state requires manual recovery from the retained backup, with Hermes kept stopped. Generic `--yes` does not authorize migration. Do not use `adopt` or forced replacement. [Full transition and ownership details](../apps/plugin/.hermes-plugin/README.md#transition-from-a-copied-installation).
+Hermes mutations reject `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` and every explicit `--ref` rather than silently ignoring local/tag/SHA requests. Native installs, pinned or not, are updated to the resolved commit. Unrecognized, linked, foreign-source or inconsistent installations are refused. For a recognized old Rembric copy, choose **Plugins → hermes → update**: stop Hermes and automatic restarts, then type `MIGRATE` at the separate prompt. The TUI verifies a private full backup outside `plugins/`, installs natively and restores the old plugin/configuration on ordinary failure. Pending native publication or changed dependency state requires manual recovery from the retained backup, with Hermes kept stopped. Generic `--yes` does not authorize migration. Do not use `adopt` or forced replacement. [Full transition and ownership details](../apps/plugin/.hermes-plugin/README.md#transition-from-a-copied-installation).
 
 **Measured limitation (Hermes v0.22.5):** its checker reports native subdirectory installs as provenance `drift` despite source tracking. Explicit update passed with an already-current result, not a measured version advance. TUI Hermes update status remains unknown and update-all skips it; request `--agent=hermes --action=update --yes` explicitly. Successful TUI update retains recognized legacy MCP repair/backups; manual native update does not run that repair.
 
@@ -581,34 +584,34 @@ Re-run `pi install npm:@rembric/pi` — idempotent, and it always resolves the l
 <details>
 <summary>Temporarily return one client plugin to a previous <code>plugin-vX.Y.Z</code> release</summary>
 
-Use this only to mitigate a broken plugin release while its fix is being prepared. Pick an existing unified `plugin-vX.Y.Z` tag, restart the affected client after the rollback, and return to `main` as soon as the fix is available. A tag is a pin: it does not receive later plugin updates.
+Use this only to mitigate a broken plugin release while its fix is being prepared. Pick an existing unified `plugin-vX.Y.Z` tag and restart the affected client after the rollback.
+
+The project-wide rollback is the maintainers moving `plugin-release` back: run `release-please.yml` manually with `plugin_release_tag=plugin-vX.Y.Z` (see [CONTRIBUTING.md](../CONTRIBUTING.md#plugin-release-ref-maintainers)). Every client then gets that version through its ordinary update, and the next promotion moves everyone forward again.
 
 ### Claude Code
 
-Do **not** remove the marketplace: replacing its source preserves the installed plugin and its enabled state.
+The marketplace entry follows `plugin-release`, so a moved branch is picked up by the ordinary update. Do **not** remove the marketplace:
 
 ```sh
-claude plugin marketplace add susomejias/rembric@plugin-vX.Y.Z
+claude plugin marketplace update rembric
 claude plugin update rembric@rembric
 ```
 
-Restart Claude Code. When the fix is available, replace `plugin-vX.Y.Z` with `main` in the first command and run the update again.
+Restart Claude Code.
 
 ### Codex CLI
 
-Codex requires the marketplace source to be replaced. The plugin is inactive between the removal and the final install, so run all three commands together. If either of the last two fails, repeat the same sequence with `main` to recover.
+Codex reads the same marketplace entry, so the ordinary update picks up a moved branch without removing the marketplace:
 
 ```sh
-codex plugin marketplace remove rembric
-codex plugin marketplace add susomejias/rembric@plugin-vX.Y.Z
-codex plugin add rembric@rembric
+codex plugin marketplace upgrade rembric && codex plugin add rembric@rembric
 ```
 
-Restart Codex and review hooks again if prompted. When the fix is available, repeat the sequence with `main` instead of the tag.
+Restart Codex and review hooks again if prompted.
 
 ### Hermes Agent
 
-The TUI deliberately rejects explicit refs and local-source overrides for Hermes; it does not translate release tags to native SHA pins. Preserve a complete backup outside plugin discovery before any operator-managed rollback. Existing native pins/source records need explicit review outside this default-source-only TUI flow; do not force-replace a copied install.
+Run the ordinary TUI update (`--agent=hermes --action=update --yes`). It moves the native pin to the commit `plugin-release` resolves to. The TUI rejects explicit refs for Hermes, so a per-machine rollback of Hermes alone is not supported.
 
 ### opencode
 
@@ -619,7 +622,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/plugin-vX.Y.Z/in
   | REMBRIC_NONINTERACTIVE=1 sh -s -- --agent=<agent> --action=update --ref=plugin-vX.Y.Z
 ```
 
-Restart the client. After the fix, run its ordinary TUI-installer update without `--ref` to return to `main`.
+Restart the client. After the fix, run its ordinary TUI-installer update without `--ref` to return to `plugin-release`.
 
 ### Pi
 

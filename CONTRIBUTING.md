@@ -177,6 +177,16 @@ work, the load-bearing items are:
   pin a clean version, or as a last resort document the exception in a
   follow-up PR.
 
+## Plugin release ref (maintainers)
+
+Clients install the plugin from the `plugin-release` branch. The `promote-plugin-release` job in `.github/workflows/release-please.yml` moves it to a new `plugin-v*` tag only after `publish-npm` succeeds and that tag's `@rembric/mcp-bridge` version is on npm. To roll back, or to re-promote, run the workflow manually with `plugin_release_tag=plugin-vX.Y.Z`. That run force-moves the branch, still refuses a tag whose bridge is not on npm, and does nothing when the branch is already there.
+
+Owner prerequisites, done once on GitHub and **before** merging the change that points the manifests at the branch:
+
+1. Create `plugin-release` at the latest `plugin-v*` tag, so no client is ever pointed at a missing ref: `git push origin <latest plugin-v* tag>^{commit}:refs/heads/plugin-release`.
+2. Create a GitHub App with repository **Contents: read and write** permission and install it on this repository only. Store its client ID in the repository variable `PLUGIN_RELEASE_APP_CLIENT_ID` and a private key in the secret `PLUGIN_RELEASE_APP_PRIVATE_KEY`.
+3. Add a branch ruleset targeting `plugin-release` that restricts updates and deletions and blocks force pushes, with that App as the only bypass actor. The bypass has to cover force pushes, because a rollback is a non-fast-forward update. `GITHUB_TOKEN` cannot bypass a ruleset, which is why the job uses the App token.
+
 ## Issues and PRs
 
 - Search existing issues before opening a new one.

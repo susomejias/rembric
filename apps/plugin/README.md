@@ -10,7 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 less rembric-install.sh && sh rembric-install.sh
 ```
 
-It is an orchestrator — opencode uses its scripts, Claude/Codex their marketplace CLIs, Pi its registry CLI, and Hermes its native Git-subdirectory plugin manager. Hermes mutations reject explicit refs and local-source overrides; explicit TUI update offers recognized legacy copies a separately confirmed stopped-host migration with verified backup and native reinstall, never forced replacement. Hermes owns provider/plugin selection and grants, and removal deletes its entire managed directory while preserving unrelated settings, MCP pins and external credentials. [Hermes transition and update-check limitations](./.hermes-plugin/README.md#transition-from-a-copied-installation).
+It is an orchestrator — opencode uses its scripts, Claude/Codex their marketplace CLIs, Pi its registry CLI, and Hermes its native Git-subdirectory plugin manager. Plugins come from the `plugin-release` branch, which CI moves only after a release's npm packages are published, so a client is never offered a plugin whose pinned bridge is missing. Server files come from `main`. Hermes pins the commit `plugin-release` resolves to. Hermes mutations reject explicit refs and local-source overrides; explicit TUI update offers recognized legacy copies a separately confirmed stopped-host migration with verified backup and native reinstall, never forced replacement. Hermes owns provider/plugin selection and grants, and removal deletes its entire managed directory while preserving unrelated settings, MCP pins and external credentials. [Hermes transition and update-check limitations](./.hermes-plugin/README.md#transition-from-a-copied-installation).
 
 | Client           | Manifest dir        | Docs                                                                          |
 | ---------------- | ------------------- | ----------------------------------------------------------------------------- |
@@ -27,7 +27,7 @@ It is an orchestrator — opencode uses its scripts, Claude/Codex their marketpl
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Claude Code**  | `claude plugin marketplace add https://github.com/susomejias/rembric.git && claude plugin install rembric@rembric`                                                                         |
 | **Codex CLI**    | `codex plugin marketplace add https://github.com/susomejias/rembric.git && codex plugin add rembric@rembric`                                                                               |
-| **Hermes Agent** | `hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable`                                                                                                            |
+| **Hermes Agent** | `hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref "$(git ls-remote https://github.com/susomejias/rembric.git refs/heads/plugin-release \| cut -f1)" --enable`    |
 | **opencode**     | `curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/apps/plugin/.opencode-plugin/install.sh \| sh`, export `REMBRIC_SERVER_URL` + `REMBRIC_API_TOKEN`, then restart      |
 | **Pi**           | `pi install npm:@rembric/pi` then export `REMBRIC_SERVER_URL` + `REMBRIC_API_TOKEN` in your shell. Never append a version — a pinned spec is skipped by `pi update --extensions` / `--all` |
 
@@ -102,7 +102,7 @@ Restart Claude Code and try again. If sessions now appear with the shell exports
 
 ### Updating to a new version
 
-Claude Code caches plugins by version. When we ship a new `version` in `plugin/.claude-plugin/plugin.json` (e.g. `0.1.0` → `0.2.0`), follow the official update flow:
+Claude Code caches plugins by version. The marketplace entry installs from the `plugin-release` branch (a `git-subdir` source), so a new `version` reaches you only after CI has published its `@rembric/mcp-bridge` to npm and moved the branch. An install made while the entry was the relative path `./apps/plugin` switches to the new source in place with the same two commands: it stays enabled and keeps its configured options. A rollback is the maintainers moving `plugin-release` back; the same commands pick it up. Follow the official update flow:
 
 ```shell
 # 1. Refresh the marketplace catalog so Claude Code sees the new version

@@ -16,10 +16,11 @@ curl -fsSL https://raw.githubusercontent.com/susomejias/rembric/main/install.sh 
 Use Hermes's native plugin manager (verified with Hermes v0.22.5):
 
 ```sh
-hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable
+REV=$(git ls-remote https://github.com/susomejias/rembric.git refs/heads/plugin-release | cut -f1)
+hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --ref "$REV" --enable
 ```
 
-Hermes records the repository/subdirectory source and installs under `${HERMES_HOME:-~/.hermes}/plugins/rembric`. `--enable` selects `memory.provider: rembric`, replacing any previous provider selection. This does not wire the separate MCP bridge.
+`plugin-release` only moves after a release's npm packages are published, and Hermes accepts only a full commit SHA for `--ref`; the TUI resolves it for you. Hermes records the repository/subdirectory source and installs under `${HERMES_HOME:-~/.hermes}/plugins/rembric`. `--enable` selects `memory.provider: rembric`, replacing any previous provider selection. This does not wire the separate MCP bridge.
 
 Native installation prompts for missing values declared in `plugin.yaml::requires_env` and stores them in `${HERMES_HOME:-~/.hermes}/.env`:
 
@@ -29,11 +30,11 @@ Native installation prompts for missing values declared in `plugin.yaml::require
 
 The TUI prints native commands without executing them when Hermes is unavailable or a headless run lacks `--yes`. `--yes` authorizes invocation, not bypassing Hermes's dependency/security/capability consent.
 
-Hermes mutations support only the default unpinned source: `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` and explicit `--ref` (including `main`, tags and SHAs) are rejected before mutation. Other clients keep their own source/ref behavior.
+Hermes mutations support only the default source, pinned to the commit `plugin-release` resolves to: `REMBRIC_SRC`, `PLUGIN_SRC`, `REMBRIC_REF` and explicit `--ref` (including `main`, tags and SHAs) are rejected before mutation, and so is an install or update when that commit cannot be resolved. Other clients keep their own source/ref behavior.
 
 ### Transition from a copied installation
 
-Choose **Plugins → hermes → update**. A native installation uses `hermes plugins update rembric`; a recognized old Rembric copy offers a one-time migration.
+Choose **Plugins → hermes → update**. A native installation, pinned or not, is moved to the resolved commit with `hermes plugins install … --force --ref <sha>`; a recognized old Rembric copy offers a one-time migration.
 
 Stop Hermes CLI/Desktop/gateway processes and automatic restarts first. The TUI checks for running Hermes processes, then requires typing `MIGRATE`; ordinary `--yes` cannot authorize this transition. Keep Hermes stopped until completion. The adapter verifies a private `rembric-backup-*` directory outside `plugins/`, preserving the whole old plugin, configuration, credentials and source metadata, then installs natively. Unknown local files stay in the backup rather than being copied over the new provider.
 
@@ -150,9 +151,12 @@ Use the TUI installer (`Plugins → hermes → update`, or `sh install.sh --agen
 Manual fallback:
 
 ```sh
-hermes plugins update rembric
+REV=$(git ls-remote https://github.com/susomejias/rembric.git refs/heads/plugin-release | cut -f1)
+hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --force --ref "$REV"
 hermes gateway restart
 ```
+
+A pinned install refuses `hermes plugins update`; `install --force --ref` is how Hermes moves the pin.
 
 The manual CLI does not run Rembric's legacy MCP repair. Use the TUI if that repair is needed.
 
