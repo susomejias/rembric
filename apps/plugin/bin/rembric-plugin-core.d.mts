@@ -20,6 +20,7 @@ export declare function diag(line: string): void;
 export declare function extractCommandPaths(command: string): string[];
 export declare function stripPrivateTags(text: string): string;
 export declare function underscoreToolNames(text: string): string;
+export declare const RARELY_USED_TOOLS: readonly string[];
 
 export type TranscriptEntry = { role: 'user' | 'assistant'; text: string; id?: string };
 

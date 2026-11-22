@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 
 import { parseDotenv, readRembricSlug } from '../mcp-bridge/rembric-dotenv.mjs';
 import { hostBindingPath } from '../mcp-bridge/rembric-host-binding.mjs';
-import { createSessionProtocol } from '../bin/rembric-plugin-core.mjs';
+import { createSessionProtocol, FIRST_PROMPT_NUDGE } from '../bin/rembric-plugin-core.mjs';
 import RembricPluginV2Default, { RembricPlugin } from './plugin.js';
 
 // A git hook exports GIT_DIR, which would point the git calls in these tests at the real repository.
@@ -1853,6 +1853,29 @@ describe('RembricPluginV2 (opencode 2.x)', () => {
     await handler(hooks, 'context')({ sessionID: 'ses_v2_b', system: after } as never);
     // Rehydrated from the daemon rather than served from the stale cache.
     expect(after.length).toBeLessThanOrEqual(1);
+
+    stream.end();
+    await cleanup?.();
+  });
+
+  it('drops the previous turn’s block when the next prompt builds an empty one', async () => {
+    const { context, hooks, stream } = fakeContext();
+    const cleanup = await RembricPluginV2Default.setup(context as never);
+    const sessionID = 'ses_v2_stale';
+    stream.push({ type: 'session.created', data: { sessionID } });
+    await settle();
+
+    await handler(hooks, 'prompt')({ sessionID, prompt: { text: 'hello' } } as never);
+    const turnOne: Array<{ type: string; text?: string }> = [];
+    await handler(hooks, 'context')({ sessionID, system: turnOne } as never);
+    expect(turnOne.map((part) => part.text).join('\n')).toContain(FIRST_PROMPT_NUDGE);
+
+    await handler(hooks, 'prompt')({ sessionID, prompt: { text: 'carry on' } } as never);
+    for (let request = 0; request < 2; request += 1) {
+      const turnTwo: Array<{ type: string; text?: string }> = [];
+      await handler(hooks, 'context')({ sessionID, system: turnTwo } as never);
+      expect(turnTwo, `request ${request} of turn two re-sent turn one's block`).toEqual([]);
+    }
 
     stream.end();
     await cleanup?.();
