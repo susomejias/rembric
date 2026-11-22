@@ -77,6 +77,8 @@ Sessions carrying a parent id SHALL be marked as sub-agents and SHALL NOT be reg
 
 ### Requirement: The V2 plugin SHALL capture the assistant transcript from session.text.ended
 
+The V2 plugin SHALL capture the assistant transcript from `session.text.ended`.
+
 opencode 2.x does not deliver assistant text as message parts. It emits `session.text.ended` carrying `{ sessionID, assistantMessageID, ordinal, text }`, where `ordinal` distinguishes the text segments of one assistant message.
 
 The plugin SHALL accumulate those segments per assistant message id, ordered by `ordinal`, and SHALL write the joined text to the shared core's assistant-transcript accumulator. Accumulating by ordinal SHALL be idempotent, so a redelivered `session.text.ended` for the same ordinal SHALL NOT duplicate text.
