@@ -182,4 +182,3 @@ Without `adminBypass: true`, the method SHALL throw `DomainError('forbidden', ..
 - **WHEN** `MemoryService.purgeDisconnectedArchived({})` or `MemoryService.purgeDisconnectedArchived({ adminBypass: false })` is called
 - **THEN** the method SHALL throw `DomainError('forbidden', ...)`
 - **AND** SHALL NOT issue any SQL statement
-

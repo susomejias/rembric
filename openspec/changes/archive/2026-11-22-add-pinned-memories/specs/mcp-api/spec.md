@@ -138,4 +138,3 @@ The `db` block SHALL NOT carry an `open` flag. Producing the report requires a d
 - **WHEN** an MCP client calls `memory.doctor`
 - **THEN** the call SHALL succeed, `warnings` SHALL name the failed pragma read, and `integrity` SHALL report `unknown` rather than `ok`
 - **AND** no field SHALL claim the database is healthy
-
