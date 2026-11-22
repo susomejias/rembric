@@ -63,9 +63,9 @@ Migrations apply in file-name order and are recorded by file name, so the number
 
 - Name a new one `NNNN_snake_case.sql` with the next number after the last migration on **`origin/main`**, not on your branch. If `main` gains a migration before yours merges, rebase and renumber yours.
 - Never edit, rename or delete a migration that is already on `main`. Fix forward with a new one.
-- Bump the two count gates in the same commit: `[ "$applied" = N ]` in `.github/workflows/ci.yml` and `[ "$migrations" -eq N ]` in `apps/web/Dockerfile`.
+- Bump the two count gates in the same commit: `[ "$applied" = N ]` in `.github/workflows/ci.yml` and `[ "$migrations" -eq N ]` in `apps/web/Dockerfile` (`apps/web/src/test/docker-migrations.test.ts` checks them).
 
-`scripts/check-migrations.mjs` enforces all three (unique, contiguous, append-only, counts in step). It runs in CI against the PR base and against the previous `main` on every push.
+`scripts/check-migrations.mjs` enforces the first two (unique, contiguous, append-only). It runs in CI against the PR base and against the previous `main` on every push.
 
 ### Table-rebuild migrations (SQLite)
 
