@@ -6,10 +6,13 @@ quality gates the repository enforces automatically.
 ## Local setup
 
 This repo uses **pnpm** as its package manager (pinned via the
-`packageManager` field in `package.json`; currently `pnpm@11.1.2`). The fastest
-way to get a compatible pnpm is via Corepack, which ships with Node 16.9+:
+`packageManager` field in `package.json`; currently `pnpm@11.1.2`) and requires
+Node 26 (`.nvmrc`, `engines.node >= 26`). Corepack resolves that exact pnpm from
+`packageManager`. Node 26 no longer bundles Corepack, so install it once at the
+version CI and the Docker image use, with its scripts off:
 
 ```bash
+npm i -g --ignore-scripts corepack@0.36.0
 corepack enable
 pnpm install
 ```

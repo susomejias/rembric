@@ -16,7 +16,7 @@ context: |
   Tech stack:
     - TypeScript strict (no any without a justifying comment, no floating
       promises)
-    - Node 22+ via corepack-pinned pnpm 11.x
+    - Node 26+ via corepack-pinned pnpm 11.x
     - pnpm workspace monorepo: apps/* hold deliverables, packages/* hold shared
       libraries. packages/db is the SQL confinement boundary — schema,
       migrations, repositories, client, migrate, diagnostics, query tokenizer

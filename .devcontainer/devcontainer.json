@@ -3,7 +3,7 @@
 // This is NOT a replacement for `pnpm run dev:docker:up` (which is the canonical
 // way to run a SERVER instance via docker-compose.dev.yml against ./data-dev/).
 // This devcontainer exists so a contributor opening the repo in VSCode →
-// "Reopen in Container" gets the language toolchain (Node 22 + pnpm via corepack)
+// "Reopen in Container" gets the language toolchain (Node 26 + pnpm via corepack)
 // ready to typecheck / lint / test without polluting their host.
 //
 // Port allocation:
@@ -14,7 +14,7 @@
 // Practice #10 of .agents/skills/npm-security-best-practices/.
 {
   "name": "rembric",
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:22-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:26-trixie",
 
   // Run as non-root for blast-radius reduction. The base image creates the
   // `node` user with UID 1000.
@@ -27,8 +27,9 @@
 
   // After the container is created, bootstrap the toolchain. This honors
   // .npmrc + pnpm-workspace.yaml, so the install runs no third-party
-  // lifecycle scripts beyond the workspace allowlist.
-  "postCreateCommand": "corepack enable && pnpm install --frozen-lockfile",
+  // lifecycle scripts beyond the workspace allowlist. Node 26 has no corepack, and the
+  // image's global pnpm would shadow the corepack shim with an unpinned version.
+  "postCreateCommand": "npm uninstall -g pnpm && npm i -g --ignore-scripts corepack@0.36.0 && corepack enable && pnpm install --frozen-lockfile",
 
   // Forward the dashboard port. The MCP endpoint is on the same port.
   "forwardPorts": [8787],

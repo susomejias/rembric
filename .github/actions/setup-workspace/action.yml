@@ -11,7 +11,7 @@ runs:
         node-version-file: .nvmrc
 
     - shell: bash
-      run: corepack enable
+      run: npm i -g --ignore-scripts corepack@0.36.0 && corepack enable
 
     - uses: actions/cache@v6
       with:
