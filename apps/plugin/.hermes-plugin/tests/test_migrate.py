@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import pty
 import select
+import subprocess
 import sys
 import tempfile
 import time
@@ -276,6 +278,155 @@ shutil.copytree = corrupt_tree
         self.assertNotEqual(code, 0, out)
         self.assertFalse((self.home / "invoked").exists())
         self.assertEqual(external.read_text(), "REMBRIC_API_TOKEN=synthetic-test-token\n")
+
+
+_BRIDGE_MODULES = (
+    "cli.mjs", "bridge.mjs", "slug.mjs", "rembric-host-binding.mjs", "rembric-project.mjs", "rembric-dotenv.mjs",
+)
+_ENV_LINES = (
+    "    env:\n"
+    "      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}\n"
+    "      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}\n"
+    "      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}\n"
+    "    enabled: true\n"
+)
+_LEGACY = (
+    "  rembric:\n    command: npx\n    args:\n      [\n        '-y',\n        'mcp-remote@latest',\n"
+    "        '${REMBRIC_SERVER_URL}/mcp/${REMBRIC_PROJECT_SLUG}',\n        '--header',\n"
+    "        'Authorization: Bearer ${REMBRIC_API_TOKEN}',\n        '--allow-http',\n      ]\n"
+)
+_INCOMPLETE = "  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@0.29.1']\n"
+_COMPLETE = "  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@1.2.3']\n" + _ENV_LINES
+_BEFORE = "memory:\n  provider: rembric\nmcp_servers:\n"
+_AFTER = "  other:\n    command: other-mcp\ntrailing: keep\n"
+
+
+class McpConfigMigrationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.hermes_home = self.home / ".hermes"
+        plugins = self.hermes_home / "plugins"
+        (plugins / "rembric").mkdir(parents=True)
+        (plugins / "rembric/plugin.yaml").write_text("name: rembric\nversion: 0.46.0\n")
+        record = {"source": _SOURCE, "pinned": False, "revision": "a" * 40}
+        (plugins / ".install-metadata.json").write_text(json.dumps({"rembric": record}))
+        self.bridge = self.home / ".config/rembric/bin"
+        self.bridge.mkdir(parents=True)
+        for name in _BRIDGE_MODULES:
+            (self.bridge / name).write_bytes((_ROOT / "apps/plugin/mcp-bridge" / name).read_bytes())
+        fake = self.home / "fakebin"
+        fake.mkdir()
+        (fake / "hermes").write_text('#!/bin/sh\necho "RAN:hermes $*"\n')
+        (fake / "hermes").chmod(0o755)
+        self.env = {
+            "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home), "REMBRIC_ACTION": "update",
+            "PATH": f"{fake}:{Path(sys.executable).parent}:/usr/bin:/bin",
+        }
+        self.config = self.hermes_home / "config.yaml"
+
+    def update(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["/bin/sh", str(_ROOT / "apps/plugin/.hermes-plugin/install.sh")],
+            env=self.env, capture_output=True, text=True, check=False,
+        )
+
+    def node_block(self) -> str:
+        return f"  rembric:\n    command: node\n    args: ['{self.bridge}/cli.mjs']\n" + _ENV_LINES
+
+    def backups(self) -> list[str]:
+        return sorted(path.name for path in self.hermes_home.glob("config.yaml.*.bak"))
+
+    def test_each_installer_written_block_migrates_to_the_node_form_with_one_backup(self) -> None:
+        for label, block, suffix in (
+            ("complete npx", _COMPLETE, "rembric-mcp-npx"),
+            ("legacy mcp-remote", _LEGACY, "rembric-mcp-remote"),
+            ("incomplete npx", _INCOMPLETE, "rembric-mcp-env"),
+        ):
+            with self.subTest(label=label):
+                for stale in self.hermes_home.glob("config.yaml.*.bak"):
+                    stale.unlink()
+                original = _BEFORE + block + _AFTER
+                self.config.write_text(original)
+                result = self.update()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("RAN:hermes plugins update rembric", result.stdout)
+                self.assertIn("migrated mcp_servers.rembric", result.stdout)
+                self.assertEqual(self.config.read_text(), _BEFORE + self.node_block() + _AFTER)
+                self.assertEqual(self.backups(), [f"config.yaml.{suffix}.bak"])
+                self.assertEqual((self.hermes_home / f"config.yaml.{suffix}.bak").read_text(), original)
+
+    def test_complete_npx_block_migrates_for_any_pinned_version(self) -> None:
+        for version in ("0.0.1", "0.45.1", "10.20.30"):
+            with self.subTest(version=version):
+                self.config.write_text(_BEFORE + _COMPLETE.replace("1.2.3", version))
+                result = self.update()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.config.read_text(), _BEFORE + self.node_block())
+
+    def test_existing_backup_is_never_overwritten(self) -> None:
+        backup = self.hermes_home / "config.yaml.rembric-mcp-npx.bak"
+        backup.write_text("older backup\n")
+        self.config.write_text(_BEFORE + _COMPLETE)
+        result = self.update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(backup.read_text(), "older backup\n")
+        self.assertEqual(self.config.read_text(), _BEFORE + self.node_block())
+
+    def test_no_migration_runs_while_any_bridge_file_is_missing(self) -> None:
+        for missing in ("cli.mjs", "rembric-dotenv.mjs"):
+            for label, block in (("complete", _COMPLETE), ("incomplete", _INCOMPLETE)):
+                with self.subTest(missing=missing, block=label):
+                    for stale in self.hermes_home.glob("config.yaml.*.bak"):
+                        stale.unlink()
+                    saved = (self.bridge / missing).read_bytes()
+                    (self.bridge / missing).unlink()
+                    original = (_BEFORE + block + _AFTER).encode()
+                    self.config.write_bytes(original)
+                    result = self.update()
+                    (self.bridge / missing).write_bytes(saved)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(self.config.read_bytes(), original)
+                    self.assertEqual(self.backups(), [])
+                    self.assertIn("re-run the TUI installer", result.stdout + result.stderr)
+                    self.assertNotIn("migrated mcp_servers.rembric", result.stdout)
+
+    def test_customised_npx_block_is_byte_identical_and_hinted(self) -> None:
+        for label, block in (
+            ("extra key", _COMPLETE + "    timeout: 30\n"),
+            ("different env value", _COMPLETE.replace("${REMBRIC_PROJECT_SLUG}\n", "demo\n")),
+            ("extra env key", _COMPLETE.replace("    enabled: true\n", "      EXTRA: x\n    enabled: true\n")),
+            ("disabled", _COMPLETE.replace("enabled: true", "enabled: false")),
+            ("different command", _COMPLETE.replace("command: npx", "command: bunx")),
+        ):
+            with self.subTest(label=label):
+                original = (_BEFORE + block + _AFTER).encode()
+                self.config.write_bytes(original)
+                result = self.update()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.config.read_bytes(), original)
+                self.assertEqual(self.backups(), [])
+                self.assertIn("mcp_servers.rembric left unchanged", result.stdout)
+                self.assertIn(f"args: ['{self.bridge}/cli.mjs']", result.stdout)
+
+    def test_canonical_node_block_is_left_alone_without_a_hint(self) -> None:
+        original = (_BEFORE + self.node_block() + _AFTER).encode()
+        self.config.write_bytes(original)
+        result = self.update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(self.backups(), [])
+        self.assertNotIn("mcp_servers.rembric", result.stdout + result.stderr)
+
+    def test_config_without_a_rembric_block_is_untouched(self) -> None:
+        original = b"memory:\n  provider: rembric\nmcp_servers:\n  other: keep\n"
+        self.config.write_bytes(original)
+        result = self.update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(self.backups(), [])
+        self.assertNotIn("mcp_servers.rembric", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

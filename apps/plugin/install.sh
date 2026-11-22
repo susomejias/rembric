@@ -858,6 +858,67 @@ do_server() {
 }
 
 # ── plugin actions ──────────────────────────────────────────────────────────
+# A native Hermes install holds only .hermes-plugin, so the TUI places the bridge its MCP block runs.
+BRIDGE_DIR="${HOME}/.config/rembric/bin"
+# cli.mjs is committed last, so its presence means every module it imports is in place.
+BRIDGE_MODULES='rembric-dotenv.mjs rembric-project.mjs slug.mjs rembric-host-binding.mjs bridge.mjs cli.mjs'
+OPENCODE_PLUGIN_FILE="${HOME}/.config/opencode/plugins/rembric.ts"
+
+discard_staged_bridge() {
+  for _m in $BRIDGE_MODULES; do rm -f "$BRIDGE_DIR/$_m.tmp.$$"; done
+  return 0
+}
+
+place_bridge() {
+  if ! mkdir -p "$BRIDGE_DIR" 2>/dev/null; then
+    printf '[rembric] error: cannot create %s; the MCP bridge was not placed\n' "$BRIDGE_DIR" >&2
+    return 1
+  fi
+  for _m in $BRIDGE_MODULES; do
+    if ! fetch "apps/plugin/mcp-bridge/$_m" "$BRIDGE_DIR/$_m.tmp.$$"; then
+      discard_staged_bridge
+      printf '[rembric] error: the MCP bridge could not be placed in %s; Hermes and its config were left unchanged\n' "$BRIDGE_DIR" >&2
+      return 1
+    fi
+    chmod 644 "$BRIDGE_DIR/$_m.tmp.$$"
+  done
+  for _m in $BRIDGE_MODULES; do
+    if ! mv -f "$BRIDGE_DIR/$_m.tmp.$$" "$BRIDGE_DIR/$_m"; then
+      discard_staged_bridge
+      printf '[rembric] error: the MCP bridge could not be placed in %s; Hermes and its config were left unchanged\n' "$BRIDGE_DIR" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
+hermes_runs_bridge() {
+  _hermes_config="${HERMES_HOME:-${HOME}/.hermes}/config.yaml"
+  [ -f "$_hermes_config" ] || return 1
+  grep -qF "$BRIDGE_DIR/cli.mjs" "$_hermes_config" && return 0
+  grep -qF '~/.config/rembric/bin/cli.mjs' "$_hermes_config"
+}
+
+prune_bridge() {
+  _present=''
+  for _m in $BRIDGE_MODULES; do
+    if [ -e "$BRIDGE_DIR/$_m" ]; then _present="$_present $BRIDGE_DIR/$_m"; fi
+  done
+  [ -n "$_present" ] || return 0
+  if [ -f "$OPENCODE_PLUGIN_FILE" ]; then
+    say "  Bridge kept for opencode ($OPENCODE_PLUGIN_FILE runs it):"
+  elif hermes_runs_bridge; then
+    say "  Bridge kept for Hermes (mcp_servers.rembric in $_hermes_config runs it):"
+  else
+    say "  Removed bridge:"
+    for _f in $_present; do rm -f "$_f"; done
+    rmdir "$BRIDGE_DIR" 2>/dev/null || true
+    rmdir "${BRIDGE_DIR%/bin}" 2>/dev/null || true
+  fi
+  for _f in $_present; do say "    $_f"; done
+  return 0
+}
+
 # opencode/Hermes: delegate to the client's own install.sh/uninstall.sh.
 # Claude/Codex: print marketplace CLI commands (run-through gated on binary).
 run_client_script() { # $1 client, $2 install|uninstall
@@ -874,6 +935,7 @@ run_client_script() { # $1 client, $2 install|uninstall
     ;;
   *) return 1 ;;
   esac
+  if [ "$c" = hermes ] && [ "$verb" != uninstall ]; then place_bridge || return 1; fi
   script="install.sh"
   [ "$verb" = "uninstall" ] && [ "$c" != hermes ] && script="uninstall.sh"
   [ "$verb" = "uninstall" ] && [ "$has_uninstall" != "1" ] && {
@@ -903,6 +965,7 @@ run_client_script() { # $1 client, $2 install|uninstall
     else
       if REMBRIC_ACTION="$verb" REMBRIC_NONINTERACTIVE="$NONINTERACTIVE" sh "$t"; then _client_rc=0; else _client_rc=$?; fi
       rm -f "$t"
+      if [ "$_client_rc" = 0 ] && [ "$verb" = uninstall ]; then prune_bridge; fi
       return "$_client_rc"
     fi
     rm -f "$t"
@@ -998,19 +1061,10 @@ client_cli_cmds() { # $1 client, $2 action → print (and optionally run) CLI
 }
 
 hermes_bridge_config() {
-  _bridge_version=$(available_version apps/plugin)
-  if [ -z "$_bridge_version" ]; then
-    _bridge_manifest="${HERMES_HOME:-${HOME}/.hermes}/plugins/rembric/plugin.yaml"
-    [ -f "$_bridge_manifest" ] && _bridge_version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$_bridge_manifest" | head -1)
-  fi
-  if [ -z "$_bridge_version" ]; then
-    say "  ${WARN}Could not determine the Hermes bridge version.${RESET}"
-    return 0
-  fi
   say "    mcp_servers:"
   say "      rembric:"
-  say "        command: npx"
-  say "        args: ['-y', '@rembric/mcp-bridge@${_bridge_version}']"
+  say "        command: node"
+  say "        args: ['${BRIDGE_DIR}/cli.mjs']"
   say "        env:"
   say "          REMBRIC_SERVER_URL: \${REMBRIC_SERVER_URL}"
   say "          REMBRIC_API_TOKEN: \${REMBRIC_API_TOKEN}"

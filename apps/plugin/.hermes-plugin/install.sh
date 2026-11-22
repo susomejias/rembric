@@ -7,7 +7,6 @@ fi
 
 HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
 export HERMES_HOME
-TARGET="${HERMES_HOME}/plugins/rembric"
 ACTION="${REMBRIC_ACTION:-install}"
 case "$ACTION" in install | update | uninstall) ;; *) exit 2 ;; esac
 if [ -n "${PLUGIN_SRC:-}${REMBRIC_SRC:-}${REMBRIC_REF:-}" ]; then
@@ -248,20 +247,30 @@ esac
 
 migrate_legacy_mcp_config() {
   config="${HERMES_HOME}/config.yaml"
-  version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "${TARGET}/plugin.yaml" | head -1)
-  [ -f "$config" ] && [ -n "$version" ] || return 0
+  [ -f "$config" ] || return 0
   command -v python3 >/dev/null 2>&1 || {
     printf '[rembric] warning: Python 3 is unavailable; update mcp_servers.rembric manually\n' >&2
     return 0
   }
-  python3 - "$config" "$version" <<'PY'
+  python3 - "$config" "${HOME}/.config/rembric/bin" <<'PY'
 from pathlib import Path
 import re
 import shutil
 import sys
 
 path = Path(sys.argv[1])
-version = sys.argv[2]
+bridge = Path(sys.argv[2])
+modules = ("cli.mjs", "bridge.mjs", "slug.mjs", "rembric-host-binding.mjs", "rembric-project.mjs", "rembric-dotenv.mjs")
+cli = str(bridge / "cli.mjs").replace("'", "''")
+env = (
+    "    env:\n"
+    "      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}\n"
+    "      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}\n"
+    "      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}\n"
+    "    enabled: true\n"
+)
+canonical = f"  rembric:\n    command: node\n    args: ['{cli}']\n" + env
+pin = r"'-y', '@rembric/mcp-bridge@[0-9]+\.[0-9]+\.[0-9]+'"
 lines = path.read_text().splitlines(keepends=True)
 for start, line in enumerate(lines):
     if line.strip() != "mcp_servers:" or line[: len(line) - len(line.lstrip())]:
@@ -277,11 +286,14 @@ for start, line in enumerate(lines):
         if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= 2:
             break
         end += 1
+    while end > index + 1 and not lines[end - 1].strip():
+        end -= 1
     block = "".join(lines[index:end])
+    entry = block if block.endswith("\n") else block + "\n"
     keys = [
-        entry.strip().split(":", 1)[0]
-        for entry in lines[index + 1:end]
-        if len(entry) - len(entry.lstrip()) == 4 and ":" in entry
+        item.strip().split(":", 1)[0]
+        for item in lines[index + 1:end]
+        if len(item) - len(item.lstrip()) == 4 and ":" in item
     ]
     legacy = (
         "mcp-remote@" in block
@@ -290,27 +302,26 @@ for start, line in enumerate(lines):
     )
     incomplete = (
         keys == ["command", "args"]
-        and re.search(r"^    args: \['-y', '@rembric/mcp-bridge@[0-9]+\.[0-9]+\.[0-9]+'\]\n?$", block, re.MULTILINE)
+        and re.search(rf"^    args: \[{pin}\]\n?$", block, re.MULTILINE)
         and "env:" not in block
         and "enabled:" not in block
     )
-    if not (legacy or incomplete):
-        continue
-    suffix = "rembric-mcp-remote" if legacy else "rembric-mcp-env"
+    complete = re.fullmatch(rf"  rembric:\n    command: npx\n    args: \[{pin}\]\n" + re.escape(env), entry)
+    if entry == canonical:
+        break
+    if not (legacy or incomplete or complete):
+        print(f"[rembric] mcp_servers.rembric left unchanged (not a block the installer wrote); "
+              f"to run the installed bridge use command: node with args: ['{cli}']")
+        break
+    if not all((bridge / name).is_file() for name in modules):
+        print(f"[rembric] mcp_servers.rembric not migrated: the MCP bridge is missing from {bridge}; "
+              "re-run the TUI installer (--agent=hermes --action=update)")
+        break
+    suffix = "rembric-mcp-remote" if legacy else "rembric-mcp-env" if incomplete else "rembric-mcp-npx"
     backup = path.with_name(f"{path.name}.{suffix}.bak")
     if not backup.exists():
         shutil.copy2(path, backup)
-    replacement = [
-        "  rembric:\n",
-        "    command: npx\n",
-        f"    args: ['-y', '@rembric/mcp-bridge@{version}']\n",
-        "    env:\n",
-        "      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}\n",
-        "      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}\n",
-        "      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}\n",
-        "    enabled: true\n",
-    ]
-    path.write_text("".join(lines[:index] + replacement + lines[end:]))
+    path.write_text("".join(lines[:index]) + canonical + "".join(lines[end:]))
     print(f"[rembric] migrated mcp_servers.rembric; backup: {backup}")
     break
 PY
