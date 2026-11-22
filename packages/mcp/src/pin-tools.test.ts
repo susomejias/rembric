@@ -247,6 +247,19 @@ describe('memory.context pinned section', () => {
     expect(out.pinnedMemories[2]!.content).toBe('short');
   });
 
+  it('an over-budget entry already within the snippet bound is whole and not flagged', async () => {
+    const first = save('first', 'x'.repeat(PINNED_CONTEXT_CHAR_BUDGET - 10));
+    const short = 'z'.repeat(200);
+    const second = save('second', short);
+    for (const id of [first, second]) await pin(id);
+
+    const out = await context();
+
+    expect(out.pinnedMemories[1]!.id).toBe(second);
+    expect(out.pinnedMemories[1]!.content).toBe(short);
+    expect(out.pinnedMemories[1]!.truncated).toBe(false);
+  });
+
   it('holds the published budget of 4000 characters', () => {
     expect(PINNED_CONTEXT_CHAR_BUDGET).toBe(4000);
   });

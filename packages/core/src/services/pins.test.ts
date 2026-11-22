@@ -58,7 +58,7 @@ const events = (memoryId: string) =>
     .orderBy(memoryPinEvents.id)
     .all();
 
-const isPinned = (id: string) => memory.pinnedIdsAmong([id]).has(id);
+const isPinned = (id: string) => memory.unsafePinnedIdsAmong([id]).has(id);
 
 function catchDomain(fn: () => unknown): DomainError {
   try {

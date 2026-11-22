@@ -651,7 +651,7 @@ export class MemoryService {
   }
 
   /** Callers pass ids they already read through a scope check. */
-  pinnedIdsAmong(ids: readonly string[]): Set<string> {
+  unsafePinnedIdsAmong(ids: readonly string[]): Set<string> {
     return this.repos.memory.pinnedIdsAmong(ids);
   }
 

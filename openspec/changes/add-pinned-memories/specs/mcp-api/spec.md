@@ -51,7 +51,7 @@ Because a pin puts a memory in front of every future session of the project, the
 
 `memory.context` SHALL return `pinnedMemories[]` as the first field of its response: every pinned memory of the connection's project, in pin order (oldest pin first), each carrying `id`, `type`, `title`, `content`, `truncated`, `createdAt`, `topicKey` and `pinnedAt`. The section SHALL be emitted on every call, independent of `focus`, `memories` and every other argument, and SHALL be empty, not absent, when nothing is pinned.
 
-Content SHALL be bounded by `PINNED_CONTEXT_CHAR_BUDGET`: walking the pins in order, an entry whose full content fits in the budget still remaining SHALL be emitted whole with `truncated: false`; every other entry SHALL be emitted through the existing context snippet bound (`CONTEXT_SNIPPET_CHARS`) with `truncated: true`, and the `memory.context` description SHALL point the agent at `memory.get_batch` for the full text of a truncated entry.
+Content SHALL be bounded by `PINNED_CONTEXT_CHAR_BUDGET`: walking the pins in order, an entry whose full content fits in the budget still remaining SHALL be emitted whole with `truncated: false`; every other entry SHALL be emitted through the existing context snippet bound (`CONTEXT_SNIPPET_CHARS`), with `truncated: true` exactly when that bound shortened it, and the `memory.context` description SHALL point the agent at `memory.get_batch` for the full text of a truncated entry.
 
 The pinned section SHALL sit outside the ranked channels. A pinned memory SHALL NOT appear in `recentMemories[]` or `relevantMemories[]`, and SHALL NOT take a slot from either: the recency channel SHALL still return up to `memories` unpinned rows, and the relevance channel up to `RELEVANCE_LIMIT` unpinned rows. When the project holds no pins, `recentMemories[]` and `relevantMemories[]` SHALL be exactly what they were before this requirement. `needsReview[]` is an action queue rather than a recall channel and SHALL NOT be deduped against the pinned section.
 
@@ -74,7 +74,7 @@ The pinned section SHALL sit outside the ranked channels. A pinned memory SHALL 
 - **GIVEN** pinned memories whose combined content exceeds `PINNED_CONTEXT_CHAR_BUDGET`
 - **WHEN** `memory.context` is called
 - **THEN** the entries that fit SHALL carry their full content with `truncated: false`
-- **AND** every later entry SHALL carry content no longer than `CONTEXT_SNIPPET_CHARS` with `truncated: true`
+- **AND** every later entry SHALL carry content no longer than `CONTEXT_SNIPPET_CHARS`, with `truncated: true` exactly when its content was shortened
 
 #### Scenario: Pins of another project are not loaded
 
