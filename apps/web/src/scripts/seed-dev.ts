@@ -438,7 +438,7 @@ export function runSeed(deps: SeedDeps): SeedResult {
   log(`  demo-reader:  ${readerTok.plaintext}`);
   log(`  demo-writer:  ${writerTok.plaintext}`);
   log('');
-  log('[seed-dev] open the dashboard:  http://127.0.0.1:8788/dashboard');
+  log('[seed-dev] open the dashboard:  http://localhost:3000/dashboard');
   if (useEnvAdmin) {
     log('[seed-dev] log in with your REMBRIC_ADMIN_TOKEN from .env');
   } else {

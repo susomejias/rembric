@@ -19,6 +19,8 @@ import { join } from 'node:path';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // Without it, `next dev` refuses the HMR socket to a page opened on 127.0.0.1 and nothing hydrates.
+  allowedDevOrigins: ['127.0.0.1'],
   // Next traces module dependencies starting at the app directory, so in a
   // monorepo everything outside `apps/web` — `packages/*`, `/models` — is
   // silently absent from `.next/standalone`. Measured requirement: point the
