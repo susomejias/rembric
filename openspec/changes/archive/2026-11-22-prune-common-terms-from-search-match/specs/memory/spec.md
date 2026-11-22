@@ -197,4 +197,3 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 - **GIVEN** a text query whose fused pool is empty, or whose leader is below an enabled floor
 - **WHEN** `memory.search` is called with reranking requested
 - **THEN** the response SHALL report the same abstention verdict and reason as the unreranked path, and no cross-encoder inference SHALL run
-

@@ -412,7 +412,7 @@ Each gate is independently enabled or disabled, and the shipped state of each is
 
 - **GIVEN** both the floor and the relative filter are disabled
 - **WHEN** `memory.search` is called
-- **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf — neither the pool's text nor any term statistic
+- **THEN** the text-query branch SHALL return the same result ids it returns with the gates removed, returning up to the requested limit, and SHALL issue no additional database read on their behalf — neither the pool's text nor any term statistic beyond the single statistics read the lexical branch makes for its own `MATCH` (see "The search lexical `MATCH` MUST omit terms present in at least half of the index")
 - **AND** no response SHALL report `gateShortened`
 - **AND** a query whose fused pool is empty SHALL still report `abstained: true` with the empty-pool reason
 
@@ -2326,3 +2326,65 @@ These costs scale with the match set of the kept tokens, which "The save-time le
 - **GIVEN** a save whose kept tokens match more rows of its project than the pool holds
 - **WHEN** the save-time lexical query runs
 - **THEN** it SHALL return the same rows, in the same order and with the same scores, as ordering by FTS5's rank over every match and then keeping the project's rows
+
+### Requirement: The search lexical `MATCH` MUST omit terms present in at least half of the index
+
+Before the text-query branch of `memory.search` passes its FTS5 `MATCH` to the lexical retriever, it SHALL omit every token that the index tokenises to exactly one term whose document frequency is at least `COMMON_TERM_DOCUMENT_RATIO` of the document total. That ratio is the share of indexed rows from which FTS5's bm25 clamps a term's inverse document frequency to a constant, so such a term adds no ranking information while making nearly every indexed row a match that must be scored and sorted. It SHALL be the same named constant save-time detection uses, declared once and never read from the environment.
+
+The frequencies and the total SHALL be the ones "The relevance level's term statistics MUST come from the search index" defines: each term's document count in the full-text index the lexical retriever scans, across every indexed row, and every `memory` row as the total. They SHALL NOT be scoped to the searched project or projects, because the index's bm25 weights are not. A token's terms SHALL be read through the index's own tokenizer, per token, as "Term-statistics lookups MUST be keyed on the index's own terms" requires; a token the index tokenises to more than one term SHALL NOT be omitted, and neither SHALL a token whose term the index does not hold.
+
+If no kept token reaches at least one indexed row, the branch SHALL keep every token the builder produced, in the builder's order and quoting. Whenever the builder yields at least one token, the `MATCH` SHALL therefore be non-empty, and a query whose every token is common SHALL match what it matched before this omission existed. Kept tokens SHALL keep the builder's quoting and order.
+
+The statistics count rows across the whole index, so a kept token can reach rows that the searched scope or the `status`, `type`, `tag` or `topic_key` filters exclude. When the reduced `MATCH` returns no row, the branch SHALL run the builder's full expression with the same scope, filters and limit, and return its result. The lexical branch SHALL therefore return no row only where the full expression returns none.
+
+The statistics the omission needs SHALL be read at most once per search, in the same read that resolves the query's terms for the relevance level, and the relevance level SHALL be computed from the same values it would read on its own. A failure of that read SHALL leave the `MATCH` unreduced: the branch SHALL search the builder's full expression, as it did before this omission existed.
+
+The omission applies to `memory.search` and to every surface that calls the same service. It SHALL NOT change the dashboard's memory search, save-time detection, or the relevance level.
+
+#### Scenario: A common term leaves the search MATCH
+
+- **GIVEN** an index where the term `notes` occurs in at least half of all indexed rows and `kubernetes` occurs in fewer
+- **WHEN** `memory.search` is called with the query `kubernetes notes`
+- **THEN** the lexical retriever's `MATCH` SHALL contain `"kubernetes"` and SHALL NOT contain `"notes"`
+
+#### Scenario: The ratio boundary is inclusive
+
+- **GIVEN** an index of N rows
+- **WHEN** a query token's single term occurs in exactly `COMMON_TERM_DOCUMENT_RATIO × N` rows, and another query token occurs in fewer
+- **THEN** the first token SHALL be omitted, and a token whose term occurs in one row fewer than that SHALL be kept
+
+#### Scenario: A query of common terms only still matches
+
+- **GIVEN** a query every token of which is common
+- **WHEN** `memory.search` is called
+- **THEN** the lexical `MATCH` SHALL be the builder's full expression, and the lexical branch SHALL return the ids it returned before the omission existed
+
+#### Scenario: A kept term the index does not hold restores every token
+
+- **GIVEN** a query made of one common term and one term no indexed row contains
+- **WHEN** `memory.search` is called
+- **THEN** the lexical `MATCH` SHALL be the builder's full expression, so the rows the common term matches are still returned
+
+#### Scenario: A kept term found only outside the scope restores every token
+
+- **GIVEN** a project whose rows match `release notes`, and another project holding the only rows that contain `kubernetes`, where `release` and `notes` are index-common and `kubernetes` is not
+- **WHEN** `memory.search` is called in the first project with the query `kubernetes release notes`
+- **THEN** the lexical branch SHALL return the first project's `release notes` rows, as the full expression does, and the search SHALL NOT report an empty-pool abstention
+
+#### Scenario: A failed statistics read searches the full expression
+
+- **GIVEN** a search whose term-statistics read fails
+- **WHEN** the lexical branch builds its `MATCH`
+- **THEN** it SHALL search the builder's full expression and return the ids that expression returns
+
+#### Scenario: A phrase token is never omitted
+
+- **GIVEN** a query token that the index tokenises to two terms, each of them common
+- **WHEN** `memory.search` is called
+- **THEN** that token SHALL remain in the lexical `MATCH`
+
+#### Scenario: The relevance level is unchanged
+
+- **GIVEN** any query and corpus
+- **WHEN** the relevance level of the fused pool is computed
+- **THEN** the document total and per-term frequencies it uses SHALL equal those a separate read of the query's term statistics returns, and the statistics read SHALL be issued at most once for the search
