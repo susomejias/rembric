@@ -20,10 +20,10 @@
 
 ## 4. Dashboard
 
-- [ ] 4.1 List badge, `pinned` filter with exact total, row pin/unpin action.
-- [ ] 4.2 Detail pin state, pin/unpin Server Actions, pin history, refusal message.
+- [x] 4.1 List badge, `pinned` filter with exact total, row pin/unpin action.
+- [x] 4.2 Detail pin state, pin/unpin Server Actions, pin history, refusal message.
 
 ## 5. Close
 
-- [ ] 5.1 Mutation check each bound and the dedupe and scope guards with `scripts/mutate.mjs`.
+- [x] 5.1 Mutation check each bound and the dedupe and scope guards with `scripts/mutate.mjs`.
 - [ ] 5.2 `pnpm run eval` ratchet green; `pnpm run typecheck`, `pnpm run lint`, `pnpm test`.

@@ -79,8 +79,9 @@ describe('Ficha memory detail', () => {
     );
     expect(html.match(/aria-label="Copy"/g)).toHaveLength(1);
     expect(html.match(/>Confirm<\/button>/g)).toHaveLength(1);
-    expect(html.match(/<form /g)).toHaveLength(2);
-    expect(html.match(/name="csrf"/g)).toHaveLength(2);
+    expect(html.match(/>Pin<\/button>/g)).toHaveLength(1);
+    expect(html.match(/<form /g)).toHaveLength(3);
+    expect(html.match(/name="csrf"/g)).toHaveLength(3);
     expect(html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>Archive<\/button>/);
     expect(html).toContain('Share</button>');
     expect(html).not.toContain('detail-actions-panel');
