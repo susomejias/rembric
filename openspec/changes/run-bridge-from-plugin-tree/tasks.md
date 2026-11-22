@@ -1,0 +1,56 @@
+## 1. Released-bridge contract guard (lands first, before any behaviour change)
+
+- [ ] 1.1 Commit the six `.mjs` files of `@rembric/mcp-bridge@0.45.1` under `apps/web/src/test/fixtures/mcp-bridge-0.45.1/` with a `checksums.json` taken from the npm tarball; exclude the directory from ESLint, Prettier and the confinement scans in `apps/web/src/test/invariants.test.ts`
+- [ ] 1.2 Add `apps/web/src/test/released-bridge-contract.test.ts`: spawn the fixture's `cli.mjs` against a server started from the current tree and assert `initialize`, `tools/list`, a `tools/call` landing in the slug's project, and a fingerprint-resolved connection; assert the fixture files match `checksums.json`
+- [ ] 1.3 Prove the guard with `scripts/mutate.mjs`: renaming `X-Rembric-Repo-Fingerprint` on the server, changing the `repositories/resolve` response shape, and rejecting protocol `2025-06-18` each turn the test red
+
+## 2. Claude Code and Codex manifests
+
+- [ ] 2.1 RED first: update the manifest assertions in `apps/web/src/test/invariants.test.ts` and `apps/plugin/test/` to expect `command: "node"` with `${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs` (Claude) and `./mcp-bridge/cli.mjs` with `cwd: "."` (Codex), and to refuse `npx` or a package specifier
+- [ ] 2.2 Change `apps/plugin/.claude-plugin/mcp.json` and `apps/plugin/.codex-plugin/mcp.json`; the tests from 2.1 pass
+- [ ] 2.3 Add a test that every module `cli.mjs` reaches by relative import exists under `apps/plugin/mcp-bridge/` and imports only siblings and `node:` builtins
+
+## 3. opencode
+
+- [ ] 3.1 RED first, in `apps/plugin/.opencode-plugin/plugin.test.ts`: with `~/.config/rembric/bin/cli.mjs` present the hook sets `['node', '<abs>/cli.mjs']`; with it absent an existing `npx` or legacy command is left untouched, no entry is created, and one hint is logged
+- [ ] 3.2 Implement the hook in `apps/plugin/.opencode-plugin/plugin.ts`; delete `MCP_BRIDGE_VERSION`
+- [ ] 3.3 `apps/plugin/.opencode-plugin/install.sh`: fetch `cli.mjs`, `bridge.mjs`, `slug.mjs` and `rembric-host-binding.mjs` to `~/.config/rembric/bin/` with write-then-rename, write `rembric.ts` last, and print the `node` snippet; `install.test.ts` covers a full install, an interrupted download leaving no partial `cli.mjs`, and `opencode.json` staying untouched
+- [ ] 3.4 `apps/plugin/.opencode-plugin/uninstall.sh`: keep all six bridge modules while the Hermes `config.yaml` references `~/.config/rembric/bin/cli.mjs` (both the expanded and the `~/` spelling) and name them as kept; test both branches
+
+## 4. Hermes and the TUI installer
+
+- [ ] 4.1 RED first, in `apps/plugin/.hermes-plugin/tests/test_migrate.py`: the `mcp-remote` block, the incomplete pinned block and the complete installer-written `npx` block each migrate to `command: node` with the downloaded `cli.mjs`, keeping `env` and `enabled` and taking one backup; a block with any extra key stays byte-identical and prints a hint; no migration runs when `cli.mjs` is missing
+- [ ] 4.2 Implement in `apps/plugin/.hermes-plugin/install.sh` (`migrate_legacy_mcp_config` and the printed block)
+- [ ] 4.3 `apps/plugin/install.sh`: place the bridge files for opencode and Hermes install and update, from the same ref as the client's other files, before any hook switch or migration; `--ref` / `REMBRIC_REF` still apply; `install.test.ts` covers install, update, a failed download (old config left working) and the control case that server artifacts are unaffected
+- [ ] 4.4 `apps/plugin/install.sh` uninstall: remove the bridge files only when opencode's plugin file is absent and the Hermes `config.yaml` does not reference `cli.mjs`; test opencode-only, Hermes-only, both, and a preserved Hermes MCP block keeping its bridge
+- [ ] 4.5 Run `scripts/mutate.mjs` over each new guard in 3.x and 4.x (file-exists check, recognised-shape check, last-client check) and confirm the test naming it turns red
+
+## 5. Stop publishing the bridge
+
+- [ ] 5.1 RED first, in `scripts/release-workflow.test.ts`: `publish-npm` publishes `apps/plugin/.pi-plugin` only, runs no bridge pack assertion, and `release-please-config.json` `extra-files` has no `mcp.json` JSONPath entry while `mcp-bridge/package.json` stays
+- [ ] 5.2 Edit `.github/workflows/release-please.yml` and `release-please-config.json`; delete `scripts/mcp-bridge-package.mjs` and its test; set `"private": true` in `apps/plugin/mcp-bridge/package.json`
+- [ ] 5.3 Confirm `node scripts/pi-package.mjs materialize` and `assert-pack` still pass, so `@rembric/pi` keeps embedding the bridge modules
+- [ ] 5.4 Consult `.agents/skills/npm-security-best-practices/` for the `package.json` and workflow edits; `ALLOWED_BUILD_SCRIPTS` and the lockfile are unchanged
+
+## 6. Docs and specs
+
+- [ ] 6.1 Replace the `npx` bridge instructions in `CLAUDE.md`, `apps/plugin/README.md`, `apps/plugin/mcp-bridge/README.md`, `apps/plugin/.opencode-plugin/README.md`, `apps/plugin/.hermes-plugin/README.md` and `docs/agents.md` (Hermes block, opencode troubleshooting, Codex bridge paragraph); leave the no-plugin HTTP sections as they are
+- [ ] 6.2 Update `.agents/skills/rembric-plugin-development/` (SKILL.md, `references/e2e-walkthrough.md`, `references/per-client-gotchas.md`) and `.agents/skills/rembric-tui-installer/`
+- [ ] 6.3 `openspec validate run-bridge-from-plugin-tree --strict`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` and `pnpm run check:delta-freshness` pass
+- [ ] 6.4 At archive time, hand-edit the non-requirement prose the deltas cannot reach: `openspec/specs/claude-code-plugin/spec.md` `## MCP server declaration` and `## Project slug selection` (stale `bin/rembric-bridge.mjs`), the `mcp-bridge` Purpose line ("published … package-distribution contract"), the three scenario titles the freshness gate forced the deltas to keep (`mcp-bridge` "npx resolves the executable without a bin name" and "A consumer's install adds nothing but the bridge", `open-source-distribution` "The bridge's pin names the version that release publishes"), and reconcile `opencode-plugin` `Install script auto-configures opencode.json` with `Install script contract`
+
+## 7. Verification before merge
+
+- [ ] 7.1 `pnpm run typecheck`, `pnpm run lint`, `pnpm test` and the Hermes Python suites pass
+- [ ] 7.2 Run the `rembric-tui-installer-e2e` playbook: headless, local round-trips in a throwaway HOME, and the pty smoke
+- [ ] 7.3 Operator, real clients in isolated config dirs, upgrade path from 0.45.x: Claude Code and Codex connect after a plugin update with the bridge spawned by `node`, and a `memory.save` attaches to the host session (this measures the host-binding path without the `npx` layer)
+- [ ] 7.4 Operator, real clients: opencode and Hermes connect after a TUI update; Hermes's migrated block has a backup and Hermes stays enabled
+- [ ] 7.5 Operator, not-updated path: a client left on its `npx -y @rembric/mcp-bridge@0.45.1` entry still connects to a server built from this branch
+
+## 8. Release and deprecation (owner)
+
+- [ ] 8.1 Owner: merge; after the plugin release that contains this change is tagged, confirm on a real install of each client that the MCP server connects at once, with no wait for an npm publish
+- [ ] 8.2 Owner: confirm npx prints a deprecated-package warning on stderr and nothing on stdout, using any already-deprecated public package and a throwaway npm cache
+- [ ] 8.3 Owner, only after 8.1 and 8.2: run `npm deprecate @rembric/mcp-bridge "use the Rembric installer"`; unpublish nothing
+- [ ] 8.4 Owner: re-run 7.5 against the now-deprecated package and confirm the client still connects
+- [ ] 8.5 Close PR #556 as superseded and delete its `serve-plugins-from-release-ref` change with the branch; close issue #513
