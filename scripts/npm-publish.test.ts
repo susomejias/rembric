@@ -173,18 +173,6 @@ describe('npm publish waits until the registry serves the version', () => {
 });
 
 describe('release workflow publish ordering', () => {
-  it('asserts both tarballs before either idempotent publish step', () => {
-    const piAssert = workflow.indexOf('node scripts/pi-package.mjs assert-pack');
-    const bridgeAssert = workflow.indexOf('node scripts/mcp-bridge-package.mjs assert-pack');
-    const piPublish = workflow.indexOf('node scripts/npm-publish.mjs apps/plugin/.pi-plugin');
-    const bridgePublish = workflow.indexOf('node scripts/npm-publish.mjs apps/plugin/mcp-bridge');
-
-    expect(piAssert).toBeGreaterThan(-1);
-    expect(bridgeAssert).toBeGreaterThan(piAssert);
-    expect(piPublish).toBeGreaterThan(bridgeAssert);
-    expect(bridgePublish).toBeGreaterThan(piPublish);
-  });
-
   it('keeps trusted publishing requirements in the workflow and helper', () => {
     expect(workflow).toContain('id-token: write');
     expect(workflow).not.toContain('NPM_TOKEN');

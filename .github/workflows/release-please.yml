@@ -106,15 +106,7 @@ jobs:
       - name: Assert the tarball contents
         run: node scripts/pi-package.mjs assert-pack
 
-      # Both package assertions intentionally precede either publish. A failed
-      # bridge assertion must not leave a partial release behind.
-      - name: Assert the bridge tarball contents
-        run: node scripts/mcp-bridge-package.mjs assert-pack
-
-      # The registry check makes a rerun after a partial publish continue with
-      # the missing package instead of failing on an already-existing version.
+      # The registry check makes a rerun succeed instead of failing on an
+      # already-published version.
       - name: Publish @rembric/pi if the exact version is missing
         run: node scripts/npm-publish.mjs apps/plugin/.pi-plugin
-
-      - name: Publish @rembric/mcp-bridge if the exact version is missing
-        run: node scripts/npm-publish.mjs apps/plugin/mcp-bridge
