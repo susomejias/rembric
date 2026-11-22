@@ -872,7 +872,7 @@ async function handleSearch(
         )
       : null;
     const review = deps.memory.reviewStateForMemories(memories);
-    const pinnedIds = deps.memory.pinnedIdsAmong(memories.map((m) => m.id));
+    const pinnedIds = deps.memory.unsafePinnedIdsAmong(memories.map((m) => m.id));
     const fieldSet =
       args.fields && args.fields.length > 0
         ? new Set<string>(['id', 'type', 'title', ...args.fields])
@@ -1000,7 +1000,7 @@ async function handleGet(deps: MemoryToolDeps, args: z.infer<z.ZodObject<typeof 
     );
     const entities = deps.repos?.entities.findEntitiesForMemories(rows.map((m) => m.id));
     const review = deps.memory.reviewStateForMemories(rows);
-    const pinnedIds = deps.memory.pinnedIdsAmong(rows.map((m) => m.id));
+    const pinnedIds = deps.memory.unsafePinnedIdsAmong(rows.map((m) => m.id));
     const memories = [];
     for (const h of histories) {
       const m = h.memory;
@@ -1219,7 +1219,7 @@ function pinnedSection(pins: readonly PinnedMemory[]) {
       type: m.type,
       title: m.title,
       content,
-      truncated: !fits,
+      truncated: content !== m.content,
       createdAt: m.createdAt.toISOString(),
       topicKey: m.topicKey,
       pinnedAt: pinnedAt.toISOString(),

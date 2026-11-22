@@ -8,7 +8,7 @@
 ## 2. Service
 
 - [x] 2.1 RED: pin, unpin, idempotence, cross-scope, non-active, count bound (with control), per-project bound.
-- [x] 2.2 GREEN: `MemoryService.setPinned`, `listPinned`, `pinnedIdsAmong`, `PIN_MAX_PER_PROJECT`, `pin_limit_reached`.
+- [x] 2.2 GREEN: `MemoryService.setPinned`, `listPinned`, `unsafePinnedIdsAmong`, `PIN_MAX_PER_PROJECT`, `pin_limit_reached`.
 - [x] 2.3 RED then GREEN: `applyRetirementEffects` releases pins on topic_key revision, supersedes verdict, merge, archive, decay and merge undo; topic_key upsert carries the pin; undo does not restore it; review axis unchanged.
 
 ## 3. MCP

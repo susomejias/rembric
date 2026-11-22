@@ -237,7 +237,7 @@ export default async function MemoriesPage({
     );
   }
   const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
-  const pinnedIds = getServices().memory.pinnedIdsAmong(rows.map((m) => m.id));
+  const pinnedIds = getServices().memory.unsafePinnedIdsAmong(rows.map((m) => m.id));
   const pinnedTotal = repos.memory.adminCount({ pinned: true });
 
   const statusCounts = repos.memory.countRowsByStatus();

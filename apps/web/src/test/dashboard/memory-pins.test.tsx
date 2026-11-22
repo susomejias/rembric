@@ -110,7 +110,7 @@ describe('dashboard pin action', () => {
     const id = save('rule');
 
     expect(pinFromForm(memory, pinForm(id, true))).toEqual({ error: null, id });
-    expect(memory.pinnedIdsAmong([id]).has(id)).toBe(true);
+    expect(memory.unsafePinnedIdsAmong([id]).has(id)).toBe(true);
     expect(pinFromForm(memory, pinForm(id, false))).toEqual({ error: null, id });
     expect(repos.memory.adminPinEventsForMemory(id).map((e) => [e.action, e.cause])).toEqual([
       ['pin', 'operator'],
@@ -130,6 +130,6 @@ describe('dashboard pin action', () => {
     expect(outcome.error).toContain(`${PIN_MAX_PER_PROJECT} pinned memories`);
     expect(outcome.error).toContain('standing rule 0');
     expect(outcome.error).toContain(`standing rule ${PIN_MAX_PER_PROJECT - 1}`);
-    expect(memory.pinnedIdsAmong([extra]).has(extra)).toBe(false);
+    expect(memory.unsafePinnedIdsAmong([extra]).has(extra)).toBe(false);
   });
 });

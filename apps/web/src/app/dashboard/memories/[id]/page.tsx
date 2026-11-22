@@ -119,7 +119,7 @@ export default async function MemoryDetailPage({
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
   );
   const confirmCount = repos.memory.adminCountConfirmations(row.id);
-  const isPinned = memoryService.pinnedIdsAmong([row.id]).has(row.id);
+  const isPinned = memoryService.unsafePinnedIdsAmong([row.id]).has(row.id);
   const pinEvents = repos.memory.adminPinEventsForMemory(row.id);
   const reviewTimestamps = repos.memory.reviewTimestampsByIds([row.id]).get(row.id);
   const now = new Date();
