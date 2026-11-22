@@ -18,6 +18,7 @@ export type DomainErrorCode =
   | 'admin_token_required'
   | 'conflict'
   | 'fingerprint_mismatch'
+  | 'pin_limit_reached'
   | 'id_collision'
   | 'prompt_not_found'
   | 'prompt_scope_mismatch'

@@ -6,6 +6,7 @@ import {
   type MemorySource,
   type MemoryStatus,
   type MemoryType,
+  type PinnedMemory,
   type Repositories,
   type Scope,
   type SearchScope,
@@ -14,7 +15,7 @@ import {
 import slugify from 'slugify';
 import { ulid } from 'ulid';
 
-import { orphanPendingOnRetirement } from '../consolidation/operations.js';
+import { applyRetirementEffects } from '../consolidation/operations.js';
 
 import { DomainError } from './errors.js';
 import {
@@ -71,6 +72,19 @@ export interface SaveMemoryInput {
   source?: MemorySource;
   sessionId?: string | null;
   topicKey?: string | null;
+}
+
+export interface PinActor {
+  cause: 'agent' | 'operator';
+  /** Token name of the caller, never its secret. */
+  name: string | null;
+}
+
+export interface PinResult {
+  id: string;
+  pinned: boolean;
+  changed: boolean;
+  pinnedCount: number;
 }
 
 export interface SaveResult {
@@ -204,9 +218,15 @@ export class MemoryService {
       }
     }
 
+    const carryPin =
+      supersededByTopicKey !== null &&
+      this.repos.memory
+        .latestPinActionsByIds([supersededByTopicKey.id])
+        .get(supersededByTopicKey.id) === 'pin';
+
     if (supersededByTopicKey) {
       this.repos.memory.markSuperseded(supersededByTopicKey.id);
-      orphanPendingOnRetirement(this.repos, this.relationsService(), {
+      applyRetirementEffects(this.repos, this.relationsService(), {
         retiredIds: [supersededByTopicKey.id],
         status: 'superseded',
         cause: 'topic_key revision',
@@ -250,6 +270,18 @@ export class MemoryService {
         markedByActor: input.source?.tokenName ?? null,
         judgedAt: ts,
         createdAt: ts,
+      });
+    }
+
+    if (carryPin) {
+      this.repos.memory.insertPinEvent({
+        memoryId: inserted.id,
+        projectId: scope.projectId,
+        action: 'pin',
+        cause: 'topic_key revision',
+        runId: null,
+        actor: input.source?.tokenName ?? null,
+        eventTs: ts,
       });
     }
 
@@ -560,7 +592,7 @@ export class MemoryService {
         reasoning: AGENT_MEMORY_ARCHIVE_REASONING,
         summary: { kind: 'agent_memory_archive', archived: 1 },
       });
-      orphanPendingOnRetirement(this.repos, this.relationsService(), {
+      applyRetirementEffects(this.repos, this.relationsService(), {
         retiredIds: [id],
         status: 'archived',
         cause: 'archive',
@@ -568,6 +600,59 @@ export class MemoryService {
         runId,
       });
     });
+  }
+
+  setPinned(id: string, scope: Scope, pinned: boolean, actor: PinActor): PinResult {
+    return this.tx.transaction((): PinResult => {
+      const existing = this.unsafeGetById(id);
+      if (!existing || !memoryMatchesScope(existing, scope)) {
+        throw new DomainError('memory_not_found', `memory.pin: id=${id} not found`);
+      }
+      if (existing.status !== 'active') {
+        throw new DomainError(
+          'conflict',
+          `memory.pin: id=${id} is not in 'active' state (current=${existing.status})`,
+        );
+      }
+      const current = this.repos.memory.pinnedInScope(scope);
+      const isPinned = current.some((p) => p.memory.id === id);
+      if (isPinned === pinned) {
+        return { id, pinned, changed: false, pinnedCount: current.length };
+      }
+      if (pinned && current.length >= PIN_MAX_PER_PROJECT) {
+        throw new DomainError(
+          'pin_limit_reached',
+          `memory.pin: this project already has ${PIN_MAX_PER_PROJECT} pinned memories; unpin one first.`,
+          {
+            limit: PIN_MAX_PER_PROJECT,
+            pinned: current.map((p) => ({ id: p.memory.id, title: p.memory.title })),
+          },
+        );
+      }
+      this.repos.memory.insertPinEvent({
+        memoryId: id,
+        projectId: scope.projectId,
+        action: pinned ? 'pin' : 'unpin',
+        cause: actor.cause,
+        runId: null,
+        actor: actor.name,
+        eventTs: this.now(),
+      });
+      return { id, pinned, changed: true, pinnedCount: current.length + (pinned ? 1 : -1) };
+    });
+  }
+
+  listPinned(scope: Scope): PinnedMemory[] {
+    return this.repos.memory.pinnedInScope(scope);
+  }
+
+  countPinned(scope: Scope): number {
+    return this.repos.memory.countPinnedInScope(scope);
+  }
+
+  /** Callers pass ids they already read through a scope check. */
+  pinnedIdsAmong(ids: readonly string[]): Set<string> {
+    return this.repos.memory.pinnedIdsAmong(ids);
   }
 
   previewMerge(
@@ -626,7 +711,7 @@ export class MemoryService {
         }'`,
         summary: { kind: 'agent_memory_merge', merged: successor.replaces.length },
       });
-      orphanPendingOnRetirement(this.repos, this.relationsService(), {
+      applyRetirementEffects(this.repos, this.relationsService(), {
         retiredIds: successor.replaces,
         status: 'superseded',
         cause: 'merge',
@@ -891,6 +976,8 @@ export class MemoryService {
 export const DEFAULT_SEARCH_LIMIT = 8;
 
 export const PREDECESSOR_CAP = 10;
+
+export const PIN_MAX_PER_PROJECT = 10;
 
 /** Bound on forward-successor hops when resolving a supersedes-chain head. */
 const HEAD_RESOLUTION_HOP_CAP = 64;
