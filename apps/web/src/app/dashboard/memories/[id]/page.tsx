@@ -8,6 +8,8 @@ import { projectScope } from '@rembric/db';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
+import { applyMemoryPin, PIN_FORM } from '../pin-action';
+
 import { ActionForm, type ActionState } from '@/components/dashboard/action-form';
 import { ConfirmSubmit } from '@/components/dashboard/confirm-submit';
 import { CsrfField } from '@/components/dashboard/csrf-field';
@@ -17,7 +19,7 @@ import { DetailDisclosure, DetailLayout } from '@/components/dashboard/detail-la
 import { DetailShare } from '@/components/dashboard/detail-share';
 import { MarkdownPanel } from '@/components/dashboard/markdown-panel';
 import { shortId, singleParam, truncate } from '@/components/dashboard/support';
-import { StatusPill, Time } from '@/components/dashboard/ui';
+import { StatusPill, Time, TonePill } from '@/components/dashboard/ui';
 import { Button } from '@/components/ui/button';
 import { guardAction, guardFailure } from '@/lib/actions/guard';
 import { getServices } from '@/lib/services';
@@ -70,6 +72,13 @@ async function confirmMemory(_prev: ActionState, formData: FormData): Promise<Ac
   redirect(`/dashboard/memories/${id}?confirmed=1`);
 }
 
+async function pinMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const outcome = await applyMemoryPin(formData);
+  if (outcome.error !== null) return { error: outcome.error };
+  redirect(`/dashboard/memories/${outcome.id}`);
+}
+
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -110,6 +119,8 @@ export default async function MemoryDetailPage({
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
   );
   const confirmCount = repos.memory.adminCountConfirmations(row.id);
+  const isPinned = memoryService.pinnedIdsAmong([row.id]).has(row.id);
+  const pinEvents = repos.memory.adminPinEventsForMemory(row.id);
   const reviewTimestamps = repos.memory.reviewTimestampsByIds([row.id]).get(row.id);
   const now = new Date();
   const { reviewState, reviewAfter, reviewBaseline } = deriveReviewState(
@@ -183,6 +194,16 @@ export default async function MemoryDetailPage({
       </ConfirmSubmit>
     </ActionForm>
   );
+  const pinForm = (
+    <ActionForm action={pinMemory}>
+      <CsrfField form={PIN_FORM} />
+      <input type="hidden" name="id" value={row.id} />
+      <input type="hidden" name="pinned" value={isPinned ? '0' : '1'} />
+      <Button type="submit" variant="outline" size="lg">
+        {isPinned ? 'Unpin' : 'Pin'}
+      </Button>
+    </ActionForm>
+  );
   const historyItem = (predecessor: typeof row) => (
     <li key={predecessor.id}>
       <Link href={`/dashboard/memories/${predecessor.id}`}>{predecessor.title}</Link>
@@ -236,6 +257,7 @@ export default async function MemoryDetailPage({
       badges={
         <>
           <StatusPill status={row.status} />
+          {isPinned ? <TonePill tone="lime">pinned</TonePill> : null}
           <span className="ficha-byline">
             in{' '}
             {project ? (
@@ -279,6 +301,7 @@ export default async function MemoryDetailPage({
             }}
           />
           {canConfirm && !needsReview ? confirmForm('lg') : null}
+          {row.status === 'active' ? pinForm : null}
           {row.status === 'active' ? archiveForm : null}
         </>
       }
@@ -403,6 +426,24 @@ export default async function MemoryDetailPage({
               </div>
             ) : null}
           </section>
+          {pinEvents.length > 0 ? (
+            <section className="ficha-section" aria-label="Pin history">
+              <h2>
+                Pin history <span>{pinEvents.length} events</span>
+              </h2>
+              <ol className="ficha-history">
+                {pinEvents.map((event) => (
+                  <li key={event.id}>
+                    <span className="ficha-kind">{event.action}</span> {event.cause}
+                    {event.actor ? ` · ${event.actor}` : ''}
+                    <div className="ficha-history-meta">
+                      <Time value={event.eventTs} />
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
           <DetailDisclosure
             presentation="ficha"
             label="Judgments"

@@ -39,16 +39,19 @@ export interface MemoryRowData {
   readonly lastSeenAt: Date | null;
   readonly needsReview: boolean;
   readonly confirms: number;
+  readonly pinned: boolean;
 }
 
 export interface MemoryServerActions {
   archive: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   confirm: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
+  pin: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
 }
 
 export interface MemoryCsrfTokens {
   readonly archive: string | null;
   readonly confirm: string | null;
+  readonly pin: string | null;
   readonly bulkArchive: string | null;
 }
 
@@ -101,6 +104,7 @@ export function MemoriesTable({
       cell: (row) => (
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusPill status={row.status} />
+          {row.pinned ? <TonePill tone="lime">pinned</TonePill> : null}
           {row.needsReview ? <TonePill tone="amber">needs review</TonePill> : null}
         </div>
       ),
@@ -243,6 +247,18 @@ function MemoryRowMenu({
                   Confirm memory
                 </Button>
               </ConfirmSubmit>
+            </ActionForm>
+          </DropdownMenuItem>
+        ) : null}
+        {row.status === 'active' ? (
+          <DropdownMenuItem asChild onSelect={(event) => event.preventDefault()}>
+            <ActionForm action={actions.pin} className={MENU_ITEM_ROOT}>
+              <input type="hidden" name="csrf" value={csrf.pin ?? ''} />
+              <input type="hidden" name="id" value={row.id} />
+              <input type="hidden" name="pinned" value={row.pinned ? '0' : '1'} />
+              <Button type="submit" variant="ghost" size="sm" className={MENU_ITEM_BUTTON}>
+                {row.pinned ? 'Unpin memory' : 'Pin memory'}
+              </Button>
             </ActionForm>
           </DropdownMenuItem>
         ) : null}

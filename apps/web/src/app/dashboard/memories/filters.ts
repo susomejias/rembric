@@ -9,6 +9,7 @@ export interface MemoriesFilters {
   status: string;
   type: string;
   review: string;
+  pinned: boolean;
   q: string;
   page: number;
 }
@@ -22,6 +23,7 @@ export function readMemoriesFilters(searchParams: SearchParams): MemoriesFilters
       searchParams['status'] === undefined ? DEFAULT_STATUS : singleParam(searchParams['status']),
     type: singleParam(searchParams['type']),
     review: singleParam(searchParams['review']),
+    pinned: singleParam(searchParams['pinned']) === '1',
     q: singleParam(searchParams['q']),
     page: Number.isNaN(rawPage) || rawPage < 1 ? 1 : rawPage,
   };

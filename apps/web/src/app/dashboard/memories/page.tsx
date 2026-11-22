@@ -18,6 +18,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { readMemoriesFilters, resolveProjectFilter, type SearchParams } from './filters';
+import { applyMemoryPin, PIN_FORM } from './pin-action';
 
 import type { ActionState } from '@/components/dashboard/action-form';
 import { MemoriesTable } from '@/components/dashboard/memories-table';
@@ -83,6 +84,14 @@ async function confirmMemory(_prev: ActionState, formData: FormData): Promise<Ac
   redirect(`/dashboard/memories?confirmed=${encodeURIComponent(id)}`);
 }
 
+async function pinMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  'use server';
+  const outcome = await applyMemoryPin(formData);
+  if (outcome.error !== null) return { error: outcome.error };
+  revalidatePath('/dashboard/memories');
+  return { error: null };
+}
+
 function readField(form: FormData, name: string): string {
   const value = form.get(name);
   return (typeof value === 'string' ? value : '').trim();
@@ -124,10 +133,11 @@ export default async function MemoriesPage({
   const csrf = {
     archive: await dashboardCsrfToken(ARCHIVE_FORM),
     confirm: await dashboardCsrfToken(CONFIRM_FORM),
+    pin: await dashboardCsrfToken(PIN_FORM),
     bulkArchive: await dashboardCsrfToken(BULK_ARCHIVE_FORM),
   };
 
-  const wantsNeedsReview = filters.review === 'needs_review';
+  const wantsNeedsReview = filters.review === 'needs_review' && !filters.pinned;
   const status = filters.status === 'all' ? undefined : (filters.status as MemoryStatus);
   const type = filters.type === '' ? undefined : (filters.type as MemoryType);
   const ftsQuery = sanitizeFtsQuery(filters.q);
@@ -140,6 +150,7 @@ export default async function MemoriesPage({
     status,
     type,
     projectId: resolvedProject.projectId,
+    pinned: filters.pinned,
   };
 
   let total: number;
@@ -226,6 +237,8 @@ export default async function MemoriesPage({
     );
   }
   const confirmCounts = repos.memory.confirmationCountsByIds(rows.map((m) => m.id));
+  const pinnedIds = getServices().memory.pinnedIdsAmong(rows.map((m) => m.id));
+  const pinnedTotal = repos.memory.adminCount({ pinned: true });
 
   const statusCounts = repos.memory.countRowsByStatus();
   const countByStatus = new Map(statusCounts.map((row) => [row.status, row.count]));
@@ -280,8 +293,9 @@ export default async function MemoriesPage({
             lastSeenAt: memory.lastSeenAt,
             needsReview: (reviewById.get(memory.id) ?? null) === 'needs_review',
             confirms: confirmCounts.get(memory.id) ?? 0,
+            pinned: pinnedIds.has(memory.id),
           }))}
-          actions={{ archive: archiveMemory, confirm: confirmMemory }}
+          actions={{ archive: archiveMemory, confirm: confirmMemory, pin: pinMemory }}
           csrf={csrf}
           bulkArchive={bulkArchiveMemory}
           selectable
@@ -295,8 +309,9 @@ export default async function MemoriesPage({
           }
           quickFilter={{
             paramKey: 'status',
-            active:
-              filters.review === 'needs_review'
+            active: filters.pinned
+              ? 'pinned'
+              : filters.review === 'needs_review'
                 ? 'needs_review'
                 : filters.status === 'all'
                   ? null
@@ -307,12 +322,14 @@ export default async function MemoriesPage({
                 label: value.charAt(0).toUpperCase() + value.slice(1),
               })),
               { value: 'needs_review', label: 'Needs review', params: { review: 'needs_review' } },
+              { value: 'pinned', label: 'Pinned', params: { pinned: '1' } },
             ],
             counts: {
               ...Object.fromEntries(
                 MEMORY_STATUSES.map((value) => [value, countByStatus.get(value) ?? 0]),
               ),
               needs_review: needsReviewTotal,
+              pinned: pinnedTotal,
             },
             totalCount: MEMORY_STATUSES.reduce(
               (sum, value) => sum + (countByStatus.get(value) ?? 0),

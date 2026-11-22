@@ -59,7 +59,28 @@ const CHANGED_DESCRIPTIONS: Record<string, string> = {
   'memory.session_end': AMBIGUITY_CLAUSE,
   'memory.context':
     'A host hook asking you to call it with `focus` on the first turn is not speculative',
+  'memory.stats': '`pinnedTotal`',
 };
+
+const PIN_FIELDS = new Set(['pinned', 'pinnedMemories', 'pinnedTotal']);
+const PIN_SURFACE = new Set([
+  'memory.context',
+  'memory.stats',
+  'memory.search',
+  'memory.get_batch',
+]);
+
+function withoutPinFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.filter((v) => !(typeof v === 'string' && PIN_FIELDS.has(v))).map(withoutPinFields);
+  }
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([k]) => !PIN_FIELDS.has(k))
+      .map(([k, v]) => [k, withoutPinFields(v)]),
+  );
+}
 
 function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
@@ -145,13 +166,13 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
 
   it('returns the base tools minus project.use plus project.bind_repository and project.create, changed only where those reach', async () => {
     const all = await liveTools();
-    const added = ['project.bind_repository', 'project.create'];
+    const added = ['project.bind_repository', 'project.create', 'memory.pin'];
     const live = all.filter((t) => !added.includes(t.name));
     const byName = new Map(live.map((t) => [t.name, t]));
 
     const base = (JSON.parse(readFileSync(BASE_TOOLS_LIST, 'utf8')) as { tools: Tool[] }).tools;
     expect(base).toHaveLength(25);
-    expect(all).toHaveLength(26);
+    expect(all).toHaveLength(27);
     expect(live).toHaveLength(24);
     expect(byName.has('project.use')).toBe(false);
 
@@ -184,6 +205,13 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
             required: schema.required.filter((r) => r !== 'suggestedSlugs'),
           },
         };
+      })
+      .map((t) => {
+        if (!PIN_SURFACE.has(t.name)) return t;
+        const liveSchema = byName.get(t.name)?.outputSchema;
+        expect(liveSchema).not.toEqual(t.outputSchema);
+        expect(withoutPinFields(liveSchema)).toEqual(t.outputSchema);
+        return { ...t, outputSchema: liveSchema };
       })
       .map((t) => {
         if (t.name !== 'memory.capture_passive') return t;
