@@ -57,6 +57,8 @@ export function classifyCandidateBand({
 
 export interface CandidateOptions {
   perSaveMax: number;
+  /** `false` returns candidates without persisting a pending judgment; omitted means `true`. */
+  persist?: boolean;
   /** Test seam only — never read from the environment. */
   poolSize?: number;
   /** Test seam only — never read from the environment. */

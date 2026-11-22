@@ -6,6 +6,17 @@ The `memory_relations` table records the judgment graph between memories. Each r
 - **judged verdict** — from the agent (`memory.judge_batch` / `memory.compare`) (`status='judged'`, `relation` set, `marked_by_kind` set).
 - **orphan** — closed without a verdict (`status='orphaned'`, `relation=null`): one of its memories was retired, which closes the pair in the same transaction; or the deterministic sweep closed it, because no agent judged it before the deadline or its stale pending drain found that no current save-time channel would surface the pair.
 
+## Judgment queue switch
+
+`JUDGMENT_QUEUE_ENABLED` (default `0`) decides whether a save's candidates become pending rows.
+
+- **`0`, the default.** Detection runs exactly as before and its result comes back in the save response, but no row is written for it. Each `candidates[]` entry names its pair as `sourceId` (the saved memory) and `targetId`, carries no `judgmentId`, and carries `converge: true` when it is high band. The agent acts only when that changes a memory: `memory.compare({ memoryIdA: sourceId, memoryIdB: targetId, relation: 'supersedes', confidence })` when the saved memory replaces the candidate, the same call with `relation: 'conflicts_with'` when the two contradict, and nothing otherwise. The hook route `POST /api/<slug>/sessions/:id/learnings` writes no pending row either.
+- **`1`.** The persisted queue described in the rest of this page: one `pending` row per candidate, closed with `memory.judge_batch`, re-surfaced in `memory.context.pendingJudgments[]`, orphaned at the deadline.
+
+Rows already `pending` when the switch is `0` are untouched: they stay judgeable, keep appearing in `memory.context.pendingJudgments[]`, and are orphaned at the deadline like any other. A `topic_key` upsert still writes its `judged` `supersedes` row on both settings. Switching between the two needs no migration.
+
+Why the default is `0`: on a production database, 2.1% of 14,714 agent verdicts changed a memory (285 `supersedes`, 23 `conflicts_with`), and 301 of those 308 were issued within an hour of the save that surfaced the pair. The rationale, the accepted loss and the production validation gate are recorded in the OpenSpec change `retire-pending-judgment-queue`.
+
 ## Lifecycle
 
 ```
@@ -95,20 +106,21 @@ Confirm with explicit `ids: [id, ...]`; judge with `judgments: [{ judgmentId, re
 
 ## When to call which tool
 
-| Situation                                            | Call                                                                                                                                                                              |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Save a memory that evolves a known topic             | `memory.save({topic_key})`                                                                                                                                                        |
-| Don't know the canonical topic_key                   | `memory.suggest_topic_key` first, then save                                                                                                                                       |
-| Save returned `candidates[]`                         | `memory.judge_batch({ judgments: [{ judgmentId, relation }] })`                                                                                                                   |
-| Save returned `convergeWith[]` (advisory)            | Map each `judgmentId` to its `candidates[]` entry; `memory.merge` the pair, or judge it `supersedes` and reuse its `topic_key` — or judge it `related` if it is not the same fact |
-| Save returned `related[]`                            | Nothing to judge; read them for context, or record a verdict with `memory.compare`                                                                                                |
-| Two arbitrary memories analyzed independently        | `memory.compare({memoryIdA, memoryIdB, …})`                                                                                                                                       |
-| Search results have `pending_conflict` annotations   | `memory.judge_batch` using the embedded `judgmentId`                                                                                                                              |
-| `memory.context` returned `pendingJudgments[]`       | `memory.judge_batch` each entry's `judgmentId`                                                                                                                                    |
-| A row's `reviewState` is `needs_review` (still true) | `memory.confirm_batch` — records a confirmation, advancing the affirmation baseline                                                                                               |
-| A `needs_review` memory has changed                  | `memory.save({topic_key})` — supersedes the prior row                                                                                                                             |
-| `memory.context` returned `needsReview[]`            | resolve each: `memory.confirm_batch` / `memory.save({topic_key})` / `memory.judge_batch` if it conflicts                                                                          |
-| Several memories each hold part of one fact          | `memory.merge({ids, …})` to preview, show the user, then the same call with `fingerprint` to commit                                                                               |
-| The user asks to always load a memory                | `memory.pin({id, pinned: true})` — it then leads every `memory.context`; past the per-project bound, ask which pin to drop                                                        |
+| Situation                                            | Call                                                                                                                                                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Save a memory that evolves a known topic             | `memory.save({topic_key})`                                                                                                                                                                  |
+| Don't know the canonical topic_key                   | `memory.suggest_topic_key` first, then save                                                                                                                                                 |
+| Save returned `candidates[]` without `judgmentId`    | Only if this memory replaces one or contradicts it: `memory.compare({memoryIdA: sourceId, memoryIdB: targetId, relation: 'supersedes' \| 'conflicts_with', confidence})`; otherwise nothing |
+| Save returned `candidates[]` with `judgmentId`       | `memory.judge_batch({ judgments: [{ judgmentId, relation }] })`                                                                                                                             |
+| Save returned `convergeWith[]` (advisory)            | Map each `judgmentId` to its `candidates[]` entry; `memory.merge` the pair, or judge it `supersedes` and reuse its `topic_key` — or judge it `related` if it is not the same fact           |
+| Save returned `related[]`                            | Nothing to judge; read them for context, or record a verdict with `memory.compare`                                                                                                          |
+| Two arbitrary memories analyzed independently        | `memory.compare({memoryIdA, memoryIdB, …})`                                                                                                                                                 |
+| Search results have `pending_conflict` annotations   | `memory.judge_batch` using the embedded `judgmentId`                                                                                                                                        |
+| `memory.context` returned `pendingJudgments[]`       | `memory.judge_batch` each entry's `judgmentId`                                                                                                                                              |
+| A row's `reviewState` is `needs_review` (still true) | `memory.confirm_batch` — records a confirmation, advancing the affirmation baseline                                                                                                         |
+| A `needs_review` memory has changed                  | `memory.save({topic_key})` — supersedes the prior row                                                                                                                                       |
+| `memory.context` returned `needsReview[]`            | resolve each: `memory.confirm_batch` / `memory.save({topic_key})` / `memory.judge_batch` if it conflicts                                                                                    |
+| Several memories each hold part of one fact          | `memory.merge({ids, …})` to preview, show the user, then the same call with `fingerprint` to commit                                                                                         |
+| The user asks to always load a memory                | `memory.pin({id, pinned: true})` — it then leads every `memory.context`; past the per-project bound, ask which pin to drop                                                                  |
 
 > `needsReview` is a **separate axis** from the judgment graph above. The relations here are **pairwise** (conflicts between two memories, closed by `memory.judge_batch`). `needsReview` is **unary** time-based staleness — a single memory whose shelf life elapsed without re-affirmation — and it is **derived at read time** from `max(created_at, last confirmation) + per-type TTL`; it is never stored and never runs a sweep. It only overlaps the judgment graph when a stale memory turns out to contradict another, at which point the normal `memory.judge_batch` flow takes over.

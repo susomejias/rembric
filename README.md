@@ -300,11 +300,12 @@ Applied to every bearer-authenticated surface (`/mcp`, `/api`, `/healthz`, `/adm
 
 Controls how `memory.save` surfaces conflict candidates to the agent for fresh-context judgment.
 
-| Variable                  | Default | Description                                                                                                          |
-| ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` turns save-time detection off: no candidates, no pending rows. |
+| Variable                  | Default | Description                                                                                                                                                                                                                                                              |
+| ------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CANDIDATES_PER_SAVE_MAX` | `5`     | Max number of similar memories surfaced per save. `0` turns save-time detection off: no candidates, no pending rows.                                                                                                                                                     |
+| `JUDGMENT_QUEUE_ENABLED`  | `0`     | `0` returns candidates without recording a pending judgment for each: the agent acts only to supersede or flag a contradiction, through `memory.compare`. `1` restores the persisted judgment queue. See [`docs/relations.md`](docs/relations.md#judgment-queue-switch). |
 
-This is the only setting. The similarity thresholds behind it are compile-time constants, not configuration, each calibrated by a committed measurement: see [`docs/embeddings.md`](docs/embeddings.md#engine-constants-not-configuration).
+These are the only settings. The similarity thresholds behind it are compile-time constants, not configuration, each calibrated by a committed measurement: see [`docs/embeddings.md`](docs/embeddings.md#engine-constants-not-configuration).
 
 The lexical pass reads a full-text index of the saving project only, so the cost of a save does not grow with other projects' memories. The first boot after upgrading builds one such index per project before serving (about 0.8 s at 50 000 memories). Each project adds a small per-write cost: see [the measured scale](docs/embeddings.md#cost-and-supported-scale-of-the-per-project-index).
 

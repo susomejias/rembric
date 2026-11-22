@@ -330,7 +330,9 @@ const relationView = z.object({
 });
 
 export const candidate = z.object({
-  judgmentId: z.string(),
+  judgmentId: z.string().optional(),
+  sourceId: z.string().optional(),
+  converge: z.literal(true).optional(),
   targetId: z.string(),
   title: z.string(),
   snippet: z.string(),
@@ -341,7 +343,7 @@ export const candidate = z.object({
   entityValue: z.string().optional(),
 });
 
-export const relatedMemory = candidate.omit({ judgmentId: true });
+export const relatedMemory = candidate.omit({ judgmentId: true, sourceId: true, converge: true });
 
 const entityRef = z.object({ kind: z.string(), value: z.string() });
 
@@ -721,7 +723,7 @@ function candidateFields(r: PostSaveResult) {
     candidates: r.candidates,
     related: r.related,
     convergeWith: r.convergeWith,
-    judgmentRequired: r.candidates.length > 0,
+    judgmentRequired: r.candidates.some((c) => c.judgmentId !== undefined),
     candidatesDetected: r.candidatesDetected,
   };
 }

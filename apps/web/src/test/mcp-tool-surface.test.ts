@@ -82,6 +82,25 @@ function withoutPinFields(value: unknown): unknown {
   );
 }
 
+const CANDIDATE_SURFACE = new Set(['memory.save', 'memory.capture_passive', 'memory.merge']);
+
+function withoutUnpersistedCandidateFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutUnpersistedCandidateFields);
+  if (value === null || typeof value !== 'object') return value;
+  const node = value as Record<string, unknown>;
+  const properties = node['properties'] as Record<string, unknown> | undefined;
+  if (properties && 'judgmentId' in properties && 'targetId' in properties) {
+    const { sourceId: _source, converge: _converge, ...rest } = properties;
+    void _source;
+    void _converge;
+    const required = (node['required'] as string[]).filter((r) => r !== 'judgmentId');
+    return { ...node, properties: rest, required: ['judgmentId', ...required] };
+  }
+  return Object.fromEntries(
+    Object.entries(node).map(([k, v]) => [k, withoutUnpersistedCandidateFields(v)]),
+  );
+}
+
 function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
     v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -110,6 +129,7 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
     resetAppGlobals();
     dataDir = mkdtempSync(join(tmpdir(), 'rembric-web-tool-surface-'));
     process.env['REMBRIC_DATA_DIR'] = dataDir;
+    process.env['JUDGMENT_QUEUE_ENABLED'] = '1';
     delete process.env['REMBRIC_PUBLIC_URL'];
     adminToken = getServices().tokens.create({ name: 'tool-surface-admin', scope: '*' }).plaintext;
   });
@@ -119,6 +139,7 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
     await new Promise((resolve) => setImmediate(resolve));
     resetAppGlobals();
     delete process.env['REMBRIC_DATA_DIR'];
+    delete process.env['JUDGMENT_QUEUE_ENABLED'];
     rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -228,6 +249,13 @@ describe('the tool surface against the base recorded before the SDK v2 port', ()
             required: liveSchema.required,
           },
         };
+      })
+      .map((t) => {
+        if (!CANDIDATE_SURFACE.has(t.name)) return t;
+        const liveSchema = byName.get(t.name)?.outputSchema;
+        expect(liveSchema).not.toEqual(t.outputSchema);
+        expect(withoutUnpersistedCandidateFields(liveSchema)).toEqual(t.outputSchema);
+        return { ...t, outputSchema: liveSchema };
       });
     expect({ tools: live }).toEqual({ tools: expected });
     expect(canonicalJson({ tools: live })).toBe(canonicalJson({ tools: expected }));

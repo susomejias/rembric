@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { KEY_LEARNINGS_HEADING_HINT, type CreatedToken } from '@rembric/core';
 import type * as CoreModule from '@rembric/core';
-import type { MemorySource, Project } from '@rembric/db';
+import { projectScope, type MemorySource, type Project } from '@rembric/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -74,6 +74,7 @@ afterEach(async () => {
   await new Promise((resolve) => setImmediate(resolve));
   resetAppGlobals();
   delete process.env['REMBRIC_DATA_DIR'];
+  delete process.env['JUDGMENT_QUEUE_ENABLED'];
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -291,5 +292,73 @@ describe('the tool and the HTTP route share one capture path', () => {
     } finally {
       await client.close();
     }
+  });
+});
+
+describe('POST /:slug/sessions/:id/learnings — judgment queue switch', () => {
+  const FOLLOW_UP =
+    'Done.\n\n## Key Learnings\n1. The parser drops BOMs early.\n2. Retries cap at three again.';
+
+  function pendingRows(): number {
+    return (
+      getServices()
+        .db.raw.prepare<
+          [],
+          { n: number }
+        >(`SELECT count(*) AS n FROM memory_relations WHERE status = 'pending'`)
+        .get()?.n ?? -1
+    );
+  }
+
+  const FILLER = [
+    'The dashboard renders timestamps through one shared component.',
+    'Backups run nightly and keep seven copies on disk.',
+    'Tokens are hashed with SHA-256 before they are stored.',
+    'The installer pins every client plugin to one release.',
+    'Search ranks hybrid results with reciprocal rank fusion.',
+    'Migrations apply in file-name order at process start.',
+  ];
+
+  async function restartWithQueue(value: string | undefined): Promise<void> {
+    await new Promise((resolve) => setImmediate(resolve));
+    resetAppGlobals();
+    if (value === undefined) delete process.env['JUDGMENT_QUEUE_ENABLED'];
+    else process.env['JUDGMENT_QUEUE_ENABLED'] = value;
+    const { memory } = getServices();
+    for (const content of FILLER) {
+      memory.save({ type: 'project', title: content, content }, projectScope(project.id));
+    }
+  }
+
+  it('with the switch unset, a forwarded report adds no pending judgment', async () => {
+    await restartWithQueue(undefined);
+    await post({ report: REPORT, agentType: 'Explore' });
+    const before = pendingRows();
+    const r = await post({ report: FOLLOW_UP, agentType: 'Explore' });
+
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, saved: 2 });
+    expect(r.json['candidatesDetected']).toBeGreaterThanOrEqual(2);
+    expect(r.json).not.toHaveProperty('candidates');
+    expect(pendingRows()).toBe(before);
+  });
+
+  it('with JUDGMENT_QUEUE_ENABLED=1, the same report records pending judgments', async () => {
+    await restartWithQueue('1');
+    await post({ report: REPORT, agentType: 'Explore' });
+    const before = pendingRows();
+    const r = await post({ report: FOLLOW_UP, agentType: 'Explore' });
+
+    expect(r.status).toBe(200);
+    expect(r.json['candidatesDetected']).toBeGreaterThanOrEqual(2);
+    expect(pendingRows()).toBeGreaterThanOrEqual(before + 2);
+  });
+
+  it('a value outside 0 and 1 is clamped like the other integer settings', async () => {
+    await restartWithQueue('7');
+    await post({ report: REPORT, agentType: 'Explore' });
+    const before = pendingRows();
+    await post({ report: FOLLOW_UP, agentType: 'Explore' });
+    expect(pendingRows()).toBeGreaterThan(before);
   });
 });

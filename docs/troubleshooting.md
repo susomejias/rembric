@@ -115,7 +115,7 @@ The runtime image moved to a distroless base in v0.21.14 (node is at `/nodejs/bi
 
 ### Pending judgments piling up in search annotations
 
-Every save inserts `memory_relations` rows with `status='pending'` for each candidate. If the agent ignores `candidates[]`, they accumulate as `pending_conflict` annotations.
+With `JUDGMENT_QUEUE_ENABLED=1`, every save inserts `memory_relations` rows with `status='pending'` for each candidate. If the agent ignores `candidates[]`, they accumulate as `pending_conflict` annotations. With the default `0`, saves write none, and the rows below are only those recorded before the switch, which drain through the same paths.
 
 - After `JUDGMENT_ORPHAN_AFTER_MS` (default 24h) they re-surface in `memory.context.pendingJudgments[]` for any agent to close with `memory.judge_batch`.
 - Retiring one of the pair's memories — a `topic_key` revision, a `supersedes` verdict, a merge, an archive or the decay pass — orphans the pair in the same transaction, journaled as `endpoint retired at retirement`. Undoing that retirement from `/dashboard/consolidation` restores it.

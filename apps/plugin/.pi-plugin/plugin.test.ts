@@ -962,7 +962,8 @@ describe('tool-observation accumulation across a turn (session-nudges D4a)', () 
 });
 
 describe('the server’s own usage instructions reach the model', () => {
-  const expected = () => underscoreToolNames(buildInstructions({ requestedSlug: PROJECT_SLUG }));
+  const expected = () =>
+    underscoreToolNames(buildInstructions({ requestedSlug: PROJECT_SLUG, judgmentQueue: false }));
 
   it('the instructions being asserted are non-empty and mention the bound project', () => {
     expect(expected().length).toBeGreaterThan(100);
