@@ -27,6 +27,7 @@
     "check:delta-freshness": "node scripts/check-delta-freshness.mjs",
     "check:delta-sections": "node scripts/check-delta-sections.mjs",
     "check:spec-crossrefs": "node scripts/check-spec-crossrefs.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs --base origin/main",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

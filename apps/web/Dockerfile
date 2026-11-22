@@ -153,8 +153,9 @@ RUN set -eux; cd /runtime/node_modules/onnxruntime-node; \
 # Each gate protects a failure that is otherwise silent at runtime: a missing
 # `next-server.js` (the renamed generated server) or launcher is an image that
 # cannot start; a missing migrations directory
-# throws when the migration runner reads the mounted volume (42 is the full
-# set — the count is the gate); a native module that does not resolve throws at
+# throws when the migration runner reads the mounted volume (the count is the
+# gate, and scripts/check-migrations.mjs keeps it equal to the number of
+# migration files); a native module that does not resolve throws at
 # boot, after the process looks healthy enough to accept traffic; a missing
 # baked model turns the embedder into a runtime download. The native modules
 # are not merely resolved but loaded, which is what the runtime does — the
