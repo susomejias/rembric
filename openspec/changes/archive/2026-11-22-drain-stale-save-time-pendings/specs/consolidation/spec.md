@@ -345,10 +345,18 @@ Deadline orphaning, rules drains and retired-endpoint drains SHALL all journal a
 
 Historical op types (`merge`, `supersede`) remain valid journal rows: they SHALL keep rendering in the dashboard and SHALL keep their undo semantics, but the sweep SHALL NOT produce new rows of those types. Historical `orphan_promote` rows that recorded a verdict SHALL keep rendering. Their undo SHALL follow "Undoing an orphaning MUST NOT overwrite a verdict written after it", which leaves unchanged every undo whose relation has not been written since the op.
 
+An agent-driven merge confirmed through `memory.merge` (see the `mcp-api` capability, "The MCP server MUST expose `memory.merge` with a preview-then-confirm contract") SHALL be journaled as exactly one `merge` op, in its own `consolidation_runs` row with `scope = 'maintenance'` (the same journal path `memory.archive` uses; a `project:<projectId>` run would satisfy the sweep's per-scope throttle and silently skip that project's next sweep), with `affected_ids` = the merged originals in the caller's order, `created_id` = the successor, and a reasoning string naming the acting token. The op SHALL be written in the same transaction as the successor insert and the originals' status flip, so a merge that rolls back leaves no journal row. The sweep itself still SHALL NOT produce `merge` ops.
+
 #### Scenario: A decay archive is journaled
 
 - **WHEN** the sweep archives memories A and B via decay
 - **THEN** a `consolidation_ops` row SHALL exist with `op_type = 'decay'`, `affected_ids = ['A','B']`, and a deterministic reasoning string
+
+#### Scenario: An agent merge is journaled as one merge op
+
+- **WHEN** an agent confirms `memory.merge` over active memories A, B and C, creating successor M
+- **THEN** exactly one new `consolidation_ops` row SHALL exist with `op_type = 'merge'`, `affected_ids = ['A','B','C']` and `created_id = 'M'`, in a new `consolidation_runs` row with `scope = 'maintenance'`
+- **AND** the next session-start sweep for that project SHALL NOT be throttled by that run
 
 #### Scenario: A historical LLM-era op is still visible and undoable
 
