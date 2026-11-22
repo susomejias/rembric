@@ -23,6 +23,23 @@ afterAll(() => {
   rmSync(scratchHome, { recursive: true, force: true });
 });
 
+// A debounced flush left armed by one test would otherwise POST through a later test's fetch mock.
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+let armedTimers: ReturnType<typeof setTimeout>[] = [];
+beforeEach(() => {
+  armedTimers = [];
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    const handle = realSetTimeout(...args);
+    armedTimers.push(handle);
+    return handle;
+  }) as typeof setTimeout;
+});
+afterEach(() => {
+  globalThis.setTimeout = realSetTimeout;
+  for (const handle of armedTimers) realClearTimeout(handle);
+});
+
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginVersion = (
   JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version: string }
