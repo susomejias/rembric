@@ -34,8 +34,8 @@
 
 ## 6. Docs and specs
 
-- [ ] 6.1 Replace the `npx` bridge instructions in `CLAUDE.md`, `apps/plugin/README.md`, `apps/plugin/mcp-bridge/README.md`, `apps/plugin/.opencode-plugin/README.md`, `apps/plugin/.hermes-plugin/README.md` and `docs/agents.md` (Hermes block, opencode troubleshooting, Codex bridge paragraph); leave the no-plugin HTTP sections as they are
-- [ ] 6.2 Update `.agents/skills/rembric-plugin-development/` (SKILL.md, `references/e2e-walkthrough.md`, `references/per-client-gotchas.md`) and `.agents/skills/rembric-tui-installer/`
+- [x] 6.1 Replace the `npx` bridge instructions in `CLAUDE.md`, `apps/plugin/README.md`, `apps/plugin/mcp-bridge/README.md`, `apps/plugin/.opencode-plugin/README.md`, `apps/plugin/.hermes-plugin/README.md` and `docs/agents.md` (Hermes block, opencode troubleshooting, Codex bridge paragraph); leave the no-plugin HTTP sections as they are
+- [x] 6.2 Update `.agents/skills/rembric-plugin-development/` (SKILL.md, `references/e2e-walkthrough.md`, `references/per-client-gotchas.md`) and `.agents/skills/rembric-tui-installer/`
 - [ ] 6.3 `openspec validate run-bridge-from-plugin-tree --strict`, `pnpm run check:delta-sections`, `pnpm run check:spec-crossrefs` and `pnpm run check:delta-freshness` pass
 - [ ] 6.4 At archive time, hand-edit the non-requirement prose the deltas cannot reach: `openspec/specs/claude-code-plugin/spec.md` `## MCP server declaration` and `## Project slug selection` (stale `bin/rembric-bridge.mjs`), the `mcp-bridge` Purpose line ("published … package-distribution contract"), the three scenario titles the freshness gate forced the deltas to keep (`mcp-bridge` "npx resolves the executable without a bin name" and "A consumer's install adds nothing but the bridge", `open-source-distribution` "The bridge's pin names the version that release publishes"), and reconcile `opencode-plugin` `Install script auto-configures opencode.json` with `Install script contract`
 

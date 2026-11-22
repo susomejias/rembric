@@ -33,6 +33,9 @@ For dev iteration against a local checkout (preferred — exercises the same cod
 ```bash
 # Hermes
 PLUGIN_SRC="$(pwd)/apps/plugin/.hermes-plugin" sh apps/plugin/.hermes-plugin/install.sh
+# Hermes's own script never places the bridge (the TUI does); copy the branch's modules
+mkdir -p ~/.config/rembric/bin
+cp apps/plugin/mcp-bridge/{cli,bridge,slug,rembric-host-binding,rembric-project,rembric-dotenv}.mjs ~/.config/rembric/bin/
 
 # opencode
 PLUGIN_SRC="$(pwd)/apps/plugin/.opencode-plugin" \
@@ -56,20 +59,17 @@ Pi has no repo-side install script — its mechanism is its own CLI (`pi install
 ```bash
 export REMBRIC_SERVER_URL=http://127.0.0.1:3000
 export REMBRIC_API_TOKEN=<demo-writer-plaintext-from-step-2>
-export BRIDGE_VERSION="$(node -p 'require("./apps/plugin/package.json").version')"
 ```
 
-For opencode specifically:
+For opencode specifically: `install.sh` places `plugin.ts` in `~/.config/opencode/plugins/` and the shared modules and the bridge in `~/.config/rembric/bin/`, and the plugin's config hook adds `mcp.rembric` in memory (`command: ['node', '<home>/.config/rembric/bin/cli.mjs']`, environment from `{env:REMBRIC_SERVER_URL}` and `{env:REMBRIC_API_TOKEN}`). With the two exports above no `opencode.json` is needed. To pin the values in a file instead, and only if `opencode.json` is absent:
 
 ```bash
-# install.sh copies plugin.ts + shared modules to their destinations and
-# prints the pinned MCP block. Paste it manually only if opencode.json is absent:
 cat > ~/.config/opencode/opencode.json <<JSON
 {
   "mcp": {
     "rembric": {
       "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@${BRIDGE_VERSION}"],
+      "command": ["node", "$HOME/.config/rembric/bin/cli.mjs"],
       "environment": {
         "REMBRIC_SERVER_URL": "http://127.0.0.1:3000",
         "REMBRIC_API_TOKEN": "<demo-writer-plaintext-from-step-2>"
@@ -277,25 +277,7 @@ bash apps/plugin/.<client>-plugin/uninstall.sh   # opencode + Hermes; Pi has no 
 
 **Restore the user's agent config file** to its prior state. If they didn't have an `opencode.json` before, delete it. If they did, restore from the backup you (should have) made.
 
-For opencode specifically, restore `opencode.json` to its prior bytes. If it was absent, leave it absent; the installer only prints this snippet:
-
-```bash
-cat > ~/.config/opencode/opencode.json <<JSON
-{
-  "mcp": {
-    "rembric": {
-      "type": "local",
-      "command": ["npx", "-y", "@rembric/mcp-bridge@${BRIDGE_VERSION}"],
-      "environment": {
-        "REMBRIC_SERVER_URL": "<REMBRIC_SERVER_URL>",
-        "REMBRIC_API_TOKEN": "<REMBRIC_API_TOKEN>"
-      },
-      "enabled": true
-    }
-  }
-}
-JSON
-```
+For opencode specifically, restore `opencode.json` to its prior bytes. If it was absent, leave it absent: the plugin's config hook needs no file. `uninstall.sh` keeps the bridge modules in `~/.config/rembric/bin/` while Hermes's `config.yaml` still runs `cli.mjs`, and says so.
 
 ## When local e2e is not possible
 

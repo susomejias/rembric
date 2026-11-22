@@ -1,7 +1,21 @@
-# @rembric/mcp-bridge
+# Rembric MCP bridge
 
-A zero-dependency MCP stdio-to-Streamable-HTTP bridge for Rembric. It is started
-with `npx -y @rembric/mcp-bridge@<exact-version>` and takes no arguments.
+A zero-dependency MCP stdio-to-Streamable-HTTP bridge for Rembric. It ships in
+the plugin tree, is started with `node <dir>/cli.mjs`, and takes no arguments.
+It is not published to npm.
+
+The bridge is six modules that must sit in one directory: `cli.mjs`,
+`bridge.mjs`, `slug.mjs`, `rembric-host-binding.mjs`, `rembric-project.mjs` and
+`rembric-dotenv.mjs`. Claude Code and Codex run them from the installed plugin
+(`${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs`, and `./mcp-bridge/cli.mjs` from the
+plugin directory). For opencode and Hermes the TUI installer places them in
+`~/.config/rembric/bin/`, from the same ref as the client's other files.
+
+Earlier plugin versions started the bridge with
+`npx -y @rembric/mcp-bridge@<version>`. Every version already on npm stays
+installable, so such an entry keeps working on the version it names. The
+entries the plugins and the installer manage switch to the `node` form on the
+client's next plugin or TUI update; nobody has to migrate by hand.
 
 Set `REMBRIC_SERVER_URL` (without `/mcp`) and `REMBRIC_API_TOKEN` in the
 process environment. The project directory is selected from
@@ -57,7 +71,7 @@ The bridge replaces `mcp-remote` for standard stdio MCP hosts. Host-specific run
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Claude Code  | **Verified 2026-08-15 on Linux, Claude Code 2.1.233**: initialize/clientInfo passthrough and a normal tool call were exercised against the recorded Streamable HTTP stub (`measurements/gate-arms-run.log`). |
 | opencode     | **Supported, host run unverified**: its plugin starts this exact stdio bridge; subprocess tests cover initialize passthrough, HTTP/SSE framing, and error propagation.                                       |
-| Codex CLI    | **Supported, host run unverified**: its manifest starts the same exact-pinned stdio bridge.                                                                                                                  |
+| Codex CLI    | **Supported, host run unverified**: its manifest starts the same stdio bridge from the installed plugin directory.                                                                                           |
 | Hermes Agent | **Verified by operator configuration**: Hermes requires the documented explicit `mcp_servers.rembric.env` map; the bridge works once that map is present.                                                    |
 | Pi           | **Not applicable**: Pi has its own in-process MCP client and does not use this bridge.                                                                                                                       |
 | Windows      | **Supported, host run unverified**: no Windows CI or recorded run exists.                                                                                                                                    |

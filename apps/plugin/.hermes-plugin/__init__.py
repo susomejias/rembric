@@ -108,7 +108,7 @@ except ImportError:  # pragma: no cover - exercised only outside Hermes
             pass
 
 
-# Mirror of the slug regex enforced by the published ``@rembric/mcp-bridge`` and
+# Mirror of the slug regex enforced by the MCP bridge (``mcp-bridge/``) and
 # Rembric's project-slug validation: lowercase letters/digits/hyphens, 1–64
 # chars, must not start or end with a hyphen.
 _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")

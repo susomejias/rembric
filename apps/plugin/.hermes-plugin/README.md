@@ -19,7 +19,7 @@ Use Hermes's native plugin manager (verified with Hermes v0.22.5):
 hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable
 ```
 
-Hermes records the repository/subdirectory source and installs under `${HERMES_HOME:-~/.hermes}/plugins/rembric`. `--enable` selects `memory.provider: rembric`, replacing any previous provider selection. This does not wire the separate MCP bridge.
+Hermes records the repository/subdirectory source and installs under `${HERMES_HOME:-~/.hermes}/plugins/rembric`. `--enable` selects `memory.provider: rembric`, replacing any previous provider selection. This neither places the MCP bridge nor wires `mcp_servers.rembric`: the native install checks out only `.hermes-plugin/`, so the bridge files come from the TUI installer, which places them in `~/.config/rembric/bin/` on every install and update.
 
 Native installation prompts for missing values declared in `plugin.yaml::requires_env` and stores them in `${HERMES_HOME:-~/.hermes}/.env`:
 
@@ -45,18 +45,18 @@ Unrecognized, linked, foreign-source, pinned or inconsistent installs remain ref
 
 The plugin works in two complementary modes — **wire both** unless you really only want lifecycle without tool access:
 
-| Mode                | What you get                                                 | Where it's configured                      |
-| ------------------- | ------------------------------------------------------------ | ------------------------------------------ |
-| **Memory provider** | Auto session create / summary-on-compact / end-on-close      | `memory.provider: rembric` (this plugin)   |
-| **MCP server**      | Full memory tool surface (save/search/get/context/judge/...) | `mcp_servers.rembric` (the bundled bridge) |
+| Mode                | What you get                                                 | Where it's configured                                                         |
+| ------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| **Memory provider** | Auto session create / summary-on-compact / end-on-close      | `memory.provider: rembric` (this plugin)                                      |
+| **MCP server**      | Full memory tool surface (save/search/get/context/judge/...) | `mcp_servers.rembric` (the bridge the TUI places in `~/.config/rembric/bin/`) |
 
-Drop this block into `~/.hermes/config.yaml`. Replace `<plugin-version>` with the exact version printed by the TUI installer (or in `~/.hermes/plugins/rembric/plugin.yaml`):
+Drop this block into `~/.hermes/config.yaml`. Replace `<HOME>` with your absolute home directory; the TUI installer prints the block with the path already filled in:
 
 ```yaml
 mcp_servers:
   rembric:
-    command: npx
-    args: ['-y', '@rembric/mcp-bridge@<plugin-version>']
+    command: node
+    args: ['<HOME>/.config/rembric/bin/cli.mjs']
     env:
       REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
       REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
@@ -145,7 +145,7 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 
 ## Updating
 
-Use the TUI installer (`Plugins → hermes → update`, or `sh install.sh --agent=hermes --action=update --yes`). After successful native update it retains the recognized legacy MCP repair and backup behavior; complete current/custom blocks and their pins remain untouched. The bridge/config transport is unchanged.
+Use the TUI installer (`Plugins → hermes → update`, or `sh install.sh --agent=hermes --action=update --yes`). It places the bridge files in `~/.config/rembric/bin/` first; if any download fails, it stops before touching Hermes or its config. After the native update it migrates the `mcp_servers.rembric` blocks the installer wrote (the `mcp-remote` block, the incomplete pinned block and the complete `npx` block) to the `node` form above, keeping `env` and `enabled` and writing a one-time backup beside `config.yaml`. A block with any other shape, such as a hand-customised one, is left byte-identical and the updater prints the replacement. An `npx` block left in place keeps working on the version it names, because published versions stay on npm.
 
 Manual fallback:
 
@@ -154,7 +154,7 @@ hermes plugins update rembric
 hermes gateway restart
 ```
 
-The manual CLI does not run Rembric's legacy MCP repair. Use the TUI if that repair is needed.
+The manual CLI neither places the bridge nor migrates the MCP block. Use the TUI for that.
 
 **Update-check limitation:** Hermes v0.22.5 reports a fresh native subdirectory install as provenance `drift` because its source metadata exists without a local `.git` directory. Explicit native update was verified to succeed with an already-current result; an actual version advance was not tested. The TUI therefore reports Hermes update status as unknown and skips it in update-all, rather than claiming current/outdated from a manifest comparison. Use the explicit update action for source-tracked installs; copied installs need the transition above.
 
@@ -170,4 +170,4 @@ Manual fallback:
 hermes plugins remove rembric
 ```
 
-Hermes removes the **entire managed plugin directory**, clears its plugin selection/grants and resets `memory.provider` if it selected Rembric. Back up local data inside that directory first. Unrelated settings, MCP entries/bridge pins, credentials outside the plugin directory and `.rembric` markers remain in place. Native repeated remove returns an error; the TUI handles the already-absent case.
+Hermes removes the **entire managed plugin directory**, clears its plugin selection/grants and resets `memory.provider` if it selected Rembric. Back up local data inside that directory first. Unrelated settings, MCP entries, credentials outside the plugin directory and `.rembric` markers remain in place. The TUI removes the bridge files from `~/.config/rembric/bin/` only when opencode is not installed and `config.yaml` no longer runs `cli.mjs`, so a preserved `mcp_servers.rembric` block keeps working. Native repeated remove returns an error; the TUI handles the already-absent case.
