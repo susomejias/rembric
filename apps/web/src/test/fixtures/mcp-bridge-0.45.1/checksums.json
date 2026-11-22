@@ -1,0 +1,13 @@
+{
+  "package": "@rembric/mcp-bridge",
+  "version": "0.45.1",
+  "integrity": "sha512-2QssTmkHFY77NYyPn1J2LSQch6nAXzp+wcEd5bMhl+1QbrCpqvVFetretn5SeD/3iSgm8kJACZxWRlrSdZQtdw==",
+  "sha256": {
+    "bridge.mjs": "83f977647175dcf29e1ce416c43ef159d7602fcf693aacbb8cf0d349e2204a06",
+    "cli.mjs": "17defdbeadc4ff835cd37a2431b95412560d0307195e183b521197baac7bfb43",
+    "rembric-dotenv.mjs": "639bf8c45800f44dbd2fcef99f5a7f280f710182dd100e86c0fba953f284bb7b",
+    "rembric-host-binding.mjs": "622bbd30c3ece93b932c407f0481ff48aed560db75b0720729c430b077bc496d",
+    "rembric-project.mjs": "4b6a099355ab517f5179669882a8f2ef90fb942a807a5d24e0bbfa3e796797a3",
+    "slug.mjs": "45ad3af743f6b31b18763e634815a944282d10be003fb295c36aa6af11a4e795"
+  }
+}

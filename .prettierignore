@@ -29,6 +29,8 @@ openspec/changes/**/specs/
 .agents/skills/skill-creator/
 .claude/worktrees/
 apps/web/next-env.d.ts
+# A byte-exact copy of a published bridge; its checksums pin it.
+apps/web/src/test/fixtures/mcp-bridge-*/
 
 # Owner-installed skill manifests (pre-existing style)
 .agents/skills/shadcn/

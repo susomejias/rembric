@@ -15,6 +15,7 @@ export default tseslint.config(
       'apps/server/scripts/**',
       'packages/core/scripts/**',
       'apps/web/.next/**',
+      'apps/web/src/test/fixtures/mcp-bridge-*/**',
       'apps/plugin/*',
       '!apps/plugin/bin',
       'apps/plugin/*/**',

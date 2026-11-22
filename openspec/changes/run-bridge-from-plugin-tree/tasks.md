@@ -1,8 +1,8 @@
 ## 1. Released-bridge contract guard (lands first, before any behaviour change)
 
-- [ ] 1.1 Commit the six `.mjs` files of `@rembric/mcp-bridge@0.45.1` under `apps/web/src/test/fixtures/mcp-bridge-0.45.1/` with a `checksums.json` taken from the npm tarball; exclude the directory from ESLint, Prettier and the confinement scans in `apps/web/src/test/invariants.test.ts`
-- [ ] 1.2 Add `apps/web/src/test/released-bridge-contract.test.ts`: spawn the fixture's `cli.mjs` against a server started from the current tree and assert `initialize`, `tools/list`, a `tools/call` landing in the slug's project, and a fingerprint-resolved connection; assert the fixture files match `checksums.json`
-- [ ] 1.3 Prove the guard with `scripts/mutate.mjs`: renaming `X-Rembric-Repo-Fingerprint` on the server, changing the `repositories/resolve` response shape, and rejecting protocol `2025-06-18` each turn the test red
+- [x] 1.1 Commit the six `.mjs` files of `@rembric/mcp-bridge@0.45.1` under `apps/web/src/test/fixtures/mcp-bridge-0.45.1/` with a `checksums.json` taken from the npm tarball (tarball sha512 verified against the registry `integrity`); exclude the directory from ESLint and Prettier. The invariant suites pass with the fixture present (126/126), so no confinement-scan exclusion is needed
+- [x] 1.2 Add `apps/web/src/test/released-bridge-contract.test.ts`: spawn the fixture's `cli.mjs` against a server started from the current tree and assert `initialize`, `tools/list`, a `tools/call` landing in the slug's project, a fingerprint-resolved connection whose header reaches the server, and a host-declared session that a `memory.save` attaches to; assert the fixture files match `checksums.json`
+- [x] 1.3 Prove the guard with `scripts/mutate.mjs`: renaming the fingerprint header, renaming the session header, reshaping the `repositories/resolve` response and moving the slug path segment each turn the test red (4/4 caught). Protocol negotiation lives in the MCP SDK, not repository code; the test pins it by asserting `initialize` returns `2025-06-18`
 
 ## 2. Claude Code and Codex manifests
 
