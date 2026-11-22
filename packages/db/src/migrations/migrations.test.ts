@@ -612,6 +612,7 @@ describe('migrations 0011 + 0012 with referencing children', () => {
       '0038_token_deleted_at.sql',
       '0039_repository_bindings.sql',
       '0040_memory_vec_384.sql',
+      '0041_memory_pin_events.sql',
     ]);
 
     // FK integrity after the rebuild.
@@ -1083,6 +1084,7 @@ describe('migration 0030_memory_fts_vocab over a database populated before it', 
       '0038_token_deleted_at.sql',
       '0039_repository_bindings.sql',
       '0040_memory_vec_384.sql',
+      '0041_memory_pin_events.sql',
     ]);
 
     expect(df('ubiquitousterm')).toBe(MEMORIES);

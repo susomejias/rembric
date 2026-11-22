@@ -657,6 +657,7 @@ function wipe(handle: DbHandle): void {
     handle.raw.exec('PRAGMA defer_foreign_keys = ON');
     handle.raw.exec('DELETE FROM memory_relations');
     handle.raw.exec('DELETE FROM confirmations');
+    handle.raw.exec('DELETE FROM memory_pin_events');
     handle.raw.exec('DELETE FROM consolidation_ops');
     handle.raw.exec('DELETE FROM consolidation_runs');
     handle.raw.exec('DELETE FROM prompts');

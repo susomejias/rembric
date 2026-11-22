@@ -41,6 +41,7 @@ export {
   MemoryRepository,
   type AdminListMemoriesOpts,
   type BoundedEndpoint,
+  type PinnedMemory,
 } from './memory-repository.js';
 export { OAuthRepository } from './oauth-repository.js';
 export {

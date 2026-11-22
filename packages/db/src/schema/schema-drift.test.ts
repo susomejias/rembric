@@ -83,6 +83,14 @@ const EXPECTED_INDEXES: { name: string; sql: string | null }[] = [
     sql: 'CREATE INDEX memory_entity_links_memory_idx ON memory_entity_links (memory_id)',
   },
   {
+    name: 'memory_pin_events_memory_idx',
+    sql: 'CREATE INDEX memory_pin_events_memory_idx ON memory_pin_events (memory_id)',
+  },
+  {
+    name: 'memory_pin_events_project_idx',
+    sql: 'CREATE INDEX memory_pin_events_project_idx ON memory_pin_events (project_id, memory_id)',
+  },
+  {
     name: 'memory_relations_judgment_id_unique',
     sql: 'CREATE UNIQUE INDEX memory_relations_judgment_id_unique ON memory_relations (judgment_id)',
   },
@@ -314,6 +322,16 @@ const EXPECTED_COLUMNS: Record<
     { name: 'session_id', type: 'TEXT', notnull: 0, pk: 0 },
     { name: 'verdict', type: 'TEXT', notnull: 1, pk: 0 },
     { name: 'reason', type: 'TEXT', notnull: 0, pk: 0 },
+  ],
+  memory_pin_events: [
+    { name: 'id', type: 'INTEGER', notnull: 0, pk: 1 },
+    { name: 'memory_id', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'project_id', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'action', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'cause', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'run_id', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'actor', type: 'TEXT', notnull: 0, pk: 0 },
+    { name: 'event_ts', type: 'INTEGER', notnull: 1, pk: 0 },
   ],
   memory_entities: [
     { name: 'id', type: 'TEXT', notnull: 1, pk: 1 },
