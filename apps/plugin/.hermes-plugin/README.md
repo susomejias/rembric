@@ -50,7 +50,7 @@ The plugin works in two complementary modes — **wire both** unless you really 
 | **Memory provider** | Auto session create / summary-on-compact / end-on-close      | `memory.provider: rembric` (this plugin)                                      |
 | **MCP server**      | Full memory tool surface (save/search/get/context/judge/...) | `mcp_servers.rembric` (the bridge the TUI places in `~/.config/rembric/bin/`) |
 
-Drop this block into `~/.hermes/config.yaml`. Replace `<HOME>` with your absolute home directory; the TUI installer prints the block with the path already filled in:
+Drop this block into `~/.hermes/config.yaml`. The TUI installer prints it with the path already filled in and places the bridge files it runs; otherwise replace `<HOME>` with your absolute home directory:
 
 ```yaml
 mcp_servers:
@@ -68,6 +68,22 @@ memory:
 ```
 
 Configure these settings for each active Hermes profile. The provider resolves them through Hermes' `agent.secret_scope.get_secret` API; the explicit `env` map configures the separate MCP bridge. Both select the project with the same cascade, described under [Project slug resolution](#project-slug-resolution).
+
+Configuring Hermes by hand, without the TUI installer, leaves no bridge files in `~/.config/rembric/bin/`. Run the published bridge package instead, replacing `<version>` with an exact version (never `latest`):
+
+```yaml
+mcp_servers:
+  rembric:
+    command: npx
+    args: ['-y', '@rembric/mcp-bridge@<version>']
+    env:
+      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}
+      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}
+      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}
+    enabled: true
+```
+
+A later TUI update recognises this exact block and migrates it to the `node` form above, with a one-time backup.
 
 ## Environment variables
 
@@ -145,7 +161,7 @@ For deeper agent-side debug (`hermes memory status`, plugin-load trace), see Her
 
 ## Updating
 
-Use the TUI installer (`Plugins → hermes → update`, or `sh install.sh --agent=hermes --action=update --yes`). It places the bridge files in `~/.config/rembric/bin/` first; if any download fails, it stops before touching Hermes or its config. After the native update it migrates the `mcp_servers.rembric` blocks the installer wrote (the `mcp-remote` block, the incomplete pinned block and the complete `npx` block) to the `node` form above, keeping `env` and `enabled` and writing a one-time backup beside `config.yaml`. A block with any other shape, such as a hand-customised one, is left byte-identical and the updater prints the replacement. An `npx` block left in place keeps working on the version it names, because published versions stay on npm.
+Use the TUI installer (`Plugins → hermes → update`, or `sh install.sh --agent=hermes --action=update --yes`). It places the bridge files in `~/.config/rembric/bin/` first; if any download fails, it stops before touching Hermes or its config. After the native update it migrates the `mcp_servers.rembric` blocks the installer wrote (the `mcp-remote` block, the incomplete pinned block and the complete `npx` block) to the `node` form above, keeping `env` and `enabled` and writing a one-time backup beside `config.yaml`. A block with any other shape, such as a hand-customised one, is left byte-identical and the updater prints the replacement. An `npx` block left in place keeps working on the version it names, because the package is still published.
 
 Manual fallback:
 

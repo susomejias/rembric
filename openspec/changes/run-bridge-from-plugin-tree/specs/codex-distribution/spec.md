@@ -28,7 +28,7 @@ The repository SHALL host a Codex marketplace manifest at `.codex-plugin/marketp
 
 ### Requirement: Codex-specific MCP server configuration MUST spawn the pinned bridge through `npx`
 
-**Reason**: The Codex manifest no longer spawns `@rembric/mcp-bridge` through `npx`. It runs `node ./mcp-bridge/cli.mjs` from the installed plugin directory, so the bridge comes from the same commit as the manifest and `@rembric/mcp-bridge` is no longer published. The title names `npx` and the `npx` resolution scenario no longer applies, so the requirement is re-added under a new title, "Codex-specific MCP server configuration MUST spawn the plugin-local bridge with `node`".
+**Reason**: The Codex manifest no longer spawns `@rembric/mcp-bridge` through `npx`. It runs `node ./mcp-bridge/cli.mjs` from the installed plugin directory, so the bridge comes from the same commit as the manifest and the plugin no longer depends on the published `@rembric/mcp-bridge` package, which stays published for hand-written configurations. The title names `npx` and the `npx` resolution scenario no longer applies, so the requirement is re-added under a new title, "Codex-specific MCP server configuration MUST spawn the plugin-local bridge with `node`".
 
 **Migration**: None required from users. An installation still running the `npx -y @rembric/mcp-bridge@<x.y.z>` entry keeps resolving that already-published version from npm until its next plugin update replaces the entry with the `node` form. Contributors no longer bump or assert a bridge pin in the Codex manifest.
 

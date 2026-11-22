@@ -17,7 +17,7 @@ Facts this design relies on, measured on 2026-11-22 with isolated config dirs an
 
 - No client can install a plugin version whose bridge is unavailable.
 - Every existing installation keeps working with or without updating. That covers marketplace, TUI and hand-written configs.
-- One fewer published package, release carrier and CI publish step.
+- No plugin depends on an npm publish, while a hand-written stdio setup stays one `npx` line.
 
 **Non-Goals:**
 
@@ -59,15 +59,15 @@ The bridge needs all six modules: `bridge.mjs` imports `rembric-project.mjs`, wh
 
 Alternative considered: remove the files with the last client and leave the block. Rejected because it would leave an MCP entry pointing at a deleted file.
 
-### D6. Stop publishing `@rembric/mcp-bridge`, deprecate after release
+### D6. Keep publishing the bridge for hand-written configs
 
-The publish step and `scripts/mcp-bridge-package.mjs` are deleted. `apps/plugin/mcp-bridge/package.json` gains `"private": true`, so an accidental `npm publish` fails. `mcp-bridge/package.json` stays a version carrier so the files keep a version identity. The two `mcp.json` JSONPath carriers go away with the pins. Once the first plugin release containing this change has been released and verified, the owner runs `npm deprecate @rembric/mcp-bridge "use the Rembric installer"`. npm keeps every published version installable, so pinned `npx` configs continue to resolve.
+`@rembric/mcp-bridge` keeps being published on every plugin release, exactly as before: the `publish-npm` job, `scripts/mcp-bridge-package.mjs assert-pack`, the `files` allowlist and the `mcp-bridge/package.json` version carrier all stay. The two `mcp.json` JSONPath carriers go away with the pins, because neither manifest names a version any more. No plugin spawns the published package, so its publish time no longer matters to any plugin. It exists for configurations written by hand: stdio-only clients and Hermes configured without the TUI use `npx -y @rembric/mcp-bridge@<version>`. The docs show that form with an exact-version placeholder, never a floating tag.
 
-Alternative considered: keep publishing as a convenience. Rejected because it keeps the OIDC publish step, the pack assertion and the carriers for a path the TUI replaces. Deprecating before the release, rejected because every client would see the warning while still depending on the package.
+Alternative considered: stop publishing and deprecate the package once a release with this change is verified. Rejected by the owner: a manual stdio setup would need six downloaded files instead of one `npx` line, and existing `npx` installs would freeze at the last published version. Keeping it costs one publish step and one pack assertion that already exist.
 
-### D7. A frozen copy of the last published bridge guards the server contract
+### D7. A frozen copy of the 0.45.1 bridge guards the server contract
 
-Installs that never update keep an old bridge while the server moves on. The bridge forwards JSON-RPC verbatim, so tool changes do not affect it; it depends only on the `/mcp` endpoints and protocol version, `POST /api/repositories/resolve`, the two `X-Rembric-*` request headers and bearer auth. The server has no minimum-bridge-version check, so a breaking change there would surface as an unexplained connection or project error. The six `.mjs` files of `@rembric/mcp-bridge@0.45.1` (the last version published) are committed under `apps/web/src/test/fixtures/mcp-bridge-0.45.1/` with a checksum manifest taken from the npm tarball. A test spawns that fixture as a subprocess against a server started from the current tree and drives `initialize`, `tools/list`, a `tools/call`, and a fingerprint-resolved connection. The fixture directory is excluded from ESLint and Prettier (the invariant scans pass with it present), and a checksum assertion keeps it from being edited.
+Installs that never update keep an old bridge while the server moves on. The bridge forwards JSON-RPC verbatim, so tool changes do not affect it; it depends only on the `/mcp` endpoints and protocol version, `POST /api/repositories/resolve`, the two `X-Rembric-*` request headers and bearer auth. The server has no minimum-bridge-version check, so a breaking change there would surface as an unexplained connection or project error. The six `.mjs` files of `@rembric/mcp-bridge@0.45.1` (the last version published before the plugins stopped spawning the package, so the version installs that never update keep running) are committed under `apps/web/src/test/fixtures/mcp-bridge-0.45.1/` with a checksum manifest taken from the npm tarball. A test spawns that fixture as a subprocess against a server started from the current tree and drives `initialize`, `tools/list`, a `tools/call`, and a fingerprint-resolved connection. The fixture directory is excluded from ESLint and Prettier (the invariant scans pass with it present), and a checksum assertion keeps it from being edited.
 
 Alternatives considered: fetch the tarball from npm in CI, rejected because tests must run offline and the repository denies install-time network by default. A server-side minimum-version refusal, rejected because it makes the break explicit without preventing it. Testing only the current bridge, rejected because the current bridge changes together with the server and so proves nothing about old installs.
 
@@ -79,7 +79,7 @@ Every switch to the `node` form rides on an update the user already performs, an
 - opencode: the installer that replaces `rembric.ts` is the one that places the bridge. `rembric.ts` already cannot load without the libraries that installer puts in `~/.config/rembric/bin/`, so the plugin never had a mode that works without it. The installer writes `rembric.ts` last, after every bridge file is in place.
 - Hermes: the TUI update that already rewrites the MCP block is the one that places the bridge and migrates it.
 
-An install that skips the update, or updates by a path that does not touch the MCP entry (`hermes plugins update`, a hand-written config), keeps its `npx` entry. That entry keeps resolving from npm and keeps working against newer servers under D7. No code path removes or disables a working `npx` entry without a working replacement in place, and nothing in the server refuses an old bridge.
+An install that skips the update, or updates by a path that does not touch the MCP entry (`hermes plugins update`, a hand-written config), keeps its `npx` entry. That entry keeps resolving from npm, where the package is still published, and keeps working against newer servers under D7. No code path removes or disables a working `npx` entry without a working replacement in place, and nothing in the server refuses an old bridge.
 
 Alternative considered: have new plugin versions refuse to start until the user migrates. Rejected because users who do not migrate would lose memory for no benefit to them.
 
@@ -87,20 +87,19 @@ Alternative considered: have new plugin versions refuse to start until the user 
 
 - [Trade-off] The server's bridge-facing surface can only grow. → Accepted; it is small, and a deliberate break stays possible through an OpenSpec change that names the versions it breaks.
 
-- [Risk] Hand-written `npx -y @rembric/mcp-bridge@X` configs freeze at the last published version, and a future server change could stop supporting that bridge. → Mitigation: the deprecation message points to the installer, the bridge's existing advisory version check still runs, and the docs give the replacement.
-- [Risk] npm prints the deprecation warning on every `npx` run of a deprecated version. If it reached stdout it would corrupt the MCP stream. → Mitigation: owner task 8.2 verifies the warning goes to stderr with a known deprecated package. The deprecation is not issued until that check passes.
+- [Risk] Hand-written `npx -y @rembric/mcp-bridge@<version>` configs track npm as before: they run the exact version they name until their owner bumps it, and a future server change could stop supporting an old one. → Mitigation: D7 keeps the server compatible with released bridges, and the bridge's existing advisory version check still runs.
+- [Risk] A hand-written Hermes block identical to the one the installer used to write cannot be told apart from it, so a TUI update migrates it to the `node` form. → Accepted: the result is equivalent, a backup is taken, and any other shape is left untouched.
 - [Risk] A Codex release could stop setting the MCP child's cwd to the plugin directory. → Mitigation: the e2e real-client layer probes Codex on every installer or distribution change. The bridge also fails loudly ("Cannot find module"), not silently.
 - [Risk] The Hermes or opencode bridge download fails half-way. → Mitigation: D2's write-then-rename, D3's presence check, and a Hermes migration that runs only after a complete download.
 - [Trade-off] Hermes and opencode now depend on the TUI (or the per-client script) to refresh the bridge. → Accepted because the TUI is already the single install and update path, and it already writes Hermes's MCP pin today.
-- [Trade-off] Someone configuring the bridge entirely by hand must download six files instead of naming a package. → Accepted; the docs say to use the installer.
 
 ## Migration Plan
 
 1. Merge. Claude and Codex users get the `node` entry on their next plugin update. Until then their old `npx` pin keeps resolving from npm.
 2. TUI update for opencode and Hermes: download the bridge, then switch the hook or migrate the config block.
-3. Verify the released plugin end to end (tasks section 6). Then the owner deprecates the npm package.
-4. Rollback: revert the commit. The old `npx` pins resolve again for every version up to the last one published. A version released after this change was never published, so a rollback must ship a new plugin release, which republishes.
+3. Verify the released plugin end to end (tasks section 7), and confirm after the release that each client's MCP server connects at once (task 8.1).
+4. Rollback: revert the commit and ship a new plugin release. The restored `npx` pins name versions that keep being published, so they resolve as before.
 
 ## Open Questions
 
-None. The deprecation timing is owner-gated in tasks.
+None.

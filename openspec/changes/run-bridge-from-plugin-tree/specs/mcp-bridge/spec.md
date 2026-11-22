@@ -1,16 +1,18 @@
 ## ADDED Requirements
 
-### Requirement: Every spawn site MUST run the bridge shipped with the same release as its launcher
+### Requirement: Every plugin and installer spawn site MUST run the bridge shipped with the same release as its launcher
 
-Every place that spawns the bridge SHALL run the copy of the `apps/plugin/mcp-bridge/` files shipped with the same release as the manifest or installer that launches it, invoked as `node <path>/cli.mjs`. The bridge then arrives in the same commit as the manifest that launches it, so no client can install a plugin version whose bridge is unavailable.
+Every place this repository's plugins or installer spawn the bridge SHALL run the copy of the `apps/plugin/mcp-bridge/` files shipped with the same release as the manifest or installer that launches it, invoked as `node <path>/cli.mjs`. The bridge then arrives in the same commit as the manifest that launches it, so no client can install a plugin version whose bridge is unavailable, however late the published package reaches npm.
 
 The spawn sites are:
 
 - **Claude Code**: `.claude-plugin/mcp.json` SHALL spawn `command: "node"` with `args: ["${CLAUDE_PLUGIN_ROOT}/mcp-bridge/cli.mjs"]`, which resolves inside the installed plugin copy.
 - **Codex CLI**: `.codex-plugin/mcp.json` SHALL spawn `command: "node"` with `args: ["./mcp-bridge/cli.mjs"]` and `cwd: "."`, so the path resolves against the installed plugin directory. Its `env_vars` SHALL keep forwarding `PWD`, because the child's cwd is the plugin directory and `PWD` is what carries the user's project.
-- **opencode and Hermes Agent**: the rembric MCP entry SHALL spawn `node` with `~/.config/rembric/bin/cli.mjs`. The TUI installer SHALL place the bridge's files in `~/.config/rembric/bin/`, fetched from the same ref as the rest of that client's files.
+- **opencode and Hermes Agent**: the rembric MCP entry that the opencode config hook sets and that the TUI installer writes for Hermes SHALL spawn `node` with `~/.config/rembric/bin/cli.mjs`. The TUI installer SHALL place the bridge's files in `~/.config/rembric/bin/`, fetched from the same ref as the rest of that client's files.
 
-No spawn site SHALL run the bridge through `npx` or fetch it from the npm registry, and no configuration block the documentation prescribes SHALL do so. Exact versioning is kept by construction rather than by a pin: new bridge code reaches a user only through a deliberate plugin release, because the bridge is part of that release.
+None of these spawn sites SHALL run the bridge through `npx` or fetch it from the npm registry. Exact versioning is kept by construction rather than by a pin: new bridge code reaches a plugin user only through a deliberate plugin release, because the bridge is part of that release.
+
+A configuration the user writes by hand is not a spawn site the repository ships. It MAY run the published package with `npx -y @rembric/mcp-bridge@<version>`; this is the documented setup for stdio-only clients and for Hermes Agent configured without the TUI installer. Documentation that shows that form SHALL name an exact version as a placeholder, never `@latest` or another floating tag, because `npx` re-resolves a floating tag on every session start.
 
 #### Scenario: Claude Code spawns the plugin-local bridge
 
@@ -31,17 +33,23 @@ No spawn site SHALL run the bridge through `npx` or fetch it from the npm regist
 - **THEN** the entry SHALL spawn `node` with `~/.config/rembric/bin/cli.mjs`, with `~` expanded to the user's home directory
 - **AND** the bridge files in `~/.config/rembric/bin/` SHALL come from the same ref as that client's other installed files
 
-#### Scenario: No spawn site uses npx or the npm registry
+#### Scenario: No plugin or installer spawn site uses npx or the npm registry
 
-- **WHEN** every spawn site the repository ships and every configuration block its documentation prescribes are read
+- **WHEN** the plugin manifests, the opencode config hook and every MCP block the installers write or print are read
 - **THEN** none SHALL invoke `npx` for the bridge
 - **AND** none SHALL name an `@rembric/mcp-bridge@<version>` package specifier
 
+#### Scenario: A documented hand-written configuration names an exact version
+
+- **WHEN** documentation shows a hand-written configuration that runs `npx -y @rembric/mcp-bridge@<version>`
+- **THEN** the version SHALL be an exact-version placeholder
+- **AND** it SHALL NOT be `@latest` or any other floating tag
+
 ## MODIFIED Requirements
 
-### Requirement: The bridge is the single client-side piece, shipped as files inside the plugin component
+### Requirement: The bridge is the single client-side piece, published as a package inside the plugin component
 
-The repository SHALL own the whole client side of the MCP connection in one set of zero-dependency files at `apps/plugin/mcp-bridge/`, shipped in the plugin tree and run with `node <path>/cli.mjs`. The bridge SHALL NOT be published to a package registry: `apps/plugin/mcp-bridge/package.json` SHALL declare `"private": true`, so an accidental `npm publish` fails. The bridge SHALL be responsible for project-directory resolution, `.rembric` slug resolution, URL building, the startup stderr diagnostic, the advisory server-version warning, bearer injection, and the stdio↔Streamable-HTTP MCP transport. It SHALL NOT implement protocol-session recovery or relay server-initiated requests: the server mints no `Mcp-Session-Id` and initiates no request.
+The repository SHALL own the whole client side of the MCP connection in one set of zero-dependency files at `apps/plugin/mcp-bridge/`, distributed two ways from the same files: shipped in the plugin tree, where the plugins and the installer run it with `node <path>/cli.mjs`, and published to npm as `@rembric/mcp-bridge`, for configurations written by hand. The plugins SHALL NOT depend on the published package. The bridge SHALL be responsible for project-directory resolution, `.rembric` slug resolution, URL building, the startup stderr diagnostic, the advisory server-version warning, bearer injection, and the stdio↔Streamable-HTTP MCP transport. It SHALL NOT implement protocol-session recovery or relay server-initiated requests: the server mints no `Mcp-Session-Id` and initiates no request.
 
 There SHALL NOT be a second component that resolves the URL and then hands off to this one. The two-piece shape it replaces existed because the transport engine was third-party and could not be told to read a `.rembric` file; with the engine owned, a wrapper whose only job is to compute an argument for it has no independent reason to exist, and it carried real cost — process spawning, a stdio relay, spawn-error handling, exit-code forwarding, terminating-signal re-raising, and one extra process per session.
 
@@ -55,15 +63,15 @@ The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which 
 
 - **WHEN** the repository is read at HEAD
 - **THEN** `apps/plugin/mcp-bridge/package.json` SHALL exist and SHALL declare `"name": "@rembric/mcp-bridge"`
-- **AND** `apps/plugin/mcp-bridge/package.json` SHALL declare `"private": true`
 - **AND** `pnpm-workspace.yaml::packages` SHALL contain an entry matching `apps/plugin/mcp-bridge`
 - **AND** the directory name SHALL NOT match `\.[\w-]+-plugin`
 
-#### Scenario: A plugin release publishes no bridge package
+#### Scenario: The plugins ship the same bridge the release publishes
 
-- **WHEN** a `plugin` release runs to completion
-- **THEN** no version of `@rembric/mcp-bridge` SHALL be published to npm
-- **AND** an `npm publish` run from `apps/plugin/mcp-bridge/` SHALL fail because the manifest is private
+- **WHEN** a `plugin` release cuts version `X.Y.Z`
+- **THEN** the plugin tree at the `plugin-vX.Y.Z` tag SHALL contain the bridge files under `apps/plugin/mcp-bridge/`
+- **AND** `@rembric/mcp-bridge@X.Y.Z` SHALL be published from those same files
+- **AND** no plugin SHALL need that publish to complete before its MCP server can start
 
 #### Scenario: A bridge-only commit causes a plugin release
 
@@ -86,7 +94,7 @@ The directory name SHALL NOT match `\.[\w-]+-plugin` — the pattern from which 
 
 ### Requirement: The bridge takes no arguments; its entire contract is the environment
 
-The package SHALL expose exactly one executable, `cli.mjs`, invoked as `node <path>/cli.mjs` with nothing after the script path, and that executable SHALL accept **no command-line arguments**.
+The package SHALL expose exactly one executable, `cli.mjs`, run by the plugins as `node <path>/cli.mjs` with nothing after the script path and resolvable by `npx @rembric/mcp-bridge@<version>` with no bin-name argument, and that executable SHALL accept **no command-line arguments**.
 
 Its inputs are three environment variables and the host binding:
 
@@ -112,9 +120,8 @@ When `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` is absent or empty, the bridge 
 
 #### Scenario: npx resolves the executable without a bin name
 
-- **GIVEN** a hand-written configuration that runs `npx -y @rembric/mcp-bridge@<version>` for a version that was published to npm
-- **WHEN** it is run with the required environment set
-- **THEN** that version's single executable SHALL start
+- **WHEN** `npx -y @rembric/mcp-bridge@<version>` is run with the required environment set
+- **THEN** the package's single executable SHALL start
 - **AND** no `--package`/bin-name disambiguation argument SHALL be required
 
 #### Scenario: A plain-HTTP endpoint is accepted with no flag
@@ -146,7 +153,7 @@ When `REMBRIC_SERVER_URL` or `REMBRIC_API_TOKEN` is absent or empty, the bridge 
 
 ### Requirement: The bridge declares no runtime dependencies
 
-`apps/plugin/mcp-bridge/package.json` SHALL declare an empty `dependencies` object, and every module shipped under `apps/plugin/mcp-bridge/` SHALL import only the bridge's other modules and `node:` built-ins. The bridge SHALL implement the stdio framing, the HTTP requests, and the SSE response parsing against Node's own built-ins, and SHALL NOT depend on `@modelcontextprotocol/sdk` or on any other package at runtime.
+`@rembric/mcp-bridge` SHALL declare an empty `dependencies` object, and every module shipped under `apps/plugin/mcp-bridge/` SHALL import only the bridge's other modules and `node:` built-ins. The bridge SHALL implement the stdio framing, the HTTP requests, and the SSE response parsing against Node's own built-ins, and SHALL NOT depend on `@modelcontextprotocol/sdk` or on any other package at runtime.
 
 The alternative — one exact-pinned dependency on the SDK's client transports — was specified first and reversed on measurement. In a clean directory (`npm install --ignore-scripts`), `mcp-remote@0.1.38` installs 80 packages / 7.0 MB while `@modelcontextprotocol/sdk@1.29.0` installs 93 packages / 25 MB, because the SDK declares `express`, `hono`, `cors`, `jose`, `eventsource` and `express-rate-limit` in `dependencies` rather than as peers. A replacement whose purpose includes reducing what a user's machine executes cannot ship a larger tree than the thing it replaces, and none of that surface is reachable from a stdio proxy.
 
@@ -154,15 +161,21 @@ Zero dependencies also discharges the message-pipe requirement above by construc
 
 This is not a novel burden for this repository. `apps/plugin/.pi-plugin/index.ts` already ships a Streamable HTTP MCP client with `dependencies: {}`, including SSE frame parsing, and the prototype recorded in `measurements/prototype-zerodep.mjs` demonstrated the one mechanism that had no precedent there: relaying a server-initiated request to the host. That relay has since been removed, because the server no longer initiates any request.
 
-This capability owns the bridge's zero-dependency rule. The bridge is not a published package, so `supply-chain-hygiene`'s rules for published packages do not reach it, and the rule holds regardless: every client that spawns the bridge executes these files on the user's machine. What the bridge owns instead of a dependency is bounded: newline-delimited stdio framing, `fetch` with a bearer header, and `data:` line parsing on the response stream. It does **not** own SSE resumability or `Last-Event-ID` (this server does not offer resumable streams), nor OAuth, nor the server half of the protocol. Zero SHALL NOT be reached by vendoring or bundling a third-party package: a bundled copy hides its version from a consumer's advisory tooling, while first-party code carries no such blind spot because there is no upstream version for tooling to miss.
+The rule covers both distributions, and the shipped files are the stricter case: a plugin copy and `~/.config/rembric/bin/` hold the bridge files with no `node_modules` directory beside them, so a bare package import would fail there.
 
 #### Scenario: The manifest declares no runtime dependencies
 
 - **WHEN** `apps/plugin/mcp-bridge/package.json` is read
 - **THEN** `dependencies` SHALL be absent or an empty object
-- **AND** the files under `apps/plugin/mcp-bridge/` SHALL NOT contain a vendored or bundled copy of any third-party package
+- **AND** neither the files under `apps/plugin/mcp-bridge/` nor the published tarball SHALL contain a vendored or bundled copy of any third-party package
 
 #### Scenario: A consumer's install adds nothing but the bridge
+
+- **WHEN** `@rembric/mcp-bridge` is installed into an empty directory with lifecycle scripts disabled
+- **THEN** the resulting tree SHALL contain exactly one package
+- **AND** its measured size SHALL be recorded against the 80 packages / 7.0 MB the replaced delegate installs
+
+#### Scenario: A plugin or installer copy runs without installing anything
 
 - **WHEN** a client installation places the bridge files, either in an installed plugin copy or in `~/.config/rembric/bin/`
 - **THEN** it SHALL install no package for the bridge and SHALL create no `node_modules` directory for it
@@ -202,7 +215,7 @@ On every request it forwards, `initialize` included, the bridge SHALL read `<hom
 
 The bridge SHALL NOT write or delete binding files. On `win32` it SHALL record no chain and send no header.
 
-The start token, the directory, the lookup, and the publish and remove used by the opencode plugin SHALL live in one module, `apps/plugin/mcp-bridge/rembric-host-binding.mjs`, shipped with the bridge's other files, and its constants SHALL be asserted against the shared layout fixture `apps/plugin/test/host-binding-layout.json`. The invariant test SHALL fail when another JS/TS plugin file defines them.
+The start token, the directory, the lookup, and the publish and remove used by the opencode plugin SHALL live in one module, `apps/plugin/mcp-bridge/rembric-host-binding.mjs`, shipped with the bridge's other files in the plugin tree and in the published package, and its constants SHALL be asserted against the shared layout fixture `apps/plugin/test/host-binding-layout.json`. The invariant test SHALL fail when another JS/TS plugin file defines them.
 
 #### Scenario: A bound host's session is sent on every request
 
@@ -250,11 +263,6 @@ The start token, the directory, the lookup, and the publish and remove used by t
 
 ### Requirement: Every spawn site MUST pin an exact bridge version
 
-**Reason**: No spawn site fetches the bridge from npm any more, so there is no package specifier to pin. Every spawn site runs the bridge files shipped in the same release as its launcher, which keeps the property the pin protected — new bridge code reaches a user only through a deliberate plugin release — by construction, and also removes the window between a plugin release becoming installable and its pinned bridge version being served by npm.
+**Reason**: No spawn site the repository ships fetches the bridge from npm any more, so no repository file carries a package specifier to pin or a pin for release-please to rewrite. Every plugin and installer spawn site runs the bridge files shipped in the same release as its launcher, which keeps the property the pin protected (new bridge code reaches a plugin user only through a deliberate plugin release) by construction, and also removes the window between a plugin release becoming installable and its pinned bridge version being served by npm. The package is still published, and the exact-version rule for documented hand-written configurations moves into "Every plugin and installer spawn site MUST run the bridge shipped with the same release as its launcher".
 
-**Migration**: The Claude Code and Codex manifests switch from `npx -y @rembric/mcp-bridge@<x.y.z>` to `node` with the plugin-local `mcp-bridge/cli.mjs`; opencode and Hermes Agent switch to `node ~/.config/rembric/bin/cli.mjs`, placed by the TUI installer. The executable checks that asserted every pin equal to the plugin version are replaced by checks that every spawn site runs the plugin-local copy, as "Every spawn site MUST run the bridge shipped with the same release as its launcher" specifies. Hand-written configurations that pin a previously published version keep resolving that version from npm.
-
-## RENAMED Requirements
-
-- FROM: `### Requirement: The bridge is the single client-side piece, published as a package inside the plugin component`
-- TO: `### Requirement: The bridge is the single client-side piece, shipped as files inside the plugin component`
+**Migration**: The Claude Code and Codex manifests switch from `npx -y @rembric/mcp-bridge@<x.y.z>` to `node` with the plugin-local `mcp-bridge/cli.mjs`; opencode and Hermes Agent switch to `node ~/.config/rembric/bin/cli.mjs`, placed by the TUI installer. The executable checks that asserted every pin equal to the plugin version are replaced by checks that every plugin and installer spawn site runs the plugin-local copy and that no operational file pins a numeric bridge version. Hand-written configurations keep running the published package at the exact version they name.
