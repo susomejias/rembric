@@ -139,9 +139,9 @@ The runtime cost of the index SHALL stay negligible against the vector index it 
 
 ### Requirement: A bare dotted token MUST be a path only by closed dotfile-name membership
 
-The `path` kind's bare-dotted-token form exists to catch dotfiles that carry no directory component: `.rembric` at a repository root is a real address. Admitting any dotted token of sufficient length instead extracts prose. Four such extractions were observed in a production index: `.length` is a property access, `.child` is an identifier fragment, `.sql` is a file TYPE rather than a file, and `.HERMES` is the generic placeholder session title this product's own session bookkeeping mints. None is an address, and none appeared alongside a path — a following `/` fails the form's lookahead, so the form fires only where no path exists.
-
 A bare dotted token — one carrying no directory separator — SHALL be extracted as a `path` only when the FIRST dot-separated segment of the token, minus its leading dot, is a member of a closed list of known dotfile NAMES.
+
+The `path` kind's bare-dotted-token form exists to catch dotfiles that carry no directory component: `.rembric` at a repository root is a real address. Admitting any dotted token of sufficient length instead extracts prose. Four such extractions were observed in a production index: `.length` is a property access, `.child` is an identifier fragment, `.sql` is a file TYPE rather than a file, and `.HERMES` is the generic placeholder session title this product's own session bookkeeping mints. None is an address, and none appeared alongside a path — a following `/` fails the form's lookahead, so the form fires only where no path exists.
 
 Membership SHALL be on that first segment rather than on the whole token, so a listed name may carry further segments: `.env.example` and `.mcp.json` are real files that appear in this repository's own README and specs, and an exact-token test would withhold exactly the identifiers this kind exists to address. Segmenting is what keeps the widening safe — a longer word that merely begins with a listed name has that whole word as its first segment, so `.envelope` is not admitted by `.env` being listed. A token bearing an EMPTY later segment — a doubled dot, as in `.env..example` — SHALL be rejected, because no filename has one.
 
@@ -395,9 +395,11 @@ Two memories can contradict each other while sharing almost no vocabulary and si
 
 Candidates surfaced this way SHALL carry a source identifying the entity channel, so the agent judging them knows why they were proposed. An entity common enough to occupy the whole per-save candidate budget SHALL NOT generate candidates.
 
+What a surfaced entity pair costs the agent is decided by its confidence band (see the `memory` capability, "Save-time candidates MUST be classified into confidence bands by one shared function"). An entity-only pair whose cosine is known and below `VEC_THRESHOLD` is in the low band. It SHALL be surfaced as a related memory, still carrying the entity source and the shared value, and SHALL NOT receive a pending row. On one real installation's judged pairs that band was 1% actionable, against about 9% overall (issue #467). An entity-only pair whose cosine is unknown, or one the dense channel also admits, SHALL remain a candidate. "Surfaced" in this requirement's scenarios means returned as a candidate or, for a low-band pair, as a related memory. The channel keeps its purpose wherever the dense branch cannot speak: when either memory has no vector, the pair stays a candidate.
+
 Rarity SHALL be measured over the population candidates are drawn from. BOTH sides of the proportion — the per-entity link count and the scope total it is divided by — SHALL count only memories whose `status` is `active`, excluding `superseded` and `archived` rows alike. Counting non-`active` rows is not a conservative approximation of that measurement, because a non-`active` row is never returned as a candidate: it makes the gate reject entities that cannot distort anything.
 
-What the gate protects is COMPOSITION, not volume. Volume is bounded unconditionally by the per-save candidate maximum, gate or no gate. Composition is bounded by nothing else: entity-sourced candidates lead the merged list (see below), so a ubiquitous entity takes every slot and the lexical and dense channels contribute nothing. Only a memory that can OCCUPY a slot can starve another channel, and only an `active` memory can occupy one — which is what makes the `active` population derivable from the gate's purpose rather than merely asserted.
+What the gate protects is COMPOSITION, not volume. Volume is bounded unconditionally by the per-save candidate maximum, gate or no gate. Composition is bounded by nothing else: entity-sourced candidates lead the merged list (see below), so a ubiquitous entity takes every slot and the lexical and dense channels contribute nothing. Only a memory that can OCCUPY a slot can starve another channel, and only an `active` memory can occupy one — which is what makes the `active` population derivable from the gate's purpose rather than merely asserted. A low-band entity pair occupies no candidate slot, so the composition defect described below is confined to entity pairs in the middle band.
 
 That population is load-bearing rather than pedantic, because the non-`active` population grows without bound. A `superseded` memory is never physically purged while a successor references it, and `topic_key` convergence concentrates a long-lived topic's entire superseded chain onto the SAME entity values — the same path, the same error code. Measuring rarity over non-`active` rows therefore drives the proportion up in proportion to a topic's age, and the channel SHALL NOT become inert on an evolving topic for that reason.
 
@@ -419,7 +421,7 @@ Because that measure is near zero for exactly the pairs this channel exists to f
 
 - **GIVEN** an active memory stating one approach for a specific file, and a new memory stating an incompatible approach for the same file, with little shared vocabulary
 - **WHEN** the new memory is saved
-- **THEN** the existing memory SHALL be surfaced as a candidate with the entity channel as its source
+- **THEN** the existing memory SHALL be surfaced with the entity channel as its source: as a candidate when the pair's cosine is unknown or at least `VEC_THRESHOLD`, and as a related memory otherwise
 
 #### Scenario: A very common entity generates no candidates
 
@@ -431,7 +433,7 @@ Because that measure is near zero for exactly the pairs this channel exists to f
 
 - **GIVEN** a scope holding three `active` memories, exactly one of them linked to an entity, so that the entity's share of the `active` population exceeds the rarity threshold while its link count is below the compile-time link minimum
 - **WHEN** a new memory linked to that same entity is saved
-- **THEN** that memory SHALL be surfaced as a candidate with the entity channel as its source
+- **THEN** that memory SHALL be surfaced with the entity channel as its source
 
 #### Scenario: The link minimum does not exempt an entity that reaches it
 
@@ -449,7 +451,7 @@ Because that measure is near zero for exactly the pairs this channel exists to f
 
 - **GIVEN** an entity linked to one `active` memory and to many `superseded` memories forming a single `topic_key` chain, such that its share of the scope's non-archived memories exceeds the rarity threshold while its share of the scope's `active` memories is far below it
 - **WHEN** a new memory linked to that entity is saved
-- **THEN** that entity SHALL generate the `active` memory as a candidate, carrying the entity channel as its source
+- **THEN** that entity SHALL surface the `active` memory, carrying the entity channel as its source
 
 #### Scenario: Archived memories are counted on neither side
 
@@ -467,7 +469,13 @@ Because that measure is near zero for exactly the pairs this channel exists to f
 - **GIVEN** a near-duplicate of the saved memory and an entity match sharing the identifier but almost no vocabulary
 - **WHEN** candidates are detected
 - **THEN** the entity candidate's reported `similarity` SHALL be the low text-likeness value and the near-duplicate's SHALL be higher
-- **AND** the entity candidate SHALL still be first in the list, and SHALL survive a per-save maximum of one
+- **AND** the entity pair SHALL still be first in the list it is returned in (`candidates[]`, or the related memories when it is in the low band), and SHALL survive a per-save maximum of one
+
+#### Scenario: An entity-only pair with a known low cosine is related, not judged
+
+- **GIVEN** an active memory sharing a rare entity with a just-saved memory, both with vectors, at a cosine below `VEC_THRESHOLD`, and not admitted lexically
+- **WHEN** the new memory is saved
+- **THEN** the existing memory SHALL be returned as a related memory carrying `source: 'entity'` and the shared value, and no pending `memory_relations` row SHALL exist for the pair
 
 ### Requirement: The entity index MUST be rebuildable and its drift MUST be observable
 
