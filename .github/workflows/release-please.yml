@@ -9,6 +9,10 @@ on:
         description: 'Force publish the current main even if no release was created (server only)'
         type: boolean
         default: false
+      plugin_release_tag:
+        description: 'Promote, or roll back, plugin-release to this plugin-vX.Y.Z tag'
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -37,6 +41,7 @@ jobs:
       server_release_created: ${{ steps.release.outputs.release_created }}
       server_tag_name: ${{ steps.release.outputs.tag_name }}
       plugin_release_created: ${{ steps.release.outputs['apps/plugin--release_created'] }}
+      plugin_tag_name: ${{ steps.release.outputs['apps/plugin--tag_name'] }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -118,3 +123,73 @@ jobs:
 
       - name: Publish @rembric/mcp-bridge if the exact version is missing
         run: node scripts/npm-publish.mjs apps/plugin/mcp-bridge
+
+  promote-plugin-release:
+    # Clients install the plugin from `plugin-release`, never from main, so a
+    # release is offered only once its exact-pinned bridge is on npm. A dispatch
+    # with `plugin_release_tag` promotes or rolls back to any plugin-v* tag.
+    needs: [release-please, publish-npm]
+    if: ${{ !cancelled() && ((needs.release-please.outputs.plugin_release_created == 'true' && needs.publish-npm.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.plugin_release_tag != '')) }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: promote-plugin-release-${{ github.ref }}
+      cancel-in-progress: false
+      queue: max
+    # The ref write goes through the App token below, the only ruleset bypass
+    # actor; GITHUB_TOKEN only reads.
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve the target and check its bridge is on npm
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.plugin_release_tag || needs.release-please.outputs.plugin_tag_name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$TAG" | grep -Eq '^plugin-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::not a plugin release tag: '$TAG'"
+            exit 1
+          fi
+          target=$(gh api "repos/$REPO/commits/$TAG" --jq .sha)
+          version=$(gh api "repos/$REPO/contents/apps/plugin/mcp-bridge/package.json?ref=$target" --jq .content | base64 -d | jq -r .version)
+          published=$(curl -fsS --max-time 30 --retry 3 "https://registry.npmjs.org/@rembric%2fmcp-bridge/$version" | jq -r .version) || published=''
+          if [ "$published" != "$version" ]; then
+            echo "::error::@rembric/mcp-bridge@$version is not on npm; $TAG stays unpromoted"
+            exit 1
+          fi
+          if ! current=$(gh api "repos/$REPO/git/ref/heads/plugin-release" --jq .object.sha); then
+            echo "::error::branch plugin-release is missing; create it at the latest plugin-v* tag first"
+            exit 1
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          if [ "$current" = "$target" ]; then
+            echo "plugin-release already at $TAG ($target)"
+            echo "move=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint the plugin-release App token
+        id: app-token
+        if: steps.resolve.outputs.move == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.PLUGIN_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PLUGIN_RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      # Automatic promotion only fast-forwards; a dispatched rollback is a
+      # non-fast-forward move, so only that path forces.
+      - name: Move plugin-release
+        if: steps.resolve.outputs.move == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          TARGET: ${{ steps.resolve.outputs.target }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.plugin_release_tag != '' }}
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/$REPO/git/refs/heads/plugin-release" -f sha="$TARGET" -F force="$FORCE" --jq .object.sha
