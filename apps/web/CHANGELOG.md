@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.33.0](https://github.com/susomejias/rembric/compare/server-v0.32.4...server-v0.33.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* engines.node rises from >=22.13 to >=26. With engine-strict, pnpm install refuses Node 22 and 24.
+
+### Build
+
+* run on the Node 26 LTS line ([d109625](https://github.com/susomejias/rembric/commit/d109625131ac10e92cb47afedf2d8c6c9b96993c)), closes [#363](https://github.com/susomejias/rembric/issues/363)
+
 ## [0.32.4](https://github.com/susomejias/rembric/compare/server-v0.32.3...server-v0.32.4) (2026-11-22)
 
 
