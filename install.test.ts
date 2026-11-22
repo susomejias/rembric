@@ -270,7 +270,13 @@ function nativeFixture(version = '0.0.1'): void {
   );
 }
 
-function nativeRun(action: string, yes = true, failure = false, absent = false) {
+function nativeRun(
+  action: string,
+  yes = true,
+  failure = false,
+  absent = false,
+  env: Record<string, string> = {},
+) {
   const bin = join(home, 'bin');
   mkdirSync(bin, { recursive: true });
   if (!absent) {
@@ -282,15 +288,228 @@ function nativeRun(action: string, yes = true, failure = false, absent = false) 
   }
   writeFileSync(
     join(bin, 'curl'),
-    `#!/bin/sh\nfor arg do case "$arg" in https://raw.githubusercontent.com/susomejias/rembric/main/*) rel="\u0024{arg#https://raw.githubusercontent.com/susomejias/rembric/main/}" ;; esac; done\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp '${REPO_ROOT}/'"$rel" "$2"; exit; fi; shift; done\nexit 91\n`,
+    `#!/bin/sh\nfor arg do case "$arg" in https://raw.githubusercontent.com/susomejias/rembric/main/*) rel="\u0024{arg#https://raw.githubusercontent.com/susomejias/rembric/main/}" ;; esac; done\nif [ -n "\u0024{CURL_LOG:-}" ]; then printf '%s\\n' "$rel" >>"$CURL_LOG"; fi\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then if [ "$rel" = "\u0024{FAIL_REL:-}" ]; then printf partial >"$2"; exit 22; fi; cp '${REPO_ROOT}/'"$rel" "$2"; exit; fi; shift; done\nexit 91\n`,
   );
   chmodSync(join(bin, 'curl'), 0o755);
   return run(['--agent=hermes', `--action=${action}`, ...(yes ? ['--yes'] : [])], {
     home,
     path: `${bin}:${absent ? CORE_PATH : process.env.PATH}`,
-    env: { REMBRIC_SRC: '' },
+    env: { REMBRIC_SRC: '', ...env },
   });
 }
+
+const bridgeDir = (): string => join(home, '.config', 'rembric', 'bin');
+const repoModule = (name: string): string =>
+  readFileSync(join(REPO_ROOT, 'apps', 'plugin', 'mcp-bridge', name), 'utf8');
+const NODE_ENV_LINES =
+  '    env:\n      REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}\n      REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}\n      REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}\n    enabled: true\n';
+const COMPLETE_NPX_BLOCK = `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@0.45.1']\n${NODE_ENV_LINES}`;
+const nodeBlock = (): string =>
+  `mcp_servers:\n  rembric:\n    command: node\n    args: ['${join(bridgeDir(), 'cli.mjs')}']\n${NODE_ENV_LINES}`;
+
+function seedBridge(content?: (name: string) => string): void {
+  mkdirSync(bridgeDir(), { recursive: true });
+  for (const name of BRIDGE_MODULES) {
+    writeFileSync(join(bridgeDir(), name), content ? content(name) : repoModule(name));
+  }
+}
+
+describe('hermes bridge placement', () => {
+  it('install places the six bridge modules from the run ref and prints the node block', () => {
+    const log = join(home, 'curl.log');
+    const result = nativeRun('install', true, false, false, { CURL_LOG: log });
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(
+      'RAN:hermes plugins install susomejias/rembric/apps/plugin/.hermes-plugin --enable',
+    );
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bridgeDir(), name), 'utf8'), name).toBe(repoModule(name));
+      expect(statSync(join(bridgeDir(), name)).mode & 0o777, name).toBe(0o644);
+      expect(readFileSync(log, 'utf8')).toContain(`apps/plugin/mcp-bridge/${name}\n`);
+    }
+    expect(readdirSync(bridgeDir()).filter((name) => name.includes('.tmp'))).toEqual([]);
+    expect(result.out).toContain('        command: node\n');
+    expect(result.out).toContain(`        args: ['${join(bridgeDir(), 'cli.mjs')}']\n`);
+    expect(result.out).toContain('          REMBRIC_PROJECT_SLUG: ${REMBRIC_PROJECT_SLUG}\n');
+    expect(result.out).not.toContain('@rembric/mcp-bridge');
+    expect(existsSync(join(home, '.hermes', 'config.yaml'))).toBe(false);
+  });
+
+  it('update places the bridge before migrating the installer-written npx block', () => {
+    nativeFixture();
+    const config = join(home, '.hermes', 'config.yaml');
+    writeFileSync(config, COMPLETE_NPX_BLOCK);
+
+    const result = nativeRun('update');
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('RAN:hermes plugins update rembric');
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bridgeDir(), name), 'utf8'), name).toBe(repoModule(name));
+    }
+    expect(readFileSync(config, 'utf8')).toBe(nodeBlock());
+    expect(readFileSync(`${config}.rembric-mcp-npx.bak`, 'utf8')).toBe(COMPLETE_NPX_BLOCK);
+    expect(result.out).toContain('migrated mcp_servers.rembric');
+  });
+
+  it('a failed bridge download skips the migration and keeps the previous bridge', () => {
+    nativeFixture();
+    seedBridge((name) => `previous ${name}\n`);
+    const config = join(home, '.hermes', 'config.yaml');
+    writeFileSync(config, COMPLETE_NPX_BLOCK);
+
+    const result = nativeRun('update', true, false, false, {
+      FAIL_REL: 'apps/plugin/mcp-bridge/bridge.mjs',
+    });
+
+    expect(result.code).not.toBe(0);
+    expect(result.out).toContain('failed to fetch');
+    expect(result.out).toContain('MCP bridge');
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bridgeDir(), name), 'utf8'), name).toBe(`previous ${name}\n`);
+    }
+    expect(readdirSync(bridgeDir()).filter((name) => name.includes('.tmp'))).toEqual([]);
+    expect(readFileSync(config, 'utf8')).toBe(COMPLETE_NPX_BLOCK);
+    expect(existsSync(`${config}.rembric-mcp-npx.bak`)).toBe(false);
+    expect(result.out).not.toContain('RAN:hermes');
+    expect(result.out).not.toContain('migrated');
+    expect(result.out).not.toContain('gateway restart');
+  });
+
+  it('a rename that fails mid-commit leaves the previous cli.mjs and no staged file', () => {
+    nativeFixture();
+    seedBridge((name) => `previous ${name}\n`);
+    const config = join(home, '.hermes', 'config.yaml');
+    writeFileSync(config, COMPLETE_NPX_BLOCK);
+    mkdirSync(join(home, 'bin'), { recursive: true });
+    writeFileSync(
+      join(home, 'bin', 'mv'),
+      '#!/bin/sh\nfor last do :; done\ncase "$last" in */bridge.mjs) exit 1 ;; esac\nexec /bin/mv "$@"\n',
+    );
+    chmodSync(join(home, 'bin', 'mv'), 0o755);
+
+    const result = nativeRun('update');
+
+    expect(result.code).not.toBe(0);
+    expect(readFileSync(join(bridgeDir(), 'cli.mjs'), 'utf8')).toBe('previous cli.mjs\n');
+    expect(readFileSync(join(bridgeDir(), 'bridge.mjs'), 'utf8')).toBe('previous bridge.mjs\n');
+    expect(readdirSync(bridgeDir()).filter((name) => name.includes('.tmp'))).toEqual([]);
+    expect(readFileSync(config, 'utf8')).toBe(COMPLETE_NPX_BLOCK);
+    expect(result.out).not.toContain('RAN:hermes');
+  });
+
+  it('a headless run without --yes places nothing', () => {
+    nativeFixture();
+    const result = nativeRun('update', false);
+
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain('RAN:hermes');
+    expect(existsSync(join(home, '.config'))).toBe(false);
+  });
+
+  it('server artifacts are unaffected by the Hermes bridge placement', () => {
+    nativeRun('install', false);
+    const serverOnly = mkdtempSync(join(tmpdir(), 'rembric-server-only-'));
+    const opts = { home, path: `${home}/bin:${process.env.PATH}`, env: { REMBRIC_SRC: '' } };
+
+    const alone = run(['--server', '--action=install'], { ...opts, cwd: serverOnly });
+    expect(alone.code).toBe(0);
+    expect(existsSync(join(home, '.config'))).toBe(false);
+    const combined = run(['--server', '--agent=hermes', '--action=install', '--yes'], {
+      ...opts,
+      cwd: dir,
+    });
+    const compose = readFileSync(join(serverOnly, 'docker-compose.yml'), 'utf8');
+    rmSync(serverOnly, { recursive: true, force: true });
+
+    expect(combined.code).toBe(0);
+    expect(readFileSync(join(dir, 'docker-compose.yml'), 'utf8')).toBe(compose);
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toMatch(/^REMBRIC_ADMIN_TOKEN=[0-9a-f]{64}$/m);
+    expect(readFileSync(join(bridgeDir(), 'cli.mjs'), 'utf8')).toBe(repoModule('cli.mjs'));
+  });
+});
+
+describe('hermes uninstall and the shared bridge', () => {
+  it.each([
+    ['expanded', () => join(bridgeDir(), 'cli.mjs')],
+    ['tilde', () => '~/.config/rembric/bin/cli.mjs'],
+  ])('keeps the bridge while the preserved MCP block runs it (%s path)', (_, path) => {
+    nativeFixture();
+    seedBridge();
+    const config = join(home, '.hermes', 'config.yaml');
+    const block = `mcp_servers:\n  rembric:\n    command: node\n    args: ['${path()}']\n${NODE_ENV_LINES}`;
+    writeFileSync(config, block);
+
+    const result = nativeRun('uninstall');
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('RAN:hermes plugins remove rembric');
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bridgeDir(), name), 'utf8'), name).toBe(repoModule(name));
+    }
+    expect(readFileSync(config, 'utf8')).toBe(block);
+    expect(result.out).toContain('kept for Hermes');
+    expect(result.out).toContain(join(bridgeDir(), 'cli.mjs'));
+  });
+
+  it('removes the bridge when no remaining client uses it', () => {
+    nativeFixture();
+    seedBridge();
+    const config = join(home, '.hermes', 'config.yaml');
+    writeFileSync(config, 'unrelated: keep\n');
+
+    const result = nativeRun('uninstall');
+
+    expect(result.code).toBe(0);
+    for (const name of BRIDGE_MODULES)
+      expect(existsSync(join(bridgeDir(), name)), name).toBe(false);
+    expect(existsSync(join(home, '.config', 'rembric'))).toBe(false);
+    expect(readFileSync(config, 'utf8')).toBe('unrelated: keep\n');
+    expect(result.out).toContain(`Removed bridge:`);
+    expect(result.out).toContain(join(bridgeDir(), 'cli.mjs'));
+  });
+
+  it('keeps a bridge directory that still holds other files', () => {
+    nativeFixture();
+    seedBridge();
+    writeFileSync(join(bridgeDir(), 'operator-note'), 'keep\n');
+
+    const result = nativeRun('uninstall');
+
+    expect(result.code).toBe(0);
+    for (const name of BRIDGE_MODULES)
+      expect(existsSync(join(bridgeDir(), name)), name).toBe(false);
+    expect(readFileSync(join(bridgeDir(), 'operator-note'), 'utf8')).toBe('keep\n');
+  });
+
+  it('keeps the bridge while opencode is installed', () => {
+    expect(run(['--agent=opencode', '--action=install'], { home }).code).toBe(0);
+    nativeFixture();
+    writeFileSync(join(home, '.hermes', 'config.yaml'), 'unrelated: keep\n');
+
+    const result = nativeRun('uninstall');
+
+    expect(result.code).toBe(0);
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bridgeDir(), name), 'utf8'), name).toBe(repoModule(name));
+    }
+    expect(existsSync(join(home, '.config', 'opencode', 'plugins', 'rembric.ts'))).toBe(true);
+    expect(result.out).toContain('kept for opencode');
+  });
+
+  it('a failed native removal leaves the bridge untouched', () => {
+    nativeFixture();
+    seedBridge();
+
+    const result = nativeRun('uninstall', true, true);
+
+    expect(result.code).not.toBe(0);
+    for (const name of BRIDGE_MODULES) {
+      expect(readFileSync(join(bridgeDir(), name), 'utf8'), name).toBe(repoModule(name));
+    }
+  });
+});
 
 describe('hermes native distribution', () => {
   it('prints without consent and executes native install only with --yes', () => {
@@ -574,7 +793,9 @@ describe('agent routing', () => {
   it('hermes update explains the automatic legacy migration and exact fallback before restart', () => {
     const { code, out } = nativeRun('update', false);
     expect(code).toBe(0);
-    expect(out).toContain(`args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']`);
+    expect(out).toContain('command: node');
+    expect(out).toContain(`args: ['${join(bridgeDir(), 'cli.mjs')}']`);
+    expect(out).not.toContain('@rembric/mcp-bridge');
     expect(out).toContain('REMBRIC_SERVER_URL: ${REMBRIC_SERVER_URL}');
     expect(out).toContain('enabled: true');
     expect(out).toContain('repairs recognized Rembric MCP blocks');
@@ -598,9 +819,7 @@ describe('agent routing', () => {
       legacy,
     );
     expect(out).toContain('migrated mcp_servers.rembric');
-    expect(readFileSync(config, 'utf8')).toBe(
-      `mcp_servers:\n  rembric:\n    command: npx\n    args: ['-y', '@rembric/mcp-bridge@${PLUGIN_VERSION.hermes}']\n    env:\n      REMBRIC_SERVER_URL: \${REMBRIC_SERVER_URL}\n      REMBRIC_API_TOKEN: \${REMBRIC_API_TOKEN}\n      REMBRIC_PROJECT_SLUG: \${REMBRIC_PROJECT_SLUG}\n    enabled: true\n  other:\n    command: other-mcp\n`,
-    );
+    expect(readFileSync(config, 'utf8')).toBe(`${nodeBlock()}  other:\n    command: other-mcp\n`);
   });
 
   it('hermes update repairs only the incomplete bridge block emitted by the prior updater', () => {
@@ -615,8 +834,7 @@ describe('agent routing', () => {
     expect(readFileSync(join(hermesHome, 'config.yaml.rembric-mcp-env.bak'), 'utf8')).toBe(
       incomplete,
     );
-    expect(readFileSync(config, 'utf8')).toContain('REMBRIC_API_TOKEN: ${REMBRIC_API_TOKEN}');
-    expect(readFileSync(config, 'utf8')).toContain('enabled: true');
+    expect(readFileSync(config, 'utf8')).toBe(nodeBlock());
   });
 
   it('hermes update preserves canonical and custom bridge blocks', () => {
@@ -626,10 +844,20 @@ describe('agent routing', () => {
     const custom = `mcp_servers:\n  rembric:\n    command: wrapper\n    args: ['rembric']\n`;
     writeFileSync(config, custom);
     nativeFixture(PLUGIN_VERSION.hermes);
-    expect(nativeRun('update').code).toBe(0);
+    const result = nativeRun('update');
+    expect(result.code).toBe(0);
 
     expect(readFileSync(config, 'utf8')).toBe(custom);
-    expect(existsSync(join(hermesHome, 'config.yaml.rembric-mcp-env.bak'))).toBe(false);
+    expect(readdirSync(hermesHome).filter((name) => name.endsWith('.bak'))).toEqual([]);
+    expect(result.out).toContain('mcp_servers.rembric left unchanged');
+
+    writeFileSync(config, nodeBlock());
+    const canonical = nativeRun('update');
+    expect(canonical.code).toBe(0);
+    expect(readFileSync(config, 'utf8')).toBe(nodeBlock());
+    expect(readdirSync(hermesHome).filter((name) => name.endsWith('.bak'))).toEqual([]);
+    expect(canonical.out).not.toContain('mcp_servers.rembric left unchanged');
+    expect(canonical.out).not.toContain('migrated mcp_servers.rembric');
   });
 
   it('opencode/claude update notes drop the install-only wiring (just restart)', () => {
