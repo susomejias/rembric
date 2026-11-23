@@ -4,6 +4,33 @@ All notable changes to the Rembric agent plugins (Claude Code, Codex CLI, Hermes
 
 The plugin is versioned independently from the Rembric server. Versions stay in lock-step across all five per-client surfaces (`apps/plugin/.claude-plugin/plugin.json`, `apps/plugin/.codex-plugin/plugin.json`, `apps/plugin/.hermes-plugin/plugin.yaml`, the `// @rembric-plugin-version` comment in `apps/plugin/.opencode-plugin/plugin.ts`, and `apps/plugin/.pi-plugin/package.json`); the version-bump rule in `CLAUDE.md::Plugin development discipline` covers the lot. Plugin releases are cut by release-please as the `plugin` component, which tags `plugin-vX.Y.Z` and updates every carrier above through `extra-files`; a `plugin` release also publishes `@rembric/pi` to npm. See `RELEASING.md`.
 
+## [0.46.0](https://github.com/susomejias/rembric/compare/plugin-v0.45.1...plugin-v0.46.0) (2026-11-23)
+
+
+### Features
+
+* **hermes:** place the bridge from the installer and migrate installer-written MCP blocks to node ([e0b26d1](https://github.com/susomejias/rembric/commit/e0b26d133a7f8760e414994ae2176412bea32209))
+* **mcp:** return save candidates without a pending judgment by default ([fab3ae8](https://github.com/susomejias/rembric/commit/fab3ae8a1a7553530b1f98497937d836456d072e))
+* **opencode:** run the downloaded bridge and keep it while Hermes uses it ([0f8dc07](https://github.com/susomejias/rembric/commit/0f8dc0730715c96914c5c2bad62bab3990552e9e))
+* **plugin:** run the bridge shipped in the plugin tree for Claude Code and Codex ([af5dbbf](https://github.com/susomejias/rembric/commit/af5dbbf6d24f1b84671c7735321c7adbbd62b78e))
+
+
+### Bug Fixes
+
+* **hermes:** print the node MCP block only when the bridge is in place ([9c8665a](https://github.com/susomejias/rembric/commit/9c8665a8fd66c06c6dad5b484f50987107e5be01))
+* **plugin:** teach the unpersisted candidate flow in the Hermes prompt ([8c4affc](https://github.com/susomejias/rembric/commit/8c4affcf44d7dc2bcc7379181ad10188b9d16636))
+
+
+### Documentation
+
+* describe the bridge shipped with each client instead of the npm package ([7685783](https://github.com/susomejias/rembric/commit/7685783adba6b283d60cafacdf3c96d15854406f))
+* **openspec:** keep publishing the bridge for hand-written configs ([0e41814](https://github.com/susomejias/rembric/commit/0e41814379bd2073b40bbc9b36978f49f0a1a7b8))
+
+
+### Reverts
+
+* keep publishing @rembric/mcp-bridge for hand-written configs ([901fbbf](https://github.com/susomejias/rembric/commit/901fbbfcb092f4b08967ce48277005ddecd434ee))
+
 ## [0.45.1](https://github.com/susomejias/rembric/compare/plugin-v0.45.0...plugin-v0.45.1) (2026-11-22)
 
 
