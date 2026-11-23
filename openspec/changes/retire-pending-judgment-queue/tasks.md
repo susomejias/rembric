@@ -32,7 +32,7 @@
 ## 6. Production validation (after release)
 
 - [ ] 6.1 Take a backup before upgrading production. Record the upgrade date here.
-- [ ] 6.2 Day 30: take a backup and compute V1–V6 from `design.md` per project and in total. Record the figures here.
+- [ ] 6.2 Day 7: take a backup and compute V1 and V3–V6 from `design.md` per project and in total. Record the figures here.
 - [ ] 6.3 Decide per the gate in `design.md`: open `remove-judgment-queue-surfaces`, or set `JUDGMENT_QUEUE_ENABLED=1` and record why.
 - [ ] 6.4 Do not archive this change before 6.3 is recorded.
 
