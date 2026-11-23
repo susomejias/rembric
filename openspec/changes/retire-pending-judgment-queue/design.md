@@ -153,18 +153,21 @@ Rewriting them now would publish text that describes a mode production may still
 ## Rollout and validation gate
 
 1. **Ship** with the default `0`. Take a backup before the upgrade.
-2. **Observe for 30 days.** Take a backup at day 30 and compute, per project and in total:
+2. **Observe for 7 days.** Take a backup at day 7 and compute, per project and in total. Seven
+   days is the shortest window in which V3 and V5 are not dominated by noise: at the measured
+   rates it yields roughly 10 to 30 effect verdicts and about 280 agent saves. No window measures
+   V4 (about one contradiction a week at baseline), so it is reported, not gated:
 
    | Id  | Metric                                                                                              | Pass                                                                                   |
    | --- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
    | V1  | Pending rows created after the upgrade                                                              | 0                                                                                      |
-   | V2  | Pending rows remaining                                                                              | 0                                                                                      |
    | V3  | Effect verdicts (`supersedes` + `conflicts_with`, `marked_by_kind = 'agent'`) per 1,000 agent saves | 35 or more (half the lowest baseline month)                                            |
    | V4  | `conflicts_with` verdicts                                                                           | Reported, with the 23-in-six-months baseline beside it; no threshold, the owner judges |
    | V5  | Share of new saves carrying a `topic_key`                                                           | 59% or more, the lowest baseline month, counted over agent saves                       |
-   | V6  | Relation rows written per month                                                                     | Reported against the 6,000-a-month baseline                                            |
+   | V6  | Relation rows written per week                                                                      | Reported against the baseline of about 1,400 a week                                    |
 
-3. **Decide.** All of V1, V2, V3 and V5 pass and the owner accepts V4: open the follow-up change.
+3. **Decide.** V1, V3 and V5 pass and the owner accepts V4: open the follow-up change. Rows still
+   pending at that point need no wait: the follow-up deletes them.
    Any fails: set `JUDGMENT_QUEUE_ENABLED=1`, record the figures in this change's tasks, and decide
    whether the queue stays.
 
@@ -182,17 +185,16 @@ destructive step is planned rather than improvised:
   `judgments` argument, the `pendingJudgments` counters of `memory.stats` and `memory.doctor`, the
   sweep's deadline orphaning and drain, and the dashboard's pending queue controls.
 - Rewrite or remove the published requirements that this change's deltas override.
-- Decide what happens to stored rows that never had an effect: `pending`, `orphaned`, and `judged`
-  rows whose relation is `related`, `compatible` or `scoped`. Deleting them shrinks search
-  annotations (84% of annotation characters today) and unblocks purging archived memories they
-  reference. It also contradicts "Append-only at the row level" in the `memory_relations`
-  migration header and the consolidation journal's promise that an orphaning can be undone, so it
-  needs its own requirement, an entry in the purge allow-list of the invariants test, and the
-  owner's explicit decision. Rows with an effect (`supersedes`, `conflicts_with`) and `not_conflict`
-  rows are kept in every option.
+- Delete the stored rows that never changed a memory: `pending`, `orphaned`, and `judged` rows
+  whose relation is `related`, `compatible`, `scoped` or `not_conflict` (the owner decided this on
+  2026-11-23: "limpieza de todo"). With no pending queue left, a `not_conflict` row only hides a
+  candidate from a later save response. Deleting them shrinks search annotations (84% of
+  annotation characters today) and unblocks purging archived memories they reference. It
+  contradicts "Append-only at the row level" in the `memory_relations` migration header and the
+  consolidation journal's promise that an orphaning can be undone, so the change needs its own
+  requirement, an entry in the purge allow-list of the invariants test, and journal entries that
+  record the deletion. Rows with an effect (`supersedes`, `conflicts_with`) are kept.
 
 ## Open Questions
 
-- Whether the follow-up deletes the no-effect rows or only hides them. Deleting is the owner's
-  stated direction; it is deferred to that change because it amends an invariant.
 - Whether `memory.compare` should refuse `related`, `compatible` and `scoped` once the queue is gone.
