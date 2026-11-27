@@ -21,7 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@huggingface/transformers": "4.2.0",
+    "@huggingface/transformers": "4.3.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@rembric/db": "workspace:*",
     "slugify": "^1.6.9",
