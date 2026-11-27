@@ -23,7 +23,7 @@
     "db:check": "drizzle-kit check"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.2.0",
     "drizzle-orm": "^0.36.0",
     "sqlite-vec": "^0.1.6",
     "ulid": "^2.3.0"
